@@ -1,0 +1,286 @@
+//! Design tokens from the desktop mockup (`design/canvas.html`): the four
+//! backgrounds, the type colors, the accent palette and the fonts. Never
+//! hard-code a color or font in a screen; add it here instead.
+
+use iced::font::{Style, Weight};
+use iced::{Color, Font, Theme, theme::Palette};
+
+use crate::model::MediaType;
+
+const fn hex(rgb: u32) -> Color {
+    Color::from_rgb8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
+}
+
+/// The window background family. Graphite is the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Background {
+    #[default]
+    Graphite,
+    Neutral,
+    Mocha,
+    Light,
+}
+
+impl Background {
+    pub const ALL: [Background; 4] = [
+        Background::Graphite,
+        Background::Neutral,
+        Background::Mocha,
+        Background::Light,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Background::Graphite => "Graphite",
+            Background::Neutral => "Neutral",
+            Background::Mocha => "Mocha",
+            Background::Light => "Light",
+        }
+    }
+
+    pub fn is_light(self) -> bool {
+        self == Background::Light
+    }
+}
+
+/// An accent color: the fill used on both themes, and the darker ink used
+/// for accent text, icons and outlines on the light theme.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Accent {
+    pub name: &'static str,
+    pub fill: Color,
+    pub ink: Color,
+}
+
+const fn accent(name: &'static str, fill: u32, ink: u32) -> Accent {
+    Accent {
+        name,
+        fill: hex(fill),
+        ink: hex(ink),
+    }
+}
+
+pub const VIVID: [Accent; 6] = [
+    accent("Peach", 0xF8B289, 0xC2521B),
+    accent("Violet", 0xA78BFA, 0x7C5CE0),
+    accent("Hot pink", 0xFF7AB6, 0xD6337F),
+    accent("Amber", 0xF2B544, 0xA36706),
+    accent("Green", 0x5EE08A, 0x15803D),
+    accent("Blue", 0x5AA9FF, 0x1D6FE0),
+];
+
+pub const PASTEL: [Accent; 10] = [
+    accent("Beige", 0xF9E2AF, 0xA66706),
+    accent("Rosewater", 0xF5E0DC, 0xAD604F),
+    accent("Flamingo", 0xF2CDCD, 0xB85759),
+    accent("Pink", 0xF5C2E7, 0xBA4A9E),
+    accent("Red", 0xF38BA8, 0xD20F39),
+    accent("Mauve", 0xCBA6F7, 0x8839EF),
+    accent("Lavender", 0xB4BEFE, 0x596ADD),
+    accent("Blue", 0x89B4FA, 0x1E66F5),
+    accent("Sky", 0x89DCEB, 0x017DAF),
+    accent("Green", 0xA6E3A1, 0x238700),
+];
+
+/// The default accent.
+pub const PEACH: Accent = VIVID[0];
+
+/// Seasonal accents, used only inside a plan with a seasonal theme.
+pub const HALLOWEEN: Color = hex(0xF08A3C);
+pub const CHRISTMAS: Color = hex(0x35A56A);
+
+/// Every color a screen draws with, resolved for one background and accent.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tokens {
+    pub light: bool,
+    /// The window frame and sidebar.
+    pub chrome: Color,
+    /// The content pane.
+    pub content: Color,
+    /// Neutral buttons, chips and cards.
+    pub raised: Color,
+    /// Text fields.
+    pub field: Color,
+    pub line: Color,
+    pub text: Color,
+    /// Secondary text and section headers.
+    pub sub: Color,
+    /// The selected row or sidebar item. Never the accent.
+    pub selection: Color,
+    /// A hovered row.
+    pub hover: Color,
+    /// Progress and slider tracks.
+    pub track: Color,
+    /// Popovers and menus.
+    pub popover: Color,
+    /// Destructive text: a neutral button with this as its label.
+    pub danger: Color,
+    /// Behind a modal dialog.
+    pub scrim: Color,
+    pub accent: Color,
+    /// Accent text, icons and outlines.
+    pub ink: Color,
+    /// Text on an accent fill.
+    pub on_accent: Color,
+}
+
+impl Tokens {
+    pub fn new(background: Background, accent: Accent) -> Tokens {
+        let (chrome, content, raised, field, line, text, sub) = match background {
+            Background::Graphite => (
+                0x131416, 0x1D1F22, 0x2A2D31, 0x1D1F22, 0x3A3E44, 0xEEF0F2, 0xA3A8AE,
+            ),
+            Background::Neutral => (
+                0x141414, 0x1A1A1A, 0x262626, 0x1F1F1F, 0x2E2E2E, 0xEDEDED, 0xA3A3A3,
+            ),
+            Background::Mocha => (
+                0x181825, 0x1E1E2E, 0x2B2C3E, 0x232334, 0x313244, 0xCDD6F4, 0xA6ADC8,
+            ),
+            Background::Light => (
+                0xF4F5F7, 0xFFFFFF, 0xE9EBEE, 0xFFFFFF, 0xD5D9DE, 0x17181B, 0x5B616B,
+            ),
+        };
+        let content = hex(content);
+        let light = background.is_light();
+        let pick = |on_light: Color, on_dark: Color| if light { on_light } else { on_dark };
+        Tokens {
+            light,
+            chrome: hex(chrome),
+            content,
+            raised: hex(raised),
+            field: hex(field),
+            line: hex(line),
+            text: hex(text),
+            sub: hex(sub),
+            selection: pick(hex(0xE9EBEE), mix_white(content, 0.14)),
+            hover: pick(hex(0xF1F2F4), mix_white(content, 0.07)),
+            track: pick(hex(0xE3E5E9), mix_white(content, 0.12)),
+            popover: pick(hex(0xFFFFFF), hex(raised)),
+            danger: pick(hex(0xD20F39), hex(0xF38BA8)),
+            scrim: pick(
+                Color::from_rgba8(20, 22, 28, 0.32),
+                Color::from_rgba8(8, 9, 10, 0.62),
+            ),
+            accent: accent.fill,
+            ink: pick(accent.ink, accent.fill),
+            on_accent: pick(hex(0x17181B), hex(0x131416)),
+        }
+    }
+
+    /// A type's color, for section headings, dots and labels. The light
+    /// inks reach 4.5:1 on white, except Movies (kept gold on purpose).
+    pub fn type_color(&self, media: MediaType) -> Color {
+        let (dark, light) = match media {
+            MediaType::Movies => (0xF2B544, 0xA87C00),
+            MediaType::Shows => (0x7FB7FF, 0x0074DC),
+            MediaType::Books => (0x8FD694, 0x01872C),
+            MediaType::Games => (0xFF8F7A, 0xD63A1F),
+            MediaType::Anime => (0xFF8CC1, 0xC8157E),
+            MediaType::Music => (0xC4A7FF, 0x7C3AED),
+        };
+        hex(if self.light { light } else { dark })
+    }
+
+    /// The iced theme behind the custom styles: the window background and
+    /// the defaults for widgets that are not styled by hand yet.
+    pub fn iced_theme(&self) -> Theme {
+        Theme::custom(
+            "Libri",
+            Palette {
+                background: self.chrome,
+                text: self.text,
+                primary: self.accent,
+                success: hex(0x5EE08A),
+                warning: hex(0xF2B544),
+                danger: self.danger,
+            },
+        )
+    }
+}
+
+/// Mixes `color` toward white by `amount` (0 to 1), as the mockup's
+/// `mixWhite` does.
+fn mix_white(color: Color, amount: f32) -> Color {
+    let mix = |c: f32| ((c * 255.0) + (255.0 - c * 255.0) * amount).round() / 255.0;
+    Color::from_rgb(mix(color.r), mix(color.g), mix(color.b))
+}
+
+/// Figtree only. Headings are ExtraBold, body Regular, labels and buttons
+/// SemiBold.
+pub mod font {
+    use super::*;
+
+    pub const REGULAR: Font = Font::with_name("Figtree");
+    pub const ITALIC: Font = Font {
+        style: Style::Italic,
+        ..REGULAR
+    };
+    pub const MEDIUM: Font = Font {
+        weight: Weight::Medium,
+        ..REGULAR
+    };
+    pub const SEMIBOLD: Font = Font {
+        weight: Weight::Semibold,
+        ..REGULAR
+    };
+    pub const BOLD: Font = Font {
+        weight: Weight::Bold,
+        ..REGULAR
+    };
+    pub const EXTRABOLD: Font = Font {
+        weight: Weight::ExtraBold,
+        ..REGULAR
+    };
+    /// Years, counts and dates.
+    pub const MONO: Font = Font::with_name("JetBrains Mono");
+    pub const MONO_MEDIUM: Font = Font {
+        weight: Weight::Medium,
+        ..MONO
+    };
+
+    /// The font files, loaded at startup.
+    pub const FILES: [&[u8]; 8] = [
+        include_bytes!("../assets/fonts/figtree/Figtree-Regular.ttf"),
+        include_bytes!("../assets/fonts/figtree/Figtree-Italic.ttf"),
+        include_bytes!("../assets/fonts/figtree/Figtree-Medium.ttf"),
+        include_bytes!("../assets/fonts/figtree/Figtree-SemiBold.ttf"),
+        include_bytes!("../assets/fonts/figtree/Figtree-Bold.ttf"),
+        include_bytes!("../assets/fonts/figtree/Figtree-ExtraBold.ttf"),
+        include_bytes!("../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf"),
+        include_bytes!("../assets/fonts/jetbrains-mono/JetBrainsMono-Medium.ttf"),
+    ];
+}
+
+/// Text sizes in logical pixels.
+pub mod size {
+    /// Screen titles and dialog titles.
+    pub const HEADING: f32 = 26.0;
+    pub const TITLE: f32 = 18.0;
+    pub const BODY: f32 = 14.0;
+    pub const SMALL: f32 = 13.0;
+    /// Section headers in small gray caps.
+    pub const SECTION: f32 = 12.5;
+    pub const MONO: f32 = 12.0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selection_gray_matches_the_mockup() {
+        // mixWhite("#1D1F22", 0.14) in the mockup.
+        let graphite = Tokens::new(Background::Graphite, PEACH);
+        assert_eq!(graphite.selection.into_rgba8(), [0x3D, 0x3E, 0x41, 0xFF]);
+        assert_eq!(
+            Tokens::new(Background::Light, PEACH).selection,
+            hex(0xE9EBEE)
+        );
+    }
+
+    #[test]
+    fn the_ink_is_the_fill_on_dark_and_the_darker_ink_on_light() {
+        assert_eq!(Tokens::new(Background::Mocha, PEACH).ink, PEACH.fill);
+        assert_eq!(Tokens::new(Background::Light, PEACH).ink, PEACH.ink);
+    }
+}

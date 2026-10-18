@@ -5,3 +5,8 @@ edition = "2024"
 
 [dependencies]
 iced = { version = "0.14.0", features = ["svg", "image", "tokio"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+[dev-dependencies]
+iced_test = "0.14.0"
