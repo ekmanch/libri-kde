@@ -26,10 +26,10 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] `.gitignore` ignores `target/`; `Cargo.lock` stays committed
 
 ### 0c. Fonts and theme
-- [x] Typography: Figtree only, headings in ExtraBold. (The canvas still draws headings in Bricolage Grotesque; noted in `docs/DESIGN.md`)
+- [x] Typography: Figtree only, headings in ExtraBold.
 - [x] Bundle the fonts in `assets/fonts/` and load them at startup with `include_bytes!` + `.font(...)`: Figtree Regular, Italic, Medium, SemiBold, Bold, ExtraBold (same six files as the phone app) and JetBrains Mono Regular and Medium (years, counts, dates); add both OFL license files
 - [x] Check whether iced 0.14 supports letter spacing; the phone's headings use -0.03em. If not, note it in DESIGN.md and accept default tracking (it does not; noted in `docs/DESIGN.md`)
-- [x] `theme` module from the mockup tokens: Graphite, Neutral, Mocha and Light backgrounds; the six type colors (dark and light inks); accent palette with Peach as the default; selection gray; small gray caps for section headers (12.5 px, 700, uppercase)
+- [x] `theme` module from the mockup tokens: the four themes Graphite, Charcoal, Catppuccin Mocha and Light; the six type colors (Libri dark, Catppuccin with Mocha, light inks); accent palette (Vivid and Catppuccin) with Peach as the default; selection gray; small gray caps for section headers (12.5 px, 700, uppercase)
 - [x] A throwaway "token sheet" view (`LIBRI_SCREEN=tokens cargo run`) that shows every color, text style and button, to eyeball against the mockup; remove at the end of phase 1
 
 ### 0d. Data on fixtures
@@ -82,7 +82,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [ ] Remove from plan or delete everywhere; Delete plan
 
 ### 1f. Settings and states
-- [ ] Settings: theme, accent color (Vivid and Pastel groups, Peach default), timeline default, seasonal theme default, tags, About row
+- [ ] Settings: theme (System, Graphite, Charcoal, Catppuccin Mocha, Light; System follows Plasma's color scheme through the desktop portal), background style (two-tone or flat, with the flat tokens in `theme`), sidebar tags (pinned or most used), accent color (Vivid and Catppuccin groups, Peach default), timeline default, seasonal theme default, tags, About row
 - [ ] Library connection section (UI only)
 - [ ] Splash: logo, wordmark, indeterminate bar; first-run and returning variants
 - [ ] Setup wizard, full window (UI only): Welcome, Connect GitHub (repo and token, "stored in KDE Wallet" copy), Branch, Library file (new or existing), Create / Pick existing, All set

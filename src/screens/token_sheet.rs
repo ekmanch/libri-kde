@@ -10,17 +10,17 @@ use crate::theme::{self, Accent, Tokens, font, size};
 use crate::ui::{self, ButtonKind, Icon};
 
 pub fn view(app: &App, tokens: Tokens) -> Element<'_, Message> {
-    let backgrounds = row(theme::Background::ALL.map(|background| {
-        let kind = if background == app.background {
+    let themes = row(theme::Theme::ALL.map(|choice| {
+        let kind = if choice == app.theme {
             ButtonKind::Primary
         } else {
             ButtonKind::Neutral
         };
         ui::labeled_button(
-            background.label(),
+            choice.label(),
             kind,
             tokens,
-            Some(Message::SetBackground(background)),
+            Some(Message::SetTheme(choice)),
         )
     }))
     .spacing(8);
@@ -112,15 +112,15 @@ pub fn view(app: &App, tokens: Tokens) -> Element<'_, Message> {
 
     let content = column![
         ui::heading("Token sheet", &tokens),
-        section("Background", backgrounds.into(), &tokens),
+        section("Theme", themes.into(), &tokens),
         section(
             "Accent, Vivid",
             accents(&theme::VIVID, app.accent, &tokens),
             &tokens
         ),
         section(
-            "Accent, Pastel",
-            accents(&theme::PASTEL, app.accent, &tokens),
+            "Accent, Catppuccin",
+            accents(&theme::CATPPUCCIN, app.accent, &tokens),
             &tokens
         ),
         section("Colors", surfaces.into(), &tokens),
@@ -194,7 +194,7 @@ mod tests {
     use crate::screens::Screen;
 
     #[test]
-    fn picking_a_background_and_an_accent_updates_the_app() {
+    fn picking_a_theme_and_an_accent_updates_the_app() {
         let mut app = App::new(Screen::TokenSheet);
         let messages = {
             let mut ui = simulator(app.view());
@@ -206,7 +206,7 @@ mod tests {
         for message in messages {
             app.update(message);
         }
-        assert_eq!(app.background, theme::Background::Light);
+        assert_eq!(app.theme, theme::Theme::Light);
         assert_eq!(app.accent.name, "Lavender");
     }
 }

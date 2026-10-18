@@ -1,9 +1,9 @@
 //! Design tokens from the desktop mockup (`design/canvas.html`): the four
-//! backgrounds, the type colors, the accent palette and the fonts. Never
+//! themes, the type colors, the accent palette and the fonts. Never
 //! hard-code a color or font in a screen; add it here instead.
 
 use iced::font::{Style, Weight};
-use iced::{Color, Font, Theme, theme::Palette};
+use iced::{Color, Font, theme::Palette};
 
 use crate::model::MediaType;
 
@@ -11,35 +11,32 @@ const fn hex(rgb: u32) -> Color {
     Color::from_rgb8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
 }
 
-/// The window background family. Graphite is the default.
+/// The four themes. Settings also offers System, which follows Plasma and
+/// resolves to Graphite or Light (docs/DESIGN.md 4.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Background {
+pub enum Theme {
     #[default]
     Graphite,
-    Neutral,
+    Charcoal,
+    /// Catppuccin Mocha, with the Catppuccin type colors.
     Mocha,
     Light,
 }
 
-impl Background {
-    pub const ALL: [Background; 4] = [
-        Background::Graphite,
-        Background::Neutral,
-        Background::Mocha,
-        Background::Light,
-    ];
+impl Theme {
+    pub const ALL: [Theme; 4] = [Theme::Graphite, Theme::Charcoal, Theme::Mocha, Theme::Light];
 
     pub fn label(self) -> &'static str {
         match self {
-            Background::Graphite => "Graphite",
-            Background::Neutral => "Neutral",
-            Background::Mocha => "Mocha",
-            Background::Light => "Light",
+            Theme::Graphite => "Graphite",
+            Theme::Charcoal => "Charcoal",
+            Theme::Mocha => "Catppuccin Mocha",
+            Theme::Light => "Light",
         }
     }
 
     pub fn is_light(self) -> bool {
-        self == Background::Light
+        self == Theme::Light
     }
 }
 
@@ -69,7 +66,7 @@ pub const VIVID: [Accent; 6] = [
     accent("Blue", 0x5AA9FF, 0x1D6FE0),
 ];
 
-pub const PASTEL: [Accent; 10] = [
+pub const CATPPUCCIN: [Accent; 10] = [
     accent("Beige", 0xF9E2AF, 0xA66706),
     accent("Rosewater", 0xF5E0DC, 0xAD604F),
     accent("Flamingo", 0xF2CDCD, 0xB85759),
@@ -89,9 +86,10 @@ pub const PEACH: Accent = VIVID[0];
 pub const HALLOWEEN: Color = hex(0xF08A3C);
 pub const CHRISTMAS: Color = hex(0x35A56A);
 
-/// Every color a screen draws with, resolved for one background and accent.
+/// Every color a screen draws with, resolved for one theme and accent.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tokens {
+    pub theme: Theme,
     pub light: bool,
     /// The window frame and sidebar.
     pub chrome: Color,
@@ -125,25 +123,26 @@ pub struct Tokens {
 }
 
 impl Tokens {
-    pub fn new(background: Background, accent: Accent) -> Tokens {
-        let (chrome, content, raised, field, line, text, sub) = match background {
-            Background::Graphite => (
+    pub fn new(theme: Theme, accent: Accent) -> Tokens {
+        let (chrome, content, raised, field, line, text, sub) = match theme {
+            Theme::Graphite => (
                 0x131416, 0x1D1F22, 0x2A2D31, 0x1D1F22, 0x3A3E44, 0xEEF0F2, 0xA3A8AE,
             ),
-            Background::Neutral => (
-                0x141414, 0x1A1A1A, 0x262626, 0x1F1F1F, 0x2E2E2E, 0xEDEDED, 0xA3A3A3,
+            Theme::Charcoal => (
+                0x151515, 0x1C1C1C, 0x272727, 0x202020, 0x2E2E2E, 0xEDEDED, 0xA3A3A3,
             ),
-            Background::Mocha => (
+            Theme::Mocha => (
                 0x181825, 0x1E1E2E, 0x2B2C3E, 0x232334, 0x313244, 0xCDD6F4, 0xA6ADC8,
             ),
-            Background::Light => (
+            Theme::Light => (
                 0xF4F5F7, 0xFFFFFF, 0xE9EBEE, 0xFFFFFF, 0xD5D9DE, 0x17181B, 0x5B616B,
             ),
         };
         let content = hex(content);
-        let light = background.is_light();
+        let light = theme.is_light();
         let pick = |on_light: Color, on_dark: Color| if light { on_light } else { on_dark };
         Tokens {
+            theme,
             light,
             chrome: hex(chrome),
             content,
@@ -167,24 +166,29 @@ impl Tokens {
         }
     }
 
-    /// A type's color, for section headings, dots and labels. The light
-    /// inks reach 4.5:1 on white, except Movies (kept gold on purpose).
+    /// A type's color, for section headings, dots and labels: the Libri
+    /// set, the Catppuccin set with Catppuccin Mocha, and the light inks
+    /// (4.5:1 on white, except Movies, kept gold on purpose) with Light.
     pub fn type_color(&self, media: MediaType) -> Color {
-        let (dark, light) = match media {
-            MediaType::Movies => (0xF2B544, 0xA87C00),
-            MediaType::Shows => (0x7FB7FF, 0x0074DC),
-            MediaType::Books => (0x8FD694, 0x01872C),
-            MediaType::Games => (0xFF8F7A, 0xD63A1F),
-            MediaType::Anime => (0xFF8CC1, 0xC8157E),
-            MediaType::Music => (0xC4A7FF, 0x7C3AED),
+        let (libri, catppuccin, light) = match media {
+            MediaType::Movies => (0xF2B544, 0xF9E2AF, 0xA87C00),
+            MediaType::Shows => (0x7FB7FF, 0x89B4FA, 0x0074DC),
+            MediaType::Books => (0x8FD694, 0xA6E3A1, 0x01872C),
+            MediaType::Games => (0xFF8F7A, 0xFAB387, 0xD63A1F),
+            MediaType::Anime => (0xFF8CC1, 0xF5C2E7, 0xC8157E),
+            MediaType::Music => (0xC4A7FF, 0xCBA6F7, 0x7C3AED),
         };
-        hex(if self.light { light } else { dark })
+        hex(match self.theme {
+            Theme::Graphite | Theme::Charcoal => libri,
+            Theme::Mocha => catppuccin,
+            Theme::Light => light,
+        })
     }
 
     /// The iced theme behind the custom styles: the window background and
     /// the defaults for widgets that are not styled by hand yet.
-    pub fn iced_theme(&self) -> Theme {
-        Theme::custom(
+    pub fn iced_theme(&self) -> iced::Theme {
+        iced::Theme::custom(
             "Libri",
             Palette {
                 background: self.chrome,
@@ -270,17 +274,23 @@ mod tests {
     #[test]
     fn selection_gray_matches_the_mockup() {
         // mixWhite("#1D1F22", 0.14) in the mockup.
-        let graphite = Tokens::new(Background::Graphite, PEACH);
+        let graphite = Tokens::new(Theme::Graphite, PEACH);
         assert_eq!(graphite.selection.into_rgba8(), [0x3D, 0x3E, 0x41, 0xFF]);
-        assert_eq!(
-            Tokens::new(Background::Light, PEACH).selection,
-            hex(0xE9EBEE)
-        );
+        assert_eq!(Tokens::new(Theme::Light, PEACH).selection, hex(0xE9EBEE));
     }
 
     #[test]
     fn the_ink_is_the_fill_on_dark_and_the_darker_ink_on_light() {
-        assert_eq!(Tokens::new(Background::Mocha, PEACH).ink, PEACH.fill);
-        assert_eq!(Tokens::new(Background::Light, PEACH).ink, PEACH.ink);
+        assert_eq!(Tokens::new(Theme::Mocha, PEACH).ink, PEACH.fill);
+        assert_eq!(Tokens::new(Theme::Light, PEACH).ink, PEACH.ink);
+    }
+
+    #[test]
+    fn catppuccin_mocha_brings_its_own_type_colors() {
+        let movies = |theme| Tokens::new(theme, PEACH).type_color(MediaType::Movies);
+        assert_eq!(movies(Theme::Graphite), hex(0xF2B544));
+        assert_eq!(movies(Theme::Charcoal), hex(0xF2B544));
+        assert_eq!(movies(Theme::Mocha), hex(0xF9E2AF));
+        assert_eq!(movies(Theme::Light), hex(0xA87C00));
     }
 }

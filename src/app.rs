@@ -1,11 +1,11 @@
 //! Application state, messages, `update` and `view`.
 
 use iced::window::{self, settings::PlatformSpecific};
-use iced::{Element, Size, Theme};
+use iced::{Element, Size};
 
 use crate::repo::{FixtureLibraryRepository, LibraryRepository};
 use crate::screens::{self, Screen};
-use crate::theme::{self, Accent, Background, Tokens, font};
+use crate::theme::{self, Accent, Theme, Tokens, font};
 
 /// The default window size, and for now the minimum (settled in 1g).
 pub const WINDOW_SIZE: Size = Size::new(1600.0, 900.0);
@@ -24,7 +24,7 @@ pub fn run() -> iced::Result {
     };
     let mut application = iced::application(App::boot, App::update, App::view)
         .title("Libri")
-        .theme(App::theme)
+        .theme(App::iced_theme)
         .default_font(font::REGULAR)
         .window(window);
     for file in font::FILES {
@@ -35,7 +35,7 @@ pub fn run() -> iced::Result {
 
 pub struct App {
     pub screen: Screen,
-    pub background: Background,
+    pub theme: Theme,
     pub accent: Accent,
     pub repo: Box<dyn LibraryRepository>,
 }
@@ -43,7 +43,7 @@ pub struct App {
 #[derive(Debug, Clone)]
 pub enum Message {
     Show(Screen),
-    SetBackground(Background),
+    SetTheme(Theme),
     SetAccent(Accent),
 }
 
@@ -62,20 +62,20 @@ impl App {
         let repo = FixtureLibraryRepository::load().expect("the bundled fixture decodes");
         App {
             screen,
-            background: Background::default(),
+            theme: Theme::default(),
             accent: theme::PEACH,
             repo: Box::new(repo),
         }
     }
 
     pub fn tokens(&self) -> Tokens {
-        Tokens::new(self.background, self.accent)
+        Tokens::new(self.theme, self.accent)
     }
 
     pub fn update(&mut self, message: Message) {
         match message {
             Message::Show(screen) => self.screen = screen,
-            Message::SetBackground(background) => self.background = background,
+            Message::SetTheme(theme) => self.theme = theme,
             Message::SetAccent(accent) => self.accent = accent,
         }
     }
@@ -84,7 +84,7 @@ impl App {
         screens::view(self)
     }
 
-    fn theme(&self) -> Theme {
+    fn iced_theme(&self) -> iced::Theme {
         self.tokens().iced_theme()
     }
 }
@@ -97,7 +97,7 @@ mod tests {
     fn starts_on_the_library_in_graphite_and_peach() {
         let app = App::new(Screen::default());
         assert_eq!(app.screen, Screen::Library);
-        assert_eq!(app.background, Background::Graphite);
+        assert_eq!(app.theme, Theme::Graphite);
         assert_eq!(app.accent, theme::PEACH);
         assert!(!app.repo.library().entries.is_empty());
     }
@@ -110,10 +110,10 @@ mod tests {
     }
 
     #[test]
-    fn background_and_accent_change_the_tokens() {
+    fn theme_and_accent_change_the_tokens() {
         let mut app = App::new(Screen::Library);
         let violet = theme::VIVID[1];
-        app.update(Message::SetBackground(Background::Light));
+        app.update(Message::SetTheme(Theme::Light));
         app.update(Message::SetAccent(violet));
         let tokens = app.tokens();
         assert!(tokens.light);
