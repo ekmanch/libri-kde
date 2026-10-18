@@ -549,7 +549,7 @@ button{font:inherit}
 <button onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="height: 28px; padding: 0 12px; border-radius: 14px; border: 1px solid {{c.border}}; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; cursor: pointer">{{c.label}}<span style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px; opacity: 0.75">{{c.count}}</span></button>
 </sc-for>
 <sc-for list="{{tagChips}}" as="g" hint-placeholder-count="1"><button onClick="{{g.clear}}" aria-label="{{g.aria}}" style="height: 28px; padding: 0 8px 0 12px; margin-left: 6px; border-radius: 14px; border: 1px solid {{accentBorder}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">{{g.label}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-for>
-<sc-if value="{{hasDecade}}" hint-placeholder-val="{{false}}"><button onClick="{{clearDecade}}" aria-label="Clear decade filter" style="height: 28px; padding: 0 8px 0 12px; margin-left: 6px; border-radius: 14px; border: 1px solid {{accentBorder}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">{{decadeLabel}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-if>
+<sc-for list="{{decChips}}" as="dc" hint-placeholder-count="1"><button onClick="{{dc.clear}}" aria-label="{{dc.aria}}" style="height: 28px; padding: 0 8px 0 12px; margin-left: 6px; border-radius: 14px; border: 1px solid {{accentBorder}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">{{dc.label}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-for>
 <sc-if value="{{seasonalOn}}" hint-placeholder-val="{{false}}"><button onClick="{{toggleSeasonal}}" aria-label="Hide seasonal-only entries" style="height: 28px; padding: 0 8px 0 12px; margin-left: 6px; border-radius: 14px; border: 1px solid {{accentBorder}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">Incl. seasonal-only<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-if>
 <sc-if value="{{hasRating}}" hint-placeholder-val="{{false}}"><button onClick="{{clearRatingF}}" aria-label="Clear rating filter" style="height: 28px; padding: 0 8px 0 12px; margin-left: 6px; border-radius: 14px; border: 1px solid {{accentBorder}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">{{ratingChip}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-if>
 <sc-if value="{{canClearAll}}" hint-placeholder-val="{{false}}"><button onClick="{{clearAll}}" style="margin-left: 10px; height: 28px; padding: 0 4px; border: 0; background: transparent; color: {{ink}}; font-size: 13px; font-weight: 600; cursor: pointer">Clear all</button></sc-if>
@@ -1071,9 +1071,9 @@ class Component extends DCLogic {
     const tagF = tagSel[0] || null;
     const rMin = st.rMin ?? null, rMax = st.rMax ?? null;
     const sortBy = st.sortBy ?? "Newest added";
-    const decade = st.decade ?? null;
-    const decOf = (e) => { const y = parseInt(e.released.slice(0, 4), 10); return y < 1980 ? "older" : String(Math.floor(y / 10) * 10); };
-    const visibleBase = inType.filter((e) => (seasonal || !e.seasonal) && (!tagSel.length || tagSel.some((g) => e.tags.indexOf(g) >= 0)) && (!decade || decOf(e) === decade) && (rMin === null || (e.rating && e.rating >= rMin && e.rating <= rMax)));
+    const decades = st.decades ?? [];
+    const decOf = (e) => { const y = parseInt(String(e.released).slice(0, 4), 10); return y < 1960 ? "older" : String(Math.floor(y / 10) * 10); };
+    const visibleBase = inType.filter((e) => (seasonal || !e.seasonal) && (!tagSel.length || tagSel.every((g) => e.tags.indexOf(g) >= 0)) && (!decades.length || decades.indexOf(decOf(e)) >= 0) && (rMin === null || (e.rating && e.rating >= rMin && e.rating <= rMax)));
     const shown = visibleBase.filter((e) => statusF === "all" || e.status === statusF).sort(SORTS[sortBy] || SORTS["Newest added"]);
     let selId = st.sel === undefined ? "m3" : st.sel;
     if (selId && !shown.find((e) => e.id === selId)) selId = null;
@@ -1178,8 +1178,15 @@ class Component extends DCLogic {
         toggle: () => set({ pickOpen: Object.assign({}, pOpen, { [grp.name]: !open }) }) });
     });
     const chipStyle = (on) => ({ bg: on ? selBg : "transparent", border: on ? selBg : t.line, fg: t.text });
-    const DEC = [[null, "Any"], ["2020", "2020s"], ["2010", "2010s"], ["2000", "2000s"], ["1990", "1990s"], ["1980", "1980s"], ["older", "Earlier"]];
-    const decadeOpts = DEC.map((x) => Object.assign({ label: x[1], on: decade === x[0], pick: () => set({ decade: x[0], sel: null }) }, chipStyle(decade === x[0])));
+    // Decade chips are built from the library (as on the phone): Older for anything before 1960, then every decade from the earliest to the latest, gaps filled.
+    const years = all.map((e) => parseInt(String(e.released).slice(0, 4), 10)).filter((y) => !isNaN(y));
+    const DEC = [];
+    if (years.some((y) => y < 1960)) DEC.push(["older", "Older"]);
+    const recent = years.filter((y) => y >= 1960);
+    if (recent.length) { for (let d = Math.floor(Math.min.apply(null, recent) / 10) * 10; d <= Math.floor(Math.max.apply(null, recent) / 10) * 10; d += 10) DEC.push([String(d), d + "s"]); }
+    const decLabel = (k) => (DEC.find((x) => x[0] === k) || [k, k])[1];
+    const toggleDec = (k) => set({ decades: decades.indexOf(k) >= 0 ? decades.filter((x) => x !== k) : decades.concat([k]), sel: null });
+    const decadeOpts = DEC.map((x) => Object.assign({ label: x[1], on: decades.indexOf(x[0]) >= 0, pick: () => toggleDec(x[0]) }, chipStyle(decades.indexOf(x[0]) >= 0)));
     const quick = (usingPins && pins.length ? pins : tagList.slice(0, 6));
     const tagOpts = quick.concat(tagSel.filter((g) => quick.indexOf(g) < 0)).map((g) => Object.assign({ label: g, on: tagSel.indexOf(g) >= 0, pick: () => toggleTag(g) }, chipStyle(tagSel.indexOf(g) >= 0)));
     const pickR = (n) => {
@@ -1192,8 +1199,8 @@ class Component extends DCLogic {
       return Object.assign({ n: String(n), on, aria: "Rating " + n, pick: () => pickR(n) }, chipStyle(on));
     });
     const ratingChip = rMin === null ? "" : (rMin === rMax ? "Rated " + rMin : "Rated " + rMin + "–" + rMax);
-    const filterCount = (decade ? 1 : 0) + tagSel.length + (seasonal ? 1 : 0) + (rMin !== null ? 1 : 0);
-    const clearAllPatch = { decade: null, tagSel: [], seasonal: false, rMin: null, rMax: null, statusF: "all", sel: null };
+    const filterCount = decades.length + tagSel.length + (seasonal ? 1 : 0) + (rMin !== null ? 1 : 0);
+    const clearAllPatch = { decades: [], tagSel: [], seasonal: false, rMin: null, rMax: null, statusF: "all", sel: null };
     const hidden = inType.filter((e) => e.seasonal && !seasonal).length;
     const noun = type === "All" ? "entries" : type.toLowerCase();
     const ae = (() => {
@@ -1259,7 +1266,7 @@ class Component extends DCLogic {
       hdr, tagGroups, pickerGroups, noPickerMatch: pickerGroups.length === 0,
       pickerOpen: !!st.pickerOpen, openPicker: () => set({ pickerOpen: true, filterOpen: false, pickQ: "" }), closePicker: () => set({ pickerOpen: false, pickQ: "" }),
       onPickerQuery: (e) => set({ pickQ: e && e.target ? e.target.value : "" }), clearTagsOnly: () => set({ tagSel: [] }),
-      pickerSummary: tagSel.length ? tagSel.length + " selected · " + shown.length + " shown" : "Shows entries with any selected tag",
+      pickerSummary: tagSel.length ? tagSel.length + " selected · " + shown.length + " shown" : "Shows entries that have all selected tags",
       pickerBtn: tagSel.length ? "Show " + shown.length : "Done",
       scrim: L.light ? "rgba(20,22,28,0.32)" : "rgba(8,9,10,0.62)",
       rateOpts, hasRating: rMin !== null, ratingChip, clearRatingF: () => set({ rMin: null, rMax: null }),
@@ -1282,9 +1289,9 @@ class Component extends DCLogic {
       setGrid: () => set({ view: "grid" }), setTable: () => set({ view: "table" }),
       filterOpen: !!st.filterOpen, toggleFilter: () => set({ filterOpen: !st.filterOpen, ratingOpen: false, sortOpen: false }), filterBtnBg: st.filterOpen || filterCount ? selBg : "transparent",
       decadeOpts, tagOpts, hasFilters: filterCount > 0, filterCount: String(filterCount),
-      resetFilters: () => set({ decade: null, tagSel: [], seasonal: false, rMin: null, rMax: null, sel: null }),
+      resetFilters: () => set({ decades: [], tagSel: [], seasonal: false, rMin: null, rMax: null, sel: null }),
       filterResult: shown.length + " " + (type === "All" ? "entries" : type.toLowerCase()) + " shown",
-      hasDecade: !!decade, decadeLabel: decade ? (DEC.find((x) => x[0] === decade) || [0, ""])[1] : "", clearDecade: () => set({ decade: null }),
+      decChips: DEC.filter((x) => decades.indexOf(x[0]) >= 0).map((x) => ({ label: x[1], clear: () => toggleDec(x[0]), aria: "Clear " + x[1] + " filter" })),
       seasonalOn: seasonal, toggleSeasonal: () => set({ seasonal: !seasonal }),
       seasonalTrack: seasonal ? accent : t.line, seasonalKnob: seasonal ? "14px" : "2px", seasonalKnobColor: seasonal ? onAccent : t.sub,
       ratingOpen: !!st.ratingOpen, toggleRating: () => set({ ratingOpen: !st.ratingOpen }), clearRating: () => { const o = Object.assign({}, over); o[sel.id] = Object.assign({}, o[sel.id] || {}, { rating: null }); set({ over: o, ratingOpen: false }); },
