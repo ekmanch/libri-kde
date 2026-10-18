@@ -60,7 +60,7 @@ Items in section 11 ("Open") are not decided yet; decide them in the phase the T
 - **Inspector (entry details):** cover, type label in the type color, title, creator, released, Status as a segmented control, Rating as a button that opens the 1-to-10 picker, Tags with "+ Tag", Note (my text), About (from the lookup), In plans (links), then Edit and Delete at the bottom. The same details are used from Plans.
 - **Add entry dialog** (opens over the library from Add): online lookup on the left (several matches to pick from), the form on the right with every fetched field editable. The form scrolls between a fixed header and a fixed bottom bar (Cancel, Add); nothing scrolls under the bottom bar.
 - **Tag picker** (from the Add dialog, the Filter popover and "All tags"): a modal with search across every group, collapsible groups in the phone's category order, a "n selected" count on folded groups, multi-select.
-- **Delete buttons** have a neutral fill and red text, never a red fill.
+- **Delete buttons** have no fill, the gray line border and red text, never a red fill (section 10 has the reds).
 
 ### 4.4 Plans
 
@@ -68,7 +68,7 @@ Items in section 11 ("Open") are not decided yet; decide them in the phase the T
 - **Plan screen:** breadcrumb, title with a year dropdown (other years of the same plan, then "New year…" in the accent ink, which copies the plan), status badge, date range, "This plan / All #tag" tabs, View, Edit plan, a progress bar with "4 of 9 done" and "Linked to #halloween". The checklist is grouped by type in two columns. An "Add to this plan" panel on the right lists entries with the plan's tags that are not in it yet, plus "+ Plan-only entry (not in library)".
 - **View popover** per plan: checklist or timeline, plain or card sections, text or covers.
 - **Seasonal themes:** Halloween and Christmas plans get an illustrated banner strip above the header (nothing overlaps it), a seasonal title icon (the phone's pumpkin for Halloween), a seasonal progress marker and accent. The banners are SVG in the mockup and are reused as-is. Seasonal touches can be turned off in Settings.
-- **New / Edit plan dialog:** Name, Year, Date range (with a calendar), Started (edit only), Linked hashtags, Seasonal theme, "Start with: Empty / Copy a plan" (new only), Timeline, and Delete plan (neutral fill, red text).
+- **New / Edit plan dialog:** Name, Year, Date range (with a calendar), Started (edit only), Linked hashtags, Seasonal theme, "Start with: Empty / Copy a plan" (new only), Timeline, and Delete plan (outlined, red text).
 - **Linked hashtags** open a full tag view inside the dialog (drill-in, with Done and Clear), not a list that scrolls inside the dialog's own scroll. Season comes first and is the only group open; the other groups follow the phone's category order.
 
 ### 4.5 Settings
@@ -171,6 +171,8 @@ Flat style uses one shade for chrome and content (Graphite flat: #151515 everywh
 
 The Catppuccin group (Beige, Rosewater, Flamingo, Pink, Red, Mauve, Lavender, Blue, Sky, Green) has the same fill/ink pairs as `Settings` in the mockup.
 
+With the Catppuccin Mocha theme, the default Peach becomes Catppuccin's own peach, #FAB387, for both fill and ink; other accents are unchanged.
+
 **Seasonal accents:** Halloween orange and Christmas green, only inside a themed plan.
 
 **Sizes from the mockup:** body text 13 to 14 px, secondary text 12 to 12.5 px, section headers 12.5 px caps, type title 26 px, plan title 30 px. Common radii: 8 px (buttons, fields, chips), 12 px (dialogs, window), 14 to 15 px (pills).
@@ -193,7 +195,7 @@ Add decisions here as they are made during phases 0 and 1, with the date.
 - **Minimum window size** (2026-10-18, phase 0b): 1100 × 680 for now, so the window cannot collapse while phase 1 is built. The real value is decided in 1g (section 11).
 - **Icons** (2026-10-18, phase 0d): the mockup's icons are exported as 24 × 24 SVGs to `assets/icons/` and tinted with the theme color. The Halloween ghost and Christmas star timeline markers keep their own colors.
 - **Type order** (2026-10-18, phase 1a): the phone's global order everywhere, Movies, Shows, Books, Games, Music, Anime. The mockup's Anime-before-Music is incidental.
-- **Delete button style** (2026-10-18, phase 1a): the desktop keeps the mockup's neutral (gray) fill with red text and no border. The phone uses no fill, a gray outline and red text; this is a deliberate difference. The apps should feel the same overall, not match in every detail, and the desktop mockup decides the desktop's look.
+- **Delete button style** (2026-10-18, phase 1a): every destructive button (Delete, Delete plan, Disconnect repository) has no fill, the gray line border and red text, as on the phone; the canvas revision of 2026-10-18 unified a gray-filled Delete plan to this. The red is brighter than before, which read as pink: #F0525F on the dark themes, #D7263D on Light.
 - **Default library view** (2026-10-18, phase 1a): the app opens on All ("Everything" in the title), not on one type.
 - **Sidebar tags** (2026-10-18, phase 1a): the six most used tags, most used first and ties A to Z, until pinning from the All tags popover is built in 1b.
 - **Popovers** (2026-10-18, phase 1a): iced 0.14 has no anchored popover, so `ui::popover` is a small custom widget (iced's `advanced` feature). It opens below its anchor, or above when there is no room, aligned to the anchor's left or right edge; a click outside it closes it. Dialogs use iced's own stack with a scrim over the whole window.
