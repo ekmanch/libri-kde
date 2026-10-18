@@ -52,16 +52,16 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Keyboard basics from the start: Esc closes the top popover or dialog, Tab moves focus, Enter confirms dialogs (Tab reaches text fields only; see 1g)
 
 ### 1b. Library
-- [ ] Type sections with their colors and counts; selecting a type in the sidebar shows that type only
-- [ ] Three views per type (text, list with covers, grid with covers, placeholder images), the choice remembered per type; each view's entry row or card is a shared widget in `ui`
-- [ ] Toolbar: search, Filter, Sort, View toggle, Add
-- [ ] Sort menu: Newest added, Title A to Z, Year newest first, Year oldest first, Rating highest first; the button shows the short label
-- [ ] Filter popover: Decade chips, Tags chips with "All tags…", Rating range 1 to 10, "Include seasonal-only" switch, Reset, live result count
-- [ ] Tag picker modal (from "All tags…" and the sidebar): search across every group, collapsible groups, multi-select
-- [ ] Sidebar tags: pinned or most used (DESIGN.md 4.5); pinning from the All tags popover, up to 8. The sidebar shows the six most used until then
-- [ ] Chips row: status chips, then the active filters (tags, decade, seasonal, rating) as removable chips, then an inline "Clear all"
-- [ ] Selection highlight on the picked entry (selection gray, not the accent)
-- [ ] Empty states: empty type, no search results, no filter results
+- [x] Type sections with their colors and counts; selecting a type in the sidebar shows that type only
+- [x] Three views per type (text, list with covers, grid with covers, placeholder images), the choice remembered per type; each view's entry row or card is a shared widget in `ui`
+- [x] Toolbar: search (Ctrl+K or Ctrl+F focuses it), Filter, Sort, View toggle, Add (opens the Add dialog from 1c)
+- [x] Sort menu: Newest added, Title A to Z, Year newest first, Year oldest first, Rating highest first; the button shows the short label
+- [x] Filter popover: Decade chips, Tags chips with "All tags…", Rating range 1 to 10, "Include seasonal-only" switch, Reset, live result count
+- [x] Tag picker modal (from the Filter's "All tags…"): search across every group, collapsible groups, multi-select. The sidebar's "All tags" opens the All tags popover instead, as in the mockup
+- [x] Sidebar tags: pinned or most used (DESIGN.md 4.5); pinning from the All tags popover, up to 8. Pins are state only until phase 2; the choice of mode is in Settings (1f)
+- [x] Chips row: status chips, then the active filters (tags, decade, seasonal, rating) as removable chips, then an inline "Clear all"
+- [x] Selection highlight on the picked entry (selection gray, not the accent)
+- [x] Empty states: empty type, no search results, no filter results
 
 ### 1c. Entry details and editing
 - [ ] Entry details as in the mockup: cover spot, status, rating, note, about, tags, plans, Edit, Delete; the same details view is used from Plans
@@ -94,7 +94,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 ### 1g. Phase 1 wrap-up
 - [ ] Walk through every mockup screen next to the app and list the differences; fix them or record the decision in DESIGN.md
 - [ ] Window sizes: the minimum size, 1366×768, 1920×1080, 2560×1440; KDE fractional scaling at 125 % and 150 %
-- [ ] Keyboard pass: Ctrl+F search, Ctrl+N new entry, arrow keys in lists, focus visible everywhere. iced 0.14 can focus only text fields, so buttons, chips and rows need a focusable wrapper widget with a visible focus ring
+- [ ] Keyboard pass: Ctrl+N new entry (Ctrl+K and Ctrl+F already focus the search), arrow keys in lists, focus visible everywhere. iced 0.14 can focus only text fields, so buttons, chips and rows need a focusable wrapper widget with a visible focus ring
 - [ ] Contrast check of the inks and type colors in dark and light
 - [ ] Tests for filtering, sorting and the similar-tag check
 - [ ] `cargo clippy -- -D warnings` clean; remove the token sheet
