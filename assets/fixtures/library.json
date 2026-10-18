@@ -1,0 +1,1626 @@
+{
+  "version": 2,
+  "tags": {
+    "Genres": [
+      "horror",
+      "scifi",
+      "fantasy",
+      "adventure",
+      "comedy",
+      "drama",
+      "thriller",
+      "crime",
+      "mystery",
+      "romance"
+    ],
+    "Game genres": [
+      "rpg",
+      "platformer",
+      "roguelike",
+      "puzzle",
+      "survival-horror",
+      "strategy",
+      "metroidvania"
+    ],
+    "Music genres": [
+      "metal",
+      "grunge",
+      "rock",
+      "pop",
+      "electronic",
+      "hip-hop",
+      "jazz",
+      "folk"
+    ],
+    "Mood": [
+      "lighthearted",
+      "cozy",
+      "dark",
+      "melancholic",
+      "epic"
+    ],
+    "Season": [
+      "halloween",
+      "christmas"
+    ],
+    "Studios": [
+      "studio-ghibli",
+      "fromsoftware"
+    ],
+    "Animation style": [
+      "2d",
+      "3d",
+      "stop-motion"
+    ],
+    "Other": [
+      "favorite",
+      "classic"
+    ]
+  },
+  "entries": [
+    {
+      "id": "movies/the-mummy-1999",
+      "type": "movies",
+      "title": "The Mummy",
+      "released": "1999",
+      "creator": "Stephen Sommers",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "adventure",
+        "lighthearted",
+        "halloween",
+        "favorite"
+      ],
+      "note": "Perfect October comfort film.",
+      "description": "An American adventurer accidentally awakens a cursed high priest in 1920s Egypt.",
+      "seasonal_only": false,
+      "added": "2025-10-02",
+      "source": null
+    },
+    {
+      "id": "movies/the-thing-1982",
+      "type": "movies",
+      "title": "The Thing",
+      "released": "1982",
+      "creator": "John Carpenter",
+      "status": "done",
+      "rating": 10,
+      "tags": [
+        "horror",
+        "scifi",
+        "dark",
+        "halloween",
+        "favorite",
+        "classic"
+      ],
+      "note": "",
+      "description": "A research team in Antarctica is hunted by a shape-shifting alien.",
+      "seasonal_only": false,
+      "added": "2025-10-05",
+      "source": null
+    },
+    {
+      "id": "movies/hereditary-2018",
+      "type": "movies",
+      "title": "Hereditary",
+      "released": "2018",
+      "creator": "Ari Aster",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "horror",
+        "dark",
+        "halloween"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-09-14",
+      "source": null
+    },
+    {
+      "id": "movies/the-nightmare-before-christmas-1993",
+      "type": "movies",
+      "title": "The Nightmare Before Christmas",
+      "released": "1993",
+      "creator": "Henry Selick",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "fantasy",
+        "stop-motion",
+        "halloween",
+        "christmas"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": true,
+      "added": "2025-10-20",
+      "source": null
+    },
+    {
+      "id": "movies/die-hard-1988",
+      "type": "movies",
+      "title": "Die Hard",
+      "released": "1988",
+      "creator": "John McTiernan",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "thriller",
+        "christmas",
+        "favorite"
+      ],
+      "note": "Yes, it is a Christmas movie.",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-12-01",
+      "source": null
+    },
+    {
+      "id": "movies/klaus-2019",
+      "type": "movies",
+      "title": "Klaus",
+      "released": "2019",
+      "creator": "Sergio Pablos",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "2d",
+        "christmas",
+        "cozy"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": true,
+      "added": "2026-09-30",
+      "source": null
+    },
+    {
+      "id": "movies/dune-part-two-2024",
+      "type": "movies",
+      "title": "Dune: Part Two",
+      "released": "2024",
+      "creator": "Denis Villeneuve",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "scifi",
+        "epic"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-03-11",
+      "source": null
+    },
+    {
+      "id": "movies/the-batman-part-ii-2027",
+      "type": "movies",
+      "title": "The Batman Part II",
+      "released": "2027-10",
+      "creator": "Matt Reeves",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "crime",
+        "dark"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-08-22",
+      "source": null
+    },
+    {
+      "id": "movies/paddington-2-2017",
+      "type": "movies",
+      "title": "Paddington 2",
+      "released": "2017",
+      "creator": "Paul King",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "comedy",
+        "cozy",
+        "lighthearted"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-10-01",
+      "source": null
+    },
+    {
+      "id": "movies/knives-out-2019",
+      "type": "movies",
+      "title": "Knives Out",
+      "released": "2019",
+      "creator": "Rian Johnson",
+      "status": "dnf",
+      "rating": null,
+      "tags": [
+        "mystery",
+        "comedy"
+      ],
+      "note": "Fell asleep twice. Not the film's fault.",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-02-14",
+      "source": null
+    },
+    {
+      "id": "movies/amelie-2001",
+      "type": "movies",
+      "title": "Amélie",
+      "released": "2001",
+      "creator": "Jean-Pierre Jeunet",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "romance",
+        "comedy",
+        "lighthearted"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-05-03",
+      "source": null
+    },
+    {
+      "id": "shows/severance-2022",
+      "type": "shows",
+      "title": "Severance",
+      "released": "2022",
+      "creator": "Dan Erickson",
+      "status": "in_progress",
+      "rating": null,
+      "tags": [
+        "scifi",
+        "thriller",
+        "mystery"
+      ],
+      "note": "Season 2, episode 4.",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-09-20",
+      "source": null,
+      "seasons": [
+        {
+          "season": 1,
+          "released": "2022-02-18",
+          "status": "done"
+        },
+        {
+          "season": 2,
+          "released": "2025-01-17",
+          "status": "in_progress"
+        }
+      ]
+    },
+    {
+      "id": "shows/the-haunting-of-hill-house-2018",
+      "type": "shows",
+      "title": "The Haunting of Hill House",
+      "released": "2018",
+      "creator": "Mike Flanagan",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "horror",
+        "drama",
+        "halloween"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-10-12",
+      "source": null,
+      "seasons": [
+        {
+          "season": 1,
+          "released": "2018-10-12",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "shows/twin-peaks-1990",
+      "type": "shows",
+      "title": "Twin Peaks",
+      "released": "1990",
+      "creator": "David Lynch",
+      "status": "done",
+      "rating": 10,
+      "tags": [
+        "mystery",
+        "drama",
+        "dark",
+        "favorite",
+        "classic"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-06-07",
+      "source": null,
+      "seasons": [
+        {
+          "season": 1,
+          "released": "1990-04-08",
+          "status": "done"
+        },
+        {
+          "season": 2,
+          "released": "1990-09-30",
+          "status": "done"
+        },
+        {
+          "season": 3,
+          "released": "2017-05-21",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "shows/over-the-garden-wall-2014",
+      "type": "shows",
+      "title": "Over the Garden Wall",
+      "released": "2014",
+      "creator": "Patrick McHale",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "2d",
+        "fantasy",
+        "halloween",
+        "cozy"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": true,
+      "added": "2025-10-24",
+      "source": null
+    },
+    {
+      "id": "shows/the-bear-2022",
+      "type": "shows",
+      "title": "The Bear",
+      "released": "2022",
+      "creator": "Christopher Storer",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "drama",
+        "comedy"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-07-18",
+      "source": null
+    },
+    {
+      "id": "shows/stranger-things-2016",
+      "type": "shows",
+      "title": "Stranger Things",
+      "released": "2016",
+      "creator": "The Duffer Brothers",
+      "status": "dnf",
+      "rating": null,
+      "tags": [
+        "scifi",
+        "horror"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-11-02",
+      "source": null,
+      "seasons": [
+        {
+          "season": 1,
+          "released": "2016-07-15",
+          "status": "done"
+        },
+        {
+          "season": 2,
+          "released": "2017-10-27",
+          "status": "done"
+        },
+        {
+          "season": 3,
+          "released": "2019-07-04",
+          "status": "dnf"
+        },
+        {
+          "season": 4,
+          "released": "2022-05-27",
+          "status": null
+        },
+        {
+          "season": 5,
+          "released": "2025-11-26",
+          "status": null
+        }
+      ]
+    },
+    {
+      "id": "shows/what-we-do-in-the-shadows-2019",
+      "type": "shows",
+      "title": "What We Do in the Shadows",
+      "released": "2019",
+      "creator": "Jemaine Clement",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "comedy",
+        "horror",
+        "lighthearted",
+        "halloween"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-10-15",
+      "source": null,
+      "seasons": [
+        {
+          "season": 1,
+          "released": "2019-03-27",
+          "status": "done"
+        },
+        {
+          "season": 2,
+          "released": "2020-04-15",
+          "status": "done"
+        },
+        {
+          "season": 3,
+          "released": "2021-09-02",
+          "status": "done"
+        },
+        {
+          "season": 4,
+          "released": "2022-07-12",
+          "status": "done"
+        },
+        {
+          "season": 5,
+          "released": "2023-07-13",
+          "status": "done"
+        },
+        {
+          "season": 6,
+          "released": "2024-10-21",
+          "status": "done"
+        }
+      ]
+    },
+    {
+      "id": "shows/the-expanse-2015",
+      "type": "shows",
+      "title": "The Expanse",
+      "released": "2015",
+      "creator": "Mark Fergus",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "scifi",
+        "epic"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-01-09",
+      "source": null
+    },
+    {
+      "id": "books/dracula-1897",
+      "type": "books",
+      "title": "Dracula",
+      "released": "1897",
+      "creator": "Bram Stoker",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "horror",
+        "classic",
+        "halloween"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-10-01",
+      "source": null,
+      "formats": [
+        "audiobook",
+        "physical"
+      ]
+    },
+    {
+      "id": "books/the-shining-1977",
+      "type": "books",
+      "title": "The Shining",
+      "released": "1977",
+      "creator": "Stephen King",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "horror",
+        "dark",
+        "halloween"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-09-02",
+      "source": null,
+      "formats": [
+        "physical"
+      ]
+    },
+    {
+      "id": "books/a-christmas-carol-1843",
+      "type": "books",
+      "title": "A Christmas Carol",
+      "released": "1843",
+      "creator": "Charles Dickens",
+      "status": "done",
+      "rating": 7,
+      "tags": [
+        "classic",
+        "christmas"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": true,
+      "added": "2025-12-10",
+      "source": null,
+      "formats": [
+        "audiobook"
+      ]
+    },
+    {
+      "id": "books/project-hail-mary-2021",
+      "type": "books",
+      "title": "Project Hail Mary",
+      "released": "2021",
+      "creator": "Andy Weir",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "scifi",
+        "lighthearted",
+        "favorite"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-04-05",
+      "source": null,
+      "formats": [
+        "audiobook"
+      ]
+    },
+    {
+      "id": "books/the-name-of-the-wind-2007",
+      "type": "books",
+      "title": "The Name of the Wind",
+      "released": "2007",
+      "creator": "Patrick Rothfuss",
+      "status": "in_progress",
+      "rating": null,
+      "tags": [
+        "fantasy",
+        "epic"
+      ],
+      "note": "Page 312.",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-08-30",
+      "source": null,
+      "formats": [
+        "physical"
+      ]
+    },
+    {
+      "id": "books/piranesi-2020",
+      "type": "books",
+      "title": "Piranesi",
+      "released": "2020",
+      "creator": "Susanna Clarke",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "fantasy",
+        "mystery",
+        "melancholic"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-06-21",
+      "source": null,
+      "formats": [
+        "physical"
+      ]
+    },
+    {
+      "id": "books/dungeon-crawler-carl-2020",
+      "type": "books",
+      "title": "Dungeon Crawler Carl",
+      "released": "2020",
+      "creator": "Matt Dinniman",
+      "status": "dnf",
+      "rating": null,
+      "tags": [
+        "fantasy",
+        "comedy"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-03-28",
+      "source": null,
+      "formats": [
+        "audiobook"
+      ]
+    },
+    {
+      "id": "books/the-long-walk-1979",
+      "type": "books",
+      "title": "The Long Walk",
+      "released": "1979",
+      "creator": "Stephen King",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "thriller",
+        "dark"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-02-02",
+      "source": null,
+      "formats": [
+        "audiobook"
+      ]
+    },
+    {
+      "id": "games/elden-ring-2022",
+      "type": "games",
+      "title": "Elden Ring",
+      "released": "2022",
+      "creator": "FromSoftware",
+      "status": "done",
+      "rating": 10,
+      "tags": [
+        "rpg",
+        "epic",
+        "fromsoftware",
+        "favorite"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-05-14",
+      "source": null,
+      "platform": "PC"
+    },
+    {
+      "id": "games/hades-2020",
+      "type": "games",
+      "title": "Hades",
+      "released": "2020",
+      "creator": "Supergiant Games",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "roguelike",
+        "favorite"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-08-19",
+      "source": null,
+      "platform": "Switch"
+    },
+    {
+      "id": "games/resident-evil-4-2023",
+      "type": "games",
+      "title": "Resident Evil 4",
+      "released": "2023",
+      "creator": "Capcom",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "survival-horror",
+        "halloween"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-09-25",
+      "source": null,
+      "platform": "PC"
+    },
+    {
+      "id": "games/hollow-knight-silksong-2025",
+      "type": "games",
+      "title": "Hollow Knight: Silksong",
+      "released": "2025",
+      "creator": "Team Cherry",
+      "status": "in_progress",
+      "rating": null,
+      "tags": [
+        "metroidvania",
+        "dark"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-09-05",
+      "source": null,
+      "platform": "PC"
+    },
+    {
+      "id": "games/the-witness-2016",
+      "type": "games",
+      "title": "The Witness",
+      "released": "2016",
+      "creator": "Thekla",
+      "status": "dnf",
+      "rating": null,
+      "tags": [
+        "puzzle"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-01-20",
+      "source": null,
+      "platform": "PC"
+    },
+    {
+      "id": "games/grand-theft-auto-vi-2026",
+      "type": "games",
+      "title": "Grand Theft Auto VI",
+      "released": "2026-11-19",
+      "creator": "Rockstar Games",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "crime"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-07-01",
+      "source": null,
+      "platform": "PlayStation 5"
+    },
+    {
+      "id": "games/celeste-2018",
+      "type": "games",
+      "title": "Celeste",
+      "released": "2018",
+      "creator": "Maddy Makes Games",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "platformer",
+        "melancholic"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-09-09",
+      "source": null,
+      "platform": "Switch"
+    },
+    {
+      "id": "games/into-the-breach-2018",
+      "type": "games",
+      "title": "Into the Breach",
+      "released": "2018",
+      "creator": "Subset Games",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "strategy",
+        "roguelike"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-02-27",
+      "source": null,
+      "platform": "PC"
+    },
+    {
+      "id": "games/silent-hill-f-2025",
+      "type": "games",
+      "title": "Silent Hill f",
+      "released": "2025",
+      "creator": "Konami",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "survival-horror",
+        "halloween",
+        "dark"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-10-03",
+      "source": null,
+      "platform": "PlayStation 5"
+    },
+    {
+      "id": "anime/spirited-away-2001",
+      "type": "anime",
+      "title": "Spirited Away",
+      "released": "2001",
+      "creator": "Hayao Miyazaki",
+      "status": "done",
+      "rating": 10,
+      "tags": [
+        "2d",
+        "fantasy",
+        "studio-ghibli",
+        "favorite",
+        "classic"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-04-11",
+      "source": null
+    },
+    {
+      "id": "anime/princess-mononoke-1997",
+      "type": "anime",
+      "title": "Princess Mononoke",
+      "released": "1997",
+      "creator": "Hayao Miyazaki",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "2d",
+        "fantasy",
+        "epic",
+        "studio-ghibli"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-04-18",
+      "source": null
+    },
+    {
+      "id": "anime/frieren-beyond-journeys-end-2023",
+      "type": "anime",
+      "title": "Frieren: Beyond Journey's End",
+      "released": "2023",
+      "creator": "Madhouse",
+      "status": "in_progress",
+      "rating": null,
+      "tags": [
+        "2d",
+        "fantasy",
+        "melancholic"
+      ],
+      "note": "Episode 17.",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-09-12",
+      "source": null
+    },
+    {
+      "id": "anime/chainsaw-man-2022",
+      "type": "anime",
+      "title": "Chainsaw Man",
+      "released": "2022",
+      "creator": "MAPPA",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "2d",
+        "horror",
+        "dark"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-08-08",
+      "source": null
+    },
+    {
+      "id": "anime/tokyo-godfathers-2003",
+      "type": "anime",
+      "title": "Tokyo Godfathers",
+      "released": "2003",
+      "creator": "Satoshi Kon",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "2d",
+        "drama",
+        "christmas",
+        "cozy"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": true,
+      "added": "2025-12-20",
+      "source": null
+    },
+    {
+      "id": "anime/land-of-the-lustrous-2017",
+      "type": "anime",
+      "title": "Land of the Lustrous",
+      "released": "2017",
+      "creator": "Orange",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "3d",
+        "fantasy",
+        "melancholic"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-05-30",
+      "source": null
+    },
+    {
+      "id": "anime/mononoke-2007",
+      "type": "anime",
+      "title": "Mononoke",
+      "released": "2007",
+      "creator": "Kenji Nakamura",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "2d",
+        "horror",
+        "mystery",
+        "halloween"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-09-28",
+      "source": null
+    },
+    {
+      "id": "anime/cowboy-bebop-1998",
+      "type": "anime",
+      "title": "Cowboy Bebop",
+      "released": "1998",
+      "creator": "Shinichirō Watanabe",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "2d",
+        "scifi",
+        "classic"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-03-03",
+      "source": null
+    },
+    {
+      "id": "anime/dandadan-2024",
+      "type": "anime",
+      "title": "Dandadan",
+      "released": "2024",
+      "creator": "Science SARU",
+      "status": "dnf",
+      "rating": null,
+      "tags": [
+        "2d",
+        "comedy",
+        "horror"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-06-15",
+      "source": null
+    },
+    {
+      "id": "music/dirt-alice-in-chains",
+      "type": "music",
+      "title": "Dirt",
+      "released": "1992",
+      "creator": "Alice in Chains",
+      "status": "done",
+      "rating": 10,
+      "tags": [
+        "grunge",
+        "metal",
+        "dark",
+        "favorite"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-01-15",
+      "source": null,
+      "kind": "album",
+      "tracks": [
+        {
+          "title": "Them Bones",
+          "id": "mb:7c9a1",
+          "rating": 9
+        },
+        {
+          "title": "Rooster",
+          "id": "mb:7c9a7",
+          "rating": 10
+        },
+        {
+          "title": "Down in a Hole",
+          "id": "mb:7c9a4",
+          "rating": 9
+        }
+      ]
+    },
+    {
+      "id": "music/master-of-puppets-metallica",
+      "type": "music",
+      "title": "Master of Puppets",
+      "released": "1986",
+      "creator": "Metallica",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "metal",
+        "classic"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-01-15",
+      "source": null,
+      "kind": "album",
+      "tracks": [
+        {
+          "title": "Master of Puppets",
+          "id": "mb:mop02",
+          "rating": 10
+        }
+      ]
+    },
+    {
+      "id": "music/the-dark-side-of-the-moon-pink-floyd",
+      "type": "music",
+      "title": "The Dark Side of the Moon",
+      "released": "1973",
+      "creator": "Pink Floyd",
+      "status": "done",
+      "rating": 10,
+      "tags": [
+        "rock",
+        "classic",
+        "favorite"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-01-16",
+      "source": null,
+      "kind": "album",
+      "tracks": [
+        {
+          "title": "Time",
+          "id": "mb:dsotm04",
+          "rating": 10
+        },
+        {
+          "title": "Us and Them",
+          "id": "mb:dsotm07",
+          "rating": 9
+        }
+      ]
+    },
+    {
+      "id": "music/abbey-road-the-beatles",
+      "type": "music",
+      "title": "Abbey Road",
+      "released": "1969",
+      "creator": "The Beatles",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "rock",
+        "classic"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-01-16",
+      "source": null,
+      "kind": "album"
+    },
+    {
+      "id": "music/discovery-daft-punk",
+      "type": "music",
+      "title": "Discovery",
+      "released": "2001",
+      "creator": "Daft Punk",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "electronic",
+        "lighthearted"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-02-01",
+      "source": null,
+      "kind": "album",
+      "tracks": [
+        {
+          "title": "Digital Love",
+          "id": "mb:disc03",
+          "rating": 9
+        }
+      ]
+    },
+    {
+      "id": "music/to-pimp-a-butterfly-kendrick-lamar",
+      "type": "music",
+      "title": "To Pimp a Butterfly",
+      "released": "2015",
+      "creator": "Kendrick Lamar",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "hip-hop"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-08-14",
+      "source": null,
+      "kind": "album"
+    },
+    {
+      "id": "music/all-eyez-on-me-2pac",
+      "type": "music",
+      "title": "All Eyez on Me",
+      "released": "1996",
+      "creator": "2Pac",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "hip-hop",
+        "classic"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-02-01",
+      "source": null,
+      "kind": "album"
+    },
+    {
+      "id": "music/kind-of-blue-miles-davis",
+      "type": "music",
+      "title": "Kind of Blue",
+      "released": "1959",
+      "creator": "Miles Davis",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "jazz",
+        "classic",
+        "cozy"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-09-29",
+      "source": null,
+      "kind": "album"
+    },
+    {
+      "id": "music/a-charlie-brown-christmas-vince-guaraldi-trio",
+      "type": "music",
+      "title": "A Charlie Brown Christmas",
+      "released": "1965",
+      "creator": "Vince Guaraldi Trio",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "jazz",
+        "christmas",
+        "cozy"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": true,
+      "added": "2025-12-01",
+      "source": null,
+      "kind": "album"
+    },
+    {
+      "id": "music/halloween-original-motion-picture-soundtrack-john-carpenter",
+      "type": "music",
+      "title": "Halloween (Original Motion Picture Soundtrack)",
+      "released": "1978",
+      "creator": "John Carpenter",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "electronic",
+        "halloween",
+        "dark"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": true,
+      "added": "2025-10-01",
+      "source": null,
+      "kind": "album"
+    },
+    {
+      "id": "music/now-thats-what-i-call-christmas-various-artists",
+      "type": "music",
+      "title": "Now That's What I Call Christmas!",
+      "released": "2001",
+      "creator": "Various Artists",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "pop",
+        "christmas"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": true,
+      "added": "2025-12-05",
+      "source": null,
+      "kind": "album"
+    },
+    {
+      "id": "music/in-rainbows-radiohead",
+      "type": "music",
+      "title": "In Rainbows",
+      "released": "2007",
+      "creator": "Radiohead",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "rock",
+        "melancholic",
+        "favorite"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-03-20",
+      "source": null,
+      "kind": "album",
+      "tracks": [
+        {
+          "title": "Nude",
+          "id": "mb:ir03",
+          "rating": 9
+        },
+        {
+          "title": "Weird Fishes/Arpeggi",
+          "id": "mb:ir04",
+          "rating": 10
+        }
+      ]
+    },
+    {
+      "id": "music/the-tortured-poets-department-taylor-swift",
+      "type": "music",
+      "title": "The Tortured Poets Department",
+      "released": "2024",
+      "creator": "Taylor Swift",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "pop"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2026-04-20",
+      "source": null,
+      "kind": "album"
+    },
+    {
+      "id": "music/bad-moon-rising-creedence-clearwater-revival",
+      "type": "music",
+      "title": "Bad Moon Rising",
+      "released": "1969",
+      "creator": "Creedence Clearwater Revival",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "rock",
+        "classic",
+        "halloween"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-10-03",
+      "source": null,
+      "kind": "song",
+      "album": "Green River"
+    },
+    {
+      "id": "music/i-put-a-spell-on-you-screamin-jay-hawkins",
+      "type": "music",
+      "title": "I Put a Spell on You",
+      "released": "1956",
+      "creator": "Screamin' Jay Hawkins",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "rock",
+        "halloween"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": true,
+      "added": "2025-10-03",
+      "source": null,
+      "kind": "song",
+      "album": "At Home with Screamin' Jay Hawkins"
+    },
+    {
+      "id": "music/fairytale-of-new-york-the-pogues",
+      "type": "music",
+      "title": "Fairytale of New York",
+      "released": "1987",
+      "creator": "The Pogues",
+      "status": "done",
+      "rating": 10,
+      "tags": [
+        "folk",
+        "christmas",
+        "favorite"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": true,
+      "added": "2025-12-01",
+      "source": null,
+      "kind": "song",
+      "album": "If I Should Fall from Grace with God"
+    },
+    {
+      "id": "music/last-christmas-wham",
+      "type": "music",
+      "title": "Last Christmas",
+      "released": "1984",
+      "creator": "Wham!",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "pop",
+        "christmas"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": true,
+      "added": "2025-12-05",
+      "source": null,
+      "kind": "song"
+    },
+    {
+      "id": "music/human-fly-the-cramps",
+      "type": "music",
+      "title": "Human Fly",
+      "released": "1981",
+      "creator": "The Cramps",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "rock",
+        "halloween",
+        "lighthearted"
+      ],
+      "note": "",
+      "description": "",
+      "seasonal_only": false,
+      "added": "2025-10-04",
+      "source": null,
+      "kind": "song",
+      "album": "Bad Music for Bad People"
+    }
+  ],
+  "plans": [
+    {
+      "id": "halloween-2026",
+      "name": "Halloween",
+      "year": 2026,
+      "tags": [
+        "halloween"
+      ],
+      "timeline": true,
+      "seasonal_theme": true,
+      "started": true,
+      "items": [
+        {
+          "entry": "music/halloween-original-motion-picture-soundtrack-john-carpenter",
+          "done": true,
+          "repeat": true,
+          "note": "",
+          "when": {
+            "from": "2026-10-01",
+            "to": "2026-10-01"
+          }
+        },
+        {
+          "entry": "movies/the-thing-1982",
+          "done": true,
+          "repeat": true,
+          "note": "",
+          "when": {
+            "from": "2026-10-03",
+            "to": "2026-10-03"
+          }
+        },
+        {
+          "entry": "anime/mononoke-2007",
+          "done": false,
+          "repeat": false,
+          "note": "",
+          "when": {
+            "from": "2026-10-10",
+            "to": "2026-10-17"
+          }
+        },
+        {
+          "entry": "movies/the-mummy-1999",
+          "done": false,
+          "repeat": true,
+          "note": "",
+          "when": {
+            "from": "2026-10-19",
+            "to": "2026-10-31"
+          }
+        },
+        {
+          "entry": "shows/over-the-garden-wall-2014",
+          "done": false,
+          "repeat": true,
+          "note": "One chapter per evening.",
+          "when": {
+            "from": "2026-10-24",
+            "to": "2026-10-26"
+          }
+        },
+        {
+          "entry": "movies/hereditary-2018",
+          "done": false,
+          "repeat": false,
+          "note": "",
+          "when": null
+        },
+        {
+          "entry": "books/dracula-1897",
+          "done": false,
+          "repeat": true,
+          "note": "",
+          "when": null
+        },
+        {
+          "entry": "games/resident-evil-4-2023",
+          "done": false,
+          "repeat": false,
+          "note": "",
+          "when": null
+        }
+      ]
+    },
+    {
+      "id": "christmas-2026",
+      "name": "Christmas",
+      "year": 2026,
+      "tags": [
+        "christmas"
+      ],
+      "timeline": false,
+      "seasonal_theme": true,
+      "started": false,
+      "items": [
+        {
+          "entry": "movies/die-hard-1988",
+          "done": false,
+          "repeat": true,
+          "note": "",
+          "when": null
+        },
+        {
+          "entry": "movies/klaus-2019",
+          "done": false,
+          "repeat": false,
+          "note": "",
+          "when": null
+        },
+        {
+          "entry": "books/a-christmas-carol-1843",
+          "done": false,
+          "repeat": true,
+          "note": "",
+          "when": null
+        },
+        {
+          "entry": "anime/tokyo-godfathers-2003",
+          "done": false,
+          "repeat": true,
+          "note": "",
+          "when": null
+        },
+        {
+          "entry": "music/fairytale-of-new-york-the-pogues",
+          "done": false,
+          "repeat": true,
+          "note": "Christmas Eve, as always.",
+          "when": null
+        },
+        {
+          "entry": "music/last-christmas-wham",
+          "done": false,
+          "repeat": false,
+          "note": "",
+          "when": null
+        }
+      ]
+    },
+    {
+      "id": "halloween-2025",
+      "name": "Halloween",
+      "year": 2025,
+      "tags": [
+        "halloween"
+      ],
+      "timeline": false,
+      "seasonal_theme": true,
+      "started": true,
+      "items": [
+        {
+          "entry": "shows/the-haunting-of-hill-house-2018",
+          "done": true,
+          "repeat": false,
+          "note": "Opened the season with it.",
+          "when": null
+        },
+        {
+          "entry": "movies/the-thing-1982",
+          "done": true,
+          "repeat": false,
+          "note": "",
+          "when": null
+        },
+        {
+          "entry": "books/dracula-1897",
+          "done": true,
+          "repeat": false,
+          "note": "",
+          "when": null
+        }
+      ]
+    }
+  ]
+}
