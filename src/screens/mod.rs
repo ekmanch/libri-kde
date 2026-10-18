@@ -28,17 +28,30 @@ pub enum Screen {
 }
 
 impl Screen {
+    pub const ALL: [Screen; 6] = [
+        Screen::Splash,
+        Screen::Setup,
+        Screen::Library,
+        Screen::Plans,
+        Screen::Settings,
+        Screen::TokenSheet,
+    ];
+
+    /// The `LIBRI_SCREEN` value, also used in screenshot file names.
+    pub fn name(self) -> &'static str {
+        match self {
+            Screen::Splash => "splash",
+            Screen::Setup => "setup",
+            Screen::Library => "library",
+            Screen::Plans => "plans",
+            Screen::Settings => "settings",
+            Screen::TokenSheet => "tokens",
+        }
+    }
+
     /// The screen for a `LIBRI_SCREEN` value.
     pub fn from_name(name: &str) -> Option<Screen> {
-        Some(match name {
-            "splash" => Screen::Splash,
-            "setup" => Screen::Setup,
-            "library" => Screen::Library,
-            "plans" => Screen::Plans,
-            "settings" => Screen::Settings,
-            "tokens" => Screen::TokenSheet,
-            _ => return None,
-        })
+        Screen::ALL.into_iter().find(|screen| screen.name() == name)
     }
 }
 
@@ -70,8 +83,8 @@ mod tests {
 
     #[test]
     fn every_screen_has_a_name() {
-        for name in ["splash", "setup", "library", "plans", "settings", "tokens"] {
-            assert!(Screen::from_name(name).is_some(), "{name}");
+        for screen in Screen::ALL {
+            assert_eq!(Screen::from_name(screen.name()), Some(screen));
         }
         assert_eq!(Screen::from_name("nope"), None);
     }

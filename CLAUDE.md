@@ -54,4 +54,12 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
+To look at a screen, capture it rather than taking a desktop screenshot. This renders every screen in Graphite and Light at 1600 × 900 (2× scale) to `screenshots/` (git-ignored):
+
+```fish
+cargo test --test screenshots -- --ignored
+```
+
+Compare each capture with its board in `design/canvas.html`. When a screen is built or changed, capture it and check it before saying it is done.
+
 Screen tests use `iced_test::simulator` on a screen's `view` (see `screens/token_sheet.rs`); logic tests call `App::update` directly (message in, state out).

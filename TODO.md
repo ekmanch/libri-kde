@@ -39,6 +39,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Copy `assets/fixtures/library.json` from the phone app; `FixtureLibraryRepository` loads it and keeps changes in memory only
 - [x] Icons: export the mockup's icons as SVG into `assets/icons/` and draw them with iced's `svg` widget, tinted by the theme
 - [x] Test setup: unit tests on `update` (message in, state out); iced's headless test crate for screen tests if 0.14 has it (`iced_test` 0.14, dev-dependency). `cargo test` passes and the app opens to an empty window
+- [x] Screen captures: `cargo test --test screenshots -- --ignored` renders every screen headless in Graphite and Light at 1600×900 to `screenshots/` (git-ignored), to compare with the mockup
 
 ## Phase 1: UI on fixture data
 

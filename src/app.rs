@@ -22,15 +22,22 @@ pub fn run() -> iced::Result {
         },
         ..window::Settings::default()
     };
-    let mut application = iced::application(App::boot, App::update, App::view)
+    iced::application(App::boot, App::update, App::view)
         .title("Libri")
         .theme(App::iced_theme)
-        .default_font(font::REGULAR)
-        .window(window);
-    for file in font::FILES {
-        application = application.font(file);
+        .settings(settings())
+        .window(window)
+        .run()
+}
+
+/// The bundled fonts with Figtree as the default. Shared with the headless
+/// screenshots so they render with the real fonts.
+pub fn settings() -> iced::Settings {
+    iced::Settings {
+        fonts: font::FILES.map(Into::into).into(),
+        default_font: font::REGULAR,
+        ..iced::Settings::default()
     }
-    application.run()
 }
 
 pub struct App {

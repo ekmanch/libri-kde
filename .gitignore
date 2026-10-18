@@ -27,3 +27,6 @@ rustc-ice-*.txt
 # Added by cargo
 
 /target
+
+# Screen captures from tests/screenshots.rs
+/screenshots
