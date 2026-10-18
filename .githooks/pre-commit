@@ -1,0 +1,5 @@
+#!/bin/sh
+# Enabled with: git config core.hooksPath .githooks
+set -e
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings

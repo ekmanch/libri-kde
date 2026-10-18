@@ -62,4 +62,6 @@ cargo test --test screenshots -- --ignored
 
 Compare each capture with its board in `design/canvas.html`. When a screen is built or changed, capture it and check it before saying it is done.
 
+The pre-commit hook in `.githooks/` runs the formatter and clippy; enable it once per clone with `git config core.hooksPath .githooks`.
+
 Screen tests use `iced_test::simulator` on a screen's `view` (see `screens/token_sheet.rs`); logic tests call `App::update` directly (message in, state out).

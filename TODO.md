@@ -14,7 +14,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Confirm iced renders on the NVIDIA GPU, not the iGPU (iced installs no logger, so checked with `nvidia-smi`, which lists the running `libri`; `WGPU_ADAPTER_NAME` if that ever changes)
 - [x] Confirm the software fallback (tiny-skia) also starts: `ICED_BACKEND=tiny-skia cargo run`
 - [ ] Optional: `cargo install bacon` for rebuild-on-save, then `fish_add_path ~/.cargo/bin` (the folder only exists after the first `cargo install`)
-- [ ] Optional: `.githooks/pre-commit` running `cargo fmt --check` and `cargo clippy -- -D warnings`, enabled with `git config core.hooksPath .githooks`
+- [x] Optional: `.githooks/pre-commit` running `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`, enabled with `git config core.hooksPath .githooks`
 
 ### 0b. Project skeleton
 - [x] Binary crate `libri` (edition 2024) at the root of the `ekmanch/libri-kde` repo (`cargo init --name libri`), next to `assets/`, `design/` and the docs; `cargo run` builds and prints "Hello, world!"
