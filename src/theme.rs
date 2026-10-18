@@ -49,6 +49,22 @@ pub struct Accent {
     pub ink: Color,
 }
 
+impl Accent {
+    /// The accent as `theme` shows it: with Catppuccin Mocha the default
+    /// Peach becomes Catppuccin's own peach.
+    pub fn for_theme(self, theme: Theme) -> Accent {
+        if theme == Theme::Mocha && self == PEACH {
+            Accent {
+                fill: hex(0xFAB387),
+                ink: hex(0xFAB387),
+                ..self
+            }
+        } else {
+            self
+        }
+    }
+}
+
 const fn accent(name: &'static str, fill: u32, ink: u32) -> Accent {
     Accent {
         name,
@@ -115,7 +131,7 @@ pub struct Tokens {
     pub track: Color,
     /// Popovers and menus.
     pub popover: Color,
-    /// Destructive text: a neutral button with this as its label.
+    /// Destructive text: Delete, Disconnect.
     pub danger: Color,
     /// Behind a modal dialog.
     pub scrim: Color,
@@ -130,6 +146,7 @@ pub struct Tokens {
 
 impl Tokens {
     pub fn new(theme: Theme, accent: Accent) -> Tokens {
+        let accent = accent.for_theme(theme);
         let (chrome, content, raised, field, line, text, sub) = match theme {
             Theme::Graphite => (
                 0x131416, 0x1D1F22, 0x2A2D31, 0x1D1F22, 0x3A3E44, 0xEEF0F2, 0xA3A8AE,
@@ -161,7 +178,7 @@ impl Tokens {
             hover: pick(hex(0xF1F2F4), mix_white(content, 0.07)),
             track: pick(hex(0xE3E5E9), mix_white(content, 0.12)),
             popover: pick(hex(0xFFFFFF), hex(raised)),
-            danger: pick(hex(0xD20F39), hex(0xF38BA8)),
+            danger: pick(hex(0xD7263D), hex(0xF0525F)),
             scrim: pick(
                 Color::from_rgba8(20, 22, 28, 0.32),
                 Color::from_rgba8(8, 9, 10, 0.62),
@@ -291,7 +308,7 @@ mod tests {
 
     #[test]
     fn the_ink_is_the_fill_on_dark_and_the_darker_ink_on_light() {
-        assert_eq!(Tokens::new(Theme::Mocha, PEACH).ink, PEACH.fill);
+        assert_eq!(Tokens::new(Theme::Graphite, PEACH).ink, PEACH.fill);
         assert_eq!(Tokens::new(Theme::Light, PEACH).ink, PEACH.ink);
     }
 
@@ -302,5 +319,13 @@ mod tests {
         assert_eq!(movies(Theme::Charcoal), hex(0xF2B544));
         assert_eq!(movies(Theme::Mocha), hex(0xF9E2AF));
         assert_eq!(movies(Theme::Light), hex(0xA87C00));
+    }
+
+    #[test]
+    fn catppuccin_mocha_turns_the_default_peach_into_catppuccin_peach() {
+        let mocha = Tokens::new(Theme::Mocha, PEACH);
+        assert_eq!((mocha.accent, mocha.ink), (hex(0xFAB387), hex(0xFAB387)));
+        assert_eq!(Tokens::new(Theme::Graphite, PEACH).accent, PEACH.fill);
+        assert_eq!(Tokens::new(Theme::Mocha, VIVID[1]).accent, VIVID[1].fill);
     }
 }

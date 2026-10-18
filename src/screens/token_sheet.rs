@@ -211,12 +211,12 @@ pub fn view(app: &App, tokens: Tokens) -> Element<'_, AppMessage> {
         section("Theme", themes.into(), &tokens),
         section(
             "Accent, Vivid",
-            accents(&theme::VIVID, app.accent, &tokens),
+            accents(&theme::VIVID, app, &tokens),
             &tokens
         ),
         section(
             "Accent, Catppuccin",
-            accents(&theme::CATPPUCCIN, app.accent, &tokens),
+            accents(&theme::CATPPUCCIN, app, &tokens),
             &tokens
         ),
         section("Colors", surfaces.into(), &tokens),
@@ -409,11 +409,12 @@ fn section<'a>(
         .into()
 }
 
-fn accents<'a>(palette: &[Accent], current: Accent, tokens: &Tokens) -> Element<'a, AppMessage> {
+fn accents<'a>(palette: &[Accent], app: &App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let tokens = *tokens;
+    let (current, theme) = (app.accent, app.theme);
     let swatches = palette.iter().map(|&accent| {
         let label = row![
-            ui::dot(accent.fill, 14.0, 7.0),
+            ui::dot(accent.for_theme(theme).fill, 14.0, 7.0),
             text(accent.name).color(tokens.text)
         ]
         .spacing(8)

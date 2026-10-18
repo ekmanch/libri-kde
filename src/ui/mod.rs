@@ -147,8 +147,8 @@ pub enum ButtonKind {
     Outline,
     /// Raised fill.
     Neutral,
-    /// Raised fill with red text and no border (the desktop mockup's
-    /// choice; the phone uses an outline, see docs/DESIGN.md section 10).
+    /// Line border, no fill, red text: Delete, Disconnect. Never a red
+    /// fill.
     Destructive,
 }
 
@@ -187,7 +187,7 @@ fn button_style(kind: ButtonKind, tokens: &Tokens, status: button::Status) -> bu
         ButtonKind::Primary => (Some(tokens.accent), tokens.on_accent, None),
         ButtonKind::Outline => (None, tokens.text, Some(tokens.line)),
         ButtonKind::Neutral => (Some(tokens.raised), tokens.text, None),
-        ButtonKind::Destructive => (Some(tokens.raised), tokens.danger, None),
+        ButtonKind::Destructive => (None, tokens.danger, Some(tokens.line)),
     };
     let fill = match status {
         button::Status::Hovered | button::Status::Pressed => {
