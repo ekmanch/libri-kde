@@ -2,6 +2,7 @@
 //! library kept as `library.json` in a GitHub repo.
 
 pub mod app;
+pub mod browse;
 pub mod fixtures;
 pub mod model;
 pub mod repo;
