@@ -9,10 +9,7 @@ use super::{Screen, library};
 use crate::app::{App, Message, SyncState};
 use crate::model::MediaType;
 use crate::theme::{self, Tokens, font};
-use crate::ui::{self, Icon};
-
-/// How many of the most used tags the sidebar lists.
-const SIDEBAR_TAGS: usize = 6;
+use crate::ui::{self, Icon, Placement, Popover};
 
 pub fn shell<'a>(app: &'a App, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     let tokens = app.tokens();
@@ -96,8 +93,20 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
 
     items = items.push(header("Tags", 20.0, tokens));
     let tag_counts = library.tag_counts();
-    for &(tag, count) in tag_counts.iter().take(SIDEBAR_TAGS) {
-        let selected = on_library && app.library.tags.iter().any(|t| t == tag);
+    let state = &app.library;
+    let sidebar_tags = state.sidebar_tags(&tag_counts);
+    if sidebar_tags.is_empty() && state.sidebar_tags == library::SidebarTags::Pinned {
+        items = items.push(
+            container(
+                text("Nothing pinned yet. Pin tags from All tags below.")
+                    .size(12.5)
+                    .color(tokens.sub),
+            )
+            .padding(Padding::new(0.0).top(2).bottom(6).left(10).right(10)),
+        );
+    }
+    for (tag, count) in sidebar_tags {
+        let selected = on_library && state.filter.tags.iter().any(|t| t == tag);
         let row = row![
             container(text("#").size(13).font(font::MONO_MEDIUM).color(tokens.ink)).width(9),
             item_label(tag, selected, tokens),
@@ -106,8 +115,21 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
         let message = Message::Library(library::Message::PickTag(tag.to_owned()));
         items = items.push(item(row, 32.0, selected, tokens, message));
     }
-    // Opens the tag picker, built in 1b.
-    items = items.push(more_row("All tags", tag_counts.len(), tokens, None));
+    let open = state.popup == Some(library::Popup::AllTags);
+    let all_tags = more_row(
+        "All tags",
+        tag_counts.len(),
+        tokens,
+        Some(Message::Library(library::Message::Toggle(
+            library::Popup::AllTags,
+        ))),
+    );
+    items = items.push(
+        Popover::new(all_tags, open.then(|| library::all_tags_popover(app)))
+            .placement(Placement::Right)
+            .gap(16.0)
+            .on_dismiss(Message::Library(library::Message::ClosePopup)),
+    );
 
     let column = column![ui::scroll(items).height(Fill), sync_row(app.sync, tokens)];
     container(column)

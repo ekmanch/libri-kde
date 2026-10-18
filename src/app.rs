@@ -81,6 +81,8 @@ pub enum KeyPress {
     Enter,
     /// Moves focus; `back` with Shift.
     Tab { back: bool },
+    /// Ctrl+K or Ctrl+F: focuses the library's search.
+    Search,
 }
 
 impl App {
@@ -122,17 +124,28 @@ impl App {
             Message::SetAccent(accent) => self.accent = accent,
             Message::Key(KeyPress::Tab { back: false }) => return operation::focus_next(),
             Message::Key(KeyPress::Tab { back: true }) => return operation::focus_previous(),
-            Message::Key(KeyPress::Escape) => {
-                if self.screen == Screen::TokenSheet {
-                    self.token_sheet.dismiss_top();
+            Message::Key(KeyPress::Escape) => match self.screen {
+                Screen::TokenSheet => self.token_sheet.dismiss_top(),
+                // The sidebar's All tags popover also opens on Plans.
+                _ => {
+                    self.library.dismiss_top();
+                }
+            },
+            Message::Key(KeyPress::Enter) => match self.screen {
+                Screen::TokenSheet => self.token_sheet.confirm(),
+                _ => self.library.confirm(),
+            },
+            Message::Key(KeyPress::Search) => {
+                if self.screen == Screen::Library {
+                    return operation::focus(library::SEARCH_ID);
                 }
             }
-            Message::Key(KeyPress::Enter) => {
-                if self.screen == Screen::TokenSheet {
-                    self.token_sheet.confirm();
+            Message::Library(message) => {
+                if message.shows_library() {
+                    self.screen = Screen::Library;
                 }
+                self.library.update(message);
             }
-            Message::Library(message) => self.library.update(message),
             Message::TokenSheet(message) => self.token_sheet.update(message),
         }
         Task::none()
@@ -163,6 +176,9 @@ impl App {
                     Key::Named(Named::Tab) => KeyPress::Tab {
                         back: modifiers.shift(),
                     },
+                    Key::Character(c) if modifiers.command() && (c == "k" || c == "f") => {
+                        KeyPress::Search
+                    }
                     _ => return None,
                 };
                 Some(Message::Key(press))
@@ -215,5 +231,13 @@ mod tests {
         assert_eq!(app.title(), "Movies — Libri");
         let _ = app.update(Message::Show(Screen::Splash));
         assert_eq!(app.title(), "Libri");
+    }
+
+    #[test]
+    fn a_sidebar_pick_on_another_screen_shows_the_library() {
+        let mut app = App::new(Screen::Plans);
+        let _ = app.update(Message::Library(library::Message::PickTag("horror".into())));
+        assert_eq!(app.screen, Screen::Library);
+        assert_eq!(app.library.filter.tags, ["horror"]);
     }
 }

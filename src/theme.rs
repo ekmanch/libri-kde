@@ -102,6 +102,26 @@ pub const PEACH: Accent = VIVID[0];
 pub const HALLOWEEN: Color = hex(0xF08A3C);
 pub const CHRISTMAS: Color = hex(0x35A56A);
 
+/// Placeholder cover colors, until covers are fetched in phase 4.
+const COVERS: [u32; 8] = [
+    0x4B5F8A, 0x8A6E3F, 0x3F6B8A, 0x6B4B8A, 0x8A553F, 0x3F8A6E, 0x8A3F5F, 0x5F6B3F,
+];
+
+/// An entry's placeholder cover color, picked from its id as the mockup
+/// does (`coverOf`), so the same entry always gets the same color.
+pub fn cover_color(id: &str) -> Color {
+    let sum: usize = id
+        .encode_utf16()
+        .enumerate()
+        .map(|(i, c)| usize::from(c) * (i + 3))
+        .sum();
+    hex(COVERS[sum % COVERS.len()])
+}
+
+/// The status badge on a grid cover: its dark disc and the green mark.
+pub const BADGE: Color = hex(0x2A2D31);
+pub const BADGE_MARK: Color = hex(0x5EE08A);
+
 /// The sync row's dot: in sync, and failing (the token expired).
 pub const SYNC_OK: Color = hex(0xA6E3A1);
 pub const SYNC_ERROR: Color = hex(0xF38BA8);
@@ -327,5 +347,11 @@ mod tests {
         assert_eq!((mocha.accent, mocha.ink), (hex(0xFAB387), hex(0xFAB387)));
         assert_eq!(Tokens::new(Theme::Graphite, PEACH).accent, PEACH.fill);
         assert_eq!(Tokens::new(Theme::Mocha, VIVID[1]).accent, VIVID[1].fill);
+    }
+
+    #[test]
+    fn cover_colors_match_the_mockups_cover_of() {
+        // coverOf("m1") in the canvas: (109*3 + 49*4) % 8 = 3.
+        assert_eq!(cover_color("m1"), hex(0x6B4B8A));
     }
 }

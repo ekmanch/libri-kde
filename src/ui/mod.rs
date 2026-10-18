@@ -3,12 +3,16 @@
 
 pub mod chip;
 pub mod dialog;
+pub mod empty;
+pub mod entry;
 pub mod icon;
 pub mod menu;
 pub mod popover;
 pub mod rating;
 pub mod search;
+pub mod switch;
 pub mod tag_group;
+pub mod toolbar;
 
 use iced::alignment::Vertical;
 use iced::widget::{self, Text, button, container, scrollable, text};
@@ -18,12 +22,16 @@ use crate::theme::{Tokens, font, size};
 
 pub use chip::{add_chip, filter_chip, removable_chip, status_chip, tag_chip};
 pub use dialog::{dialog, modal};
+pub use empty::empty_state;
+pub use entry::{EntryLook, entry_card, entry_list_row, entry_table_header, entry_table_row, rule};
 pub use icon::{Icon, icon};
 pub use menu::radio_menu;
-pub use popover::{Align, Popover};
+pub use popover::{Align, Placement, Popover};
 pub use rating::rating;
 pub use search::search_field;
+pub use switch::switch;
 pub use tag_group::tag_group;
+pub use toolbar::{add_button, icon_switch, menu_button};
 
 /// A section header in small gray caps.
 pub fn section_header<'a, Message>(label: &str, tokens: &Tokens) -> Element<'a, Message> {

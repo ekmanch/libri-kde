@@ -248,6 +248,7 @@ fn widgets<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
         &state.search,
         move |query| msg(Message::Search(query)),
         Some("Ctrl K"),
+        None,
         tokens,
     ))
     .width(280);

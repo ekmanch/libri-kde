@@ -13,7 +13,16 @@ use iced::advanced::{Clipboard, Shell, overlay, renderer};
 use iced::widget::space;
 use iced::{Element, Event, Length, Point, Rectangle, Size, Vector, mouse};
 
-/// Which edges of the anchor and the popover line up.
+/// Where the popover opens: below the anchor (above when there is no room),
+/// or to its right with the bottoms lined up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Placement {
+    #[default]
+    Below,
+    Right,
+}
+
+/// Which edges of the anchor and the popover line up, below it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Align {
     #[default]
@@ -25,6 +34,7 @@ pub struct Popover<'a, Message, Theme, Renderer> {
     anchor: Element<'a, Message, Theme, Renderer>,
     popup: Element<'a, Message, Theme, Renderer>,
     open: bool,
+    placement: Placement,
     align: Align,
     gap: f32,
     on_dismiss: Option<Message>,
@@ -46,10 +56,16 @@ where
             anchor: anchor.into(),
             popup: popup.unwrap_or_else(|| space().into()),
             open,
+            placement: Placement::Below,
             align: Align::Start,
             gap: 8.0,
             on_dismiss: None,
         }
+    }
+
+    pub fn placement(mut self, placement: Placement) -> Self {
+        self.placement = placement;
+        self
     }
 
     pub fn align(mut self, align: Align) -> Self {
@@ -197,6 +213,7 @@ where
                 anchor: layout.bounds() + translation,
                 popup: &mut self.popup,
                 tree: popup_tree,
+                placement: self.placement,
                 align: self.align,
                 gap: self.gap,
                 on_dismiss: self.on_dismiss.clone(),
@@ -227,6 +244,7 @@ struct Overlay<'a, 'b, Message, Theme, Renderer> {
     anchor: Rectangle,
     popup: &'b mut Element<'a, Message, Theme, Renderer>,
     tree: &'b mut Tree,
+    placement: Placement,
     align: Align,
     gap: f32,
     on_dismiss: Option<Message>,
@@ -245,7 +263,14 @@ where
             &layout::Limits::new(Size::ZERO, bounds),
         );
         let size = node.size();
-        let position = place(self.anchor, size, bounds, self.align, self.gap);
+        let position = place(
+            self.anchor,
+            size,
+            bounds,
+            self.placement,
+            self.align,
+            self.gap,
+        );
         node.move_to(position)
     }
 
@@ -335,8 +360,24 @@ where
     }
 }
 
-/// Below the anchor when it fits, otherwise above; kept inside the window.
-fn place(anchor: Rectangle, size: Size, window: Size, align: Align, gap: f32) -> Point {
+/// Below the anchor when it fits, otherwise above, or to its right; kept
+/// inside the window.
+fn place(
+    anchor: Rectangle,
+    size: Size,
+    window: Size,
+    placement: Placement,
+    align: Align,
+    gap: f32,
+) -> Point {
+    if placement == Placement::Right {
+        let x = anchor.x + anchor.width + gap;
+        let y = anchor.y + anchor.height - size.height;
+        return Point::new(
+            x.clamp(0.0, (window.width - size.width).max(0.0)),
+            y.clamp(0.0, (window.height - size.height).max(0.0)),
+        );
+    }
     let x = match align {
         Align::Start => anchor.x,
         Align::End => anchor.x + anchor.width - size.width,
@@ -365,11 +406,11 @@ mod tests {
         let anchor = Rectangle::new(Point::new(1000.0, 20.0), Size::new(100.0, 36.0));
         let size = Size::new(240.0, 200.0);
         assert_eq!(
-            place(anchor, size, WINDOW, Align::Start, 8.0),
+            place(anchor, size, WINDOW, Placement::Below, Align::Start, 8.0),
             Point::new(1000.0, 64.0)
         );
         assert_eq!(
-            place(anchor, size, WINDOW, Align::End, 8.0),
+            place(anchor, size, WINDOW, Placement::Below, Align::End, 8.0),
             Point::new(860.0, 64.0)
         );
     }
@@ -379,8 +420,16 @@ mod tests {
         let anchor = Rectangle::new(Point::new(1500.0, 840.0), Size::new(100.0, 30.0));
         let size = Size::new(320.0, 560.0);
         assert_eq!(
-            place(anchor, size, WINDOW, Align::Start, 8.0),
+            place(anchor, size, WINDOW, Placement::Below, Align::Start, 8.0),
             Point::new(1280.0, 272.0)
         );
+    }
+
+    #[test]
+    fn opens_to_the_right_with_the_bottoms_lined_up() {
+        let anchor = Rectangle::new(Point::new(12.0, 760.0), Size::new(208.0, 32.0));
+        let size = Size::new(320.0, 560.0);
+        let position = place(anchor, size, WINDOW, Placement::Right, Align::Start, 4.0);
+        assert_eq!(position, Point::new(224.0, 232.0));
     }
 }

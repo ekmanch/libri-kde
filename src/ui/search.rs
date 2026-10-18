@@ -5,17 +5,22 @@ use super::{Icon, icon, mono};
 use crate::theme::{Tokens, size};
 
 /// The search box: a magnifier, the field, and an optional shortcut hint
-/// ("Ctrl K") on the right. One outline around all of it.
+/// ("Ctrl K") on the right. One outline around all of it. `id` lets a
+/// shortcut focus the field.
 pub fn search_field<'a, Message: Clone + 'a>(
     placeholder: &'a str,
     value: &'a str,
     on_input: impl Fn(String) -> Message + 'a,
     shortcut: Option<&'a str>,
+    id: Option<&'static str>,
     tokens: &Tokens,
 ) -> Element<'a, Message> {
     let tokens = *tokens;
-    let input = text_input(placeholder, value)
-        .on_input(on_input)
+    let mut input = text_input(placeholder, value).on_input(on_input);
+    if let Some(id) = id {
+        input = input.id(id);
+    }
+    let input = input
         .size(size::BODY)
         .padding(0)
         .style(move |_, _| text_input::Style {
