@@ -74,7 +74,21 @@ Items in section 11 ("Open") are not decided yet; decide them in the phase the T
 ### 4.5 Settings
 
 - A sidebar of its own sections ("On this page"), changes apply right away.
-- **Appearance:** theme (dark or light), dark background (Graphite, the default; Charcoal; Catppuccin Mocha), background style (two-tone or flat), sidebar tags (pinned or most used), accent color (Vivid group with Peach as the default, and a Catppuccin group).
+- **Appearance:**
+  - **Theme**, one list of five (decided 2026-10-18, replacing a Dark/Light switch plus a separate "Dark background" choice). There are four themes; System picks one of them:
+
+    | Theme | Behavior |
+    |---|---|
+    | System (default) | Graphite when Plasma's color scheme is dark, Light when it is light; switches live when Plasma switches |
+    | Graphite | Always Graphite |
+    | Charcoal | Always Charcoal |
+    | Catppuccin Mocha | Always Mocha, and the type colors switch to the Catppuccin set (section 8) |
+    | Light | Always light |
+
+    Picking a named theme is an explicit override and ignores Plasma. Plasma's light or dark preference is read from the desktop portal (`org.freedesktop.appearance` `color-scheme`), including changes while Libri runs. With no portal answer, System means Graphite.
+  - **Background style:** two-tone (the default) or flat, a separate setting that applies to every theme.
+  - **Sidebar tags:** pinned or most used.
+  - **Accent color:** a Vivid group with Peach as the default, and a Catppuccin group. On the phone the second group is called "Pastel", since most Android users won't know Catppuccin; on a KDE desktop the name says what it is.
 - **Library source:** repository, branch, library file, access token (Replace), Sync now, Disconnect repository.
 - **Plans:** timeline by default, seasonal touches.
 - **Games:** default platform.
@@ -119,23 +133,23 @@ Exact values live in the `theme` module once it exists; these are the mockup's.
 
 **Surfaces (dark)**
 
-| Token | Graphite (default) | Charcoal | Catppuccin Mocha |
+| Token | Graphite | Charcoal | Catppuccin Mocha |
 |---|---|---|---|
-| chrome (sidebar, window) | #131416 | #141414 | #181825 |
-| content | #1D1F22 | #1A1A1A | #1E1E2E |
-| raised (popovers, chips) | #2A2D31 | #262626 | #2B2C3E |
-| field | #1D1F22 | #1F1F1F | #232334 |
+| chrome (sidebar, window) | #131416 | #151515 | #181825 |
+| content | #1D1F22 | #1C1C1C | #1E1E2E |
+| raised (popovers, chips) | #2A2D31 | #272727 | #2B2C3E |
+| field | #1D1F22 | #202020 | #232334 |
 | line | #3A3E44 | #2E2E2E | #313244 |
 | text | #EEF0F2 | #EDEDED | #CDD6F4 |
 | secondary text | #A3A8AE | #A3A3A3 | #A6ADC8 |
 
-Flat style uses one shade for chrome and content (Graphite flat: #151515 everywhere, raised #252525, line #2A2A2A).
+Flat style uses one shade for chrome and content (Graphite flat: #151515 everywhere, raised #252525, line #2A2A2A; Charcoal flat: #151515, raised #242424; Mocha flat: #181825, raised #2A2B3C).
 
-**Surfaces (light):** content #FFFFFF, raised #E9EBEE, field #FFFFFF, line #D5D9DE, text #17181B, secondary text #5B616B; chrome #F4F5F7 (see Open).
+**Surfaces (light):** content #FFFFFF, raised #E9EBEE, field #FFFFFF, line #D5D9DE, text #17181B, secondary text #5B616B; chrome #F4F5F7 when two-tone, #FFFFFF when flat.
 
 **Selection gray:** the content color mixed 14% toward white in dark themes; #E9EBEE in light.
 
-**Type colors** (order Movies, Shows, Books, Games, Anime, Music as listed in the mockup)
+**Type colors** (order Movies, Shows, Books, Games, Anime, Music as listed in the mockup). There is no separate type-color setting: the Libri set is used with Graphite and Charcoal, the Catppuccin dark set with Catppuccin Mocha, and the Libri light inks with Light. The Catppuccin light inks are kept for a possible Catppuccin Latte theme later.
 
 | Set | Movies | Shows | Books | Games | Anime | Music |
 |---|---|---|---|---|---|---|
@@ -163,10 +177,12 @@ The Catppuccin group (Beige, Rosewater, Flamingo, Pink, Red, Mauve, Lavender, Bl
 
 ## 9. Tried and rejected
 
-- **Bricolage Grotesque** for headings: dropped on 2026-10-18 to match the phone. `design/canvas.html` still draws its headings in it; the app does not.
+- **Bricolage Grotesque** for headings: dropped on 2026-10-18 to match the phone.
 - **DejaVu Sans with DejaVu Sans Mono**, to match the Plasma desktop font: tried in a side-by-side spike. With its lowercase letters scaled to Figtree's height it is still about 10% wider in bold, has no Medium or SemiBold, and did not look enough better to justify that.
 - **A setup card in the middle of an empty window:** replaced by the full-window setup (4.2).
 - **Colored section headers:** small gray caps were preferred (section 3).
+- **Theme Dark/Light plus a "Dark background" choice:** two settings for one decision, and the second did nothing in Light. Replaced by one Theme list with System as the default (4.5).
+- **A separate type-color palette setting:** dropped; Catppuccin Mocha brings its own type colors (section 8).
 - **A list of linked hashtags that scrolls inside the plan dialog:** replaced by the drill-in tag view (4.4), so there is never a scroll inside a scroll.
 
 ## 10. Decisions made while building
@@ -181,5 +197,4 @@ Add decisions here as they are made during phases 0 and 1, with the date.
 
 - **Type order:** the mockup lists Anime before Music; the phone's global order (section 2 there) is Movies, Shows, Books, Games, Music, Anime. Follow the phone unless decided otherwise (phase 1a).
 - **Minimum window size** (1100 × 680 for now, section 10) and how the three panes give way below 1600 px wide: does the inspector overlay the content, or the sidebar collapse? (phase 1g)
-- **Light chrome:** the Library and Splash boards use #F4F5F7, the Settings board uses #FFFFFF. Pick one (phase 1f, light theme pass).
 - **Delete button style:** the desktop uses a neutral fill with red text; the phone's DESIGN.md now says no fill, gray outline, red text. Decide whether the desktop follows the phone (phase 1a, shared widgets).
