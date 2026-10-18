@@ -60,6 +60,27 @@ impl Library {
             .filter(move |entry| entry.media == media)
     }
 
+    /// Entries of `media` (every type when `None`), seasonal-only ones
+    /// left out as the main lists do.
+    pub fn count(&self, media: Option<MediaType>) -> usize {
+        self.entries
+            .iter()
+            .filter(|e| !e.seasonal_only && media.is_none_or(|m| e.media == m))
+            .count()
+    }
+
+    /// Every tag on an entry with the number of entries that have it, most
+    /// used first, ties A to Z.
+    pub fn tag_counts(&self) -> Vec<(&str, usize)> {
+        let mut counts = BTreeMap::<&str, usize>::new();
+        for tag in self.entries.iter().flat_map(|entry| &entry.tags) {
+            *counts.entry(tag).or_default() += 1;
+        }
+        let mut counts: Vec<_> = counts.into_iter().collect();
+        counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+        counts
+    }
+
     /// Tags used by at least one entry or one plan.
     pub fn used_tags(&self) -> BTreeSet<&str> {
         let entry_tags = self.entries.iter().flat_map(|entry| &entry.tags);
@@ -89,6 +110,24 @@ mod tests {
         assert_eq!(
             library.plan("halloween-2025").unwrap().title(),
             "Halloween 2025"
+        );
+    }
+
+    #[test]
+    fn counts_leave_out_seasonal_only_entries() {
+        let library = codec::decode(fixtures::LIBRARY_JSON).unwrap();
+        assert_eq!(library.count(Some(MediaType::Music)), 12);
+        assert_eq!(library.count(None), 52);
+    }
+
+    #[test]
+    fn tag_counts_are_most_used_first_then_a_to_z() {
+        let library = codec::decode(fixtures::LIBRARY_JSON).unwrap();
+        let counts = library.tag_counts();
+        assert_eq!(counts.len(), 39);
+        assert_eq!(
+            &counts[..3],
+            &[("halloween", 16), ("classic", 12), ("favorite", 12)]
         );
     }
 

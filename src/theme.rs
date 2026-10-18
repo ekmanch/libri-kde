@@ -86,6 +86,10 @@ pub const PEACH: Accent = VIVID[0];
 pub const HALLOWEEN: Color = hex(0xF08A3C);
 pub const CHRISTMAS: Color = hex(0x35A56A);
 
+/// The sync row's dot: in sync, and failing (the token expired).
+pub const SYNC_OK: Color = hex(0xA6E3A1);
+pub const SYNC_ERROR: Color = hex(0xF38BA8);
+
 /// Every color a screen draws with, resolved for one theme and accent.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tokens {
@@ -115,6 +119,8 @@ pub struct Tokens {
     pub danger: Color,
     /// Behind a modal dialog.
     pub scrim: Color,
+    /// Under popovers and dialogs.
+    pub shadow: Color,
     pub accent: Color,
     /// Accent text, icons and outlines.
     pub ink: Color,
@@ -159,6 +165,10 @@ impl Tokens {
             scrim: pick(
                 Color::from_rgba8(20, 22, 28, 0.32),
                 Color::from_rgba8(8, 9, 10, 0.62),
+            ),
+            shadow: pick(
+                Color::from_rgba8(20, 22, 28, 0.18),
+                Color::from_rgba8(0, 0, 0, 0.6),
             ),
             accent: accent.fill,
             ink: pick(accent.ink, accent.fill),

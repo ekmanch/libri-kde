@@ -1,10 +1,12 @@
 //! Application state, messages, `update` and `view`.
 
+use iced::keyboard::{self, Key, key::Named};
+use iced::widget::operation;
 use iced::window::{self, settings::PlatformSpecific};
-use iced::{Element, Size};
+use iced::{Element, Size, Subscription, Task};
 
 use crate::repo::{FixtureLibraryRepository, LibraryRepository};
-use crate::screens::{self, Screen};
+use crate::screens::{self, Screen, library, token_sheet};
 use crate::theme::{self, Accent, Theme, Tokens, font};
 
 /// The default window size, and for now the minimum (settled in 1g).
@@ -23,8 +25,9 @@ pub fn run() -> iced::Result {
         ..window::Settings::default()
     };
     iced::application(App::boot, App::update, App::view)
-        .title("Libri")
+        .title(App::title)
         .theme(App::iced_theme)
+        .subscription(App::subscription)
         .settings(settings())
         .window(window)
         .run()
@@ -40,11 +43,23 @@ pub fn settings() -> iced::Settings {
     }
 }
 
+/// The sync row's state. Faked until phase 3; `LIBRI_SYNC=expired` shows
+/// the expired token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SyncState {
+    #[default]
+    Synced,
+    TokenExpired,
+}
+
 pub struct App {
     pub screen: Screen,
     pub theme: Theme,
     pub accent: Accent,
+    pub sync: SyncState,
     pub repo: Box<dyn LibraryRepository>,
+    pub library: library::State,
+    pub token_sheet: token_sheet::State,
 }
 
 #[derive(Debug, Clone)]
@@ -52,17 +67,35 @@ pub enum Message {
     Show(Screen),
     SetTheme(Theme),
     SetAccent(Accent),
+    Key(KeyPress),
+    Library(library::Message),
+    TokenSheet(token_sheet::Message),
+}
+
+/// The keys the app handles itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyPress {
+    /// Closes the topmost popover or dialog.
+    Escape,
+    /// Confirms the open dialog.
+    Enter,
+    /// Moves focus; `back` with Shift.
+    Tab { back: bool },
 }
 
 impl App {
-    /// Starts on the screen named by `LIBRI_SCREEN` (development only), or
-    /// the library.
+    /// Starts on the screen named by `LIBRI_SCREEN` and with the sync state
+    /// in `LIBRI_SYNC` (development only), or the library, synced.
     fn boot() -> App {
         let screen = std::env::var("LIBRI_SCREEN")
             .ok()
             .and_then(|name| Screen::from_name(&name))
             .unwrap_or_default();
-        App::new(screen)
+        let mut app = App::new(screen);
+        if std::env::var("LIBRI_SYNC").is_ok_and(|state| state == "expired") {
+            app.sync = SyncState::TokenExpired;
+        }
+        app
     }
 
     pub fn new(screen: Screen) -> App {
@@ -71,7 +104,10 @@ impl App {
             screen,
             theme: Theme::default(),
             accent: theme::PEACH,
+            sync: SyncState::default(),
             repo: Box::new(repo),
+            library: library::State::default(),
+            token_sheet: token_sheet::State::default(),
         }
     }
 
@@ -79,26 +115,67 @@ impl App {
         Tokens::new(self.theme, self.accent)
     }
 
-    pub fn update(&mut self, message: Message) {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Show(screen) => self.screen = screen,
             Message::SetTheme(theme) => self.theme = theme,
             Message::SetAccent(accent) => self.accent = accent,
+            Message::Key(KeyPress::Tab { back: false }) => return operation::focus_next(),
+            Message::Key(KeyPress::Tab { back: true }) => return operation::focus_previous(),
+            Message::Key(KeyPress::Escape) => {
+                if self.screen == Screen::TokenSheet {
+                    self.token_sheet.dismiss_top();
+                }
+            }
+            Message::Key(KeyPress::Enter) => {
+                if self.screen == Screen::TokenSheet {
+                    self.token_sheet.confirm();
+                }
+            }
+            Message::Library(message) => self.library.update(message),
+            Message::TokenSheet(message) => self.token_sheet.update(message),
         }
+        Task::none()
     }
 
     pub fn view(&self) -> Element<'_, Message> {
         screens::view(self)
     }
 
+    /// "Movies — Libri": the screen's name, then the app's.
+    pub fn title(&self) -> String {
+        match screens::title(self) {
+            Some(name) => format!("{name} — Libri"),
+            None => "Libri".into(),
+        }
+    }
+
     fn iced_theme(&self) -> iced::Theme {
         self.tokens().iced_theme()
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        keyboard::listen().filter_map(|event| match event {
+            keyboard::Event::KeyPressed { key, modifiers, .. } => {
+                let press = match key {
+                    Key::Named(Named::Escape) => KeyPress::Escape,
+                    Key::Named(Named::Enter) => KeyPress::Enter,
+                    Key::Named(Named::Tab) => KeyPress::Tab {
+                        back: modifiers.shift(),
+                    },
+                    _ => return None,
+                };
+                Some(Message::Key(press))
+            }
+            _ => None,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::MediaType;
 
     #[test]
     fn starts_on_the_library_in_graphite_and_peach() {
@@ -106,13 +183,14 @@ mod tests {
         assert_eq!(app.screen, Screen::Library);
         assert_eq!(app.theme, Theme::Graphite);
         assert_eq!(app.accent, theme::PEACH);
+        assert_eq!(app.sync, SyncState::Synced);
         assert!(!app.repo.library().entries.is_empty());
     }
 
     #[test]
     fn show_switches_the_screen() {
         let mut app = App::new(Screen::Library);
-        app.update(Message::Show(Screen::Plans));
+        let _ = app.update(Message::Show(Screen::Plans));
         assert_eq!(app.screen, Screen::Plans);
     }
 
@@ -120,10 +198,22 @@ mod tests {
     fn theme_and_accent_change_the_tokens() {
         let mut app = App::new(Screen::Library);
         let violet = theme::VIVID[1];
-        app.update(Message::SetTheme(Theme::Light));
-        app.update(Message::SetAccent(violet));
+        let _ = app.update(Message::SetTheme(Theme::Light));
+        let _ = app.update(Message::SetAccent(violet));
         let tokens = app.tokens();
         assert!(tokens.light);
         assert_eq!((tokens.accent, tokens.ink), (violet.fill, violet.ink));
+    }
+
+    #[test]
+    fn the_window_title_names_the_screen() {
+        let mut app = App::new(Screen::Library);
+        assert_eq!(app.title(), "Everything — Libri");
+        let _ = app.update(Message::Library(library::Message::ShowType(Some(
+            MediaType::Movies,
+        ))));
+        assert_eq!(app.title(), "Movies — Libri");
+        let _ = app.update(Message::Show(Screen::Splash));
+        assert_eq!(app.title(), "Libri");
     }
 }

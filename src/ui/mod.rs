@@ -1,15 +1,29 @@
 //! Widgets shared by every screen. Anything that repeats across screens
 //! (rows, chips, buttons, search field) lives here, never copied.
 
+pub mod chip;
+pub mod dialog;
 pub mod icon;
+pub mod menu;
+pub mod popover;
+pub mod rating;
+pub mod search;
+pub mod tag_group;
 
 use iced::alignment::Vertical;
-use iced::widget::{self, button, text};
-use iced::{Background, Border, Element, Fill, Padding};
+use iced::widget::{self, Text, button, container, scrollable, text};
+use iced::{Background, Border, Color, Element, Fill, Padding, Shadow, Vector};
 
 use crate::theme::{Tokens, font, size};
 
+pub use chip::{add_chip, filter_chip, removable_chip, status_chip, tag_chip};
+pub use dialog::{dialog, modal};
 pub use icon::{Icon, icon};
+pub use menu::radio_menu;
+pub use popover::{Align, Popover};
+pub use rating::rating;
+pub use search::search_field;
+pub use tag_group::tag_group;
 
 /// A section header in small gray caps.
 pub fn section_header<'a, Message>(label: &str, tokens: &Tokens) -> Element<'a, Message> {
@@ -32,6 +46,99 @@ pub fn heading<'a, Message>(
         .into()
 }
 
+/// Years, counts and dates.
+pub fn mono<'a>(value: impl text::IntoFragment<'a>, text_size: f32, color: Color) -> Text<'a> {
+    text(value).size(text_size).font(font::MONO).color(color)
+}
+
+/// A small colored square or circle: type dots, the sync dot, swatches.
+pub fn dot<'a, Message: 'a>(color: Color, diameter: f32, radius: f32) -> Element<'a, Message> {
+    container(widget::space())
+        .width(diameter)
+        .height(diameter)
+        .style(move |_| container::background(color).border(Border::default().rounded(radius)))
+        .into()
+}
+
+/// The surface of popovers and dialogs.
+pub fn panel_style(tokens: &Tokens, radius: f32) -> container::Style {
+    container::Style {
+        text_color: Some(tokens.text),
+        background: Some(Background::Color(tokens.popover)),
+        border: Border::default()
+            .rounded(radius)
+            .width(1)
+            .color(tokens.line),
+        shadow: Shadow {
+            color: tokens.shadow,
+            offset: Vector::new(0.0, 12.0),
+            blur_radius: 32.0,
+        },
+        ..container::Style::default()
+    }
+}
+
+/// A vertical scroll area with the mockup's thin gray scroller.
+pub fn scroll<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+) -> scrollable::Scrollable<'a, Message> {
+    scrollable(content)
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(4)
+                .scroller_width(4)
+                .margin(3),
+        ))
+        .style(|theme, status| {
+            let mut style = scrollable::default(theme, status);
+            let thumb = Color::from_rgba(0.5, 0.5, 0.5, 0.3);
+            style.vertical_rail.background = None;
+            style.vertical_rail.border = Border::default();
+            style.vertical_rail.scroller.background = Background::Color(thumb);
+            style.vertical_rail.scroller.border = Border::default().rounded(2);
+            style
+        })
+}
+
+/// A borderless button for rows and list items: the selection gray when
+/// `selected`, a light hover otherwise.
+pub fn row_style(
+    tokens: &Tokens,
+    selected: bool,
+    radius: f32,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style + use<> {
+    let tokens = *tokens;
+    move |_, status| {
+        let background = match status {
+            _ if selected => Some(tokens.selection),
+            button::Status::Hovered | button::Status::Pressed => Some(tokens.hover),
+            _ => None,
+        };
+        button::Style {
+            background: background.map(Background::Color),
+            text_color: tokens.text,
+            border: Border::default().rounded(radius),
+            ..button::Style::default()
+        }
+    }
+}
+
+/// A 30 px square icon button in the secondary color: Close, Settings.
+pub fn icon_button<'a, Message: Clone + 'a>(
+    which: Icon,
+    icon_size: f32,
+    tokens: &Tokens,
+    on_press: Message,
+) -> Element<'a, Message> {
+    button(container(icon(which, icon_size, tokens.sub)).center(Fill))
+        .width(30)
+        .height(30)
+        .padding(0)
+        .on_press(on_press)
+        .style(row_style(tokens, false, 8.0))
+        .into()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonKind {
     /// Accent fill.
@@ -40,7 +147,8 @@ pub enum ButtonKind {
     Outline,
     /// Raised fill.
     Neutral,
-    /// Raised fill with red text.
+    /// Raised fill with red text and no border (the desktop mockup's
+    /// choice; the phone uses an outline, see docs/DESIGN.md section 10).
     Destructive,
 }
 
@@ -60,7 +168,7 @@ pub fn labeled_button<'a, Message: Clone + 'a>(
     tokens: Tokens,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    widget::button(
+    button(
         text(label)
             .size(size::BODY)
             .font(font::SEMIBOLD)
@@ -101,7 +209,7 @@ fn button_style(kind: ButtonKind, tokens: &Tokens, status: button::Status) -> bu
             text_color
         },
         border: Border {
-            color: border.unwrap_or(iced::Color::TRANSPARENT),
+            color: border.unwrap_or(Color::TRANSPARENT),
             width: if border.is_some() { 1.0 } else { 0.0 },
             radius: 8.0.into(),
         },

@@ -1,8 +1,10 @@
 use iced::Element;
+use iced::widget::space;
 
-use crate::app::Message;
-use crate::theme::Tokens;
+use super::shell::shell;
+use crate::app::{App, Message};
 
-pub fn view<'a>(tokens: &Tokens) -> Element<'a, Message> {
-    super::placeholder(tokens)
+/// The plans overview and plan screens come in 1e; for now the shell.
+pub fn view(app: &App) -> Element<'_, Message> {
+    shell(app, space())
 }

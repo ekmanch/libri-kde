@@ -1,12 +1,13 @@
 //! One module per screen of the mockup. Each draws from the app state and
 //! the theme tokens; shared pieces come from `ui`.
 
-mod library;
+pub mod library;
 mod plans;
 mod settings;
 mod setup;
+mod shell;
 mod splash;
-mod token_sheet;
+pub mod token_sheet;
 
 use iced::widget::{container, space};
 use iced::{Element, Fill};
@@ -60,10 +61,21 @@ pub fn view(app: &App) -> Element<'_, Message> {
     match app.screen {
         Screen::Splash => splash::view(&tokens),
         Screen::Setup => setup::view(&tokens),
-        Screen::Library => library::view(&tokens),
-        Screen::Plans => plans::view(&tokens),
+        Screen::Library => library::view(app),
+        Screen::Plans => plans::view(app),
         Screen::Settings => settings::view(&tokens),
         Screen::TokenSheet => token_sheet::view(app, tokens),
+    }
+}
+
+/// The screen's part of the window title, or `None` for plain "Libri".
+pub fn title(app: &App) -> Option<&'static str> {
+    match app.screen {
+        Screen::Splash | Screen::Setup => None,
+        Screen::Library => Some(app.library.title()),
+        Screen::Plans => Some("Plans"),
+        Screen::Settings => Some("Settings"),
+        Screen::TokenSheet => Some("Token sheet"),
     }
 }
 
