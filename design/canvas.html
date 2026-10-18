@@ -1,10 +1,4 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-</head>
-<body>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Libri Desktop Mockup</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
 <!--
@@ -206,7 +200,7 @@ class Component extends DCLogic {
   renderVals() {
     const t = theme(this.props);
     const first = (this.props.state ?? "returning") === "firstRun";
-    return { t, accent: this.props.accent ?? "#F8B289", winTitle: "Libri",
+    return { t, accent: (this.props.bg === "mocha" && String(this.props.accent ?? "#F8B289").toUpperCase() === "#F8B289") ? "#FAB387" : (this.props.accent ?? "#F8B289"), winTitle: "Libri",
       status: first ? "Getting things ready…" : "Loading your library…",
       footer: first ? "Version 0.1.0" : "ekmanch/library · main · library.json" };
   }
@@ -364,7 +358,8 @@ class Component extends DCLogic {
   componentWillUnmount() { clearTimeout(this._t); }
   renderVals() {
     const t = theme(this.props);
-    const accent = this.props.accent ?? "#F8B289";
+    const accent0 = this.props.accent ?? "#F8B289";
+    const accent = (this.props.bg === "mocha" && String(accent0).toUpperCase() === "#F8B289") ? "#FAB387" : accent0;
     const onAccent = t.light ? "#17181B" : "#131416";
     const st = this.state || {};
     const self = this;
@@ -988,13 +983,14 @@ function mixWhite(h, f) { const n = parseInt(String(h).slice(1), 16); const c = 
 function mixBlack(h, f) { const n = parseInt(String(h).slice(1), 16); const c = (v) => Math.round(v * (1 - f)).toString(16).padStart(2, "0"); return "#" + c((n >> 16) & 255) + c((n >> 8) & 255) + c(n & 255); }
 function lightKit(props) {
   const light = (props.bg ?? "graphite") === "light";
-  const accent = props.accent ?? "#F8B289";
+  const accent0 = props.accent ?? "#F8B289";
+  const accent = (props.bg === "mocha" && String(accent0).toUpperCase() === "#F8B289") ? "#FAB387" : accent0;
   const INK = { "#F8B289": "#C2521B", "#A78BFA": "#7C5CE0", "#FF7AB6": "#D6337F", "#F2B544": "#A36706", "#5EE08A": "#15803D", "#5AA9FF": "#1D6FE0", "#F9E2AF": "#A66706", "#F5E0DC": "#AD604F", "#F2CDCD": "#B85759", "#F5C2E7": "#BA4A9E", "#F38BA8": "#D20F39", "#CBA6F7": "#8839EF", "#B4BEFE": "#596ADD", "#89B4FA": "#1E66F5", "#89DCEB": "#017DAF", "#A6E3A1": "#238700" };
   const ink = light ? (INK[String(accent).toUpperCase()] || mixBlack(accent, 0.45)) : accent;
   return {
     light, accent, ink, onAccent: light ? "#17181B" : "#131416",
     t: { chrome: "#FFFFFF", content: "#FFFFFF", raised: "#E9EBEE", field: "#FFFFFF", line: "#D5D9DE", text: "#17181B", sub: "#5B616B" },
-    extra: { pop: "#FFFFFF", popShadow: "0 12px 32px rgba(20,22,28,0.18)", windowShadow: "0 0 0 1px rgba(20,22,28,0.14), 0 30px 80px rgba(20,22,28,0.18)", danger: "#D20F39", scrim: "rgba(20,22,28,0.32)" },
+    extra: { pop: "#FFFFFF", popShadow: "0 12px 32px rgba(20,22,28,0.18)", windowShadow: "0 0 0 1px rgba(20,22,28,0.14), 0 30px 80px rgba(20,22,28,0.18)", danger: "#D7263D", scrim: "rgba(20,22,28,0.32)" },
     palettes: (props.lightTypes ?? "bright") === "app" ? APP_LIGHT : {
       libri: { Movies: "#EB8A00", Shows: "#2F80ED", Books: "#27A15A", Games: "#EB5545", Anime: "#E2468F", Music: "#9B51E0" },
       mocha: { Movies: "#DF8E1D", Shows: "#1E66F5", Books: "#40A02B", Games: "#FE640B", Anime: "#EA76CB", Music: "#8839EF" }
@@ -1003,7 +999,7 @@ function lightKit(props) {
 }
 const COVERS = ["#4B5F8A", "#8A6E3F", "#3F6B8A", "#6B4B8A", "#8A553F", "#3F8A6E", "#8A3F5F", "#5F6B3F"];
 function coverOf(id) { let s = 0; for (let i = 0; i < id.length; i++) s += id.charCodeAt(i) * (i + 3); return COVERS[s % COVERS.length]; }
-function darkExtra(t) { return { pop: t.raised, popShadow: "0 12px 32px rgba(0,0,0,0.6)", windowShadow: "0 0 0 1px rgba(0,0,0,0.6), 0 30px 80px rgba(0,0,0,0.55)", danger: "#F38BA8", scrim: "rgba(8,9,10,0.62)" }; }
+function darkExtra(t) { return { pop: t.raised, popShadow: "0 12px 32px rgba(0,0,0,0.6)", windowShadow: "0 0 0 1px rgba(0,0,0,0.6), 0 30px 80px rgba(0,0,0,0.55)", danger: "#F0525F", scrim: "rgba(8,9,10,0.62)" }; }
 
 const ADDED = {};
 ENTRIES.forEach((e, i) => { ADDED[e.id] = i; });
@@ -1649,7 +1645,7 @@ button{font:inherit}
 </div>
 </div>
 <div style="display: flex; align-items: center; gap: 10px; padding: 14px 20px 18px">
-<sc-if value="{{dlg.isEdit}}" hint-placeholder-val="{{false}}"><button style="height: 36px; padding: 0 14px; border-radius: 8px; border: 0; background: {{selBg}}; color: #F0525F; font-size: 13.5px; font-weight: 600; cursor: pointer">Delete plan</button></sc-if>
+<sc-if value="{{dlg.isEdit}}" hint-placeholder-val="{{false}}"><button style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid {{t.line}}; background: transparent; color: {{danger}}; font-size: 13.5px; font-weight: 600; cursor: pointer">Delete plan</button></sc-if>
 <button onClick="{{closeDlg}}" style="margin-left: auto; height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid {{t.line}}; background: transparent; color: {{t.text}}; font-size: 13.5px; cursor: pointer">Cancel</button>
 <button onClick="{{closeDlg}}" style="height: 36px; padding: 0 18px; border-radius: 8px; border: 0; background: {{accent}}; color: {{onAccent}}; font-size: 13.5px; font-weight: 600; cursor: pointer">{{dlg.cta}}</button>
 </div>
@@ -1774,7 +1770,8 @@ class Component extends DCLogic {
   renderVals() {
     const light = (this.props.bg ?? "graphite") === "light";
     const flat = !!this.props.flat;
-    const accent = this.props.accent ?? "#F8B289";
+    const accent0 = this.props.accent ?? "#F8B289";
+    const accent = (this.props.bg === "mocha" && String(accent0).toUpperCase() === "#F8B289") ? "#FAB387" : accent0;
     const onAccent = light ? "#17181B" : "#131416";
     let t;
     if (light) {
@@ -1935,6 +1932,7 @@ class Component extends DCLogic {
       tlHelp: dTl ? "Entries sit on a timeline, each with a day or a period." : (isEdit ? "A plain checklist without dates." : "A plain checklist without dates. Starts off, as set in Settings.")
     };
     return {
+      danger: light ? "#D7263D" : "#F0525F",
       t, sc, accent, ink: light ? (({ "#F8B289": "#C2521B", "#A78BFA": "#7C5CE0", "#FF7AB6": "#D6337F", "#5AA9FF": "#1D6FE0" })[accent] || "#C2521B") : accent, onAccent, selBg, cardBg, cardShadow, groups, tl, pool, poolHelp: poolDef.help,
       isOverview, isPlanPage, isCollection, isDetail: !isOverview, h, planGroups, finished, collCards, sidePlans,
       winTitle: isOverview ? "All plans" : h.crumb,
@@ -2220,6 +2218,7 @@ class Component extends DCLogic {
     let accent = "#FAB387", ink = "#FAB387";
     const all = VIVID.map((a) => ["Vivid", a]).concat(CTP.map((a) => ["Catppuccin", a]));
     all.forEach((x) => { if (x[0] + "/" + x[1][0] === accKey) { accent = x[1][1]; ink = dark ? x[1][1] : x[1][2]; } });
+    if (eff === "mocha" && accKey === "Vivid/Peach") { accent = "#FAB387"; ink = "#FAB387"; }
 
     let t;
     if (dark) {
@@ -2259,7 +2258,7 @@ class Component extends DCLogic {
       const on = key === accKey;
       const ringC = dark ? a[1] : a[2];
       return {
-        name: a[0], color: a[1], on, aria: group + " " + a[0],
+        name: a[0], color: (eff === "mocha" && key === "Vivid/Peach") ? "#FAB387" : a[1], on, aria: group + " " + a[0],
         bg: on ? t.sel : "transparent", fg: on ? t.text : t.sub, weight: on ? 600 : 500,
         ring: dark ? "none" : "inset 0 0 0 1px rgba(0,0,0,0.08)",
         pick: () => set({ acc: key })
@@ -2304,7 +2303,7 @@ class Component extends DCLogic {
       vivid: sw(VIVID, "Vivid"), ctp: sw(CTP, "Catppuccin"),
       themeHelp: theme === "system" ? "Follows your Plasma color scheme and switches with it. Right now Plasma is " + (plasmaDark ? "dark, so Libri uses Graphite." : "light, so Libri uses Light.") : "Stays the same whatever Plasma uses. Pick System to follow Plasma again.",
       okBg: dark ? hexA("#A6E3A1", 0.08) : hexA("#40A02B", 0.08), okDot: dark ? "#A6E3A1" : "#40A02B",
-      danger: dark ? "#F38BA8" : "#D20F39",
+      danger: dark ? "#F0525F" : "#D7263D",
       plans: [{ name: "Halloween", year: "2026", prog: "4/9", pct: "44%" }, { name: "Christmas", year: "2026", prog: "0/6", pct: "0%" }, { name: "Winter break", year: "", prog: "1/5", pct: "20%" }],
       pins: tagMode === "pinned" ? pinnedList : usedList
     };
@@ -2580,5 +2579,4 @@ class Component extends DCLogic {
 </script>
 
 
-</body>
-</html>
+</body></html>
