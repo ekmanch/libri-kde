@@ -44,20 +44,21 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 ## Phase 1: UI on fixture data
 
 ### 1a. Shell and shared pieces
-- [ ] Window shell: sidebar on the left, content area with toolbar on the right; the content pane's rounded corner as in the mockup
-- [ ] Sidebar: Library with the six types and counts in their type colors; Plans with each plan's name and gray year span, then "All plans"; TAGS with the grouped tags and "All tags"; the sync row at the bottom (dot and status text, fake states)
-- [ ] Shared widgets: entry row, chip (filter, tag, removable), buttons (primary, outline, neutral, destructive = neutral fill with red text), search field with magnifier, popover/menu, modal dialog with scrim, collapsible tag group (header, count, "n selected"), section header in small gray caps
-- [ ] Rating picker: tap → 1 to 10 grid, never a slider
-- [ ] Theme and accent switching, live (state only; the Settings UI is 1f)
-- [ ] Keyboard basics from the start: Esc closes the top popover or dialog, Tab moves focus, Enter confirms dialogs
+- [x] Window shell: sidebar on the left, content area with toolbar on the right (title and count for now; the toolbar's controls are 1b); the content pane's rounded corner as in the mockup
+- [x] Sidebar: Library with All and the six types and counts in their type colors; Plans with each plan's name, gray year, done count and progress bar, then "All plans"; TAGS with the six most used tags and "All tags"; the sync row at the bottom (dot and status text, fake states: `LIBRI_SYNC=expired`); the window title follows the screen ("Movies — Libri")
+- [x] Shared widgets: chip (filter, status, tag, removable, add), buttons (primary, outline, neutral, destructive = neutral fill with red text), search field with magnifier, popover (a small custom widget) and radio menu, modal dialog with scrim, collapsible tag group (header, count, "n selected"), section header in small gray caps
+- [x] Rating picker: tap → 1 to 10 grid, never a slider
+- [x] Theme and accent switching, live (state only, from the token sheet; the Settings UI is 1f)
+- [x] Keyboard basics from the start: Esc closes the top popover or dialog, Tab moves focus, Enter confirms dialogs (Tab reaches text fields only; see 1g)
 
 ### 1b. Library
 - [ ] Type sections with their colors and counts; selecting a type in the sidebar shows that type only
-- [ ] Three views per type (text, list with covers, grid with covers, placeholder images), the choice remembered per type
+- [ ] Three views per type (text, list with covers, grid with covers, placeholder images), the choice remembered per type; each view's entry row or card is a shared widget in `ui`
 - [ ] Toolbar: search, Filter, Sort, View toggle, Add
 - [ ] Sort menu: Newest added, Title A to Z, Year newest first, Year oldest first, Rating highest first; the button shows the short label
 - [ ] Filter popover: Decade chips, Tags chips with "All tags…", Rating range 1 to 10, "Include seasonal-only" switch, Reset, live result count
 - [ ] Tag picker modal (from "All tags…" and the sidebar): search across every group, collapsible groups, multi-select
+- [ ] Sidebar tags: pinned or most used (DESIGN.md 4.5); pinning from the All tags popover, up to 8. The sidebar shows the six most used until then
 - [ ] Chips row: status chips, then the active filters (tags, decade, seasonal, rating) as removable chips, then an inline "Clear all"
 - [ ] Selection highlight on the picked entry (selection gray, not the accent)
 - [ ] Empty states: empty type, no search results, no filter results
@@ -93,7 +94,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 ### 1g. Phase 1 wrap-up
 - [ ] Walk through every mockup screen next to the app and list the differences; fix them or record the decision in DESIGN.md
 - [ ] Window sizes: the minimum size, 1366×768, 1920×1080, 2560×1440; KDE fractional scaling at 125 % and 150 %
-- [ ] Keyboard pass: Ctrl+F search, Ctrl+N new entry, arrow keys in lists, focus visible everywhere
+- [ ] Keyboard pass: Ctrl+F search, Ctrl+N new entry, arrow keys in lists, focus visible everywhere. iced 0.14 can focus only text fields, so buttons, chips and rows need a focusable wrapper widget with a visible focus ring
 - [ ] Contrast check of the inks and type colors in dark and light
 - [ ] Tests for filtering, sorting and the similar-tag check
 - [ ] `cargo clippy -- -D warnings` clean; remove the token sheet

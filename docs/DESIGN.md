@@ -192,9 +192,14 @@ Add decisions here as they are made during phases 0 and 1, with the date.
 - **Letter spacing** (2026-10-18, phase 0c): iced 0.14 has no letter-spacing setting on text (checked in `iced_core`, `iced_widget` and `iced_graphics`). Headings use default tracking instead of -0.03em, and the small-caps section headers default tracking instead of the slight spacing in section 3.
 - **Minimum window size** (2026-10-18, phase 0b): 1100 × 680 for now, so the window cannot collapse while phase 1 is built. The real value is decided in 1g (section 11).
 - **Icons** (2026-10-18, phase 0d): the mockup's icons are exported as 24 × 24 SVGs to `assets/icons/` and tinted with the theme color. The Halloween ghost and Christmas star timeline markers keep their own colors.
+- **Type order** (2026-10-18, phase 1a): the phone's global order everywhere, Movies, Shows, Books, Games, Music, Anime. The mockup's Anime-before-Music is incidental.
+- **Delete button style** (2026-10-18, phase 1a): the desktop keeps the mockup's neutral (gray) fill with red text and no border. The phone uses no fill, a gray outline and red text; this is a deliberate difference. The apps should feel the same overall, not match in every detail, and the desktop mockup decides the desktop's look.
+- **Default library view** (2026-10-18, phase 1a): the app opens on All ("Everything" in the title), not on one type.
+- **Sidebar tags** (2026-10-18, phase 1a): the six most used tags, most used first and ties A to Z, until pinning from the All tags popover is built in 1b.
+- **Popovers** (2026-10-18, phase 1a): iced 0.14 has no anchored popover, so `ui::popover` is a small custom widget (iced's `advanced` feature). It opens below its anchor, or above when there is no room, aligned to the anchor's left or right edge; a click outside it closes it. Dialogs use iced's own stack with a scrim over the whole window.
+- **Keyboard focus** (2026-10-18, phase 1a): in iced 0.14 only text fields can take keyboard focus. Tab and Shift+Tab move between text fields; buttons, chips and rows get a focusable wrapper with a visible focus ring in the 1g keyboard pass.
+- **Dashed borders** (2026-10-18, phase 1a): iced 0.14 draws only solid borders, so the mockup's dashed "+ Tag" and "All tags…" chips have a solid line border.
 
 ## 11. Open
 
-- **Type order:** the mockup lists Anime before Music; the phone's global order (section 2 there) is Movies, Shows, Books, Games, Music, Anime. Follow the phone unless decided otherwise (phase 1a).
 - **Minimum window size** (1100 × 680 for now, section 10) and how the three panes give way below 1600 px wide: does the inspector overlay the content, or the sidebar collapse? (phase 1g)
-- **Delete button style:** the desktop uses a neutral fill with red text; the phone's DESIGN.md now says no fill, gray outline, red text. Decide whether the desktop follows the phone (phase 1a, shared widgets).
