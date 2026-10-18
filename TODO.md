@@ -1,6 +1,6 @@
 # TODO
 
-Build order for Libri desktop (Rust + iced, KDE Plasma on CachyOS). Screens refer to `design/libri-desktop-mockup.html` (Splash, Setup, Library, Plans, Settings, with the design notes under each). The data model, tag rules and sync decisions are shared with the phone app and live in `ekmanch/library-app` → `docs/DESIGN.md`; this app follows them rather than redefining them.
+Build order for Libri desktop (Rust + iced, KDE Plasma on CachyOS). Screens refer to design/libri-desktop-mockup.html (Splash, Setup, Library, Plans, Settings, with the design notes under each). Desktop decisions are in docs/DESIGN.md. The data model, tag rules and sync decisions are shared with the phone app and live in ekmanch/library-app → docs/DESIGN.md; this app follows them rather than redefining them.
 
 Phase 1 builds the whole UI on fixture data, with nothing saved and no network. Functionality is wired up from phase 2.
 
@@ -11,34 +11,34 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] `rust-src` and `rust-analyzer` installed with Shelly
 - [ ] rust-analyzer hooked up in the editor, format on save with rustfmt
 - [x] System pieces iced needs on Plasma Wayland: `vulkan-icd-loader`, `libxkbcommon`, `wayland`, `fontconfig` (already present). `vulkaninfo` sees the RTX 4070 Super (NVIDIA proprietary) and the 7800X3D iGPU (RADV)
-- [ ] Confirm iced renders on the NVIDIA GPU, not the iGPU (check the wgpu adapter in the log, `WGPU_ADAPTER_NAME` if needed)
-- [ ] Confirm the software fallback (tiny-skia) also starts: `ICED_BACKEND=tiny-skia cargo run`
+- [x] Confirm iced renders on the NVIDIA GPU, not the iGPU (iced installs no logger, so checked with `nvidia-smi`, which lists the running `libri`; `WGPU_ADAPTER_NAME` if that ever changes)
+- [x] Confirm the software fallback (tiny-skia) also starts: `ICED_BACKEND=tiny-skia cargo run`
 - [ ] Optional: `cargo install bacon` for rebuild-on-save, then `fish_add_path ~/.cargo/bin` (the folder only exists after the first `cargo install`)
 - [ ] Optional: `.githooks/pre-commit` running `cargo fmt --check` and `cargo clippy -- -D warnings`, enabled with `git config core.hooksPath .githooks`
 
 ### 0b. Project skeleton
 - [x] Binary crate `libri` (edition 2024) at the root of the `ekmanch/libri-kde` repo (`cargo init --name libri`), next to `assets/`, `design/` and the docs; `cargo run` builds and prints "Hello, world!"
 - [x] `iced` 0.14.0 added with `svg`, `image` and `tokio` (defaults bring wgpu, tiny-skia, wayland, x11); `advanced` only if a custom widget needs it
-- [ ] Module layout: `app` (state, `Message`, `update`, `view`), `theme` (tokens), `ui` (shared widgets), `screens` (splash, setup, library, plans, settings), `model`, `repo`, `fixtures`
-- [ ] Main window: 1600×900 default, a sensible minimum size (decide in 1g), app id `libri` so KDE groups the window and finds its icon later
-- [ ] `CLAUDE.md`: stack (system Rust 1.99, iced 0.14, no rustup), module layout, the "never commit unless asked, suggest a commit message" rule, American spelling in UI text, Shelly for system packages, how to run and test
-- [ ] `design/libri-desktop-mockup.html` in the repo as the visual reference; `README.md` with build and run commands
+- [x] Module layout: `app` (state, `Message`, `update`, `view`), `theme` (tokens), `ui` (shared widgets), `screens` (splash, setup, library, plans, settings), `model`, `repo`, `fixtures`
+- [x] Main window: 1600×900 default, a sensible minimum size (1100×680 for now, decide in 1g), app id `libri` so KDE groups the window and finds its icon later
+- [x] `CLAUDE.md`: stack (system Rust 1.99, iced 0.14, no rustup), module layout, the "never commit unless asked, suggest a commit message" rule, American spelling in UI text, Shelly for system packages, how to run and test
+- [x] `design/canvas.html` in the repo as the visual reference; `README.md` with build and run commands
 - [x] `.gitignore` ignores `target/`; `Cargo.lock` stays committed
 
 ### 0c. Fonts and theme
-- [ ] Typography: Figtree only, headings in ExtraBold.
-- [ ] Bundle the fonts in `assets/fonts/` and load them at startup with `include_bytes!` + `.font(...)`: Figtree Regular, Italic, Medium, SemiBold, Bold, ExtraBold (same six files as the phone app) and JetBrains Mono Regular and Medium (years, counts, dates); add both OFL license files
-- [ ] Check whether iced 0.14 supports letter spacing; the phone's headings use -0.03em. If not, note it in DESIGN.md and accept default tracking
-- [ ] `theme` module from the mockup tokens: Graphite, Neutral, Mocha and Light backgrounds; the six type colors (dark and light inks); accent palette with Peach as the default; selection gray; small gray caps for section headers (12.5 px, 700, uppercase)
-- [ ] A throwaway "token sheet" view that shows every color, text style and button, to eyeball against the mockup; remove at the end of phase 1
+- [x] Typography: Figtree only, headings in ExtraBold. (The canvas still draws headings in Bricolage Grotesque; noted in `docs/DESIGN.md`)
+- [x] Bundle the fonts in `assets/fonts/` and load them at startup with `include_bytes!` + `.font(...)`: Figtree Regular, Italic, Medium, SemiBold, Bold, ExtraBold (same six files as the phone app) and JetBrains Mono Regular and Medium (years, counts, dates); add both OFL license files
+- [x] Check whether iced 0.14 supports letter spacing; the phone's headings use -0.03em. If not, note it in DESIGN.md and accept default tracking (it does not; noted in `docs/DESIGN.md`)
+- [x] `theme` module from the mockup tokens: Graphite, Neutral, Mocha and Light backgrounds; the six type colors (dark and light inks); accent palette with Peach as the default; selection gray; small gray caps for section headers (12.5 px, 700, uppercase)
+- [x] A throwaway "token sheet" view (`LIBRI_SCREEN=tokens cargo run`) that shows every color, text style and button, to eyeball against the mockup; remove at the end of phase 1
 
 ### 0d. Data on fixtures
-- [ ] `model`: Entry, Track, Plan, PlanItem, tag categories (Genres, Game genres, Music genres, Mood, Season, Authors, Directors, Actors, Studios, Other) with serde, matching DESIGN.md section 8
-- [ ] Canonical JSON encoding identical to the phone's codec (key order, category order, formatting), so both apps write the same bytes; a round-trip test on the fixture proves it
-- [ ] `LibraryRepository` trait with the starter set of operations
-- [ ] Copy `assets/fixtures/library.json` from the phone app; `FixtureLibraryRepository` loads it and keeps changes in memory only
-- [ ] Icons: export the mockup's icons as SVG into `assets/icons/` and draw them with iced's `svg` widget, tinted by the theme
-- [ ] Test setup: unit tests on `update` (message in, state out); iced's headless test crate for screen tests if 0.14 has it. `cargo test` passes and the app opens to an empty window
+- [x] `model`: Entry, Track, Season, Plan, PlanItem, tag categories (Genres, Game genres, Music genres, Mood, Season, Authors, Directors, Actors, Studios, Animation style, Other) with serde, matching DESIGN.md section 8
+- [x] Canonical JSON encoding identical to the phone's codec (key order, category order, formatting), so both apps write the same bytes; a round-trip test on the fixture proves it
+- [x] `LibraryRepository` trait with the starter set of operations
+- [x] Copy `assets/fixtures/library.json` from the phone app; `FixtureLibraryRepository` loads it and keeps changes in memory only
+- [x] Icons: export the mockup's icons as SVG into `assets/icons/` and draw them with iced's `svg` widget, tinted by the theme
+- [x] Test setup: unit tests on `update` (message in, state out); iced's headless test crate for screen tests if 0.14 has it (`iced_test` 0.14, dev-dependency). `cargo test` passes and the app opens to an empty window
 
 ## Phase 1: UI on fixture data
 
