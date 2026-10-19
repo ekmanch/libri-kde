@@ -492,7 +492,7 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
     let main: Element<'_, AppMessage> = match selected {
         Some(entry) => row![
             container(content).width(Fill),
-            entry::details::view(app, entry)
+            entry::details::view(app, entry, None)
         ]
         .into(),
         None => content.into(),

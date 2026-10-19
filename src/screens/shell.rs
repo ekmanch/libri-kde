@@ -5,9 +5,10 @@ use iced::border::Radius;
 use iced::widget::{Column, button, column, container, progress_bar, row, space, text};
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
-use super::{Screen, library};
+use super::{Screen, library, plans};
 use crate::app::{App, Message, SyncState};
 use crate::model::MediaType;
+use crate::plans as rules;
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, Icon, Placement, Popover};
 
@@ -70,25 +71,45 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
         ));
     }
 
-    items = items.push(header("Plans", 20.0, tokens));
-    for plan in &library.plans {
-        let done = plan.items.iter().filter(|item| item.done).count();
+    // Plans opens New plan from its header; finished plans wait under All
+    // plans.
+    let on_plans = app.screen == Screen::Plans;
+    let open_plan = if on_plans { app.plans.plan_id() } else { None };
+    let new_plan = on_plans.then_some(Message::Plans(plans::Message::NewPlan));
+    items = items.push(plans_header(tokens, new_plan));
+    let shown = library
+        .plans
+        .iter()
+        .filter(|plan| rules::plan_state(plan, app.today) != rules::PlanState::Finished);
+    for plan in shown {
+        let done = rules::done_count(plan);
         let total = plan.items.len();
         let year = plan.year.map(|year| year.to_string()).unwrap_or_default();
+        let selected = open_plan == Some(plan.id.as_str());
+        let weight = if selected {
+            font::SEMIBOLD
+        } else {
+            font::MEDIUM
+        };
         let title = row![
-            text(&plan.name).size(14),
+            text(&plan.name).size(14).font(weight),
             text(year).size(13).font(font::MEDIUM).color(tokens.sub),
             space::horizontal(),
             ui::mono(format!("{done}/{total}"), 11.5, tokens.sub),
         ]
         .spacing(6)
         .align_y(iced::alignment::Vertical::Bottom);
-        let tokens_copy = *tokens;
+        // On Plans the bars take each plan's own accent.
+        let (track, fill) = if on_plans {
+            (tokens.track, plans::plan_accent(plan, tokens))
+        } else {
+            (tokens.line, tokens.accent)
+        };
         let bar = progress_bar(0.0..=total.max(1) as f32, done as f32)
             .girth(4)
             .style(move |_| progress_bar::Style {
-                background: Background::Color(tokens_copy.line),
-                bar: Background::Color(tokens_copy.accent),
+                background: Background::Color(track),
+                bar: Background::Color(fill),
                 border: Border::default().rounded(2),
             });
         let content = column![title, bar].spacing(6);
@@ -96,16 +117,36 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
             button(content)
                 .width(Fill)
                 .padding([7, 10])
-                .on_press(Message::Show(Screen::Plans))
-                .style(ui::row_style(tokens, false, 8.0)),
+                .on_press(Message::Plans(plans::Message::ShowPlan(plan.id.clone())))
+                .style(ui::row_style(tokens, selected, 8.0)),
         );
     }
+    let on_overview = on_plans && open_plan.is_none();
     items = items.push(more_row(
         "All plans",
         library.plans.len(),
+        on_overview,
         tokens,
-        Some(Message::Show(Screen::Plans)),
+        Some(Message::Plans(plans::Message::ShowOverview)),
     ));
+
+    // The tags filter the library, so they stay on its sidebar.
+    if !on_plans {
+        items = tags(app, items, tokens);
+    }
+
+    let column = column![ui::scroll(items).height(Fill), sync_row(app.sync, tokens)];
+    container(column)
+        .width(232)
+        .height(Fill)
+        .padding(Padding::new(0.0).top(6).left(12).right(12))
+        .into()
+}
+
+/// The sidebar's Tags: pinned or most used, then All tags.
+fn tags<'a>(app: &'a App, mut items: Column<'a, Message>, tokens: &Tokens) -> Column<'a, Message> {
+    let library = app.repo.library();
+    let on_library = app.screen == Screen::Library;
 
     items = items.push(header("Tags", 20.0, tokens));
     let tag_counts = library.tag_counts();
@@ -135,23 +176,37 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
     let all_tags = more_row(
         "All tags",
         tag_counts.len(),
+        false,
         tokens,
         Some(Message::Library(library::Message::Toggle(
             library::Popup::AllTags,
         ))),
     );
-    items = items.push(
+    items.push(
         Popover::new(all_tags, open.then(|| library::all_tags_popover(app)))
             .placement(Placement::Right)
             .gap(16.0)
             .on_dismiss(Message::Library(library::Message::ClosePopup)),
-    );
+    )
+}
 
-    let column = column![ui::scroll(items).height(Fill), sync_row(app.sync, tokens)];
-    container(column)
-        .width(232)
-        .height(Fill)
-        .padding(Padding::new(0.0).top(6).left(12).right(12))
+/// "Plans", with the + for a new plan on the Plans screen.
+fn plans_header<'a>(tokens: &Tokens, new_plan: Option<Message>) -> Element<'a, Message> {
+    let mut content =
+        row![ui::section_header("Plans", tokens), space::horizontal()].align_y(Center);
+    if let Some(message) = new_plan {
+        content = content.push(
+            button(container(ui::icon(Icon::Plus, 14.0, tokens.sub)).center(Fill))
+                .width(22)
+                .height(22)
+                .padding(0)
+                .on_press(message)
+                .style(ui::row_style(tokens, false, 6.0)),
+        );
+    }
+    container(content)
+        .height(48)
+        .padding(Padding::new(0.0).top(20).bottom(6).left(10).right(10))
         .into()
 }
 
@@ -196,12 +251,13 @@ fn item<'a>(
 fn more_row<'a>(
     label: &'a str,
     count: usize,
+    selected: bool,
     tokens: &Tokens,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
     let content = row![
         ui::icon(Icon::More, 12.0, tokens.sub),
-        text(label).size(14).color(tokens.sub).width(Fill),
+        item_label(label, selected, tokens),
         ui::mono(count.to_string(), 12.0, tokens.sub),
     ]
     .spacing(10)
@@ -212,7 +268,7 @@ fn more_row<'a>(
         .height(32)
         .padding([0, 10])
         .on_press_maybe(on_press)
-        .style(ui::row_style(tokens, false, 8.0))
+        .style(ui::row_style(tokens, selected, 8.0))
         .into()
 }
 

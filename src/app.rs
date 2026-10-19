@@ -8,7 +8,7 @@ use iced::{Element, Size, Subscription, Task};
 use crate::model::Date;
 use crate::repo::Operation;
 use crate::repo::{FixtureLibraryRepository, LibraryRepository};
-use crate::screens::{self, Screen, entry, library, token_sheet};
+use crate::screens::{self, Screen, entry, library, plans, token_sheet};
 use crate::theme::{self, Accent, Theme, Tokens, font};
 
 /// The default window size, and for now the minimum (settled in 1g).
@@ -68,6 +68,10 @@ pub struct App {
     /// The entry dialog open over the window: Add or Edit, Delete, Add to
     /// plan.
     pub dialog: Option<entry::Dialog>,
+    pub plans: plans::State,
+    /// The plan dialog open over the window: New or Edit plan, Delete
+    /// plan, Remove from plan.
+    pub plan_dialog: Option<plans::Dialog>,
     pub token_sheet: token_sheet::State,
 }
 
@@ -80,6 +84,7 @@ pub enum Message {
     Modifiers(keyboard::Modifiers),
     Library(library::Message),
     Entry(entry::Message),
+    Plans(plans::Message),
     TokenSheet(token_sheet::Message),
 }
 
@@ -132,6 +137,8 @@ impl App {
             repo: Box::new(repo),
             library: library::State::default(),
             dialog: None,
+            plans: plans::State::default(),
+            plan_dialog: None,
             token_sheet: token_sheet::State::default(),
         }
     }
@@ -160,7 +167,7 @@ impl App {
                 // A dialog first; the sidebar's All tags popover also opens
                 // on Plans.
                 _ => {
-                    if !entry::dismiss_top(self) {
+                    if !entry::dismiss_top(self) && !plans::dismiss_top(self) {
                         self.library.dismiss_top();
                     }
                 }
@@ -168,16 +175,25 @@ impl App {
             Message::Key(KeyPress::Enter) => match self.screen {
                 Screen::TokenSheet => self.token_sheet.confirm(),
                 _ if self.dialog.is_some() => return entry::confirm(self),
+                _ if self.plan_dialog.is_some() => return plans::confirm(self),
                 _ => self.library.confirm(),
             },
+            Message::Key(KeyPress::Save) if self.plan_dialog.is_some() => {
+                return plans::update(self, plans::Message::Save);
+            }
             Message::Key(KeyPress::Save) => return entry::update(self, entry::Message::Save),
             Message::Key(KeyPress::Up) => return entry::update(self, entry::Message::MovePick(-1)),
             Message::Key(KeyPress::Down) => {
                 return entry::update(self, entry::Message::MovePick(1));
             }
             Message::Key(KeyPress::Edit) => {
+                let selected = match self.screen {
+                    Screen::Plans => self.plans.selected.clone(),
+                    _ => self.library.selected.clone(),
+                };
                 if self.dialog.is_none()
-                    && let Some(id) = self.library.selected.clone()
+                    && self.plan_dialog.is_none()
+                    && let Some(id) = selected
                 {
                     return entry::update(self, entry::Message::Edit(id));
                 }
@@ -221,6 +237,10 @@ impl App {
                     self.screen = Screen::Library;
                 }
                 self.library.update(message);
+            }
+            Message::Plans(message) => {
+                self.screen = Screen::Plans;
+                return plans::update(self, message);
             }
             Message::TokenSheet(message) => self.token_sheet.update(message),
         }

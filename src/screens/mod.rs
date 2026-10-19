@@ -3,10 +3,10 @@
 
 pub mod entry;
 pub mod library;
-mod plans;
+pub mod plans;
 mod settings;
 mod setup;
-mod shell;
+pub mod shell;
 mod splash;
 pub mod token_sheet;
 
@@ -67,7 +67,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         Screen::Settings => settings::view(&tokens),
         Screen::TokenSheet => token_sheet::view(app, tokens),
     };
-    entry::overlay(app, screen)
+    entry::overlay(app, plans::overlay(app, screen))
 }
 
 /// The screen's part of the window title, or `None` for plain "Libri".
@@ -75,7 +75,7 @@ pub fn title(app: &App) -> Option<String> {
     let name = match app.screen {
         Screen::Splash | Screen::Setup => return None,
         Screen::Library => return Some(app.library.title()),
-        Screen::Plans => "Plans",
+        Screen::Plans => return Some(plans::title(app)),
         Screen::Settings => "Settings",
         Screen::TokenSheet => "Token sheet",
     };

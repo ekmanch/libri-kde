@@ -82,12 +82,14 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Replace dialogs as on the phone: saving an album when songs from it are saved (D12: keep both, or replace the songs and move their ratings to the album's tracks), and saving a song when its album is saved (D13)
 
 ### 1e. Plans
-- [ ] Plans overview ("All plans")
-- [ ] Plan screen: title with the year dropdown (other years of the same plan, "New year…" in the accent ink), checklist grouped by type
-- [ ] Timeline view (per-plan override of the global default)
-- [ ] Seasonal themes: the Halloween and Christmas banner strips (SVG from the mockup), the title icon (the phone's pumpkin), the seasonal accent
-- [ ] New plan and Edit plan dialog: Name, Year, Date range with the calendar, Started (edit only), Linked hashtags as a drill-in tag view (search, collapsible categories, Season first and the only one open, Done / Clear), Seasonal theme, "Start with: Empty / Copy a plan", Timeline, Delete
-- [ ] Remove from plan or delete everywhere; Delete plan
+- [x] Plans overview ("All plans")
+- [x] Plan screen: title with the year dropdown (other years of the same plan, "New year…" in the accent ink), checklist grouped by type
+- [x] Timeline view (per-plan override of the global default; the default itself is a Settings item in 1f)
+- [x] Seasonal themes: the Halloween and Christmas banner strips (SVG from the mockup), the title icon (the phone's pumpkin), the seasonal accent
+- [x] New plan and Edit plan dialog: Name, Year, Started (edit only), Linked hashtags as a drill-in tag view (search, collapsible categories, Season first and the only one open, Done / Clear), Seasonal theme, "Start with: Empty / Copy a plan", Timeline, Delete. No Date range: `library.json` has none, so a plan's dates come from its items and the calendar sets each item's When in the details pane
+- [x] The plan page's side pane: "Add to this plan" (tagged entries not in the plan, or wanted ones for a plan without tags; the filter searches the whole library), and the entry details with the plan's When and note
+- [x] Sidebar on Plans: plan rows open their plan, the + opens New plan, finished plans only under All plans
+- [x] Remove from plan or delete everywhere; Delete plan
 
 ### 1f. Settings and states
 - [ ] Settings: type checkboxes (off or on), theme (System, Graphite, Charcoal, Catppuccin Mocha, Light; System follows Plasma's color scheme through the desktop portal), background style (two-tone or flat, with the flat tokens in `theme`), sidebar tags (pinned or most used), accent color (Vivid and Catppuccin groups, Peach default), timeline default, seasonal theme default, tags, About row

@@ -1,6 +1,8 @@
 //! The details pane beside the list, shown while an entry is selected:
 //! cover, type, title, creator, released, status, rating, tags, note,
-//! about, plans, then Edit and Delete.
+//! about, plans, then Edit and Delete. Inside a plan it also shows the
+//! entry's place in it (when, and the plan's note), and Delete asks
+//! whether to remove it from the plan only.
 
 use iced::widget::{Column, button, column, container, row, text};
 use iced::{Background, Border, Color, Element, Fill, Padding};
@@ -9,11 +11,11 @@ use super::Message;
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
 use crate::lookup;
-use crate::model::{Entry, EntryStatus, MediaType};
+use crate::model::{Entry, EntryStatus, MediaType, Plan};
 use crate::music;
-use crate::screens::Screen;
+use crate::screens::plans;
 use crate::theme::{self, Tokens, font};
-use crate::ui::{self, ButtonKind};
+use crate::ui::{self, Align, ButtonKind, Icon, Popover};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Entry(message)
@@ -22,7 +24,7 @@ fn msg(message: Message) -> AppMessage {
 /// The pane is this wide.
 pub const WIDTH: f32 = 352.0;
 
-pub fn view<'a>(app: &'a App, entry: &'a Entry) -> Element<'a, AppMessage> {
+pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
     let id = || entry.id.clone();
     let color = tokens.type_color(entry.media);
@@ -117,7 +119,7 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry) -> Element<'a, AppMessage> {
         in_plans = in_plans.push(
             button(text(format!("{} →", plan.title())).size(14))
                 .padding(0)
-                .on_press(AppMessage::Show(Screen::Plans))
+                .on_press(AppMessage::Plans(plans::Message::ShowPlan(plan.id.clone())))
                 .style(move |_, _| button::Style {
                     text_color: ink,
                     ..button::Style::default()
@@ -130,9 +132,15 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry) -> Element<'a, AppMessage> {
         msg(Message::AddToPlan(id())),
     ));
 
-    let mut sections = Column::new()
-        .spacing(20)
-        .push(header)
+    let mut sections = Column::new().spacing(20).push(header);
+    if let Some(plan) = plan {
+        sections = sections.push(section(
+            "This plan",
+            in_plan(app, plan, entry, &tokens),
+            &tokens,
+        ));
+    }
+    sections = sections
         .push(section("Status", status, &tokens))
         .push(section("Rating", rating, &tokens));
     if entry.media == MediaType::Music && !music::is_song(entry) {
@@ -150,6 +158,11 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry) -> Element<'a, AppMessage> {
     }
     sections = sections.push(section("In plans", in_plans.into(), &tokens));
 
+    // Inside a plan, Delete asks: this plan only, or everywhere (D4).
+    let delete = match plan {
+        Some(_) => AppMessage::Plans(plans::Message::RemoveItem(id())),
+        None => msg(Message::Delete(id())),
+    };
     let actions = row![
         ui::wide_button(
             "Edit",
@@ -157,12 +170,7 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry) -> Element<'a, AppMessage> {
             tokens,
             Some(msg(Message::Edit(id())))
         ),
-        ui::labeled_button(
-            "Delete",
-            ButtonKind::Destructive,
-            tokens,
-            Some(msg(Message::Delete(id())))
-        ),
+        ui::labeled_button("Delete", ButtonKind::Destructive, tokens, Some(delete)),
     ]
     .spacing(8);
 
@@ -178,6 +186,108 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry) -> Element<'a, AppMessage> {
     .height(Fill)
     .style(move |_| container::background(content_bg))
     .into()
+}
+
+/// The entry in the open plan: its When (a day or a period, on a
+/// timeline plan) and the plan's own note for it.
+fn in_plan<'a>(
+    app: &'a App,
+    plan: &'a Plan,
+    entry: &'a Entry,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let Some(item) = plan.item_for(&entry.id) else {
+        return text("Not in this plan").size(14).color(tokens.sub).into();
+    };
+    let mut column = Column::new().spacing(10);
+    if plan.timeline {
+        let open = app.plans.when_open;
+        let (label, color) = match item.when {
+            Some(when) => (crate::plans::format_when(when, plan.year), tokens.text),
+            None => ("Whenever".to_owned(), tokens.sub),
+        };
+        let tokens_copy = *tokens;
+        let field = button(
+            row![
+                ui::icon(Icon::Calendar, 15.0, tokens.sub),
+                text(label).size(14).color(color).width(Fill),
+            ]
+            .spacing(8)
+            .align_y(iced::Center)
+            .height(Fill),
+        )
+        .width(Fill)
+        .height(36)
+        .padding([0, 10])
+        .on_press(AppMessage::Plans(plans::Message::ToggleWhen))
+        .style(move |_, _| button::Style {
+            background: Some(Background::Color(tokens_copy.field)),
+            border: Border::default()
+                .rounded(8)
+                .width(1)
+                .color(tokens_copy.line),
+            ..button::Style::default()
+        });
+        let calendar = open.then(|| {
+            let picked = ui::calendar::calendar(
+                plans::shown_month(app),
+                item.when,
+                app.today,
+                tokens.accent,
+                tokens.on_accent,
+                |day| AppMessage::Plans(plans::Message::PickDay(day)),
+                |by| AppMessage::Plans(plans::Message::Month(by)),
+                tokens,
+            );
+            let hint = if app.plans.anchor.is_some() {
+                "Click a later day for a period."
+            } else {
+                "Click a day, then a later one for a period."
+            };
+            let footer = row![
+                text(hint).size(12).color(tokens_copy.sub).width(Fill),
+                ui::labeled_button(
+                    "Clear",
+                    ButtonKind::Text,
+                    tokens_copy,
+                    item.when
+                        .is_some()
+                        .then_some(AppMessage::Plans(plans::Message::ClearWhen))
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Center);
+            container(column![picked, footer].spacing(6).width(252))
+                .padding(12)
+                .style(move |_| ui::panel_style(&tokens_copy, 12.0))
+                .into()
+        });
+        let when = Popover::new(field, calendar)
+            .align(Align::Start)
+            .on_dismiss(AppMessage::Plans(plans::Message::ToggleWhen));
+        column = column.push(labeled("When", when.into(), tokens));
+    }
+    let note = ui::text_field(
+        "A note for this plan",
+        &item.note,
+        |note| AppMessage::Plans(plans::Message::ItemNote(note)),
+        font::REGULAR,
+        tokens,
+    );
+    column
+        .push(labeled("Plan note", note.into(), tokens))
+        .into()
+}
+
+/// A small label over a control.
+fn labeled<'a>(
+    label: &'a str,
+    control: Element<'a, AppMessage>,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    column![text(label).size(12.5).color(tokens.sub), control]
+        .spacing(5)
+        .into()
 }
 
 /// An album's tracks: the track list with a rating per track, rated
