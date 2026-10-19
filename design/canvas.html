@@ -418,6 +418,8 @@ a{color:inherit}a:hover{color:inherit}
 .scroll::-webkit-scrollbar{width:10px}
 .scroll::-webkit-scrollbar-thumb{background:rgba(128,128,128,0.3);border-radius:5px;border:3px solid transparent;background-clip:padding-box}
 .scroll::-webkit-scrollbar-track{background:transparent}
+.typed{scrollbar-width:none}
+.typed::-webkit-scrollbar{width:0;height:0}
 button{font:inherit}
 </style>
 </helmet>
@@ -442,7 +444,8 @@ button{font:inherit}
 <div style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.sub}}; padding: 8px 10px 6px">Library</div>
 <sc-for list="{{side}}" as="s" hint-placeholder-count="7">
 <button onClick="{{s.pick}}" aria-pressed="{{s.on}}" style="height: 34px; border: 0; border-radius: 8px; background: {{s.bg}}; color: {{s.fg}}; display: flex; align-items: center; gap: 10px; padding: 0 10px; cursor: pointer; text-align: left; font-size: 14px; font-weight: {{s.weight}}">
-<span aria-hidden="true" style="width: 9px; height: 9px; border-radius: 3px; background: {{s.color}}; flex-shrink: 0"></span>
+<sc-if value="{{s.hasBox}}" hint-placeholder-val="{{false}}"><span onClick="{{s.boxToggle}}" role="checkbox" aria-checked="{{s.on}}" aria-label="{{s.boxAria}}" style="width: 15px; height: 15px; box-sizing: border-box; border-radius: 4px; border: 1.5px solid {{s.color}}; background: {{s.boxBg}}; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin: 0 -3px"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="{{checkStroke}}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display: {{s.checkDisp}}"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span></sc-if>
+<sc-if value="{{s.hasDot}}" hint-placeholder-val="{{true}}"><span aria-hidden="true" style="width: 9px; height: 9px; border-radius: 3px; background: {{s.color}}; flex-shrink: 0"></span></sc-if>
 <span style="flex-grow: 1">{{s.label}}</span>
 <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: {{t.sub}}">{{s.count}}</span>
 </button>
@@ -501,6 +504,12 @@ button{font:inherit}
 <sc-if value="{{filterOpen}}" hint-placeholder-val="{{false}}">
 <div role="dialog" aria-label="Filter" style="position: absolute; top: 44px; right: 0; z-index: 15; width: 340px; box-sizing: border-box; padding: 14px; border-radius: 12px; background: {{t.pop}}; border: 1px solid {{t.line}}; box-shadow: {{t.popShadow}}; display: flex; flex-direction: column; gap: 16px">
 <div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: {{hdr.size}}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{hdr.color}}">Type</span>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{typeOpts}}" as="o" hint-placeholder-count="6"><button onClick="{{o.pick}}" aria-pressed="{{o.on}}" style="height: 30px; padding: 0 11px; border-radius: 15px; border: 1px solid {{o.border}}; background: {{o.bg}}; color: {{o.fg}}; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 7px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 3px; background: {{o.color}}"></span>{{o.label}}</button></sc-for>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
 <span style="font-size: {{hdr.size}}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{hdr.color}}">Decade</span>
 <div style="display: flex; flex-wrap: wrap; gap: 6px">
 <sc-for list="{{decadeOpts}}" as="o" hint-placeholder-count="7"><button onClick="{{o.pick}}" aria-pressed="{{o.on}}" style="height: 30px; padding: 0 11px; border-radius: 15px; border: 1px solid {{o.border}}; background: {{o.bg}}; color: {{o.fg}}; font-size: 13px; font-weight: 500; cursor: pointer">{{o.label}}</button></sc-for>
@@ -544,25 +553,124 @@ button{font:inherit}
 <button onClick="{{openAdd}}" style="height: 36px; padding: 0 14px; border-radius: 8px; background: {{accent}}; color: {{onAccent}}; border: 0; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 6px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add</button>
 </div>
 
-<div style="flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 0 24px 12px">
+<sc-if value="{{ov.off}}" hint-placeholder-val="{{false}}">
+<div style="flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 0 24px 12px; flex-wrap: wrap">
 <sc-for list="{{statusChips}}" as="c" hint-placeholder-count="4">
 <button onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="height: 28px; padding: 0 12px; border-radius: 14px; border: 1px solid {{c.border}}; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; cursor: pointer">{{c.label}}<span style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px; opacity: 0.75">{{c.count}}</span></button>
 </sc-for>
+<sc-for list="{{typeChips}}" as="y" hint-placeholder-count="2"><button onClick="{{y.clear}}" aria-label="{{y.aria}}" style="height: 28px; padding: 0 8px 0 12px; margin-left: 6px; border-radius: 14px; border: 1px solid {{accentBorder}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 3px; background: {{y.color}}"></span>{{y.label}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-for>
+<sc-for list="{{specialChips}}" as="x" hint-placeholder-count="1"><button onClick="{{x.clear}}" aria-label="{{x.aria}}" style="height: 28px; padding: 0 8px 0 12px; margin-left: 6px; border-radius: 14px; border: 1px solid {{accentBorder}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">{{x.label}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-for>
 <sc-for list="{{tagChips}}" as="g" hint-placeholder-count="1"><button onClick="{{g.clear}}" aria-label="{{g.aria}}" style="height: 28px; padding: 0 8px 0 12px; margin-left: 6px; border-radius: 14px; border: 1px solid {{accentBorder}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">{{g.label}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-for>
 <sc-for list="{{decChips}}" as="dc" hint-placeholder-count="1"><button onClick="{{dc.clear}}" aria-label="{{dc.aria}}" style="height: 28px; padding: 0 8px 0 12px; margin-left: 6px; border-radius: 14px; border: 1px solid {{accentBorder}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">{{dc.label}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-for>
 <sc-if value="{{seasonalOn}}" hint-placeholder-val="{{false}}"><button onClick="{{toggleSeasonal}}" aria-label="Hide seasonal-only entries" style="height: 28px; padding: 0 8px 0 12px; margin-left: 6px; border-radius: 14px; border: 1px solid {{accentBorder}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">Incl. seasonal-only<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-if>
 <sc-if value="{{hasRating}}" hint-placeholder-val="{{false}}"><button onClick="{{clearRatingF}}" aria-label="Clear rating filter" style="height: 28px; padding: 0 8px 0 12px; margin-left: 6px; border-radius: 14px; border: 1px solid {{accentBorder}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">{{ratingChip}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-if>
 <sc-if value="{{canClearAll}}" hint-placeholder-val="{{false}}"><button onClick="{{clearAll}}" style="margin-left: 10px; height: 28px; padding: 0 4px; border: 0; background: transparent; color: {{ink}}; font-size: 13px; font-weight: 600; cursor: pointer">Clear all</button></sc-if>
 </div>
+</sc-if>
 
-<div class="scroll" style="flex-grow: 1; min-height: 0; overflow-y: auto; padding: 4px 24px 24px">
+<div data-scrollwrap="1" style="position: relative; flex-grow: 1; min-height: 0; display: flex; flex-direction: column">
+<div class="scroll {{scrollCls}}" onScroll="{{onScroll}}" style="flex-grow: 1; min-height: 0; overflow-y: auto; padding: 4px 24px 24px">
+<!-- All: now and next -->
+<sc-if value="{{ov.on}}" hint-placeholder-val="{{true}}">
+<sc-if value="{{ov.cols}}" hint-placeholder-val="{{false}}">
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 36px; align-items: start; padding-top: 6px">
+<div style="display: flex; flex-direction: column; gap: 28px; min-width: 0">
+<div style="border-radius: 12px; background: {{t.raised}}; padding: 14px 16px; display: flex; flex-direction: column; gap: 9px">
+<div style="display: flex; align-items: center; height: 18px"><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.sub}}">Active plan</span><a href="Plans.dc.html" style="margin-left: auto; color: {{ink}}; font-size: 13px; font-weight: 600; text-decoration: none; display: flex; align-items: center; gap: 4px">Open<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></a></div>
+<div style="display: flex; align-items: baseline; gap: 8px"><span style="font-family: 'Figtree', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.03em">{{ov.plan.name}}</span><span style="font-size: 14px; color: {{t.sub}}">{{ov.plan.year}}</span><span style="margin-left: auto; font-size: 13.5px; font-weight: 600; white-space: nowrap">{{ov.plan.done}}</span></div>
+<span style="height: 5px; border-radius: 3px; background: {{t.line}}; overflow: hidden; display: block"><span style="display: block; height: 5px; width: {{ov.plan.pct}}; background: {{accent}}; border-radius: 3px"></span></span>
+<span style="font-size: 12.5px; color: {{t.sub}}">{{ov.plan.next}}</span>
+</div>
+<sc-for list="{{ov.left}}" as="sx" hint-placeholder-count="2">
+<section style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<div style="display: flex; align-items: center; height: 24px"><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.sub}}">{{sx.title}}</span><button onClick="{{sx.open}}" style="margin-left: auto; border: 0; background: transparent; padding: 0 2px; color: {{ink}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; cursor: pointer">{{sx.seeAll}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button></div>
+<div style="display: flex; flex-direction: column">
+<sc-for list="{{sx.rows}}" as="r" hint-placeholder-count="4">
+<button onClick="{{r.pick}}" aria-pressed="{{r.sel}}" style="display: flex; align-items: center; gap: 12px; min-height: {{sx.rowH}}; padding: 4px 8px; border: 0; border-bottom: 1px solid {{t.line}}; background: {{r.bg}}; color: {{t.text}}; text-align: left; cursor: pointer">
+<span aria-hidden="true" style="display: {{sx.dotDisp}}; width: 8px; height: 8px; border-radius: 3px; background: {{r.color}}; flex-shrink: 0"></span>
+<span aria-hidden="true" style="display: {{sx.coverDisp}}; width: 30px; height: 45px; flex-shrink: 0; border-radius: 4px; background: {{r.tint}}"></span>
+<span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.title}}</span><span style="display: {{sx.coverDisp}}; font-size: 12px; color: {{r.color}}">{{r.typeLabel}}</span></span>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: {{t.sub}}; white-space: nowrap">{{r.meta}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 28px; min-width: 0">
+<sc-for list="{{ov.right}}" as="sx" hint-placeholder-count="2">
+<section style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<div style="display: flex; align-items: center; height: 24px"><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.sub}}">{{sx.title}}</span><button onClick="{{sx.open}}" style="margin-left: auto; border: 0; background: transparent; padding: 0 2px; color: {{ink}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; cursor: pointer">{{sx.seeAll}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button></div>
+<div style="display: flex; flex-direction: column">
+<sc-for list="{{sx.rows}}" as="r" hint-placeholder-count="4">
+<button onClick="{{r.pick}}" aria-pressed="{{r.sel}}" style="display: flex; align-items: center; gap: 12px; min-height: {{sx.rowH}}; padding: 4px 8px; border: 0; border-bottom: 1px solid {{t.line}}; background: {{r.bg}}; color: {{t.text}}; text-align: left; cursor: pointer">
+<span aria-hidden="true" style="display: {{sx.dotDisp}}; width: 8px; height: 8px; border-radius: 3px; background: {{r.color}}; flex-shrink: 0"></span>
+<span aria-hidden="true" style="display: {{sx.coverDisp}}; width: 30px; height: 45px; flex-shrink: 0; border-radius: 4px; background: {{r.tint}}"></span>
+<span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.title}}</span><span style="display: {{sx.coverDisp}}; font-size: 12px; color: {{r.color}}">{{r.typeLabel}}</span></span>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: {{t.sub}}; white-space: nowrap">{{r.meta}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+</sc-for>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ov.isGrid}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; gap: 40px; align-items: flex-start; padding-top: 6px">
+<div style="flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 26px">
+<sc-for list="{{ov.shelves}}" as="sh" hint-placeholder-count="3">
+<section style="display: flex; flex-direction: column; gap: 10px; min-width: 0">
+<button onClick="{{sh.open}}" style="align-self: flex-start; height: 24px; border: 0; background: transparent; padding: 0; display: flex; align-items: center; gap: 8px; color: {{t.sub}}; cursor: pointer"><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase">{{sh.title}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px">{{sh.count}}</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
+<div style="display: flex; gap: 14px">
+<sc-for list="{{sh.items}}" as="c" hint-placeholder-count="5">
+<button onClick="{{c.pick}}" aria-pressed="{{c.sel}}" style="width: {{sh.w}}; flex-shrink: 0; border: 0; padding: 0; background: transparent; color: {{t.text}}; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 6px; opacity: {{c.dim}}; transition: opacity 160ms ease">
+<span style="height: {{sh.h}}; border-radius: 8px; background: {{c.tint}}; display: flex; align-items: flex-end; padding: 10px; box-sizing: border-box; font-family: 'Figtree', sans-serif; font-weight: 800; letter-spacing: -0.03em; font-size: {{sh.fs}}; line-height: 1.1; color: #FFFFFF">{{c.title}}</span>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: {{t.sub}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.meta}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+</sc-for>
+</div>
+<div style="flex: 1 1 380px; min-width: 340px; max-width: 560px; margin-left: auto; padding-top: 34px; display: flex; flex-direction: column; gap: 28px">
+<div style="border-radius: 12px; background: {{t.raised}}; padding: 14px 16px; display: flex; flex-direction: column; gap: 9px">
+<div style="display: flex; align-items: center; height: 18px"><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.sub}}">Active plan</span><a href="Plans.dc.html" style="margin-left: auto; color: {{ink}}; font-size: 13px; font-weight: 600; text-decoration: none; display: flex; align-items: center; gap: 4px">Open<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></a></div>
+<div style="display: flex; align-items: baseline; gap: 8px"><span style="font-family: 'Figtree', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.03em">{{ov.plan.name}}</span><span style="font-size: 14px; color: {{t.sub}}">{{ov.plan.year}}</span><span style="margin-left: auto; font-size: 13.5px; font-weight: 600; white-space: nowrap">{{ov.plan.done}}</span></div>
+<span style="height: 5px; border-radius: 3px; background: {{t.line}}; overflow: hidden; display: block"><span style="display: block; height: 5px; width: {{ov.plan.pct}}; background: {{accent}}; border-radius: 3px"></span></span>
+<span style="font-size: 12.5px; color: {{t.sub}}">{{ov.plan.next}}</span>
+</div>
+<sc-for list="{{ov.rail}}" as="sx" hint-placeholder-count="1">
+<section style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+<div style="display: flex; align-items: center; height: 24px"><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.sub}}">{{sx.title}}</span><button onClick="{{sx.open}}" style="margin-left: auto; border: 0; background: transparent; padding: 0 2px; color: {{ink}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; cursor: pointer">{{sx.seeAll}}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button></div>
+<div style="display: flex; flex-direction: column">
+<sc-for list="{{sx.rows}}" as="r" hint-placeholder-count="4">
+<button onClick="{{r.pick}}" aria-pressed="{{r.sel}}" style="display: flex; align-items: center; gap: 12px; min-height: {{sx.rowH}}; padding: 4px 8px; border: 0; border-bottom: 1px solid {{t.line}}; background: {{r.bg}}; color: {{t.text}}; text-align: left; cursor: pointer">
+<span aria-hidden="true" style="display: {{sx.dotDisp}}; width: 8px; height: 8px; border-radius: 3px; background: {{r.color}}; flex-shrink: 0"></span>
+<span aria-hidden="true" style="display: {{sx.coverDisp}}; width: 30px; height: 45px; flex-shrink: 0; border-radius: 4px; background: {{r.tint}}"></span>
+<span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.title}}</span><span style="display: {{sx.coverDisp}}; font-size: 12px; color: {{r.color}}">{{r.typeLabel}}</span></span>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: {{t.sub}}; white-space: nowrap">{{r.meta}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+</sc-for>
+</div>
+</div>
+</sc-if>
+</sc-if>
+<sc-if value="{{ov.off}}" hint-placeholder-val="{{false}}">
 <sc-if value="{{isGrid}}" hint-placeholder-val="{{true}}">
+<sc-for list="{{groups}}" as="gr" hint-placeholder-count="1">
+<div data-grpwrap="{{gr.name}}" style="display: flex; flex-direction: column">
+<sc-if value="{{gr.showHead}}" hint-placeholder-val="{{false}}"><div data-grp="{{gr.name}}" style="position: sticky; top: {{stickTop}}; z-index: 4; background: {{t.content}}; box-shadow: {{gr.shadow}}; margin: 0 -24px; padding: 14px 24px 10px; display: flex; align-items: center; gap: 8px"><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{gr.color}}">{{gr.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: {{t.sub}}">{{gr.count}}</span></div></sc-if>
 <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 22px 18px">
-<sc-for list="{{cards}}" as="c" hint-placeholder-count="10">
+<sc-for list="{{gr.cards}}" as="c" hint-placeholder-count="10">
 <button onClick="{{c.pick}}" aria-pressed="{{c.sel}}" style="border: 0; padding: 8px 8px 10px; margin: -8px -8px -10px; border-radius: 12px; background: {{c.cardBg}}; opacity: {{c.dim}}; transition: opacity 160ms ease; color: {{t.text}}; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 8px">
 <span style="aspect-ratio: 2 / 3; width: 100%; box-sizing: border-box; border-radius: 8px; background: {{c.tint}}; box-shadow: {{c.ring}}; position: relative; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; padding: 14px">
 <span style="position: absolute; top: 12px; left: 14px; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: {{c.textColor}}">{{c.typeLabel}}</span>
 <sc-if value="{{c.done}}" hint-placeholder-val="{{false}}"><span aria-label="Done" style="position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; border-radius: 12px; background: #2A2D31; color: #5EE08A; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span></sc-if>
+<sc-if value="{{c.dnf}}" hint-placeholder-val="{{false}}"><span aria-label="Did not finish" style="position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; border-radius: 12px; background: #2A2D31; color: #A3A8AE; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M6.5 17.5l11-11"></path></svg></span></sc-if>
 <sc-if value="{{c.prog}}" hint-placeholder-val="{{false}}"><span aria-label="In progress" style="position: absolute; top: 10px; right: 10px; width: 24px; height: 24px; border-radius: 12px; background: #2A2D31; display: flex; align-items: center; justify-content: center"><span style="width: 10px; height: 10px; border-radius: 6px; border: 2px solid #5EE08A; background: linear-gradient(90deg, #5EE08A 50%, transparent 50%)"></span></span></sc-if>
 <span style="font-family: 'Figtree', sans-serif; font-size: 19px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.08; color: {{c.textColor}}">{{c.title}}</span>
 <span style="font-size: 12px; color: rgba(255,255,255,0.78)">{{c.creator}}</span>
@@ -571,10 +679,15 @@ button{font:inherit}
 </button>
 </sc-for>
 </div>
+</div>
+</sc-for>
 </sc-if>
 <sc-if value="{{isList}}" hint-placeholder-val="{{false}}">
+<sc-for list="{{groups}}" as="gr" hint-placeholder-count="1">
+<div data-grpwrap="{{gr.name}}" style="display: flex; flex-direction: column">
+<sc-if value="{{gr.showHead}}" hint-placeholder-val="{{false}}"><div data-grp="{{gr.name}}" style="position: sticky; top: {{stickTop}}; z-index: 4; background: {{t.content}}; box-shadow: {{gr.shadow}}; margin: 0 -24px; padding: 14px 24px 10px; display: flex; align-items: center; gap: 8px"><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{gr.color}}">{{gr.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: {{t.sub}}">{{gr.count}}</span></div></sc-if>
 <div style="display: flex; flex-direction: column; gap: 2px">
-<sc-for list="{{cards}}" as="c" hint-placeholder-count="8">
+<sc-for list="{{gr.cards}}" as="c" hint-placeholder-count="8">
 <button onClick="{{c.pick}}" aria-pressed="{{c.sel}}" style="display: flex; align-items: center; gap: 16px; padding: 8px 12px; border: 0; border-radius: 10px; background: {{c.rowBg}}; color: {{t.text}}; text-align: left; cursor: pointer">
 <span style="width: 44px; height: 66px; flex-shrink: 0; border-radius: 6px; background: {{c.tint}}"></span>
 <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px"><span style="font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.title}}</span><span style="font-size: 13px; color: {{t.sub}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.creator}}</span></span>
@@ -585,13 +698,18 @@ button{font:inherit}
 </button>
 </sc-for>
 </div>
+</div>
+</sc-for>
 </sc-if>
 <sc-if value="{{isTable}}" hint-placeholder-val="{{false}}">
 <div role="table" style="display: flex; flex-direction: column">
-<div role="row" style="display: grid; grid-template-columns: 2.2fr 1.5fr 0.8fr 0.9fr 0.6fr 1.6fr; gap: 16px; padding: 0 12px; height: 34px; align-items: center; font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.sub}}; border-bottom: 1px solid {{t.line}}">
+<div role="row" style="position: sticky; top: -4px; z-index: 5; background: {{t.content}}; display: grid; grid-template-columns: 2.2fr 1.5fr 0.8fr 0.9fr 0.6fr 1.6fr; gap: 16px; padding: 0 12px; height: 34px; align-items: center; font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.sub}}; border-bottom: 1px solid {{t.line}}">
 <span role="columnheader">Title ↑</span><span role="columnheader">{{creatorLabel}}</span><span role="columnheader">Released</span><span role="columnheader">Status</span><span role="columnheader">Rating</span><span role="columnheader">Tags</span>
 </div>
-<sc-for list="{{cards}}" as="c" hint-placeholder-count="10">
+<sc-for list="{{groups}}" as="gr" hint-placeholder-count="1">
+<div data-grpwrap="{{gr.name}}" style="display: flex; flex-direction: column">
+<sc-if value="{{gr.showHead}}" hint-placeholder-val="{{false}}"><div data-grp="{{gr.name}}" style="position: sticky; top: {{stickTop}}; z-index: 4; background: {{t.content}}; box-shadow: {{gr.shadow}}; margin: 0 -24px; padding: 14px 24px 10px; display: flex; align-items: center; gap: 8px"><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{gr.color}}">{{gr.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: {{t.sub}}">{{gr.count}}</span></div></sc-if>
+<sc-for list="{{gr.cards}}" as="c" hint-placeholder-count="10">
 <button role="row" onClick="{{c.pick}}" style="display: grid; grid-template-columns: 2.2fr 1.5fr 0.8fr 0.9fr 0.6fr 1.6fr; gap: 16px; padding: 0 12px; height: 42px; align-items: center; border: 0; border-bottom: 1px solid {{t.divider}}; background: {{c.rowBg}}; color: {{t.text}}; text-align: left; cursor: pointer; font-size: 14px">
 <span role="cell" style="display: flex; align-items: center; gap: 10px; min-width: 0"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 3px; background: {{c.color}}; flex-shrink: 0"></span><span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.title}}</span></span>
 <span role="cell" style="color: {{t.sub}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.creator}}</span>
@@ -601,6 +719,16 @@ button{font:inherit}
 <span role="cell" style="color: {{t.sub}}; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.tagText}}</span>
 </button>
 </sc-for>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</sc-if>
+</div>
+<sc-if value="{{rail.on}}" hint-placeholder-val="{{false}}">
+<div aria-hidden="true" style="position: absolute; right: 8px; top: {{rail.top}}; bottom: 10px; width: 5px; display: flex; flex-direction: column; gap: 2px; z-index: 6">
+<sc-for list="{{rail.segs}}" as="sg" hint-placeholder-count="3"><span onClick="{{sg.jump}}" title="{{sg.title}}" style="flex: {{sg.flex}} 1 0; min-height: 6px; border-radius: 2px; background: {{sg.color}}; cursor: pointer"></span></sc-for>
+<span style="position: absolute; left: -3px; right: -3px; top: {{rail.thumbTop}}; height: {{rail.thumbH}}; box-sizing: border-box; border-radius: 5px; border: 1.5px solid {{rail.thumbColor}}; pointer-events: none"></span>
 </div>
 </sc-if>
 </div>
@@ -912,7 +1040,7 @@ button{font:inherit}
 
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;bg&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;graphite&quot;,&quot;charcoal&quot;,&quot;mocha&quot;,&quot;light&quot;],&quot;default&quot;:&quot;graphite&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#F8B289&quot;,&quot;#FF7AB6&quot;,&quot;#A78BFA&quot;,&quot;#5AA9FF&quot;],&quot;default&quot;:&quot;#F8B289&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;flat&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;section&quot;:&quot;Theme&quot;},&quot;tokenWarning&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;off&quot;,&quot;6 days&quot;,&quot;1 day&quot;,&quot;expired&quot;],&quot;default&quot;:&quot;off&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;sidebarTags&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;pinned&quot;,&quot;mostUsed&quot;],&quot;default&quot;:&quot;mostUsed&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;$preview&quot;:{&quot;width&quot;:1600,&quot;height&quot;:900}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;bg&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;graphite&quot;,&quot;charcoal&quot;,&quot;mocha&quot;,&quot;light&quot;],&quot;default&quot;:&quot;graphite&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#F8B289&quot;,&quot;#FF7AB6&quot;,&quot;#A78BFA&quot;,&quot;#5AA9FF&quot;],&quot;default&quot;:&quot;#F8B289&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;flat&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;section&quot;:&quot;Theme&quot;},&quot;typeBoxes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;section&quot;:&quot;Settings&quot;},&quot;tokenWarning&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;off&quot;,&quot;6 days&quot;,&quot;1 day&quot;,&quot;expired&quot;],&quot;default&quot;:&quot;off&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;sidebarTags&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;pinned&quot;,&quot;mostUsed&quot;],&quot;default&quot;:&quot;mostUsed&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;$preview&quot;:{&quot;width&quot;:1600,&quot;height&quot;:900}}">
 const THEMES = {
   graphite: { chrome: "#131416", content: "#1D1F22", raised: "#2A2D31", field: "#1D1F22", line: "#3A3E44", text: "#EEF0F2", sub: "#A3A8AE" },
   charcoal: { chrome: "#151515", content: "#1C1C1C", raised: "#272727", field: "#202020", line: "#2E2E2E", text: "#EDEDED", sub: "#A3A3A3" },
@@ -943,11 +1071,15 @@ const ENTRIES = [
   { id: "m10", type: "Movies", title: "Jurassic Park", creator: "Steven Spielberg", released: "1993", status: "done", rating: 9, tags: ["#adventure", "#favorite"], note: "", desc: "A theme park of cloned dinosaurs breaks down during its preview tour.", plans: [] },
   { id: "m11", type: "Movies", title: "Shutter Island", creator: "Martin Scorsese", released: "2010", status: "dnf", rating: null, tags: ["#thriller", "#leonardo-dicaprio"], note: "Stopped halfway, try again.", desc: "A U.S. Marshal investigates a disappearance at a hospital for the criminally insane.", plans: [] },
   { id: "m12", type: "Movies", title: "Home Alone", creator: "Chris Columbus", released: "1990", status: "done", rating: 7, tags: ["#christmas", "#cozy", "#lighthearted"], note: "", desc: "A boy accidentally left behind over Christmas defends the house from two burglars.", plans: ["Christmas 2026"], seasonal: true },
+  { id: "m13", type: "Movies", title: "Avengers: Doomsday", creator: "Russo brothers", released: "2026-12-18", status: "want", rating: null, tags: ["#action", "#sci-fi"], note: "", desc: "The Avengers face Doctor Doom.", plans: [] },
+  { id: "m14", type: "Movies", title: "Shrek 5", creator: "Walt Dohrn", released: "2027-06-30", status: "want", rating: null, tags: ["#lighthearted"], note: "", desc: "The fifth Shrek film.", plans: [] },
+  { id: "m15", type: "Movies", title: "The Batman Part II", creator: "Matt Reeves", released: "2027-10-01", status: "want", rating: null, tags: ["#thriller"], note: "", desc: "The sequel to The Batman.", plans: [] },
   { id: "s1", type: "Shows", title: "Carrie", creator: "Mike Flanagan", released: "2026-10-07", status: "prog", rating: null, tags: ["#horror", "#stephen-king", "#mike-flanagan"], note: "3 of 8 episodes.", desc: "Flanagan's eight-episode series based on Stephen King's first novel.", plans: ["Halloween 2026"] },
   { id: "s2", type: "Shows", title: "Shōgun", creator: "Rachel Kondo & Justin Marks", released: "2024", status: "done", rating: 9, tags: ["#historical"], note: "S2 has wrapped filming.", desc: "An English navigator shipwrecked in feudal Japan is drawn into a lord's fight for power.", plans: [] },
   { id: "s3", type: "Shows", title: "Pluribus", creator: "Vince Gilligan", released: "2025", status: "done", rating: 9, tags: ["#sci-fi"], note: "", desc: "One of the few people unaffected by a strange global change tries to save humanity from happiness.", plans: [] },
   { id: "s4", type: "Shows", title: "The Haunting of Hill House", creator: "Mike Flanagan", released: "2018", status: "done", rating: 10, tags: ["#horror", "#mike-flanagan", "#favorite", "#scary"], note: "", desc: "Siblings who grew up in a haunted house are pulled back together by tragedy.", plans: [] },
   { id: "s5", type: "Shows", title: "Midnight Mass", creator: "Mike Flanagan", released: "2021", status: "done", rating: 9, tags: ["#horror", "#mike-flanagan", "#scary", "#dark"], note: "", desc: "A charismatic priest's arrival on a dying island brings miracles, and something else.", plans: [] },
+  { id: "s6", type: "Shows", title: "Severance", creator: "Dan Erickson", released: "2022", status: "prog", rating: null, tags: ["#sci-fi", "#thriller"], note: "Season 2, episode 6.", desc: "Office workers whose work and home memories have been surgically split start to question their jobs.", plans: [] },
   { id: "b1", type: "Books", title: "Other Worlds Than These", creator: "Stephen King & Peter Straub", released: "2026-10-06", status: "want", rating: null, tags: ["#stephen-king", "#dark-tower"], note: "", desc: "The final Talisman book, tying into the Dark Tower.", plans: ["Halloween 2026"] },
   { id: "b2", type: "Books", title: "The Gunslinger", creator: "Stephen King", released: "1982", status: "done", rating: 8, tags: ["#stephen-king", "#dark-tower"], note: "", desc: "Roland, the last gunslinger, follows the man in black across a dying desert.", plans: [] },
   { id: "b3", type: "Books", title: "Pet Sematary", creator: "Stephen King", released: "1983", status: "prog", rating: null, tags: ["#horror", "#stephen-king", "#scary"], note: "", desc: "A family discovers the burial ground behind their new home brings things back.", plans: ["Halloween 2026"] },
@@ -958,6 +1090,7 @@ const ENTRIES = [
   { id: "g3", type: "Games", title: "Ori and the Will of the Wisps", creator: "Moon Studios", released: "2020", status: "done", rating: 10, tags: ["#metroidvania", "#favorite"], note: "", desc: "Ori searches for a lost friend in a decaying forest.", plans: [] },
   { id: "g4", type: "Games", title: "Control Resonant", creator: "Remedy", released: "2026-09-24", status: "want", rating: null, tags: ["#remedy"], note: "", desc: "Remedy's return to the Control universe, connected to Alan Wake.", plans: [] },
   { id: "g5", type: "Games", title: "Alan Wake 2", creator: "Remedy", released: "2023", status: "done", rating: 9, tags: ["#horror", "#remedy", "#dark"], note: "", desc: "An FBI agent and a trapped writer try to escape a story that is rewriting reality.", plans: ["Halloween 2026"] },
+  { id: "g6", type: "Games", title: "Grand Theft Auto VI", creator: "Rockstar Games", released: "2026-11-19", status: "want", rating: null, tags: ["#action"], note: "", desc: "A return to Vice City, following Lucia and Jason.", plans: [] },
   { id: "a1", type: "Anime", title: "One Punch Man", creator: "ONE", released: "2015", status: "prog", rating: null, tags: ["#action"], note: "S3 Part 2 arrives January 2027.", desc: "A hero who beats every enemy with a single punch is bored out of his mind.", plans: [] },
   { id: "a2", type: "Anime", title: "Frieren", creator: "Kanehito Yamada", released: "2023", status: "done", rating: 10, tags: ["#fantasy", "#favorite", "#cozy"], note: "", desc: "An elf mage revisits the journey she made with her party decades earlier.", plans: [] },
   { id: "a3", type: "Anime", title: "Berserk", creator: "Kentaro Miura", released: "1997", status: "done", rating: 9, tags: ["#dark-fantasy", "#dark"], note: "", desc: "A mercenary's bond with a charismatic commander ends in betrayal.", plans: [] },
@@ -1003,6 +1136,15 @@ function darkExtra(t) { return { pop: t.raised, popShadow: "0 12px 32px rgba(0,0
 
 const ADDED = {};
 ENTRIES.forEach((e, i) => { ADDED[e.id] = i; });
+// The most recently added entries, newest first (mock data, so Recently added shows a realistic mix).
+["s1", "b1", "g1", "m8", "a4", "g4", "b4", "m6", "s3", "m7", "a2", "u2"].forEach((id, i, arr) => { ADDED[id] = ENTRIES.length + arr.length - i; });
+// Mock "added" dates: the newest entry was added yesterday, the rest two days apart.
+const TODAY = "2026-10-19";
+const ADDED_AT = {};
+ENTRIES.slice().sort((x, y) => ADDED[y.id] - ADDED[x.id]).forEach((e, i) => { const d = new Date(Date.UTC(2026, 9, 18)); d.setUTCDate(d.getUTCDate() - i * 2); ADDED_AT[e.id] = d.toISOString().slice(0, 10); });
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function fmtDay(iso) { const m = MON[parseInt(iso.slice(5, 7), 10) - 1]; return iso.slice(0, 4) === TODAY.slice(0, 4) ? m + " " + parseInt(iso.slice(8, 10), 10) : m + " " + iso.slice(0, 4); }
+function monthAgo(iso) { const y = parseInt(iso.slice(0, 4), 10), m = parseInt(iso.slice(5, 7), 10) - 1, d = parseInt(iso.slice(8, 10), 10); const t = new Date(Date.UTC(m === 0 ? y - 1 : y, m === 0 ? 11 : m - 1, d)); return t.toISOString().slice(0, 10); }
 const yr = (e) => parseInt(String(e.released).slice(0, 4), 10) || 0;
 const SORTS = {
   "Newest added": (a, b) => ADDED[b.id] - ADDED[a.id],
@@ -1060,37 +1202,54 @@ class Component extends DCLogic {
     const appCovers = true;
     const coverFor = (e) => appCovers ? coverOf(e.id) : BRIGHT[e.type];
     const st = this.state || {};
-    const type = st.type ?? "Movies";
-    const view = st.view ?? "grid";
+    const types = st.types ?? [];
+    const type = types.length === 1 ? types[0] : "All";
+    const viewKey = types.length === 1 ? types[0] : (types.length ? "multi" : "All");
+    const views = st.views || {};
+    const view = views[viewKey] ?? "grid";
+    const setView = (v) => set({ views: Object.assign({}, views, { [viewKey]: v }) });
     const statusF = st.statusF ?? "all";
     const seasonal = !!st.seasonal;
     const over = st.over || {};
     const all = ENTRIES.map((e) => Object.assign({}, e, over[e.id] || {}));
-    const inType = all.filter((e) => type === "All" || e.type === type);
+    const inType = all.filter((e) => !types.length || types.indexOf(e.type) >= 0);
+    const upcoming = !!st.upcoming, recentF = !!st.recentF;
+    const sinceIso = monthAgo(TODAY);
     const tagSel = st.tagSel || [];
     const tagF = tagSel[0] || null;
     const rMin = st.rMin ?? null, rMax = st.rMax ?? null;
     const sortBy = st.sortBy ?? "Newest added";
     const decades = st.decades ?? [];
     const decOf = (e) => { const y = parseInt(String(e.released).slice(0, 4), 10); return y < 1960 ? "older" : String(Math.floor(y / 10) * 10); };
-    const visibleBase = inType.filter((e) => (seasonal || !e.seasonal) && (!tagSel.length || tagSel.every((g) => e.tags.indexOf(g) >= 0)) && (!decades.length || decades.indexOf(decOf(e)) >= 0) && (rMin === null || (e.rating && e.rating >= rMin && e.rating <= rMax)));
+    const visibleBase = inType.filter((e) => (seasonal || !e.seasonal) && (!tagSel.length || tagSel.every((g) => e.tags.indexOf(g) >= 0)) && (!decades.length || decades.indexOf(decOf(e)) >= 0) && (rMin === null || (e.rating && e.rating >= rMin && e.rating <= rMax)) && (!upcoming || (/^\d{4}-\d{2}-\d{2}$/.test(e.released) && e.released > TODAY && e.status === "want")) && (!recentF || ADDED_AT[e.id] >= sinceIso));
     const shown = visibleBase.filter((e) => statusF === "all" || e.status === statusF).sort(SORTS[sortBy] || SORTS["Newest added"]);
-    let selId = st.sel === undefined ? "m3" : st.sel;
-    if (selId && !shown.find((e) => e.id === selId)) selId = null;
+    const filterCount0 = (types.length >= 2 ? types.length : 0) + decades.length + tagSel.length + (seasonal ? 1 : 0) + (rMin !== null ? 1 : 0) + (upcoming ? 1 : 0) + (recentF ? 1 : 0);
+    const overview = !types.length && filterCount0 === 0 && statusF === "all";
+    let selId = st.sel === undefined ? null : st.sel;
+    if (selId && !(overview ? all : shown).find((e) => e.id === selId)) selId = null;
     const hasSel = !!selId;
     const sel = all.find((e) => e.id === selId) || shown[0] || all[0];
     const set = (patch) => this.setState(Object.assign({}, st, patch));
     const update = (id, patch) => { const o = Object.assign({}, over); o[id] = Object.assign({}, o[id] || {}, patch); set({ over: o }); };
 
-    const side = ["All"].concat(TYPES).map((k) => ({
-      label: k, on: k === type, count: String(all.filter((e) => (k === "All" || e.type === k) && !e.seasonal).length),
-      color: k === "All" ? t.sub : P[k], bg: k === type ? selBg : "transparent", fg: k === type ? t.text : t.sub, weight: k === type ? 600 : 500,
-      pick: () => set({ type: k, statusF: "all", sel: null, ratingOpen: false })
-    }));
+    const boxes = !!this.props.typeBoxes;
+    const toggleType = (k) => { const nt = types.indexOf(k) >= 0 ? types.filter((x) => x !== k) : TYPES.filter((x) => x === k || types.indexOf(x) >= 0); set({ types: nt, sel: null, ratingOpen: false }); };
+    const side = ["All"].concat(TYPES).map((k) => {
+      const on = k === "All" ? !types.length : types.indexOf(k) >= 0;
+      return {
+        label: k, on, count: String(all.filter((e) => (k === "All" || e.type === k) && !e.seasonal).length),
+        color: k === "All" ? t.sub : P[k], bg: on ? selBg : "transparent", fg: on ? t.text : t.sub, weight: on ? 600 : 500,
+        hasBox: boxes && k !== "All", hasDot: !(boxes && k !== "All"), boxBg: on ? P[k] : "transparent", checkDisp: on ? "block" : "none", boxAria: (on ? "Remove " : "Add ") + k,
+        boxToggle: (ev) => { if (ev && ev.stopPropagation) ev.stopPropagation(); toggleType(k); },
+        // Click shows only this type; Ctrl+click adds or removes it.
+        pick: (ev) => { if (k !== "All" && ev && (ev.ctrlKey || ev.metaKey)) { toggleType(k); return; } set({ types: k === "All" ? [] : [k], statusF: "all", sel: null, ratingOpen: false }); }
+      };
+    });
 
     const counts = { all: visibleBase.length };
     ["want", "prog", "done", "dnf"].forEach((s) => { counts[s] = visibleBase.filter((e) => e.status === s).length; });
-    const chipKeys = type === "Movies" || type === "Music" ? ["all", "want", "done", "dnf"] : ["all", "want", "prog", "done", "dnf"];
+    const anyProg = !types.length || types.some((k) => k !== "Movies" && k !== "Music");
+    const chipKeys = anyProg ? ["all", "want", "prog", "done", "dnf"] : ["all", "want", "done", "dnf"];
     const chipLabel = { all: "All", want: "Want", prog: type === "All" ? "In progress" : (PROG[type] || "In progress"), done: type === "Music" ? "Saved" : "Done", dnf: "DNF" };
     const statusChips = chipKeys.filter((k) => !(type === "Music" && k === "dnf")).map((k) => ({
       label: chipLabel[k], count: String(counts[k]), on: k === statusF,
@@ -1105,12 +1264,15 @@ class Component extends DCLogic {
         textColor: "#FFFFFF",
         title: e.title, creator: e.creator, year: e.released.slice(0, 4), released: e.released, color: c, typeLabel: SINGULAR[e.type],
         tint: coverFor(e), ring: "none", cardBg: false && isSel ? selBg : "transparent", dim: true && hasSel && !isSel ? 0.6 : 1,
-        done: e.status === "done", prog: e.status === "prog", sel: isSel,
+        done: e.status === "done", prog: e.status === "prog", dnf: e.status === "dnf", sel: isSel,
         rowBg: isSel ? selRow : "transparent",
         statusLabel: statusLabel(e.type, e.status), ratingText: e.rating ? e.rating + "/10" : "—", tagText: e.tags.join("  "),
-        pick: () => set({ sel: isSel ? null : e.id, ratingOpen: false })
+        pick: () => set({ sel: isSel ? null : e.id, ratingOpen: false }), type: e.type
       };
     });
+    const pinShadow = L.light ? "0 8px 10px -8px rgba(20,22,28,0.25)" : "0 8px 10px -8px rgba(0,0,0,0.8)";
+    const groups = types.length === 1 ? [{ showHead: false, name: "", color: t.sub, count: "", cards, shadow: "none" }] :
+      TYPES.map((k) => ({ showHead: true, name: k, color: P[k], cards: cards.filter((c) => c.type === k) })).filter((g) => g.cards.length).map((g) => Object.assign(g, { count: String(g.cards.length), shadow: st.curGrp === g.name && (st.sTop || 0) > 4 ? pinShadow : "none" }));
 
     const sc = P[sel.type];
     const d = {
@@ -1199,8 +1361,8 @@ class Component extends DCLogic {
       return Object.assign({ n: String(n), on, aria: "Rating " + n, pick: () => pickR(n) }, chipStyle(on));
     });
     const ratingChip = rMin === null ? "" : (rMin === rMax ? "Rated " + rMin : "Rated " + rMin + "–" + rMax);
-    const filterCount = decades.length + tagSel.length + (seasonal ? 1 : 0) + (rMin !== null ? 1 : 0);
-    const clearAllPatch = { decades: [], tagSel: [], seasonal: false, rMin: null, rMax: null, statusF: "all", sel: null };
+    const filterCount = filterCount0;
+    const clearAllPatch = { decades: [], tagSel: [], seasonal: false, rMin: null, rMax: null, statusF: "all", sel: null, upcoming: false, recentF: false, types: types.length >= 2 ? [] : types };
     const hidden = inType.filter((e) => e.seasonal && !seasonal).length;
     const noun = type === "All" ? "entries" : type.toLowerCase();
     const ae = (() => {
@@ -1252,7 +1414,67 @@ class Component extends DCLogic {
       later: () => set({ tokLater: true }),
       dot: tokMode === "expired" ? "#F38BA8" : "#A6E3A1", sync: tokMode === "expired" ? "Token expired" : "Synced 2 min ago", syncFg: tokMode === "expired" ? t.text : t.sub
     };
+    // ---- All: now and next (the overview shown on All with no filters)
+    const ovView = view === "table" ? "text" : view;
+    const mkRow = (e, meta) => { const isSel = selId === e.id; return { title: e.title, color: P[e.type], typeLabel: SINGULAR[e.type], tint: coverFor(e), meta, sel: isSel, bg: isSel ? selRow : "transparent", dim: selId && !isSel ? 0.6 : 1, pick: () => set({ sel: isSel ? null : e.id, ratingOpen: false }) }; };
+    const newest = (a, b) => ADDED[b.id] - ADDED[a.id];
+    const inProg = all.filter((e) => e.status === "prog" && !e.seasonal).sort(newest);
+    const soon = all.filter((e) => e.status === "want" && /^\d{4}-\d{2}-\d{2}$/.test(e.released) && e.released > TODAY).sort((a, b) => a.released.localeCompare(b.released));
+    const recentList = all.filter((e) => ADDED_AT[e.id] >= sinceIso && !e.seasonal).sort(newest);
+    const topList = all.filter((e) => (e.rating || 0) >= 9 && !e.seasonal).sort(newest);
+    const goProg = () => set({ types: [], statusF: "prog", sel: null });
+    const goSoon = () => set({ types: [], upcoming: true, sortBy: "Year, oldest first", sel: null });
+    const goRecent = () => set({ types: [], recentF: true, sortBy: "Newest added", sel: null });
+    const goTop = () => set({ types: [], rMin: 9, rMax: 10, sortBy: "Rating, highest first", sel: null });
+    const rowsCap = ovView === "text" ? 6 : 4;
+    const listSec = (title, list, cap, meta, open, count, styleView) => {
+      const v = styleView || ovView;
+      return { title, rows: list.slice(0, cap).map((e) => mkRow(e, meta(e))), seeAll: count === null ? "See all" : "See all " + count, open, n: list.length,
+        dotDisp: v === "text" ? "block" : "none", coverDisp: v === "text" ? "none" : "block", rowH: v === "text" ? "38px" : "56px" };
+    };
+    const yearMeta = (e) => String(e.released).slice(0, 4), soonMeta = (e) => fmtDay(e.released), addMeta = (e) => fmtDay(ADDED_AT[e.id]), rateMeta = (e) => e.rating + "/10";
+    const ov = {
+      on: overview, off: !overview, cols: overview && ovView !== "grid", isGrid: overview && ovView === "grid",
+      plan: { name: "Halloween", year: "2026", done: "4 of 9 done", pct: "44%", next: "Next up: It, Carrie · 12 days left" },
+      left: [listSec("In progress", inProg, rowsCap, yearMeta, goProg, inProg.length), listSec("Top rated", topList, ovView === "text" ? 6 : 3, rateMeta, goTop, topList.length)].filter((x) => x.n),
+      right: [listSec("Coming soon", soon, rowsCap, soonMeta, goSoon, soon.length), listSec("Recently added", recentList, rowsCap, addMeta, goRecent, recentList.length)].filter((x) => x.n),
+      rail: [listSec("Recently added", recentList, 12, addMeta, goRecent, recentList.length, "text")].filter((x) => x.n),
+      shelves: [
+        { title: "Coming soon", count: String(soon.length), open: goSoon, w: "100px", h: "150px", fs: "14px", items: soon.slice(0, 7).map((e) => mkRow(e, soonMeta(e))) },
+        { title: "Top rated", count: String(topList.length), open: goTop, w: "100px", h: "150px", fs: "14px", items: topList.slice(0, 7).map((e) => mkRow(e, rateMeta(e))) },
+        { title: "In progress", count: String(inProg.length), open: goProg, w: "100px", h: "150px", fs: "14px", items: inProg.slice(0, 7).map((e) => mkRow(e, yearMeta(e))) }
+      ].filter((x) => x.items.length)
+    };
+    const typeOpts = TYPES.map((k) => Object.assign({ label: k, color: P[k], on: types.indexOf(k) >= 0, pick: () => toggleType(k) }, chipStyle(types.indexOf(k) >= 0)));
+    const typeChips = types.length >= 2 ? types.map((k) => ({ label: k, color: P[k], aria: "Remove " + k, clear: () => toggleType(k) })) : [];
+    const specialChips = [];
+    if (upcoming) specialChips.push({ label: "Not released yet", aria: "Clear not released yet", clear: () => set({ upcoming: false }) });
+    if (recentF) specialChips.push({ label: "Added in the past month", aria: "Clear added in the past month", clear: () => set({ recentF: false }) });
+    const multiTitle = types.length >= 2 ? types.join(" + ") : (types.length === 1 ? type : "Library");
+    // Grouped results: thin type-colored scrollbar (overview + jump) and a pinned type header.
+    const railOn = !overview && groups.length > 1;
+    const onScroll = (ev) => {
+      const sc = ev && (ev.currentTarget || ev.target); if (!sc || !sc.querySelectorAll) return;
+      let cur = null; sc.querySelectorAll("[data-grpwrap]").forEach((w) => { if (w.offsetTop - 6 <= sc.scrollTop) cur = w.getAttribute("data-grpwrap"); });
+      const s0 = this.state || {};
+      if (s0.sTop === sc.scrollTop && s0.curGrp === cur && s0.sH === sc.scrollHeight) return;
+      this.setState(Object.assign({}, s0, { sTop: sc.scrollTop, sH: sc.scrollHeight, cH: sc.clientHeight, curGrp: cur }));
+    };
+    const jumpTo = (k) => (ev) => {
+      const wrap = ev && ev.currentTarget && ev.currentTarget.closest ? ev.currentTarget.closest("[data-scrollwrap]") : null;
+      const sc = wrap && wrap.querySelector(".scroll"); const w = sc && sc.querySelector('[data-grpwrap="' + k + '"]');
+      if (w) sc.scrollTo({ top: Math.max(0, w.offsetTop - 4), behavior: "smooth" });
+    };
+    const rail = {
+      on: railOn, top: view === "table" ? "78px" : "44px",
+      segs: groups.map((g) => ({ color: g.color, flex: String(g.cards.length), title: g.name + " · " + g.count, jump: jumpTo(g.name) })),
+      thumbTop: st.sH ? ((st.sTop || 0) / st.sH * 100).toFixed(2) + "%" : "0%",
+      thumbH: st.sH ? Math.min(100, (st.cH || 0) / st.sH * 100).toFixed(2) + "%" : "30%",
+      thumbColor: L.light ? "rgba(20,22,28,0.75)" : "rgba(255,255,255,0.9)"
+    };
     return {
+      rail, onScroll, scrollCls: railOn ? "typed" : "", stickTop: view === "table" ? "30px" : "-4px",
+      ov, groups, typeOpts, typeChips, specialChips, checkStroke: L.light ? "#FFFFFF" : "#131416",
       t, accent, onAccent, ink, ae, tok, openAdd: () => set({ aeOpen: true, sel: st.sel, filterOpen: false, sortOpen: false }), accentText, side, statusChips, cards, d, ratingOpts,
       sideTags, allTags, tagTotal: String(tagList.length), noTagMatch: allTags.length === 0,
       tagHeader: "Tags", tagHeaderNote: "", noPins: usingPins && pins.length === 0,
@@ -1277,20 +1499,20 @@ class Component extends DCLogic {
       sortOpts: Object.keys(SORTS).map((n) => ({ name: n, on: n === sortBy, bg: n === sortBy ? selRow : "transparent", ring: n === sortBy ? accent : t.sub, dot: n === sortBy ? accent : "transparent", pick: () => set({ sortBy: n, sortOpen: false }) })),
       accentSoft: selBg, accentBorder: selBorder,
       hrefPlans: "Plans.dc.html", hrefAdd: "AddEntry.dc.html",
-      windowTitle: type === "All" ? "Everything" : type,
-      typeColor: type === "All" ? t.text : P[type],
-      shownCount: String(shown.length),
-      searchHint: "Search " + (type === "All" ? "everything" : type.toLowerCase()),
+      windowTitle: multiTitle,
+      typeColor: types.length === 1 ? P[type] : t.text,
+      shownCount: String(overview ? all.filter((e) => !e.seasonal).length : shown.length),
+      searchHint: "Search " + (types.length === 1 ? type.toLowerCase() : "everything"),
       creatorLabel: CREATOR[type],
       isGrid: view === "grid", isTable: view === "table", isList: view === "list", hasSel, noSel: !hasSel,
-      listBg: view === "list" ? selBg : "transparent", listFg: view === "list" ? t.text : t.sub, setList: () => set({ view: "list" }),
+      listBg: view === "list" ? selBg : "transparent", listFg: view === "list" ? t.text : t.sub, setList: () => setView("list"),
       gridBg: view === "grid" ? selBg : "transparent", gridFg: view === "grid" ? t.text : t.sub,
       tableBg: view === "table" ? selBg : "transparent", tableFg: view === "table" ? t.text : t.sub,
-      setGrid: () => set({ view: "grid" }), setTable: () => set({ view: "table" }),
+      setGrid: () => setView("grid"), setTable: () => setView("table"),
       filterOpen: !!st.filterOpen, toggleFilter: () => set({ filterOpen: !st.filterOpen, ratingOpen: false, sortOpen: false }), filterBtnBg: st.filterOpen || filterCount ? selBg : "transparent",
       decadeOpts, tagOpts, hasFilters: filterCount > 0, filterCount: String(filterCount),
-      resetFilters: () => set({ decades: [], tagSel: [], seasonal: false, rMin: null, rMax: null, sel: null }),
-      filterResult: shown.length + " " + (type === "All" ? "entries" : type.toLowerCase()) + " shown",
+      resetFilters: () => set({ decades: [], tagSel: [], seasonal: false, rMin: null, rMax: null, sel: null, upcoming: false, recentF: false, types: types.length >= 2 ? [] : types }),
+      filterResult: shown.length + " " + (types.length === 1 ? type.toLowerCase() : "entries") + " shown",
       decChips: DEC.filter((x) => decades.indexOf(x[0]) >= 0).map((x) => ({ label: x[1], clear: () => toggleDec(x[0]), aria: "Clear " + x[1] + " filter" })),
       seasonalOn: seasonal, toggleSeasonal: () => set({ seasonal: !seasonal }),
       seasonalTrack: seasonal ? accent : t.line, seasonalKnob: seasonal ? "14px" : "2px", seasonalKnobColor: seasonal ? onAccent : t.sub,
@@ -2085,6 +2307,15 @@ button{font:inherit}
 </div>
 
 <div style="display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 28px; align-items: start">
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 14.5px; font-weight: 600">Type checkboxes</span><span style="font-size: 13px; line-height: 1.45; color: {{t.sub}}">{{boxHelp}}</span></div>
+<div role="group" aria-label="Type checkboxes" style="align-self: start; display: inline-flex; width: max-content; border: 1px solid {{t.line}}; border-radius: 9px; overflow: hidden">
+<sc-for list="{{boxModes}}" as="m" hint-placeholder-count="2">
+<button onClick="{{m.pick}}" aria-pressed="{{m.on}}" style="height: 36px; padding: 0 18px; border: 0; border-right: 1px solid {{t.line}}; background: {{m.bg}}; color: {{m.fg}}; font-size: 13.5px; font-weight: 600; cursor: pointer">{{m.label}}</button>
+</sc-for>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 28px; align-items: start">
 <div style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 14.5px; font-weight: 600">Accent color</span><span style="font-size: 13px; line-height: 1.45; color: {{t.sub}}">Buttons, progress, selection and the pinned-tag marks. Text and icons on the accent are always plain black.</span></div>
 <div style="display: flex; flex-direction: column; gap: 14px">
 <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: {{t.sub}}">Vivid</span>
@@ -2297,12 +2528,15 @@ class Component extends DCLogic {
     const seg = (list, cur, key) => list.map((m) => ({ label: m[1], on: m[0] === cur, bg: m[0] === cur ? t.sel : "transparent", fg: m[0] === cur ? t.text : t.sub, pick: () => set({ [key]: m[0] }) }));
     const styles = seg([[false, "Two-tone"], [true, "Flat"]], flatBg, "flatBg");
     const tagModes = seg([["pinned", "Pinned"], ["mostUsed", "Most used"]], tagMode, "tagMode");
+    const typeBoxes = !!st.typeBoxes;
+    const boxModes = seg([[false, "Off"], [true, "On"]], typeBoxes, "typeBoxes");
     const pinnedList = [{ label: "horror", count: "12" }, { label: "stephen-king", count: "8" }, { label: "mike-flanagan", count: "6" }];
     const usedList = [{ label: "horror", count: "12" }, { label: "stephen-king", count: "8" }, { label: "mike-flanagan", count: "6" }, { label: "sci-fi", count: "5" }, { label: "metroidvania", count: "4" }, { label: "favorite", count: "4" }];
     const counts = ["34", "11", "5", "5", "5", "4", "4"];
     const side = [{ label: "All", color: t.sub, count: counts[0] }].concat(TYPES.map((k, i) => ({ label: k, color: typeCols[i], count: counts[i + 1] })));
 
     return {
+      boxModes, boxHelp: typeBoxes ? "Each type in the sidebar gets a checkbox in its color: the box adds or removes the type, the name shows only that type. Ctrl+click works too." : "Click a type to show only it; Ctrl+click adds or removes more. Picked types also show as chips, and Filter has a Type section.",
       t, accent, ink, side, themes, palettes, switches, platforms, dark, styles, tagModes,
       styleHelp: flatBg ? "One shade for the whole window, like Dolphin." : (dark ? "Darker sidebar and title bar, lighter content area." : "Light gray sidebar and title bar, white content area."),
       tagHelp: tagMode === "pinned" ? "The sidebar shows the tags you pin, up to 8." : "The sidebar shows your 6 most-used tags and updates on its own.",
@@ -2322,7 +2556,7 @@ class Component extends DCLogic {
 <script src="https://cdn.jsdelivr.net/npm/preact@10.19.3/dist/preact.umd.js"></script>
 <script>
 (function () {
-  var META = {"sections": [{"name": "Start", "files": ["Splash.dc.html", "Setup.dc.html"]}, {"name": "Library", "files": ["Main.dc.html"]}, {"name": "Plans and settings", "files": ["Plans.dc.html", "Settings.dc.html"]}], "screens": {"Splash.dc.html": {"title": "D0 · Splash", "notes": ["Shown while Libri starts. Returning users see which repo, branch and file are loading; first run shows the version instead.", "Logo, wordmark and an indeterminate bar in the accent color. No buttons."]}, "Setup.dc.html": {"title": "D1 · First-time setup", "notes": ["First run only. The whole window is the setup: steps in the sidebar column, the form in the content pane, Back and the main action pinned at the bottom.", "Four steps: Connect GitHub (repo + fine-grained token, stored in KDE Wallet), branch, library file (create new or pick an existing Libri JSON), then create or pick.", "Files that aren't in Libri's format are listed but can't be picked. Creating never overwrites an existing file. Everything can be changed later in Settings → Library source.", "Use the startStep setting to jump to any step. Replace token (from the token warning) lands on the Connect GitHub step with the repo kept."]}, "Main.dc.html": {"title": "D2 · Library", "notes": ["Three panes: sidebar (Library types, Plans, Tags), content, and an inspector that only shows while an entry is selected.", "Toolbar: search, Filter popover (decade, tags, rating range, seasonal-only), Sort (same five options as the phone app), view mode (grid, list with covers, text) remembered per type, Add.", "Add opens the Add entry dialog over the library: online lookup on the left (TMDB, IGDB, Steam, Wikipedia) with several matches, every fetched field editable, the form scrolls between a fixed header and bottom bar.", "Tags (in Add entry and Filter) use the shared picker: search, folding categories, counts. A new tag is created only after confirming, and near-misses (scifi → #sci-fi, jorror → #horror) are suggested first.", "Active filters show as removable chips after the status chips, with Clear all right after the last chip.", "Tag categories match the phone app: Genres, Game genres, Music genres, Mood, Season, Authors, Directors, Actors, Studios, Other. Headers are small gray caps, tags are white.", "Token expiry: GitHub sends a GitHub-Authentication-Token-Expiration header on API responses made with a token that has an expiry date. Libri saves it from normal sync calls. From 7 days before, the warning shows once a day, the first time Libri opens that day. Later closes it until the next day; Replace token opens the Connect GitHub step of setup with the repo kept; Open GitHub opens the token settings page in the browser. A token without expiry never sends the header, so nothing shows. Once expired, GitHub answers 401 and the sidebar sync row says Token expired with Replace token. Use the tokenWarning setting to preview.", "Selection is a gray fill with no border; in the grid, unselected covers dim to 60%. Rating is always tap → picker, never a slider."]}, "Plans.dc.html": {"title": "D3 · Plans", "notes": ["All plans is the Plans home (Active, Upcoming, Finished, plus Seasonal collections). Plans have a name and an optional year; the year shows next to the name everywhere and switches from the title.", "Halloween and Christmas plans get an illustrated banner above the header (nothing overlaps it), a seasonal title icon, progress marker and accent. Seasonal touches can be turned off in Settings.", "New / Edit plan dialog: name, year, date range, linked hashtags (opens a full tag screen inside the dialog, Season open first), seasonal theme, start with empty or a copy, timeline. Delete uses neutral fill with red text.", "View popover per plan: checklist or timeline, plain or card sections, text or covers."]}, "Settings.dc.html": {"title": "D4 · Settings", "notes": ["Appearance: one Theme list: System (the default: Graphite when Plasma is dark, Light when it is light, switching live), Graphite, Charcoal, Catppuccin Mocha (brings Catppuccin type colors) and Light. Then background style (two-tone, the default, or flat), sidebar tags (pinned or most used), accent (vivid set incl. Peach, the default, and Catppuccin).", "Use the startTheme and plasma settings to preview each theme and what System does in a dark or light Plasma.", "Library source shows repo, branch and file. Plans: timeline by default, seasonal touches. Games: default platform."]}}};
+  var META = {"sections": [{"name": "Start", "files": ["Splash.dc.html", "Setup.dc.html"]}, {"name": "Library", "files": ["Main.dc.html"]}, {"name": "Plans and settings", "files": ["Plans.dc.html", "Settings.dc.html"]}], "screens": {"Splash.dc.html": {"title": "D0 · Splash", "notes": ["Shown while Libri starts. Returning users see which repo, branch and file are loading; first run shows the version instead.", "Logo, wordmark and an indeterminate bar in the accent color. No buttons."]}, "Setup.dc.html": {"title": "D1 · First-time setup", "notes": ["First run only. The whole window is the setup: steps in the sidebar column, the form in the content pane, Back and the main action pinned at the bottom.", "Four steps: Connect GitHub (repo + fine-grained token, stored in KDE Wallet), branch, library file (create new or pick an existing Libri JSON), then create or pick.", "Files that aren't in Libri's format are listed but can't be picked. Creating never overwrites an existing file. Everything can be changed later in Settings → Library source.", "Use the startStep setting to jump to any step. Replace token (from the token warning) lands on the Connect GitHub step with the repo kept."]}, "Main.dc.html": {"title": "D2 · Library", "notes": ["Libri opens on All, which is an overview (\"now and next\"), not a list of everything: In progress, the active plan, Coming soon, Recently added (the past month) and Top rated. Each list has See all N ›; in the grid view the cover shelves use their header as the link. Any filter, status or type turns All into the full grouped list.", "View (grid, list with covers, text) is remembered per type, and All has its own. In the text and list views the overview is two columns; in grid it is cover shelves plus a rail with the plan and Recently added. The active plan always uses the regular accent, never the seasonal look.", "Several types: Filter has a Type section; Ctrl+click in the sidebar adds or removes a type. Picked types show as removable chips, and results are grouped by type, each group in the current sort. The typeBoxes setting (Settings → Type checkboxes) adds a checkbox per type in the sidebar.", "Three panes: sidebar (Library types, Plans, Tags), content, and an inspector that only shows while an entry is selected.", "Toolbar: search, Filter popover (decade, tags, rating range, seasonal-only), Sort (same five options as the phone app), view mode (grid, list with covers, text) remembered per type, Add.", "Add opens the Add entry dialog over the library: online lookup on the left (TMDB, IGDB, Steam, Wikipedia) with several matches, every fetched field editable, the form scrolls between a fixed header and bottom bar.", "Tags (in Add entry and Filter) use the shared picker: search, folding categories, counts. A new tag is created only after confirming, and near-misses (scifi → #sci-fi, jorror → #horror) are suggested first.", "Active filters show as removable chips after the status chips, with Clear all right after the last chip.", "Tag categories match the phone app: Genres, Game genres, Music genres, Mood, Season, Authors, Directors, Actors, Studios, Other. Headers are small gray caps, tags are white.", "Token expiry: GitHub sends a GitHub-Authentication-Token-Expiration header on API responses made with a token that has an expiry date. Libri saves it from normal sync calls. From 7 days before, the warning shows once a day, the first time Libri opens that day. Later closes it until the next day; Replace token opens the Connect GitHub step of setup with the repo kept; Open GitHub opens the token settings page in the browser. A token without expiry never sends the header, so nothing shows. Once expired, GitHub answers 401 and the sidebar sync row says Token expired with Replace token. Use the tokenWarning setting to preview.", "Selection is a gray fill with no border; in the grid, unselected covers dim to 60%. Rating is always tap → picker, never a slider."]}, "Plans.dc.html": {"title": "D3 · Plans", "notes": ["All plans is the Plans home (Active, Upcoming, Finished, plus Seasonal collections). Plans have a name and an optional year; the year shows next to the name everywhere and switches from the title.", "Halloween and Christmas plans get an illustrated banner above the header (nothing overlaps it), a seasonal title icon, progress marker and accent. Seasonal touches can be turned off in Settings.", "New / Edit plan dialog: name, year, date range, linked hashtags (opens a full tag screen inside the dialog, Season open first), seasonal theme, start with empty or a copy, timeline. Delete uses neutral fill with red text.", "View popover per plan: checklist or timeline, plain or card sections, text or covers."]}, "Settings.dc.html": {"title": "D4 · Settings", "notes": ["Appearance: one Theme list: System (the default: Graphite when Plasma is dark, Light when it is light, switching live), Graphite, Charcoal, Catppuccin Mocha (brings Catppuccin type colors) and Light. Then background style (two-tone, the default, or flat), sidebar tags (pinned or most used), accent (vivid set incl. Peach, the default, and Catppuccin).", "Use the startTheme and plasma settings to preview each theme and what System does in a dark or light Plasma.", "Library source shows repo, branch and file. Plans: timeline by default, seasonal touches. Games: default platform."]}}};
   if (!window.preact) {
     document.getElementById('screen').innerHTML = '<p class="boot-error">The viewer library did not load. Check the connection and reload.</p>';
     return;
