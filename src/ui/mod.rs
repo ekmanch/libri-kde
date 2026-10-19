@@ -9,6 +9,7 @@ pub mod field;
 pub mod groups;
 pub mod icon;
 pub mod menu;
+pub mod music;
 pub mod popover;
 pub mod rating;
 pub mod search;
@@ -32,7 +33,7 @@ pub use groups::Groups;
 pub use icon::{Icon, icon};
 pub use menu::radio_menu;
 pub use popover::{Align, Placement, Popover};
-pub use rating::rating;
+pub use rating::{rating, track_rating};
 pub use search::search_field;
 pub use segmented::segmented;
 pub use switch::switch;
@@ -200,14 +201,17 @@ pub enum ButtonKind {
     /// Line border, no fill, red text: Delete, Disconnect. Never a red
     /// fill.
     Destructive,
+    /// Plain text, no fill or border: Cancel under a stack of choices.
+    Text,
 }
 
 impl ButtonKind {
-    pub const ALL: [ButtonKind; 4] = [
+    pub const ALL: [ButtonKind; 5] = [
         ButtonKind::Primary,
         ButtonKind::Outline,
         ButtonKind::Neutral,
         ButtonKind::Destructive,
+        ButtonKind::Text,
     ];
 }
 
@@ -262,6 +266,7 @@ fn button_style(kind: ButtonKind, tokens: &Tokens, status: button::Status) -> bu
         ButtonKind::Outline => (None, tokens.text, Some(tokens.line)),
         ButtonKind::Neutral => (Some(tokens.raised), tokens.text, None),
         ButtonKind::Destructive => (None, tokens.danger, Some(tokens.line)),
+        ButtonKind::Text => (None, tokens.text, None),
     };
     let fill = match status {
         button::Status::Hovered | button::Status::Pressed => {

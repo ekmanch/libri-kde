@@ -192,6 +192,7 @@ pub fn view(app: &App, tokens: Tokens) -> Element<'_, AppMessage> {
             ButtonKind::Outline => "Outline",
             ButtonKind::Neutral => "Neutral",
             ButtonKind::Destructive => "Delete",
+            ButtonKind::Text => "Text",
         };
         ui::labeled_button(label, kind, tokens, Some(AppMessage::SetAccent(app.accent))).into()
     }))

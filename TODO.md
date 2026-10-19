@@ -76,9 +76,10 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Delete confirmation ("plan only or everywhere" when the entry is in a plan; the plan-only choice comes with the plan screen in 1e)
 
 ### 1d. Music
-- [ ] Artists / Albums / Songs, "Various Artists" pinned last, a leading "The" ignored when sorting
-- [ ] One artist: Albums and Songs sections; album details with track ratings (static track lists)
-- [ ] Album / Song switch in the entry form, with the optional album field for songs
+- [x] Artists / Albums / Songs, "Various Artists" pinned last, a leading "The" ignored when sorting
+- [x] One artist: Albums and Songs sections; album details with track ratings (static track lists)
+- [x] Album / Song switch in the entry form, with the optional album field for songs (built with the form in 1c)
+- [x] Replace dialogs as on the phone: saving an album when songs from it are saved (D12: keep both, or replace the songs and move their ratings to the album's tracks), and saving a song when its album is saved (D13)
 
 ### 1e. Plans
 - [ ] Plans overview ("All plans")
@@ -99,6 +100,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 ### 1g. Phase 1 wrap-up
 - [ ] Walk through every mockup screen next to the app and list the differences; fix them or record the decision in DESIGN.md
 - [ ] Window sizes: the minimum size, 1366×768, 1920×1080, 2560×1440; KDE fractional scaling at 125 % and 150 %
+- [ ] Long lists as on the phone (L1 to L6): letter headers and an alphabet rail for artists and title order, decade headers for the year orders, once a list is three screens tall with two sections or more
 - [ ] Keyboard pass: Ctrl+N new entry (Ctrl+K and Ctrl+F already focus the search), arrow keys in lists, focus visible everywhere. iced 0.14 can focus only text fields, so buttons, chips and rows need a focusable wrapper widget with a visible focus ring
 - [ ] Contrast check of the inks and type colors in dark and light
 - [ ] Tests for filtering, sorting and the similar-tag check

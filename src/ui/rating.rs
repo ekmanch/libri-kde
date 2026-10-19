@@ -46,6 +46,43 @@ pub fn rating<'a, Message: Clone + 'a>(
         .into()
 }
 
+/// A compact rating for a list row, an album's track: "9" or a gray
+/// "Rate", opening the same picker.
+pub fn track_rating<'a, Message: Clone + 'a>(
+    value: Option<u8>,
+    open: bool,
+    on_toggle: Message,
+    on_pick: impl Fn(Option<u8>) -> Message + 'a,
+    tokens: &Tokens,
+) -> Element<'a, Message> {
+    let tokens_copy = *tokens;
+    let label = match value {
+        Some(n) => text(format!("{n}/10"))
+            .font(font::MONO_MEDIUM)
+            .size(13)
+            .color(tokens.text),
+        None => text("Rate").size(13).color(tokens.sub),
+    };
+    let anchor = button(container(label).center_y(Fill))
+        .height(28)
+        .padding([0, 10])
+        .on_press(on_toggle.clone())
+        .style(move |_, status| button::Style {
+            background: matches!(status, button::Status::Hovered)
+                .then_some(Background::Color(tokens_copy.hover)),
+            border: Border::default()
+                .rounded(7)
+                .width(1)
+                .color(tokens_copy.line),
+            ..button::Style::default()
+        });
+    let picker = open.then(|| picker(value, on_pick, tokens));
+    Popover::new(anchor, picker)
+        .align(Align::End)
+        .on_dismiss(on_toggle)
+        .into()
+}
+
 /// Five by two, the current rating in the accent, then "Clear rating".
 fn picker<'a, Message: Clone + 'a>(
     value: Option<u8>,

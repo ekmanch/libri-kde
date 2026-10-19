@@ -8,7 +8,9 @@ use iced::{Background, Border, Color, Element, Fill, Padding};
 use super::Message;
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
-use crate::model::{Entry, EntryStatus};
+use crate::lookup;
+use crate::model::{Entry, EntryStatus, MediaType};
+use crate::music;
 use crate::screens::Screen;
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, ButtonKind};
@@ -48,6 +50,9 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry) -> Element<'a, AppMessage> {
         .push(text(&entry.title).size(24).font(font::EXTRABOLD));
     if let Some(creator) = &entry.creator {
         facts = facts.push(text(creator).size(14).color(tokens.sub));
+    }
+    if let Some(album) = &entry.album {
+        facts = facts.push(text(album).size(14).font(font::ITALIC).color(tokens.sub));
     }
     if let Some(released) = entry.released {
         facts = facts.push(ui::mono(released.to_string(), 12.5, tokens.sub));
@@ -129,7 +134,11 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry) -> Element<'a, AppMessage> {
         .spacing(20)
         .push(header)
         .push(section("Status", status, &tokens))
-        .push(section("Rating", rating, &tokens))
+        .push(section("Rating", rating, &tokens));
+    if entry.media == MediaType::Music && !music::is_song(entry) {
+        sections = sections.push(tracks(app, entry, &tokens));
+    }
+    sections = sections
         .push(section("Tags", tags.into(), &tokens))
         .push(section("Note", note.into(), &tokens));
     if !entry.description.is_empty() {
@@ -169,6 +178,78 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry) -> Element<'a, AppMessage> {
     .height(Fill)
     .style(move |_| container::background(content_bg))
     .into()
+}
+
+/// An album's tracks: the track list with a rating per track, rated
+/// tracks the list lacks after it. Only rated tracks are stored.
+fn tracks<'a>(app: &'a App, album: &'a Entry, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let rated = album.tracks.as_deref().unwrap_or_default();
+    let rating_of = |title: &str| {
+        rated
+            .iter()
+            .find(|t| t.title.eq_ignore_ascii_case(title))
+            .map(|t| t.rating)
+    };
+    let listed = lookup::track_list(music::artist_of(album), &album.title).unwrap_or_default();
+    let extra = rated
+        .iter()
+        .filter(|t| !listed.iter().any(|l| l.eq_ignore_ascii_case(&t.title)))
+        .map(|t| t.title.as_str());
+    let open = app.library.track_rating_open.as_deref();
+
+    let mut rows = Column::new();
+    for (index, title) in listed.iter().copied().chain(extra).enumerate() {
+        let number = if index < listed.len() {
+            (index + 1).to_string()
+        } else {
+            String::new()
+        };
+        let picker = ui::track_rating(
+            rating_of(title),
+            open == Some(title),
+            msg(Message::ToggleTrackRating(title.to_owned())),
+            move |rating| {
+                msg(Message::RateTrack {
+                    album: album.id.clone(),
+                    title: title.to_owned(),
+                    rating,
+                })
+            },
+            tokens,
+        );
+        rows = rows.push(
+            row![
+                container(ui::mono(number, 12.0, tokens.sub)).width(22),
+                container(text(title).size(14).wrapping(text::Wrapping::None))
+                    .width(Fill)
+                    .clip(true),
+                picker,
+            ]
+            .spacing(8)
+            .align_y(iced::Center)
+            .height(36),
+        );
+    }
+    let note = if listed.is_empty() {
+        Some("No track list was found for this album.")
+    } else if rated.is_empty() {
+        Some("No tracks rated yet.")
+    } else {
+        None
+    };
+    let mut body = Column::new().spacing(6);
+    if let Some(note) = note {
+        body = body.push(text(note).size(13).color(tokens.sub));
+    }
+    body = body.push(rows);
+    let header = row![
+        ui::section_header("Tracks", tokens),
+        iced::widget::space::horizontal(),
+        text(format!("{} rated", rated.len()))
+            .size(12.5)
+            .color(tokens.sub),
+    ];
+    column![header, body].spacing(8).into()
 }
 
 fn section<'a>(

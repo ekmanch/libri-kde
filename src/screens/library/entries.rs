@@ -27,6 +27,9 @@ pub fn body<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> 
     }
     let state = &app.library;
     let view = state.view_mode();
+    if state.single() == Some(MediaType::Music) {
+        return super::music::body(app, listing, view, &tokens);
+    }
 
     // One type is one block; All or several types get one group per type,
     // in type order, each in the current sort.
@@ -210,7 +213,7 @@ fn rail<'a>(
         .into()
 }
 
-fn block<'a>(
+pub(super) fn block<'a>(
     app: &'a App,
     entries: &[&'a Entry],
     view: View,

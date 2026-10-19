@@ -2,6 +2,7 @@
 //! narrowed by search, status, the Filter popover and the tag pickers.
 
 mod entries;
+mod music;
 mod overview;
 mod tags;
 mod toolbar;
@@ -36,6 +37,15 @@ pub enum View {
     Grid,
     List,
     Text,
+}
+
+/// Music's three tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MusicTab {
+    #[default]
+    Artists,
+    Albums,
+    Songs,
 }
 
 /// What a view choice is remembered for.
@@ -99,6 +109,11 @@ pub struct State {
     pub type_boxes: bool,
     /// The details pane's rating picker.
     pub details_rating_open: bool,
+    /// The album track whose rating picker is open, by title.
+    pub track_rating_open: Option<String>,
+    pub music_tab: MusicTab,
+    /// The artist whose page is open, within Music.
+    pub artist: Option<String>,
     pub scroll: Scroll,
     /// Where each type group starts in the list, from its top.
     pub group_tops: Vec<f32>,
@@ -144,8 +159,11 @@ pub enum Message {
     PickFromAllTags(String),
     TogglePin(String),
     UnpinAll,
-    /// Opens the Add entry dialog, built in 1c.
+    /// Opens the Add entry dialog.
     Add,
+    MusicTab(MusicTab),
+    OpenArtist(String),
+    CloseArtist,
     Scrolled(Scroll),
     GroupsMeasured(Vec<f32>),
     /// A click on the type rail: the app scrolls the list there.
@@ -171,6 +189,7 @@ impl State {
         match message {
             Message::ShowType(media) => {
                 self.types = media.into_iter().collect();
+                self.artist = None;
                 self.status = None;
                 self.selected = None;
                 self.popup = None;
@@ -218,6 +237,7 @@ impl State {
             }
             Message::Select(id) => {
                 self.details_rating_open = false;
+                self.track_rating_open = None;
                 self.selected = if self.selected.as_deref() == Some(id.as_str()) {
                     None
                 } else {
@@ -253,7 +273,7 @@ impl State {
                 self.clear_several_types();
             }
             Message::OpenPicker => {
-                self.popup = None;
+                self.close_popovers();
                 self.picker = Some(TagPicker::default());
             }
             Message::ClosePicker => self.picker = None,
@@ -287,6 +307,15 @@ impl State {
             Message::UnpinAll => self.pins.clear(),
             Message::Add | Message::JumpToGroup(_) => {}
             Message::Scrolled(scroll) => self.scroll = scroll,
+            Message::MusicTab(tab) => {
+                self.music_tab = tab;
+                self.artist = None;
+            }
+            Message::OpenArtist(name) => {
+                self.artist = Some(name);
+                self.selected = None;
+            }
+            Message::CloseArtist => self.artist = None,
             Message::GroupsMeasured(tops) => self.group_tops = tops,
         }
     }
@@ -298,6 +327,14 @@ impl State {
             return true;
         }
         self.popup.take().is_some()
+    }
+
+    /// Closes every popover: the Filter, Sort and All tags popovers and
+    /// the details pane's rating pickers.
+    pub fn close_popovers(&mut self) {
+        self.popup = None;
+        self.details_rating_open = false;
+        self.track_rating_open = None;
     }
 
     /// Enter: the tag picker's Done.
@@ -331,6 +368,9 @@ impl State {
 
     /// "Library", "Movies" or "Movies + Shows".
     pub fn title(&self) -> String {
+        if let (Some(artist), Some(MediaType::Music)) = (&self.artist, self.single()) {
+            return artist.clone();
+        }
         if self.types.is_empty() {
             return "Library".into();
         }
@@ -624,5 +664,21 @@ mod tests {
         state.update(Message::ToggleType(MediaType::Movies));
         state.update(Message::ToggleType(MediaType::Shows));
         assert_eq!(state.view_mode(), View::List);
+    }
+
+    #[test]
+    fn an_artist_page_closes_with_another_type_or_tab() {
+        let mut state = State::default();
+        state.update(Message::ShowType(Some(MediaType::Music)));
+        state.update(Message::OpenArtist("Metallica".into()));
+        assert_eq!(state.title(), "Metallica");
+        state.update(Message::MusicTab(MusicTab::Songs));
+        assert_eq!(state.artist, None);
+        state.update(Message::OpenArtist("Metallica".into()));
+        state.update(Message::ShowType(Some(MediaType::Books)));
+        assert_eq!(
+            (state.artist.as_deref(), state.title().as_str()),
+            (None, "Books")
+        );
     }
 }

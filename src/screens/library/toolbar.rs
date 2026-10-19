@@ -4,10 +4,10 @@
 use iced::widget::{Column, Row, button, column, container, row, space, text};
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
-use super::{Listing, Message, Popup, SEARCH_ID, TOP_TAGS, View};
+use super::{Listing, Message, MusicTab, Popup, SEARCH_ID, TOP_TAGS, View};
 use crate::app::{App, Message as AppMessage};
 use crate::browse::{self, Decade, Sort};
-use crate::model::MediaType;
+use crate::model::{Entry, MediaType};
 use crate::theme::{Tokens, font};
 use crate::ui::{self, Align, ButtonKind, Icon, Popover};
 
@@ -67,9 +67,13 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         .align(Align::End)
         .on_dismiss(msg(Message::ClosePopup));
 
-    // The overview counts the whole library, a list what it shows.
+    // The overview counts the whole library, an artist's page the artist's
+    // entries, a list what it shows.
     let count = if state.is_overview() {
         app.repo.library().count(None)
+    } else if let Some(artist) = &state.artist {
+        let of_artist = |e: &&&Entry| crate::music::artist_of(e).eq_ignore_ascii_case(artist);
+        listing.shown.iter().filter(of_artist).count()
     } else {
         listing.shown.len()
     };
@@ -85,7 +89,13 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         &tokens,
     );
 
+    // On an artist's page, a back arrow to Music comes first.
+    let back = state
+        .artist
+        .is_some()
+        .then(|| ui::icon_button(Icon::ChevronLeft, 18.0, &tokens, msg(Message::CloseArtist)));
     let bar = row![
+        row(back),
         text(state.title())
             .size(26)
             .font(font::EXTRABOLD)
@@ -313,16 +323,43 @@ pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage>
     let filter = &state.filter;
     let mut chips = Row::new().spacing(6).align_y(Center);
 
+    // Music's tabs come first, outside an artist's page.
+    if state.single() == Some(MediaType::Music) && state.artist.is_none() {
+        let tabs = [
+            ("Artists", MusicTab::Artists),
+            ("Albums", MusicTab::Albums),
+            ("Songs", MusicTab::Songs),
+        ]
+        .map(|(label, tab)| (label, state.music_tab == tab, msg(Message::MusicTab(tab))));
+        chips = chips.push(
+            container(ui::segmented(tabs, 28.0, &tokens))
+                .width(270)
+                .padding(Padding::new(0.0).right(10)),
+        );
+    }
+
+    // On an artist's page the counts are the artist's.
+    let base: Vec<&Entry> = listing
+        .base
+        .iter()
+        .copied()
+        .filter(|e| {
+            state
+                .artist
+                .as_ref()
+                .is_none_or(|artist| crate::music::artist_of(e).eq_ignore_ascii_case(artist))
+        })
+        .collect();
     let all = ui::status_chip(
         "All",
-        listing.base.len(),
+        base.len(),
         state.status.is_none(),
         &tokens,
         msg(Message::Status(None)),
     );
     chips = chips.push(all);
     for status in browse::status_options(&state.types) {
-        let count = listing.base.iter().filter(|e| e.status == status).count();
+        let count = base.iter().filter(|e| e.status == status).count();
         let label = browse::status_label(state.single(), status);
         let on = state.status == Some(status);
         chips = chips.push(ui::status_chip(

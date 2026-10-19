@@ -10,7 +10,7 @@ use iced::widget::{
 };
 use iced::{Background, Border, Center, Color, Element, Fill, Length, Padding, Shadow, Vector};
 
-use super::{Form, Message, NewTag, TagPicker};
+use super::{Form, Message, NewTag, Replace, TagPicker};
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
 use crate::model::{BookFormat, EntryStatus, MediaType, MusicKind, TagCategory, text as rules};
@@ -71,7 +71,7 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
         ),
         None => panel,
     };
-    match &form.new_tag {
+    let with_new_tag = match &form.new_tag {
         Some(new_tag) => ui::modal(
             with_picker,
             Some(new_tag_dialog(new_tag, &tokens)),
@@ -79,7 +79,95 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
             &tokens,
         ),
         None => with_picker,
+    };
+    match &form.replace {
+        Some(replace) => ui::modal(
+            with_new_tag,
+            Some(replace_dialog(replace, &tokens)),
+            msg(Message::ReplaceCancel),
+            &tokens,
+        ),
+        None => with_new_tag,
     }
+}
+
+/// The phone's D12 and D13: keep both, replace, or go back to the form.
+fn replace_dialog<'a>(replace: &Replace, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let (title, body, note, replace_label) = match replace {
+        Replace::Songs { album, songs } => {
+            let n = songs.len();
+            let note = if n == 1 {
+                "The song entry is removed. Its rating moves to the album's track list.".to_owned()
+            } else {
+                format!(
+                    "The {} song entries are removed. Their ratings move to the album's track list.",
+                    count_word(n)
+                )
+            };
+            (
+                format!(
+                    "You have {n} {} from {album} saved",
+                    if n == 1 { "song" } else { "songs" }
+                ),
+                songs.join(" · "),
+                note,
+                "Replace songs with album",
+            )
+        }
+        Replace::Album {
+            album,
+            song,
+            adding,
+        } => (
+            format!("{album} is already in your library"),
+            format!(
+                "You are {} the song {song} from this album.",
+                if *adding { "adding" } else { "saving" }
+            ),
+            "Replacing deletes the album entry, with its rating and note.".to_owned(),
+            "Replace album with this song",
+        ),
+    };
+    let body = column![text(body).size(14), text(note).size(13).color(tokens.sub)].spacing(10);
+    let actions = column![
+        ui::wide_button(
+            "Keep both",
+            ButtonKind::Outline,
+            *tokens,
+            Some(msg(Message::ReplaceKeepBoth))
+        ),
+        ui::wide_button(
+            replace_label,
+            ButtonKind::Destructive,
+            *tokens,
+            Some(msg(Message::ReplaceConfirm))
+        ),
+        ui::wide_button(
+            "Cancel",
+            ButtonKind::Text,
+            *tokens,
+            Some(msg(Message::ReplaceCancel))
+        ),
+    ]
+    .spacing(8);
+    ui::dialog(
+        title,
+        body,
+        actions,
+        440,
+        tokens,
+        msg(Message::ReplaceCancel),
+    )
+}
+
+/// "two", "three": small counts in words, as the phone writes them.
+fn count_word(n: usize) -> String {
+    const WORDS: [&str; 10] = [
+        "", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    ];
+    WORDS
+        .get(n)
+        .map_or_else(|| n.to_string(), |w| (*w).to_owned())
 }
 
 /// "Add to library", the type, and Close.
@@ -229,7 +317,7 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
 
     let creator_label = browse::creator_label(Some(form.media));
     let mut released = column![ui::text_field(
-        "2026, 2026-12 or 2026-12-25",
+        "2026-12-25",
         &form.released,
         |r| msg(Message::Released(r)),
         font::MONO,

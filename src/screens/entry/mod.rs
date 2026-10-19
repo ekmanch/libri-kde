@@ -19,6 +19,7 @@ use crate::model::{
     BookFormat, Entry, EntryStatus, Library, MediaType, MusicKind, PlanItem, Released, TagCategory,
     text,
 };
+use crate::music;
 use crate::repo::Operation;
 use crate::ui;
 
@@ -66,6 +67,23 @@ pub struct Form {
     pub also_plan: Option<String>,
     pub picker: Option<TagPicker>,
     pub new_tag: Option<NewTag>,
+    /// The phone's replace question, asked on Save (D12, D13).
+    pub replace: Option<Replace>,
+    /// The answer, once given: replace (true) or keep both (false).
+    pub replace_answer: Option<bool>,
+}
+
+/// Saving music that overlaps what is saved.
+#[derive(Debug, Clone)]
+pub enum Replace {
+    /// D12: an album whose songs are saved as entries.
+    Songs { album: String, songs: Vec<String> },
+    /// D13: a song whose album is saved.
+    Album {
+        album: String,
+        song: String,
+        adding: bool,
+    },
 }
 
 /// The form's tag picker.
@@ -89,6 +107,13 @@ pub enum Message {
     SetStatus(String, EntryStatus),
     SetRating(String, Option<u8>),
     ToggleDetailsRating,
+    /// An album track's rating picker, by the track's title.
+    ToggleTrackRating(String),
+    RateTrack {
+        album: String,
+        title: String,
+        rating: Option<u8>,
+    },
     Add,
     Edit(String),
     /// Edit with the tag picker open: the details' "+ Tag".
@@ -133,6 +158,10 @@ pub enum Message {
     NewTagCategory(TagCategory),
     ConfirmNewTag,
     CancelNewTag,
+    /// The replace question's answers.
+    ReplaceKeepBoth,
+    ReplaceConfirm,
+    ReplaceCancel,
     // The other dialogs.
     ConfirmDelete,
     TogglePlan(String),
@@ -167,6 +196,8 @@ impl Form {
             also_plan: None,
             picker: None,
             new_tag: None,
+            replace: None,
+            replace_answer: None,
         }
     }
 
@@ -340,6 +371,26 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::ToggleDetailsRating => {
             app.library.details_rating_open = !app.library.details_rating_open
         }
+        Message::ToggleTrackRating(title) => {
+            let open = &mut app.library.track_rating_open;
+            *open = if open.as_deref() == Some(title.as_str()) {
+                None
+            } else {
+                Some(title)
+            };
+        }
+        Message::RateTrack {
+            album,
+            title,
+            rating,
+        } => {
+            app.apply(Operation::SetTrackRating {
+                album,
+                title,
+                rating,
+            });
+            app.library.track_rating_open = None;
+        }
         Message::Add => {
             let media = app.library.single().unwrap_or(MediaType::Movies);
             app.dialog = Some(Dialog::Form(Box::new(Form::add(media))));
@@ -407,6 +458,10 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                 app.library.selected = selected;
             }
         }
+    }
+    // Popovers draw above everything, so none stays open under a dialog.
+    if app.dialog.is_some() {
+        app.library.close_popovers();
     }
     Task::none()
 }
@@ -573,12 +628,60 @@ fn update_form(
             }
         }
         Message::CancelNewTag => form.new_tag = None,
+        Message::ReplaceKeepBoth | Message::ReplaceConfirm => {
+            form.replace = None;
+            form.replace_answer = Some(matches!(message, Message::ReplaceConfirm));
+            return update_form(form, Message::Save, library, today);
+        }
+        Message::ReplaceCancel => {
+            form.replace = None;
+            form.replace_answer = None;
+        }
         Message::Save => {
             if !form.can_save() {
                 return None;
             }
             let base = form.editing.as_deref().and_then(|id| library.entry(id));
-            let entry = form.entry(base, library, today);
+            let mut entry = form.entry(base, library, today);
+
+            // Music that overlaps what is saved asks first.
+            let songs = if music::is_song(&entry) {
+                Vec::new()
+            } else {
+                music::songs_from_album(&library.entries, &entry)
+            };
+            let album = if music::is_song(&entry) {
+                music::album_of_song(&library.entries, &entry)
+            } else {
+                None
+            };
+            let overlaps =
+                entry.media == MediaType::Music && (!songs.is_empty() || album.is_some());
+            if overlaps && form.replace_answer.is_none() {
+                form.replace = Some(match album {
+                    Some(album) => Replace::Album {
+                        album: album.title.clone(),
+                        song: entry.title.clone(),
+                        adding: base.is_none(),
+                    },
+                    None => Replace::Songs {
+                        album: entry.title.clone(),
+                        songs: songs.iter().map(|s| s.title.clone()).collect(),
+                    },
+                });
+                return None;
+            }
+            let mut removals = Vec::new();
+            if overlaps && form.replace_answer == Some(true) {
+                if entry.media == MediaType::Music && !music::is_song(&entry) {
+                    entry = music::absorb_songs(entry, &songs);
+                }
+                let gone = songs.iter().copied().chain(album);
+                removals = gone
+                    .map(|e| Operation::DeleteEntry { id: e.id.clone() })
+                    .collect();
+            }
+
             let mut operations: Vec<Operation> = form
                 .new_tags
                 .iter()
@@ -605,6 +708,7 @@ fn update_form(
                     item: new_item(id, done),
                 });
             }
+            operations.extend(removals);
             return Some(operations);
         }
         _ => {}
@@ -617,7 +721,8 @@ fn update_form(
 pub fn dismiss_top(app: &mut App) -> bool {
     match &mut app.dialog {
         Some(Dialog::Form(form)) => {
-            if form.new_tag.take().is_none()
+            if form.replace.take().is_none()
+                && form.new_tag.take().is_none()
                 && form.picker.take().is_none()
                 && !std::mem::take(&mut form.rating_open)
             {
@@ -846,5 +951,58 @@ mod tests {
         assert!(dismiss_top(&mut app));
         assert!(app.dialog.is_none());
         assert!(!dismiss_top(&mut app));
+    }
+
+    #[test]
+    fn saving_an_album_with_its_songs_saved_asks_and_can_absorb_them() {
+        let mut app = app();
+        send(&mut app, Message::Add);
+        send(&mut app, Message::Type(MediaType::Music));
+        send(&mut app, Message::Title("Bad Music for Bad People".into()));
+        send(&mut app, Message::Creator("The Cramps".into()));
+        send(&mut app, Message::Save);
+        assert!(
+            matches!(&form(&app).replace, Some(Replace::Songs { songs, .. }) if songs == &["Human Fly"])
+        );
+        send(&mut app, Message::ReplaceConfirm);
+        let library = app.repo.library();
+        assert!(
+            library.entry("music/human-fly-the-cramps").is_none(),
+            "the song goes"
+        );
+        let album = library
+            .entry("music/bad-music-for-bad-people-the-cramps")
+            .unwrap();
+        assert_eq!(album.tracks.as_ref().unwrap()[0].title, "Human Fly");
+    }
+
+    #[test]
+    fn saving_a_song_whose_album_is_saved_asks_and_can_keep_both() {
+        let mut app = app();
+        send(&mut app, Message::Add);
+        send(&mut app, Message::Type(MediaType::Music));
+        send(&mut app, Message::Kind(MusicKind::Song));
+        send(&mut app, Message::Title("Rooster".into()));
+        send(&mut app, Message::Creator("Alice in Chains".into()));
+        send(&mut app, Message::Album("Dirt".into()));
+        send(&mut app, Message::Save);
+        assert!(
+            matches!(&form(&app).replace, Some(Replace::Album { album, adding: true, .. }) if album == "Dirt")
+        );
+        send(&mut app, Message::ReplaceKeepBoth);
+        let library = app.repo.library();
+        assert!(library.entry("music/dirt-alice-in-chains").is_some());
+        assert!(library.entry("music/rooster-alice-in-chains").is_some());
+    }
+
+    #[test]
+    fn opening_a_dialog_closes_the_popovers_under_it() {
+        let mut app = app();
+        app.library.selected = Some("music/dirt-alice-in-chains".into());
+        send(&mut app, Message::ToggleTrackRating("Rooster".into()));
+        send(&mut app, Message::ToggleDetailsRating);
+        send(&mut app, Message::Add);
+        assert_eq!(app.library.track_rating_open, None);
+        assert!(!app.library.details_rating_open);
     }
 }
