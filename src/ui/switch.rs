@@ -1,7 +1,7 @@
-use iced::widget::{button, container, row, space, text};
+use iced::widget::{button, column, container, row, space, text};
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
-use crate::theme::Tokens;
+use crate::theme::{Tokens, font};
 
 /// A labeled on/off switch: the label on the left, a 30 × 18 track on the
 /// right, the accent when on.
@@ -11,7 +11,34 @@ pub fn switch<'a, Message: Clone + 'a>(
     tokens: &Tokens,
     on_toggle: Message,
 ) -> Element<'a, Message> {
-    let tokens = *tokens;
+    let label = text(label).size(13.5).width(Fill);
+    let content = row![label, track(on, tokens)]
+        .spacing(10)
+        .align_y(Center)
+        .height(Fill);
+    toggle(content, 30.0, tokens, on_toggle)
+}
+
+/// A setting with a name and help on the left and the switch at the top
+/// right; the whole row toggles it.
+pub fn setting_switch<'a, Message: Clone + 'a>(
+    name: &'a str,
+    help: &'a str,
+    on: bool,
+    tokens: &Tokens,
+    on_toggle: Message,
+) -> Element<'a, Message> {
+    let label = column![
+        text(name).size(13).font(font::SEMIBOLD),
+        text(help).size(12.5).color(tokens.sub),
+    ]
+    .spacing(3)
+    .width(Fill);
+    let content = row![label, track(on, tokens)].spacing(14);
+    toggle(content, iced::Shrink, tokens, on_toggle)
+}
+
+fn track<'a, Message: 'a>(on: bool, tokens: &Tokens) -> Element<'a, Message> {
     let (track, knob) = if on {
         (tokens.accent, tokens.on_accent)
     } else {
@@ -31,20 +58,25 @@ pub fn switch<'a, Message: Clone + 'a>(
             iced::alignment::Horizontal::Left
         })
         .style(move |_| container::background(track).border(Border::default().rounded(9)));
-    button(
-        row![text(label).size(13.5).width(Fill), track]
-            .spacing(10)
-            .align_y(Center)
-            .height(Fill),
-    )
-    .width(Fill)
-    .height(30)
-    .padding(0)
-    .on_press(on_toggle)
-    .style(move |_, _| button::Style {
-        background: None::<Background>,
-        text_color: tokens.text,
-        ..button::Style::default()
-    })
-    .into()
+    track.into()
+}
+
+fn toggle<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    height: impl Into<iced::Length>,
+    tokens: &Tokens,
+    on_toggle: Message,
+) -> Element<'a, Message> {
+    let tokens = *tokens;
+    button(content)
+        .width(Fill)
+        .height(height)
+        .padding(0)
+        .on_press(on_toggle)
+        .style(move |_, _| button::Style {
+            background: None::<Background>,
+            text_color: tokens.text,
+            ..button::Style::default()
+        })
+        .into()
 }

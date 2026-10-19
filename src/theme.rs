@@ -13,7 +13,7 @@ const fn hex(rgb: u32) -> Color {
 
 /// The four themes. Settings also offers System, which follows Plasma and
 /// resolves to Graphite or Light (docs/DESIGN.md 4.5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Theme {
     #[default]
     Graphite,
@@ -259,9 +259,19 @@ impl Tokens {
 
 /// Mixes `color` toward white by `amount` (0 to 1), as the mockup's
 /// `mixWhite` does.
-fn mix_white(color: Color, amount: f32) -> Color {
+pub fn mix_white(color: Color, amount: f32) -> Color {
     let mix = |c: f32| ((c * 255.0) + (255.0 - c * 255.0) * amount).round() / 255.0;
     Color::from_rgb(mix(color.r), mix(color.g), mix(color.b))
+}
+
+/// The surface of plan cards and card-style sections: white on Light, a
+/// touch lighter than the content otherwise.
+pub fn card_background(tokens: &Tokens) -> Color {
+    if tokens.light {
+        Color::WHITE
+    } else {
+        mix_white(tokens.content, 0.035)
+    }
 }
 
 /// Figtree only. Headings are ExtraBold, body Regular, labels and buttons

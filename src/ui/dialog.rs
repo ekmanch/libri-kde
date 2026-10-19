@@ -39,8 +39,20 @@ pub fn dialog<'a, Message: Clone + 'a>(
         icon_button(Icon::Close, 16.0, tokens, on_close),
     ]
     .align_y(Center);
+    panel(header, body, footer, width, tokens)
+}
+
+/// A dialog panel with a title row of its own: a drill-in view with a
+/// back arrow.
+pub fn panel<'a, Message: 'a>(
+    header: impl Into<Element<'a, Message>>,
+    body: impl Into<Element<'a, Message>>,
+    footer: impl Into<Element<'a, Message>>,
+    width: impl Into<Length>,
+    tokens: &Tokens,
+) -> Element<'a, Message> {
     let tokens = *tokens;
-    container(column![header, body.into(), footer.into()].spacing(14))
+    container(column![header.into(), body.into(), footer.into()].spacing(14))
         .width(width)
         .padding(iced::Padding::new(18.0).bottom(14))
         .style(move |_| panel_style(&tokens, 14.0))

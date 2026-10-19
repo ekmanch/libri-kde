@@ -1,6 +1,7 @@
 //! Widgets shared by every screen. Anything that repeats across screens
 //! (rows, chips, buttons, search field) lives here, never copied.
 
+pub mod calendar;
 pub mod chip;
 pub mod dialog;
 pub mod empty;
@@ -13,6 +14,7 @@ pub mod music;
 pub mod popover;
 pub mod rating;
 pub mod search;
+pub mod seasonal;
 pub mod segmented;
 pub mod switch;
 pub mod tag_group;
@@ -25,7 +27,7 @@ use iced::{Background, Border, Color, Element, Fill, Padding, Shadow, Vector};
 use crate::theme::{Tokens, font, size};
 
 pub use chip::{add_chip, filter_chip, removable_chip, status_chip, tag_chip};
-pub use dialog::{dialog, modal};
+pub use dialog::{dialog, modal, panel};
 pub use empty::empty_state;
 pub use entry::{EntryLook, entry_card, entry_list_row, entry_table_header, entry_table_row, rule};
 pub use field::{labeled, text_field};
@@ -36,7 +38,7 @@ pub use popover::{Align, Placement, Popover};
 pub use rating::{rating, track_rating};
 pub use search::search_field;
 pub use segmented::segmented;
-pub use switch::switch;
+pub use switch::{setting_switch, switch};
 pub use tag_group::tag_group;
 pub use toolbar::{add_button, icon_switch, menu_button};
 
