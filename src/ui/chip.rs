@@ -104,7 +104,7 @@ pub fn tag_chip<'a, Message: 'a>(label: String, tokens: &Tokens) -> Element<'a, 
 /// "+ Tag": an outlined chip in the secondary color. The mockup's border
 /// is dashed; iced 0.14 draws only solid borders.
 pub fn add_chip<'a, Message: Clone + 'a>(
-    label: &'a str,
+    label: impl text::IntoFragment<'a>,
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {

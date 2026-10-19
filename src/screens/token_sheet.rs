@@ -117,6 +117,7 @@ pub fn view(app: &App, tokens: Tokens) -> Element<'_, AppMessage> {
             tokens,
             Some(AppMessage::SetTheme(choice)),
         )
+        .into()
     }))
     .spacing(8);
 
@@ -192,7 +193,7 @@ pub fn view(app: &App, tokens: Tokens) -> Element<'_, AppMessage> {
             ButtonKind::Neutral => "Neutral",
             ButtonKind::Destructive => "Delete",
         };
-        ui::labeled_button(label, kind, tokens, Some(AppMessage::SetAccent(app.accent)))
+        ui::labeled_button(label, kind, tokens, Some(AppMessage::SetAccent(app.accent))).into()
     }))
     .push(ui::labeled_button(
         "Disabled",

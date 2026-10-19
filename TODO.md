@@ -69,11 +69,11 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Grouped results: a thin type-colored scrollbar (one segment per group, sized by its count; a click jumps to the group; the thumb is an outline) and pinned type headers. `ui::Groups` measures where each group starts; the text view's column header stays above the rows
 
 ### 1c. Entry details and editing
-- [ ] Entry details as in the mockup: cover spot, status, rating, note, about, tags, plans, Edit, Delete; the same details view is used from Plans
-- [ ] Add entry dialog: type, lookup matches (static fixture results), the form, tag picker with collapsible categories and search
-- [ ] Similar-tag warning and new-tag confirmation with a category pick
-- [ ] Add to plan
-- [ ] Delete confirmation ("plan only or everywhere" when the entry is in a plan)
+- [x] Entry details as in the mockup: cover spot, status, rating, note, about, tags, plans, Edit, Delete; the same details view is used from Plans (wired with the plan screen, 1e)
+- [x] Add entry dialog: type, lookup matches (static fixture results), the form, tag picker with collapsible categories and search
+- [x] Similar-tag warning and new-tag confirmation with a category pick
+- [x] Add to plan
+- [x] Delete confirmation ("plan only or everywhere" when the entry is in a plan; the plan-only choice comes with the plan screen in 1e)
 
 ### 1d. Music
 - [ ] Artists / Albums / Songs, "Various Artists" pinned last, a leading "The" ignored when sorting
@@ -118,6 +118,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 
 ## Phase 4: Lookups and images
 
+- [ ] "Look up again" in the Edit dialog (the lookup pane for an existing entry), as on the phone (A8)
 - [ ] The phone's lookup providers and keys handling (`secrets.json`, git-ignored); covers cached under `~/.cache/libri/`
 
 ## Phase 5: Packaging

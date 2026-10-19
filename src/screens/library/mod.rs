@@ -8,11 +8,12 @@ mod toolbar;
 
 use std::collections::{BTreeSet, HashMap};
 
-use iced::widget::{column, container};
+use iced::widget::{column, container, row};
 use iced::{Element, Fill};
 
 pub use tags::all_tags_popover;
 
+use super::entry;
 use super::shell::shell;
 use crate::app::{App, Message as AppMessage};
 use crate::browse::{self, Decade, Filter, Section, Sort};
@@ -96,6 +97,8 @@ pub struct State {
     pub sidebar_tags: SidebarTags,
     /// Checkboxes on the sidebar's types (a Settings choice in 1f).
     pub type_boxes: bool,
+    /// The details pane's rating picker.
+    pub details_rating_open: bool,
     pub scroll: Scroll,
     /// Where each type group starts in the list, from its top.
     pub group_tops: Vec<f32>,
@@ -214,6 +217,7 @@ impl State {
                 self.views.insert(self.view_key(), view);
             }
             Message::Select(id) => {
+                self.details_rating_open = false;
                 self.selected = if self.selected.as_deref() == Some(id.as_str()) {
                     None
                 } else {
@@ -443,7 +447,17 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
         .as_ref()
         .map(|picker| tags::picker(app, picker, &listing));
     let close = AppMessage::Library(Message::ClosePicker);
-    ui::modal(shell(app, content), picker, close, &tokens)
+    // The details pane shows beside the list while an entry is selected.
+    let selected = state.selected.as_deref().and_then(|id| library.entry(id));
+    let main: Element<'_, AppMessage> = match selected {
+        Some(entry) => row![
+            container(content).width(Fill),
+            entry::details::view(app, entry)
+        ]
+        .into(),
+        None => content.into(),
+    };
+    ui::modal(shell(app, main), picker, close, &tokens)
 }
 
 fn footer<'a>(tokens: &crate::theme::Tokens) -> Element<'a, AppMessage> {

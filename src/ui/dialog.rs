@@ -26,7 +26,7 @@ pub fn modal<'a, Message: Clone + 'a>(
 /// The dialog panel: a title with a close button, the body, and a footer
 /// of buttons. `width` is the panel's width in px.
 pub fn dialog<'a, Message: Clone + 'a>(
-    title: &'a str,
+    title: impl text::IntoFragment<'a>,
     body: impl Into<Element<'a, Message>>,
     footer: impl Into<Element<'a, Message>>,
     width: impl Into<Length>,

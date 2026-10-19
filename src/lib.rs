@@ -4,6 +4,7 @@
 pub mod app;
 pub mod browse;
 pub mod fixtures;
+pub mod lookup;
 pub mod model;
 pub mod repo;
 pub mod screens;

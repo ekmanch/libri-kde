@@ -6,8 +6,9 @@ use iced::window::{self, settings::PlatformSpecific};
 use iced::{Element, Size, Subscription, Task};
 
 use crate::model::Date;
+use crate::repo::Operation;
 use crate::repo::{FixtureLibraryRepository, LibraryRepository};
-use crate::screens::{self, Screen, library, token_sheet};
+use crate::screens::{self, Screen, entry, library, token_sheet};
 use crate::theme::{self, Accent, Theme, Tokens, font};
 
 /// The default window size, and for now the minimum (settled in 1g).
@@ -64,6 +65,9 @@ pub struct App {
     pub modifiers: keyboard::Modifiers,
     pub repo: Box<dyn LibraryRepository>,
     pub library: library::State,
+    /// The entry dialog open over the window: Add or Edit, Delete, Add to
+    /// plan.
+    pub dialog: Option<entry::Dialog>,
     pub token_sheet: token_sheet::State,
 }
 
@@ -75,6 +79,7 @@ pub enum Message {
     Key(KeyPress),
     Modifiers(keyboard::Modifiers),
     Library(library::Message),
+    Entry(entry::Message),
     TokenSheet(token_sheet::Message),
 }
 
@@ -86,9 +91,18 @@ pub enum KeyPress {
     /// Confirms the open dialog.
     Enter,
     /// Moves focus; `back` with Shift.
-    Tab { back: bool },
+    Tab {
+        back: bool,
+    },
     /// Ctrl+K or Ctrl+F: focuses the library's search.
     Search,
+    /// Ctrl+Enter: saves the entry form.
+    Save,
+    /// The arrow keys, in the entry form's lookup.
+    Up,
+    Down,
+    /// E: edits the selected entry.
+    Edit,
 }
 
 impl App {
@@ -117,7 +131,16 @@ impl App {
             modifiers: keyboard::Modifiers::default(),
             repo: Box::new(repo),
             library: library::State::default(),
+            dialog: None,
             token_sheet: token_sheet::State::default(),
+        }
+    }
+
+    /// Applies one change to the library. A change that cannot apply (an
+    /// entry gone meanwhile) leaves the library as it was.
+    pub fn apply(&mut self, operation: Operation) {
+        if let Err(error) = self.repo.apply(operation) {
+            eprintln!("libri: change not applied: {error}");
         }
     }
 
@@ -134,15 +157,43 @@ impl App {
             Message::Key(KeyPress::Tab { back: true }) => return operation::focus_previous(),
             Message::Key(KeyPress::Escape) => match self.screen {
                 Screen::TokenSheet => self.token_sheet.dismiss_top(),
-                // The sidebar's All tags popover also opens on Plans.
+                // A dialog first; the sidebar's All tags popover also opens
+                // on Plans.
                 _ => {
-                    self.library.dismiss_top();
+                    if !entry::dismiss_top(self) {
+                        self.library.dismiss_top();
+                    }
                 }
             },
             Message::Key(KeyPress::Enter) => match self.screen {
                 Screen::TokenSheet => self.token_sheet.confirm(),
+                _ if self.dialog.is_some() => return entry::confirm(self),
                 _ => self.library.confirm(),
             },
+            Message::Key(KeyPress::Save) => return entry::update(self, entry::Message::Save),
+            Message::Key(KeyPress::Up) => return entry::update(self, entry::Message::MovePick(-1)),
+            Message::Key(KeyPress::Down) => {
+                return entry::update(self, entry::Message::MovePick(1));
+            }
+            Message::Key(KeyPress::Edit) => {
+                if self.dialog.is_none()
+                    && let Some(id) = self.library.selected.clone()
+                {
+                    return entry::update(self, entry::Message::Edit(id));
+                }
+            }
+            Message::Entry(message) => {
+                let opens_form = matches!(message, entry::Message::Add);
+                let task = entry::update(self, message);
+                if opens_form {
+                    return operation::focus(entry::LOOKUP_ID);
+                }
+                return task;
+            }
+            Message::Library(library::Message::Add) => {
+                let _ = entry::update(self, entry::Message::Add);
+                return operation::focus(entry::LOOKUP_ID);
+            }
             Message::Key(KeyPress::Search) => {
                 if self.screen == Screen::Library {
                     return operation::focus(library::SEARCH_ID);
@@ -198,7 +249,11 @@ impl App {
             keyboard::Event::KeyPressed { key, modifiers, .. } => {
                 let press = match key {
                     Key::Named(Named::Escape) => KeyPress::Escape,
+                    Key::Named(Named::Enter) if modifiers.command() => KeyPress::Save,
                     Key::Named(Named::Enter) => KeyPress::Enter,
+                    Key::Named(Named::ArrowUp) => KeyPress::Up,
+                    Key::Named(Named::ArrowDown) => KeyPress::Down,
+                    Key::Character(c) if c == "e" && modifiers.is_empty() => KeyPress::Edit,
                     Key::Named(Named::Tab) => KeyPress::Tab {
                         back: modifiers.shift(),
                     },

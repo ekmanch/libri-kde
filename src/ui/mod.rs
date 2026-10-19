@@ -5,12 +5,14 @@ pub mod chip;
 pub mod dialog;
 pub mod empty;
 pub mod entry;
+pub mod field;
 pub mod groups;
 pub mod icon;
 pub mod menu;
 pub mod popover;
 pub mod rating;
 pub mod search;
+pub mod segmented;
 pub mod switch;
 pub mod tag_group;
 pub mod toolbar;
@@ -25,12 +27,14 @@ pub use chip::{add_chip, filter_chip, removable_chip, status_chip, tag_chip};
 pub use dialog::{dialog, modal};
 pub use empty::empty_state;
 pub use entry::{EntryLook, entry_card, entry_list_row, entry_table_header, entry_table_row, rule};
+pub use field::{labeled, text_field};
 pub use groups::Groups;
 pub use icon::{Icon, icon};
 pub use menu::radio_menu;
 pub use popover::{Align, Placement, Popover};
 pub use rating::rating;
 pub use search::search_field;
+pub use segmented::segmented;
 pub use switch::switch;
 pub use tag_group::tag_group;
 pub use toolbar::{add_button, icon_switch, menu_button};
@@ -207,13 +211,14 @@ impl ButtonKind {
     ];
 }
 
-/// A 36 px button with a SemiBold label.
+/// A 36 px button with a SemiBold label. Returned as a button, so a
+/// caller can widen it.
 pub fn labeled_button<'a, Message: Clone + 'a>(
-    label: &'a str,
+    label: impl text::IntoFragment<'a>,
     kind: ButtonKind,
     tokens: Tokens,
     on_press: Option<Message>,
-) -> Element<'a, Message> {
+) -> button::Button<'a, Message> {
     button(
         text(label)
             .size(size::BODY)
@@ -225,7 +230,30 @@ pub fn labeled_button<'a, Message: Clone + 'a>(
     .padding(Padding::from([0, 16]))
     .on_press_maybe(on_press)
     .style(move |_, status| button_style(kind, &tokens, status))
-    .into()
+}
+
+/// A labeled button that fills the width, its label centered: Edit in
+/// the details pane.
+pub fn wide_button<'a, Message: Clone + 'a>(
+    label: impl text::IntoFragment<'a>,
+    kind: ButtonKind,
+    tokens: Tokens,
+    on_press: Option<Message>,
+) -> button::Button<'a, Message> {
+    button(
+        text(label)
+            .size(size::BODY)
+            .font(font::SEMIBOLD)
+            .width(Fill)
+            .height(Fill)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(Vertical::Center),
+    )
+    .width(Fill)
+    .height(36)
+    .padding(Padding::from([0, 16]))
+    .on_press_maybe(on_press)
+    .style(move |_, status| button_style(kind, &tokens, status))
 }
 
 fn button_style(kind: ButtonKind, tokens: &Tokens, status: button::Status) -> button::Style {

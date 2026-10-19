@@ -1,6 +1,7 @@
 //! One module per screen of the mockup. Each draws from the app state and
 //! the theme tokens; shared pieces come from `ui`.
 
+pub mod entry;
 pub mod library;
 mod plans;
 mod settings;
@@ -58,14 +59,15 @@ impl Screen {
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let tokens = app.tokens();
-    match app.screen {
+    let screen = match app.screen {
         Screen::Splash => splash::view(&tokens),
         Screen::Setup => setup::view(&tokens),
         Screen::Library => library::view(app),
         Screen::Plans => plans::view(app),
         Screen::Settings => settings::view(&tokens),
         Screen::TokenSheet => token_sheet::view(app, tokens),
-    }
+    };
+    entry::overlay(app, screen)
 }
 
 /// The screen's part of the window title, or `None` for plain "Libri".
