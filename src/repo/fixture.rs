@@ -195,4 +195,27 @@ mod tests {
             Err(RepoError::DuplicateTag("horror".into()))
         );
     }
+
+    #[test]
+    fn track_ratings_are_added_changed_and_cleared() {
+        let mut repo = repo();
+        let dirt = "music/dirt-alice-in-chains";
+        let rate = |title: &str, rating| Operation::SetTrackRating {
+            album: dirt.into(),
+            title: title.into(),
+            rating,
+        };
+        repo.apply(rate("Would?", Some(10))).unwrap();
+        repo.apply(rate("rooster", Some(8))).unwrap();
+        let library = repo.apply(rate("Them Bones", None)).unwrap();
+        let tracks = library.entry(dirt).unwrap().tracks.clone().unwrap();
+        let titles: Vec<_> = tracks
+            .iter()
+            .map(|t| (t.title.as_str(), t.rating))
+            .collect();
+        assert_eq!(
+            titles,
+            [("Rooster", 8), ("Down in a Hole", 9), ("Would?", 10)]
+        );
+    }
 }

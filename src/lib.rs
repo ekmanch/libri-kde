@@ -6,6 +6,7 @@ pub mod browse;
 pub mod fixtures;
 pub mod lookup;
 pub mod model;
+pub mod music;
 pub mod repo;
 pub mod screens;
 pub mod theme;

@@ -8,7 +8,7 @@ use std::fmt;
 
 pub use fixture::FixtureLibraryRepository;
 
-use crate::model::{Entry, EntryStatus, Library, Plan, PlanItem, TagCategory};
+use crate::model::{Entry, EntryStatus, Library, Plan, PlanItem, TagCategory, Track};
 
 pub trait LibraryRepository {
     /// The current library.
@@ -59,6 +59,13 @@ pub enum Operation {
         plan: String,
         entry: String,
     },
+    /// Rates a track on an album, or clears it: only rated tracks are
+    /// stored. A track is matched by title, case ignored.
+    SetTrackRating {
+        album: String,
+        title: String,
+        rating: Option<u8>,
+    },
 }
 
 impl Operation {
@@ -107,6 +114,32 @@ impl Operation {
                 match plan.items.iter_mut().find(|i| i.entry == item.entry) {
                     Some(existing) => *existing = item,
                     None => plan.items.push(item),
+                }
+            }
+            Operation::SetTrackRating {
+                album,
+                title,
+                rating,
+            } => {
+                if rating.is_some_and(|r| !(1..=10).contains(&r)) {
+                    return Err(RepoError::InvalidRating(rating.unwrap_or_default()));
+                }
+                let album = entry_mut(library, &album)?;
+                let tracks = album.tracks.get_or_insert_with(Vec::new);
+                let found = tracks
+                    .iter()
+                    .position(|t| t.title.eq_ignore_ascii_case(&title));
+                match (found, rating) {
+                    (Some(index), Some(rating)) => tracks[index].rating = rating,
+                    (Some(index), None) => {
+                        tracks.remove(index);
+                    }
+                    (None, Some(rating)) => tracks.push(Track {
+                        title,
+                        id: None,
+                        rating,
+                    }),
+                    (None, None) => {}
                 }
             }
             Operation::RemovePlanItem { plan, entry } => {

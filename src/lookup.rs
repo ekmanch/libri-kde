@@ -187,6 +187,107 @@ pub const CATALOG: &[Match] = &[
     ),
 ];
 
+/// Track lists for albums the fixture has, by artist and album title.
+/// Phase 4 fetches them from the album's lookup instead.
+const TRACK_LISTS: &[(&str, &str, &[&str])] = &[
+    (
+        "Alice in Chains",
+        "Dirt",
+        &[
+            "Them Bones",
+            "Dam That River",
+            "Rain When I Die",
+            "Down in a Hole",
+            "Sickman",
+            "Rooster",
+            "Junkhead",
+            "Dirt",
+            "God Smack",
+            "Iron Gland",
+            "Hate to Feel",
+            "Angry Chair",
+            "Would?",
+        ],
+    ),
+    (
+        "Metallica",
+        "Master of Puppets",
+        &[
+            "Battery",
+            "Master of Puppets",
+            "The Thing That Should Not Be",
+            "Welcome Home (Sanitarium)",
+            "Disposable Heroes",
+            "Leper Messiah",
+            "Orion",
+            "Damage, Inc.",
+        ],
+    ),
+    (
+        "Pink Floyd",
+        "The Dark Side of the Moon",
+        &[
+            "Speak to Me",
+            "Breathe",
+            "On the Run",
+            "Time",
+            "The Great Gig in the Sky",
+            "Money",
+            "Us and Them",
+            "Any Colour You Like",
+            "Brain Damage",
+            "Eclipse",
+        ],
+    ),
+    (
+        "Radiohead",
+        "In Rainbows",
+        &[
+            "15 Step",
+            "Bodysnatchers",
+            "Nude",
+            "Weird Fishes/Arpeggi",
+            "All I Need",
+            "Faust Arp",
+            "Reckoner",
+            "House of Cards",
+            "Jigsaw Falling into Place",
+            "Videotape",
+        ],
+    ),
+    (
+        "The Beatles",
+        "Abbey Road",
+        &[
+            "Come Together",
+            "Something",
+            "Maxwell's Silver Hammer",
+            "Oh! Darling",
+            "Octopus's Garden",
+            "I Want You (She's So Heavy)",
+            "Here Comes the Sun",
+            "Because",
+            "You Never Give Me Your Money",
+            "Sun King",
+            "Mean Mr. Mustard",
+            "Polythene Pam",
+            "She Came In Through the Bathroom Window",
+            "Golden Slumbers",
+            "Carry That Weight",
+            "The End",
+            "Her Majesty",
+        ],
+    ),
+];
+
+/// The album's track list, when the lookup has one.
+pub fn track_list(artist: &str, album: &str) -> Option<&'static [&'static str]> {
+    TRACK_LISTS
+        .iter()
+        .find(|(a, t, _)| a.eq_ignore_ascii_case(artist) && t.eq_ignore_ascii_case(album))
+        .map(|(_, _, tracks)| *tracks)
+}
+
 /// The matches for `query` among `media`: titles that contain it, case
 /// ignored. Nothing for an empty query.
 pub fn search(media: MediaType, query: &str) -> Vec<&'static Match> {
