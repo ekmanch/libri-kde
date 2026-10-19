@@ -19,9 +19,9 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
     let tokens = app.tokens();
     let state = &app.library;
     let title_color = state
-        .media
+        .single()
         .map_or(tokens.text, |media| tokens.type_color(media));
-    let placeholder = match state.media {
+    let placeholder = match state.single() {
         Some(media) => search_hint(media),
         None => "Search everything",
     };
@@ -35,7 +35,7 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
     ))
     .width(280);
 
-    let filter_count = state.filter.count();
+    let filter_count = state.filter_count();
     let filter_button = ui::menu_button(
         Some(Icon::Filter),
         text("Filter"),
@@ -67,6 +67,13 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         .align(Align::End)
         .on_dismiss(msg(Message::ClosePopup));
 
+    // The overview counts the whole library, a list what it shows.
+    let count = if state.is_overview() {
+        app.repo.library().count(None)
+    } else {
+        listing.shown.len()
+    };
+
     let current = state.view_mode();
     let views = ui::icon_switch(
         [
@@ -83,7 +90,7 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
             .size(26)
             .font(font::EXTRABOLD)
             .color(title_color),
-        ui::mono(listing.shown.len().to_string(), 13.0, tokens.sub),
+        ui::mono(count.to_string(), 13.0, tokens.sub),
         space::horizontal(),
         search,
         filter,
@@ -111,18 +118,32 @@ fn search_hint(media: MediaType) -> &'static str {
     }
 }
 
-/// The Filter popover: decades, tags, a rating range, the seasonal-only
-/// switch, then Reset and the live count.
+/// The Filter popover: types, decades, tags, a rating range, the
+/// seasonal-only switch, then Reset and the live count.
 fn filter_panel<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
     let state = &app.library;
     let library = app.repo.library();
     let filter = &state.filter;
 
+    let types = Row::with_children(MediaType::ALL.map(|media| {
+        ui::filter_chip(
+            media.label().to_owned(),
+            Some(tokens.type_color(media)),
+            None,
+            state.types.contains(&media),
+            &tokens,
+            msg(Message::ToggleType(media)),
+        )
+    }))
+    .spacing(6)
+    .wrap()
+    .vertical_spacing(6);
+
     let in_type = library
         .entries
         .iter()
-        .filter(|e| state.media.is_none_or(|m| e.media == m));
+        .filter(|e| state.types.is_empty() || state.types.contains(&e.media));
     let decades = Row::with_children(
         Decade::options_for(in_type.map(|e| e.year()))
             .into_iter()
@@ -130,6 +151,7 @@ fn filter_panel<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessa
                 let on = filter.decades.contains(&decade);
                 ui::filter_chip(
                     decade.label(),
+                    None,
                     None,
                     on,
                     &tokens,
@@ -157,6 +179,7 @@ fn filter_panel<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessa
         ui::filter_chip(
             format!("#{tag}"),
             None,
+            None,
             on,
             &tokens,
             msg(Message::ToggleTag(tag.to_owned())),
@@ -180,7 +203,7 @@ fn filter_panel<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessa
 
     let result = text(format!(
         "{} shown",
-        count_noun(state.media, listing.shown.len())
+        count_noun(state.single(), listing.shown.len())
     ))
     .size(13)
     .color(tokens.sub)
@@ -198,6 +221,7 @@ fn filter_panel<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessa
     .align_y(Center);
 
     let panel = Column::new()
+        .push(group("Type", types.into(), &tokens))
         .push(group("Decade", decades.into(), &tokens))
         .push(group("Tags", tags.into(), &tokens))
         .push(
@@ -281,7 +305,8 @@ fn rating_cell<'a>(n: u8, on: bool, tokens: &Tokens) -> Element<'a, AppMessage> 
 }
 
 /// The status chips with counts, then the active filters as removable
-/// chips, then "Clear all".
+/// chips (several types, the overview's two, tags, decades, seasonal,
+/// rating), then "Clear all".
 pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
     let state = &app.library;
@@ -296,9 +321,9 @@ pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage>
         msg(Message::Status(None)),
     );
     chips = chips.push(all);
-    for &status in browse::status_options(state.media) {
+    for status in browse::status_options(&state.types) {
         let count = listing.base.iter().filter(|e| e.status == status).count();
-        let label = browse::status_label(state.media, status);
+        let label = browse::status_label(state.single(), status);
         let on = state.status == Some(status);
         chips = chips.push(ui::status_chip(
             label,
@@ -309,39 +334,40 @@ pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage>
         ));
     }
 
-    let mut active = Row::new().spacing(6).padding(Padding::new(0.0).left(6));
+    let mut active = Vec::new();
+    // Each removable chip keeps 6 px more room than the status chips.
+    let mut add = |label: String, dot, message| {
+        let chip = ui::removable_chip(label, dot, &tokens, msg(message));
+        active.push(container(chip).padding(Padding::new(0.0).left(6)).into());
+    };
+    if state.types.len() > 1 {
+        for &media in &state.types {
+            let dot = Some(tokens.type_color(media));
+            add(media.label().to_owned(), dot, Message::ToggleType(media));
+        }
+    }
+    if filter.not_released {
+        add("Not released yet".into(), None, Message::ClearNotReleased);
+    }
+    if filter.recent {
+        add("Added in the past month".into(), None, Message::ClearRecent);
+    }
     for tag in &filter.tags {
-        active = active.push(ui::removable_chip(
-            format!("#{tag}"),
-            &tokens,
-            msg(Message::ToggleTag(tag.clone())),
-        ));
+        add(format!("#{tag}"), None, Message::ToggleTag(tag.clone()));
     }
     for &decade in &filter.decades {
-        active = active.push(ui::removable_chip(
-            decade.label(),
-            &tokens,
-            msg(Message::ToggleDecade(decade)),
-        ));
+        add(decade.label(), None, Message::ToggleDecade(decade));
     }
     if filter.include_seasonal {
-        active = active.push(ui::removable_chip(
-            "Incl. seasonal-only".into(),
-            &tokens,
-            msg(Message::ToggleSeasonal),
-        ));
+        add("Incl. seasonal-only".into(), None, Message::ToggleSeasonal);
     }
     if let Some(label) = filter.rating_label() {
-        active = active.push(ui::removable_chip(
-            label,
-            &tokens,
-            msg(Message::ClearRating),
-        ));
+        add(label, None, Message::ClearRating);
     }
-    chips = chips.push(active);
+    chips = chips.extend(active);
 
     // With nothing shown, the empty state's button clears the filters.
-    let filtering = !filter.is_empty() || state.status.is_some();
+    let filtering = state.filter_count() > 0 || state.status.is_some();
     if filtering && !listing.shown.is_empty() {
         let ink = tokens.ink;
         chips = chips.push(
@@ -361,7 +387,7 @@ pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage>
             }),
         );
     }
-    container(chips)
+    container(chips.wrap().vertical_spacing(6))
         .padding(Padding::new(0.0).left(24).right(24).bottom(12))
         .into()
 }

@@ -1,7 +1,7 @@
 //! Chips: filter options, status filters with counts, active filters that
 //! can be removed, and an entry's tags.
 
-use iced::widget::{button, row, text};
+use iced::widget::{Row, button, row, text};
 use iced::{Background, Border, Center, Color, Element, Padding};
 
 use super::{Icon, icon, mono};
@@ -11,14 +11,17 @@ use crate::theme::{Tokens, font};
 /// selection gray when on. `count` shows in mono after the label.
 pub fn filter_chip<'a, Message: Clone + 'a>(
     label: String,
+    dot: Option<Color>,
     count: Option<usize>,
     on: bool,
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
-    let mut content = row![text(label).size(13).font(font::MEDIUM)]
-        .spacing(6)
-        .align_y(Center);
+    let mut content = Row::new().spacing(6).align_y(Center);
+    if let Some(color) = dot {
+        content = content.push(super::dot(color, 8.0, 3.0)).spacing(7);
+    }
+    content = content.push(text(label).size(13).font(font::MEDIUM));
     if let Some(count) = count {
         content = content.push(mono(count.to_string(), 11.0, tokens.sub));
     }
@@ -59,18 +62,21 @@ pub fn status_chip<'a, Message: Clone + 'a>(
     )
 }
 
-/// An active filter in the chips row, removed by a click: "#horror ×".
+/// An active filter in the chips row, removed by a click: "#horror ×",
+/// with a type's dot in front for a picked type.
 pub fn removable_chip<'a, Message: Clone + 'a>(
     label: String,
+    dot: Option<Color>,
     tokens: &Tokens,
     on_remove: Message,
 ) -> Element<'a, Message> {
-    let content = row![
-        text(label).size(13).font(font::SEMIBOLD),
-        icon(Icon::Close, 12.0, tokens.text)
-    ]
-    .spacing(6)
-    .align_y(Center);
+    let mut content = Row::new().spacing(6).align_y(Center);
+    if let Some(color) = dot {
+        content = content.push(super::dot(color, 8.0, 3.0));
+    }
+    let content = content
+        .push(text(label).size(13).font(font::SEMIBOLD))
+        .push(icon(Icon::Close, 12.0, tokens.text));
     chip(
         content,
         28.0,

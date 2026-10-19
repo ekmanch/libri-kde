@@ -39,9 +39,25 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
             Some(media) => (media.label(), tokens.type_color(media)),
             None => ("All", tokens.sub),
         };
-        let selected = on_library && app.library.media == media;
+        let state = &app.library;
+        let selected = on_library
+            && match media {
+                Some(media) => state.types.contains(&media),
+                None => state.types.is_empty(),
+            };
+        // With type checkboxes on, a box adds or removes the type and the
+        // name shows only it.
+        let lead = match media {
+            Some(media) if state.type_boxes => ui::type_checkbox(
+                color,
+                selected,
+                tokens,
+                Message::Library(library::Message::ToggleType(media)),
+            ),
+            _ => ui::dot(color, 9.0, 3.0),
+        };
         let row = row![
-            ui::dot(color, 9.0, 3.0),
+            lead,
             item_label(label, selected, tokens),
             ui::mono(library.count(media).to_string(), 12.0, tokens.sub),
         ];

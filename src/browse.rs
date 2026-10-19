@@ -5,7 +5,7 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 
-use crate::model::{Entry, EntryStatus, MediaType};
+use crate::model::{Date, Entry, EntryStatus, Library, MediaType, MusicKind, Plan};
 
 /// A release decade in the filter: "Older" for everything before 1960,
 /// then one per decade.
@@ -63,7 +63,8 @@ impl Decade {
 
 /// The Filter popover's choices. Within decades any choice matches; every
 /// chosen tag must be on the entry; the rating range leaves out unrated
-/// entries. Seasonal-only entries are hidden unless included.
+/// entries. Seasonal-only entries are hidden unless included. The last two
+/// come from the overview's "See all" links.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Filter {
     pub decades: BTreeSet<Decade>,
@@ -72,6 +73,10 @@ pub struct Filter {
     /// Lowest and highest rating, inclusive.
     pub rating: Option<(u8, u8)>,
     pub include_seasonal: bool,
+    /// Wanted and not out yet: the overview's Coming soon.
+    pub not_released: bool,
+    /// Added in the past month: the overview's Recently added.
+    pub recent: bool,
 }
 
 impl Filter {
@@ -85,9 +90,17 @@ impl Filter {
             + self.tags.len()
             + usize::from(self.rating.is_some())
             + usize::from(self.include_seasonal)
+            + usize::from(self.not_released)
+            + usize::from(self.recent)
     }
 
-    pub fn matches(&self, entry: &Entry) -> bool {
+    pub fn matches(&self, entry: &Entry, today: Date) -> bool {
+        if self.not_released && !is_coming(entry, today) {
+            return false;
+        }
+        if self.recent && entry.added < today.month_before() {
+            return false;
+        }
         if entry.seasonal_only && !self.include_seasonal {
             return false;
         }
@@ -142,9 +155,24 @@ impl Filter {
 
     /// Spells out a filter that matches nothing: "No books are both in
     /// progress and tagged #christmas. Remove a filter to see more."
-    pub fn no_matches_text(&self, media: Option<MediaType>, status: Option<EntryStatus>) -> String {
-        let subject = media.map_or("entries".to_owned(), |m| m.label().to_lowercase());
+    pub fn no_matches_text(
+        &self,
+        types: &BTreeSet<MediaType>,
+        status: Option<EntryStatus>,
+    ) -> String {
+        let subject = if types.is_empty() {
+            "entries".to_owned()
+        } else {
+            let names: Vec<String> = types.iter().map(|m| m.label().to_lowercase()).collect();
+            join(&names, "or")
+        };
         let mut conditions = Vec::new();
+        if self.not_released {
+            conditions.push("not out yet".to_owned());
+        }
+        if self.recent {
+            conditions.push("added in the past month".to_owned());
+        }
         if let Some(status) = status {
             conditions.push(
                 match status {
@@ -277,6 +305,121 @@ impl Sort {
     }
 }
 
+/// The lowest rating Top rated lists.
+pub const TOP_RATED: u8 = 9;
+
+/// The overview's lists, each with a "See all".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    InProgress,
+    ComingSoon,
+    RecentlyAdded,
+    TopRated,
+}
+
+impl Section {
+    pub fn title(self) -> &'static str {
+        match self {
+            Section::InProgress => "In progress",
+            Section::ComingSoon => "Coming soon",
+            Section::RecentlyAdded => "Recently added",
+            Section::TopRated => "Top rated",
+        }
+    }
+}
+
+/// What All shows with nothing narrowing it: "now and next".
+pub struct Overview<'a> {
+    /// Newest added first.
+    pub in_progress: Vec<&'a Entry>,
+    /// Soonest release first.
+    pub coming: Vec<&'a Entry>,
+    /// Added in the past month, newest first.
+    pub recent: Vec<&'a Entry>,
+    /// Rated 9 or 10, newest added first.
+    pub top: Vec<&'a Entry>,
+    pub plan: Option<ActivePlan<'a>>,
+}
+
+impl<'a> Overview<'a> {
+    pub fn of(library: &'a Library, today: Date) -> Overview<'a> {
+        let main = || library.entries.iter().filter(|e| !e.seasonal_only);
+        let newest = |mut list: Vec<&'a Entry>| {
+            Sort::NewestAdded.apply(&mut list);
+            list
+        };
+        let mut coming: Vec<&Entry> = library
+            .entries
+            .iter()
+            .filter(|e| is_coming(e, today))
+            .collect();
+        coming.sort_by_key(|e| e.released.map(|r| r.available_from()));
+        let since = today.month_before();
+        Overview {
+            in_progress: newest(
+                main()
+                    .filter(|e| e.status == EntryStatus::InProgress)
+                    .collect(),
+            ),
+            coming,
+            recent: newest(main().filter(|e| e.added >= since).collect()),
+            top: newest(
+                main()
+                    .filter(|e| e.rating.is_some_and(|r| r >= TOP_RATED))
+                    .collect(),
+            ),
+            plan: ActivePlan::of(library, today),
+        }
+    }
+
+    pub fn list(&self, section: Section) -> &[&'a Entry] {
+        match section {
+            Section::InProgress => &self.in_progress,
+            Section::ComingSoon => &self.coming,
+            Section::RecentlyAdded => &self.recent,
+            Section::TopRated => &self.top,
+        }
+    }
+}
+
+/// The plan the overview's card shows: the first started plan with
+/// something left to do.
+pub struct ActivePlan<'a> {
+    pub plan: &'a Plan,
+    pub done: usize,
+    pub total: usize,
+    /// The next two items not done: dated ones by date first, then the
+    /// rest in plan order.
+    pub next_up: Vec<&'a Entry>,
+    /// Days until the plan's last date, when it has dates and it is ahead.
+    pub days_left: Option<i64>,
+}
+
+impl<'a> ActivePlan<'a> {
+    pub fn of(library: &'a Library, today: Date) -> Option<ActivePlan<'a>> {
+        let plan = library
+            .plans
+            .iter()
+            .find(|p| p.started && p.items.iter().any(|i| !i.done))?;
+        let mut open: Vec<_> = plan.items.iter().filter(|i| !i.done).collect();
+        // A stable sort keeps plan order among undated items.
+        open.sort_by_key(|i| i.when.map_or((1, None), |w| (0, Some(w.from))));
+        let next_up = open
+            .iter()
+            .filter_map(|i| library.entry(&i.entry))
+            .take(2)
+            .collect();
+        let last = plan.items.iter().filter_map(|i| i.when.map(|w| w.to)).max();
+        Some(ActivePlan {
+            plan,
+            done: plan.items.iter().filter(|i| i.done).count(),
+            total: plan.items.len(),
+            next_up,
+            days_left: last.map(|d| today.days_until(d)).filter(|&n| n >= 0),
+        })
+    }
+}
+
 /// Case-insensitive search over titles and tags; a leading "#" is ignored.
 pub fn matches_search(entry: &Entry, query: &str) -> bool {
     let query = query.trim().trim_start_matches('#').to_lowercase();
@@ -302,11 +445,36 @@ pub fn status_label(media: Option<MediaType>, status: EntryStatus) -> &'static s
     }
 }
 
-/// The status chips for a type, or every status for everything.
-pub fn status_options(media: Option<MediaType>) -> &'static [EntryStatus] {
-    match media {
-        Some(media) => EntryStatus::options_for(media),
-        None => EntryStatus::options_for(MediaType::Shows),
+/// Wanted and not released yet, whatever the date's precision.
+pub fn is_coming(entry: &Entry, today: Date) -> bool {
+    entry.status == EntryStatus::Want && !entry.is_released_on(today)
+}
+
+/// The status chips for the picked types: a status shows when any of them
+/// can have it, and every status shows with no type picked.
+pub fn status_options(types: &BTreeSet<MediaType>) -> Vec<EntryStatus> {
+    let all = EntryStatus::options_for(MediaType::Shows);
+    all.iter()
+        .copied()
+        .filter(|s| {
+            types.is_empty()
+                || types
+                    .iter()
+                    .any(|&t| EntryStatus::options_for(t).contains(s))
+        })
+        .collect()
+}
+
+/// "Movie", "Album", "Song": an entry's kind, on covers and under titles.
+pub fn kind_label(entry: &Entry) -> &'static str {
+    match entry.media {
+        MediaType::Movies => "Movie",
+        MediaType::Shows => "Show",
+        MediaType::Books => "Book",
+        MediaType::Games => "Game",
+        MediaType::Music if entry.kind == Some(MusicKind::Song) => "Song",
+        MediaType::Music => "Album",
+        MediaType::Anime => "Anime",
     }
 }
 
@@ -331,6 +499,10 @@ mod tests {
         codec::decode(fixtures::LIBRARY_JSON).unwrap()
     }
 
+    fn today() -> Date {
+        Date::parse("2026-10-19").unwrap()
+    }
+
     fn titles(entries: &[&Entry]) -> Vec<String> {
         entries.iter().map(|e| e.title.clone()).collect()
     }
@@ -353,7 +525,7 @@ mod tests {
             library
                 .entries
                 .iter()
-                .filter(|e| filter.matches(e))
+                .filter(|e| filter.matches(e, today()))
                 .all(|e| {
                     e.tags.iter().any(|t| t == "horror") && e.tags.iter().any(|t| t == "halloween")
                 })
@@ -364,7 +536,7 @@ mod tests {
         let years: Vec<_> = library
             .entries
             .iter()
-            .filter(|e| filter.matches(e))
+            .filter(|e| filter.matches(e, today()))
             .map(|e| e.year().unwrap())
             .collect();
         assert!(!years.is_empty() && years.iter().all(|y| (1980..2000).contains(y)));
@@ -375,9 +547,9 @@ mod tests {
         let library = library();
         let seasonal = library.entries.iter().find(|e| e.seasonal_only).unwrap();
         let mut filter = Filter::default();
-        assert!(!filter.matches(seasonal));
+        assert!(!filter.matches(seasonal, today()));
         filter.include_seasonal = true;
-        assert!(filter.matches(seasonal));
+        assert!(filter.matches(seasonal, today()));
     }
 
     #[test]
@@ -398,13 +570,16 @@ mod tests {
         let mut filter = Filter::default();
         filter.toggle_tag("christmas");
         assert_eq!(
-            filter.no_matches_text(Some(MediaType::Books), Some(EntryStatus::InProgress)),
+            filter.no_matches_text(
+                &BTreeSet::from([MediaType::Books]),
+                Some(EntryStatus::InProgress)
+            ),
             "No books are both in progress and tagged #christmas. Remove a filter to see more."
         );
         filter.toggle_decade(Decade::Older);
         filter.toggle_decade(Decade::From(1990));
         assert_eq!(
-            filter.no_matches_text(None, None),
+            filter.no_matches_text(&BTreeSet::new(), None),
             "No entries are both from before 1960 or from the 1990s and tagged #christmas. \
              Remove a filter to see more."
         );
@@ -459,5 +634,94 @@ mod tests {
             "Saved"
         );
         assert_eq!(status_label(None, EntryStatus::InProgress), "In progress");
+    }
+
+    #[test]
+    fn coming_soon_and_recently_added_filter_by_date() {
+        let library = library();
+        let filter = Filter {
+            not_released: true,
+            ..Filter::default()
+        };
+        let coming: Vec<_> = library
+            .entries
+            .iter()
+            .filter(|e| filter.matches(e, today()))
+            .collect();
+        assert!(!coming.is_empty());
+        assert!(
+            coming
+                .iter()
+                .all(|e| e.status == EntryStatus::Want && !e.is_released_on(today()))
+        );
+
+        let filter = Filter {
+            recent: true,
+            ..Filter::default()
+        };
+        let since = Date::parse("2026-09-19").unwrap();
+        assert!(
+            library
+                .entries
+                .iter()
+                .filter(|e| filter.matches(e, today()))
+                .all(|e| e.added >= since)
+        );
+    }
+
+    #[test]
+    fn status_options_cover_every_picked_type() {
+        let movies = BTreeSet::from([MediaType::Movies]);
+        assert!(!status_options(&movies).contains(&EntryStatus::InProgress));
+        let music = BTreeSet::from([MediaType::Music]);
+        assert_eq!(
+            status_options(&music),
+            [EntryStatus::Want, EntryStatus::Done]
+        );
+        let both = BTreeSet::from([MediaType::Movies, MediaType::Books]);
+        assert_eq!(status_options(&both).len(), 4);
+        assert_eq!(status_options(&BTreeSet::new()).len(), 4);
+    }
+
+    #[test]
+    fn several_types_read_as_a_list() {
+        let filter = Filter {
+            recent: true,
+            ..Filter::default()
+        };
+        let types = BTreeSet::from([MediaType::Movies, MediaType::Shows]);
+        assert_eq!(
+            filter.no_matches_text(&types, None),
+            "No movies or shows are added in the past month. Remove a filter to see more."
+        );
+    }
+
+    #[test]
+    fn the_overview_lists_now_and_next() {
+        let library = library();
+        let overview = Overview::of(&library, today());
+        assert!(
+            overview
+                .in_progress
+                .iter()
+                .all(|e| e.status == EntryStatus::InProgress)
+        );
+        assert_eq!(
+            overview.coming.first().map(|e| e.title.as_str()),
+            Some("Grand Theft Auto VI")
+        );
+        assert!(overview.recent.windows(2).all(|w| w[0].added >= w[1].added));
+        assert!(overview.top.iter().all(|e| e.rating >= Some(9)));
+    }
+
+    #[test]
+    fn the_active_plan_is_the_first_started_one_with_work_left() {
+        let library = library();
+        let active = ActivePlan::of(&library, today()).unwrap();
+        assert_eq!(active.plan.id, "halloween-2026");
+        assert_eq!((active.done, active.total), (2, 8));
+        assert_eq!(active.days_left, Some(12));
+        let next: Vec<_> = active.next_up.iter().map(|e| e.title.as_str()).collect();
+        assert_eq!(next, ["Mononoke", "The Mummy"]);
     }
 }

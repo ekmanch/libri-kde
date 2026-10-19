@@ -268,6 +268,7 @@ fn widgets<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     for tag in &state.picked {
         active = active.push(ui::removable_chip(
             format!("#{tag}"),
+            None,
             tokens,
             msg(Message::ToggleTag(tag.clone())),
         ));
@@ -294,6 +295,7 @@ fn widgets<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                 let on = state.picked.contains(name);
                 ui::filter_chip(
                     format!("#{name}"),
+                    None,
                     count,
                     on,
                     tokens,

@@ -69,14 +69,15 @@ pub fn view(app: &App) -> Element<'_, Message> {
 }
 
 /// The screen's part of the window title, or `None` for plain "Libri".
-pub fn title(app: &App) -> Option<&'static str> {
-    match app.screen {
-        Screen::Splash | Screen::Setup => None,
-        Screen::Library => Some(app.library.title()),
-        Screen::Plans => Some("Plans"),
-        Screen::Settings => Some("Settings"),
-        Screen::TokenSheet => Some("Token sheet"),
-    }
+pub fn title(app: &App) -> Option<String> {
+    let name = match app.screen {
+        Screen::Splash | Screen::Setup => return None,
+        Screen::Library => return Some(app.library.title()),
+        Screen::Plans => "Plans",
+        Screen::Settings => "Settings",
+        Screen::TokenSheet => "Token sheet",
+    };
+    Some(name.into())
 }
 
 /// An empty window in the theme's chrome, until the screen is built.

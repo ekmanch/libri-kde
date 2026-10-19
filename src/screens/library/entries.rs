@@ -1,13 +1,13 @@
 //! The list itself: the entries in the chosen view, grouped by type when
 //! everything is shown, or an empty state.
 
-use iced::widget::{Column, column, container, grid, row, text};
-use iced::{Element, Fill, Padding};
+use iced::widget::{Column, button, column, container, grid, row, scrollable, space, stack, text};
+use iced::{Background, Border, Element, Fill, FillPortion, Padding, Shadow, Vector};
 
 use super::{Listing, Message, View};
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
-use crate::model::{Entry, MediaType, MusicKind};
+use crate::model::{Entry, MediaType};
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, EntryLook, Icon};
 
@@ -27,55 +27,187 @@ pub fn body<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> 
     }
     let state = &app.library;
     let view = state.view_mode();
-    let mut content = Column::new().spacing(if view == View::Text { 0 } else { 2 });
-    if view == View::Text {
-        let creator = browse::creator_label(state.media);
-        content = content.push(ui::entry_table_header(
-            ["Title", creator, "Released", "Status", "Rating", "Tags"],
-            &tokens,
-        ));
-    }
-    match state.media {
-        Some(_) => content = content.push(block(app, &listing.shown, view, &tokens)),
-        // Everything: one section per type, in type order.
-        None => {
-            for media in MediaType::ALL {
-                let entries: Vec<&Entry> = listing
+
+    // One type is one block; All or several types get one group per type,
+    // in type order, each in the current sort.
+    let groups: Vec<(Option<MediaType>, Vec<&Entry>)> = match state.single() {
+        Some(_) => vec![(None, listing.shown.clone())],
+        None => MediaType::ALL
+            .into_iter()
+            .map(|media| {
+                let entries = listing
                     .shown
                     .iter()
                     .copied()
                     .filter(|e| e.media == media)
                     .collect();
-                if entries.is_empty() {
-                    continue;
-                }
-                content = content
-                    .push(section_header(media, entries.len(), &tokens))
-                    .push(block(app, &entries, view, &tokens));
-            }
+                (Some(media), entries)
+            })
+            .filter(|(_, entries): &(_, Vec<&Entry>)| !entries.is_empty())
+            .collect(),
+    };
+    let children = groups.iter().map(|(media, entries)| {
+        let mut group = Column::new();
+        if let Some(media) = media {
+            group = group.push(group_header(*media, entries.len(), &tokens));
         }
+        group.push(block(app, entries, view, &tokens)).into()
+    });
+    let list = ui::Groups::new(children, |tops| msg(Message::GroupsMeasured(tops)));
+    let grouped = groups.len() > 1;
+    let scrollbar = if grouped {
+        // The type-colored rail replaces it.
+        scrollable::Scrollbar::hidden()
+    } else {
+        ui::scrollbar()
+    };
+    let scroll = ui::scroll(container(list).padding(Padding::new(24.0).top(4)))
+        .direction(scrollable::Direction::Vertical(scrollbar))
+        .id(super::LIST_ID)
+        .on_scroll(|viewport| {
+            msg(Message::Scrolled(super::Scroll {
+                offset: viewport.absolute_offset().y,
+                viewport: viewport.bounds().height,
+                content: viewport.content_bounds().height,
+            }))
+        })
+        .height(Fill);
+
+    let mut layers = stack![scroll];
+    if grouped {
+        if let Some(pinned) = pinned_header(state, &groups, &tokens) {
+            layers = layers.push(pinned);
+        }
+        layers = layers.push(rail(state, &groups, &tokens));
     }
-    ui::scroll(container(content).padding(Padding::new(24.0).top(4)))
-        .height(Fill)
-        .into()
+    let list: Element<'a, AppMessage> = layers.into();
+    if view == View::Text {
+        // The table header stays above the scrolling rows.
+        let creator = browse::creator_label(state.single());
+        let header = ui::entry_table_header(
+            ["Title", creator, "Released", "Status", "Rating", "Tags"],
+            &tokens,
+        );
+        column![container(header).padding([0, 24]), list].into()
+    } else {
+        list
+    }
 }
 
-/// A type's heading in the Everything list: the type in its color, caps,
-/// and the count.
-fn section_header<'a>(media: MediaType, count: usize, tokens: &Tokens) -> Element<'a, AppMessage> {
+/// A type group's heading: the type in its color, caps, and the count.
+fn group_header<'a>(media: MediaType, count: usize, tokens: &Tokens) -> Element<'a, AppMessage> {
     container(
         row![
             text(media.label().to_uppercase())
                 .size(theme::size::SECTION)
                 .font(font::BOLD)
                 .color(tokens.type_color(media)),
-            ui::mono(count.to_string(), 11.5, tokens.sub),
+            ui::mono(count.to_string(), 12.0, tokens.sub),
         ]
         .spacing(8)
         .align_y(iced::Center),
     )
-    .padding(Padding::new(0.0).top(18).bottom(10))
+    .padding(Padding::new(0.0).top(14).bottom(10))
     .into()
+}
+
+/// The group being scrolled through, by its top.
+fn current_group(state: &super::State) -> Option<usize> {
+    let offset = state.scroll.offset;
+    state
+        .group_tops
+        .iter()
+        .rposition(|&top| top <= offset + 6.0)
+}
+
+/// The current group's header, pinned to the top once its own header has
+/// scrolled away, with a soft shadow under it.
+fn pinned_header<'a>(
+    state: &super::State,
+    groups: &[(Option<MediaType>, Vec<&Entry>)],
+    tokens: &Tokens,
+) -> Option<Element<'a, AppMessage>> {
+    let index = current_group(state)?;
+    if state.scroll.offset <= state.group_tops[index] + 0.5 {
+        return None;
+    }
+    let (media, entries) = groups.get(index)?;
+    let header = group_header((*media)?, entries.len(), tokens);
+    let (content, shadow) = (tokens.content, tokens.shadow);
+    let bar = container(header)
+        .width(Fill)
+        .padding([0, 24])
+        .style(move |_| container::Style {
+            background: Some(Background::Color(content)),
+            shadow: Shadow {
+                color: shadow.scale_alpha(0.6),
+                offset: Vector::new(0.0, 4.0),
+                blur_radius: 8.0,
+            },
+            ..container::Style::default()
+        });
+    Some(column![bar, space::vertical()].into())
+}
+
+/// The type-colored scrollbar: one segment per group, sized by its count,
+/// that jumps there on a click, and an outlined thumb for the view.
+fn rail<'a>(
+    state: &super::State,
+    groups: &[(Option<MediaType>, Vec<&Entry>)],
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let segments =
+        Column::with_children(groups.iter().enumerate().map(|(index, (media, entries))| {
+            let color = media.map_or(tokens.sub, |m| tokens.type_color(m));
+            let portion = u16::try_from(entries.len()).unwrap_or(u16::MAX).max(1);
+            button(space())
+                .width(5)
+                .height(FillPortion(portion))
+                .padding(0)
+                .on_press(msg(Message::JumpToGroup(index)))
+                .style(move |_, _| button::Style {
+                    background: Some(Background::Color(color)),
+                    border: Border::default().rounded(2),
+                    ..button::Style::default()
+                })
+                .into()
+        }))
+        .spacing(2)
+        .height(Fill);
+
+    // The thumb, as parts of a thousand of the rail.
+    let scroll = state.scroll;
+    let (top, size) = if scroll.content > scroll.viewport && scroll.content > 0.0 {
+        let top = (scroll.offset / scroll.content * 1000.0)
+            .round()
+            .clamp(0.0, 1000.0) as u16;
+        let size = (scroll.viewport / scroll.content * 1000.0)
+            .round()
+            .clamp(1.0, 1000.0) as u16;
+        (top, size.min(1000 - top))
+    } else {
+        (0, 1000)
+    };
+    let edge = tokens.rail_thumb;
+    let thumb = column![
+        space().height(FillPortion(top)),
+        container(space())
+            .width(11)
+            .height(FillPortion(size.max(1)))
+            .style(move |_| container::Style::default()
+                .border(Border::default().rounded(5).width(1.5).color(edge))),
+        space().height(FillPortion(1000 - top - size)),
+    ]
+    .height(Fill);
+    let rail = stack![container(segments).center_x(11), thumb]
+        .width(11)
+        .height(Fill);
+    container(rail)
+        .width(Fill)
+        .height(Fill)
+        .align_right(Fill)
+        .padding(Padding::new(0.0).top(44).right(5).bottom(10))
+        .into()
 }
 
 fn block<'a>(
@@ -123,22 +255,13 @@ fn look<'a>(
     tokens: &Tokens,
 ) -> EntryLook<'a> {
     let is_selected = selected == Some(entry.id.as_str());
-    let kind = match entry.media {
-        MediaType::Movies => "Movie",
-        MediaType::Shows => "Show",
-        MediaType::Books => "Book",
-        MediaType::Games => "Game",
-        MediaType::Music if entry.kind == Some(MusicKind::Song) => "Song",
-        MediaType::Music => "Album",
-        MediaType::Anime => "Anime",
-    };
     let tags: Vec<String> = entry.tags.iter().map(|t| format!("#{t}")).collect();
     EntryLook {
         title: &entry.title,
         creator: entry.creator.as_deref().unwrap_or(""),
         year: entry.year().map(|y| y.to_string()).unwrap_or_default(),
         released: entry.released.map(|r| r.to_string()).unwrap_or_default(),
-        kind,
+        kind: browse::kind_label(entry),
         type_color: tokens.type_color(entry.media),
         cover: theme::cover_color(&entry.id),
         status: entry.status,
@@ -163,11 +286,20 @@ fn empty_state<'a>(
     let state = &app.library;
     let query = state.query.trim();
     let (which, title, body, action) = if listing.in_type == 0 {
-        match state.media {
+        match state.single() {
             Some(media) => (
                 Icon::Document,
                 format!("No {} yet", media.label().to_lowercase()),
                 format!("{} you add will show up here.", media.label()),
+                Some(("Add", msg(Message::Add))),
+            ),
+            None if !state.types.is_empty() => (
+                Icon::Document,
+                format!(
+                    "No {} yet",
+                    state.title().to_lowercase().replace(" + ", " or ")
+                ),
+                "Entries you add will show up here.".into(),
                 Some(("Add", msg(Message::Add))),
             ),
             None => (
@@ -184,7 +316,7 @@ fn empty_state<'a>(
             "Check the spelling, or add it to your library as a new entry.".into(),
             Some(("Clear search", msg(Message::Search(String::new())))),
         )
-    } else if state.filter.is_empty() && listing.base.is_empty() {
+    } else if state.filter_count() == 0 && listing.base.is_empty() {
         // Only seasonal-only entries in this type.
         (
             Icon::Filter,
@@ -192,10 +324,10 @@ fn empty_state<'a>(
             "Everything here is seasonal-only. Turn on \"Show seasonal-only entries\" in Filter to see it.".into(),
             None,
         )
-    } else if state.filter.is_empty() {
+    } else if state.filter_count() == 0 {
         let status = state
             .status
-            .map_or("", |s| browse::status_label(state.media, s));
+            .map_or("", |s| browse::status_label(state.single(), s));
         (
             Icon::Filter,
             format!("Nothing marked {} yet", status.to_lowercase()),
@@ -206,9 +338,68 @@ fn empty_state<'a>(
         (
             Icon::Filter,
             "Nothing matches these filters".into(),
-            state.filter.no_matches_text(state.media, state.status),
+            state.filter.no_matches_text(&state.types, state.status),
             Some(("Clear filters", msg(Message::ClearAll))),
         )
     };
     Some(ui::empty_state(which, title, body, action, tokens))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Date;
+    use crate::screens::Screen;
+
+    fn grouped_app() -> App {
+        let mut app = App::new(Screen::Library);
+        app.today = Date::parse("2026-10-19").unwrap();
+        for message in [
+            Message::ShowType(Some(MediaType::Movies)),
+            Message::ToggleType(MediaType::Games),
+        ] {
+            let _ = app.update(msg(message));
+        }
+        app
+    }
+
+    #[test]
+    fn the_grouped_list_reports_where_each_group_starts() {
+        let app = grouped_app();
+        let messages: Vec<_> = {
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            // The list reports on the first event, as on the window's first
+            // redraw.
+            let redraw = iced::window::Event::RedrawRequested(std::time::Instant::now());
+            let _ = ui.simulate([iced::Event::Window(redraw)]);
+            ui.into_messages().collect()
+        };
+        let tops = messages.into_iter().find_map(|m| match m {
+            AppMessage::Library(Message::GroupsMeasured(tops)) => Some(tops),
+            _ => None,
+        });
+        let tops = tops.expect("the list measures its groups");
+        assert_eq!(tops.len(), 2);
+        assert!(tops[0] == 0.0 && tops[1] > 0.0);
+    }
+
+    #[test]
+    fn the_current_group_is_the_last_one_scrolled_to() {
+        let mut app = grouped_app();
+        app.library.group_tops = vec![0.0, 600.0, 1200.0];
+        app.library.scroll.offset = 0.0;
+        assert_eq!(current_group(&app.library), Some(0));
+        app.library.scroll.offset = 597.0;
+        assert_eq!(
+            current_group(&app.library),
+            Some(1),
+            "a few px early, as the mockup"
+        );
+        app.library.scroll.offset = 1500.0;
+        assert_eq!(current_group(&app.library), Some(2));
+    }
 }

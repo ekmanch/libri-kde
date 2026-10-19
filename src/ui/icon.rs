@@ -13,6 +13,7 @@ pub enum Icon {
     ChevronLeft,
     ChevronRight,
     Close,
+    Dnf,
     Document,
     ExternalLink,
     Filter,
@@ -31,13 +32,14 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Icon; 21] = [
+    pub const ALL: [Icon; 22] = [
         Icon::Calendar,
         Icon::Check,
         Icon::ChevronDown,
         Icon::ChevronLeft,
         Icon::ChevronRight,
         Icon::Close,
+        Icon::Dnf,
         Icon::Document,
         Icon::ExternalLink,
         Icon::Filter,
@@ -68,6 +70,7 @@ impl Icon {
             Icon::ChevronLeft => file!("chevron-left"),
             Icon::ChevronRight => file!("chevron-right"),
             Icon::Close => file!("close"),
+            Icon::Dnf => file!("dnf"),
             Icon::Document => file!("document"),
             Icon::ExternalLink => file!("external-link"),
             Icon::Filter => file!("filter"),

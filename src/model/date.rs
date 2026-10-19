@@ -26,6 +26,64 @@ impl Date {
         }
     }
 
+    /// Today in UTC, from the system clock.
+    pub fn today() -> Date {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        Date::from_days((secs / 86_400) as i64)
+    }
+
+    /// The same day a month earlier, or the month's last day when it is
+    /// shorter: 2026-03-31 gives 2026-02-28.
+    pub fn month_before(self) -> Date {
+        let (year, month) = if self.month == 1 {
+            (self.year - 1, 12)
+        } else {
+            (self.year, self.month - 1)
+        };
+        Date {
+            year,
+            month,
+            day: self.day.min(days_in_month(year, month)),
+        }
+    }
+
+    /// Days from this date to `later`; negative when `later` is earlier.
+    pub fn days_until(self, later: Date) -> i64 {
+        later.days() - self.days()
+    }
+
+    /// Days since 1970-01-01 (Howard Hinnant's `days_from_civil`).
+    fn days(self) -> i64 {
+        let (month, day) = (i64::from(self.month), i64::from(self.day));
+        let year = i64::from(self.year) - i64::from(month <= 2);
+        let era = year.div_euclid(400);
+        let year_of_era = year - era * 400;
+        let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+        let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+        era * 146_097 + day_of_era - 719_468
+    }
+
+    /// The date `days` after 1970-01-01 (`civil_from_days`).
+    fn from_days(days: i64) -> Date {
+        let z = days + 719_468;
+        let era = z.div_euclid(146_097);
+        let day_of_era = z - era * 146_097;
+        let year_of_era =
+            (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        let mp = (5 * day_of_year + 2) / 153;
+        let day = day_of_year - (153 * mp + 2) / 5 + 1;
+        let month = if mp < 10 { mp + 3 } else { mp - 9 };
+        let year = year_of_era + era * 400 + i64::from(month <= 2);
+        Date {
+            year: year as u16,
+            month: month as u8,
+            day: day as u8,
+        }
+    }
+
     /// The day after this one.
     pub fn next_day(self) -> Date {
         if self.day < days_in_month(self.year, self.month) {
@@ -226,5 +284,17 @@ mod tests {
         let day = Released::parse("2026-12-25").unwrap();
         assert!(!day.is_released_on(date("2026-12-24")));
         assert!(day.is_released_on(date("2026-12-25")));
+    }
+
+    #[test]
+    fn day_counts_round_trip_and_measure_spans() {
+        for text in ["1970-01-01", "2000-02-29", "2026-10-19", "2026-12-31"] {
+            let d = date(text);
+            assert_eq!(Date::from_days(d.days()), d, "{text}");
+        }
+        assert_eq!(date("1970-01-02").days(), 1);
+        assert_eq!(date("2026-10-19").days_until(date("2026-10-31")), 12);
+        assert_eq!(date("2026-03-31").month_before(), date("2026-02-28"));
+        assert_eq!(date("2026-01-15").month_before(), date("2025-12-15"));
     }
 }

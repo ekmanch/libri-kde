@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 
 use libri::app::{self, App};
+use libri::model::Date;
 use libri::screens::Screen;
 use libri::theme::Theme;
 
@@ -22,6 +23,8 @@ fn capture_every_screen() {
         for theme in [Theme::Graphite, Theme::Light] {
             let mut app = App::new(screen);
             app.theme = theme;
+            // The fixture's dates are set around this day.
+            app.today = Date::parse("2026-10-19").unwrap();
             let mut ui =
                 iced_test::Simulator::with_size(app::settings(), app::WINDOW_SIZE, app.view());
             let snapshot = ui.snapshot(&app.tokens().iced_theme()).unwrap();

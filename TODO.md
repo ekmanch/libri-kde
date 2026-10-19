@@ -62,6 +62,11 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Chips row: status chips, then the active filters (tags, decade, seasonal, rating) as removable chips, then an inline "Clear all"
 - [x] Selection highlight on the picked entry (selection gray, not the accent)
 - [x] Empty states: empty type, no search results, no filter results
+- [x] All as the start screen, a "now and next" overview: In progress, the active plan, Coming soon, Recently added (the past month) and Top rated. Text and list views: two columns with "See all N" links; grid: cover shelves with clickable headers plus a side column with the plan card and Recently added. The plan card always uses the regular accent. Any type, filter, status or search turns All into the full grouped list. "See all" for Coming soon and Recently added filters by "Not released yet" and "Added in the past month", shown as removable chips
+- [x] Several types at once: a Type section in Filter, Ctrl+click in the sidebar adds or removes a type, picked types as removable chips (two or more), results grouped by type in the current sort; the view is remembered for All, for several types and per type
+- [x] Type checkboxes in the sidebar (optional, colored, a box adds or removes the type, the name shows only it); the setting itself is in Settings (1f)
+- [x] DNF badge on grid covers
+- [x] Grouped results: a thin type-colored scrollbar (one segment per group, sized by its count; a click jumps to the group; the thumb is an outline) and pinned type headers. `ui::Groups` measures where each group starts; the text view's column header stays above the rows
 
 ### 1c. Entry details and editing
 - [ ] Entry details as in the mockup: cover spot, status, rating, note, about, tags, plans, Edit, Delete; the same details view is used from Plans
@@ -84,7 +89,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [ ] Remove from plan or delete everywhere; Delete plan
 
 ### 1f. Settings and states
-- [ ] Settings: theme (System, Graphite, Charcoal, Catppuccin Mocha, Light; System follows Plasma's color scheme through the desktop portal), background style (two-tone or flat, with the flat tokens in `theme`), sidebar tags (pinned or most used), accent color (Vivid and Catppuccin groups, Peach default), timeline default, seasonal theme default, tags, About row
+- [ ] Settings: type checkboxes (off or on), theme (System, Graphite, Charcoal, Catppuccin Mocha, Light; System follows Plasma's color scheme through the desktop portal), background style (two-tone or flat, with the flat tokens in `theme`), sidebar tags (pinned or most used), accent color (Vivid and Catppuccin groups, Peach default), timeline default, seasonal theme default, tags, About row
 - [ ] Library connection section (UI only)
 - [ ] Splash: logo, wordmark, indeterminate bar; first-run and returning variants
 - [ ] Setup wizard, full window (UI only): Welcome, Connect GitHub (repo and token, "stored in KDE Wallet" copy), Branch, Library file (new or existing), Create / Pick existing, All set

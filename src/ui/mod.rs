@@ -5,6 +5,7 @@ pub mod chip;
 pub mod dialog;
 pub mod empty;
 pub mod entry;
+pub mod groups;
 pub mod icon;
 pub mod menu;
 pub mod popover;
@@ -24,6 +25,7 @@ pub use chip::{add_chip, filter_chip, removable_chip, status_chip, tag_chip};
 pub use dialog::{dialog, modal};
 pub use empty::empty_state;
 pub use entry::{EntryLook, entry_card, entry_list_row, entry_table_header, entry_table_row, rule};
+pub use groups::Groups;
 pub use icon::{Icon, icon};
 pub use menu::radio_menu;
 pub use popover::{Align, Placement, Popover};
@@ -86,17 +88,20 @@ pub fn panel_style(tokens: &Tokens, radius: f32) -> container::Style {
     }
 }
 
+/// The mockup's thin scrollbar.
+pub fn scrollbar() -> scrollable::Scrollbar {
+    scrollable::Scrollbar::new()
+        .width(4)
+        .scroller_width(4)
+        .margin(3)
+}
+
 /// A vertical scroll area with the mockup's thin gray scroller.
 pub fn scroll<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> scrollable::Scrollable<'a, Message> {
     scrollable(content)
-        .direction(scrollable::Direction::Vertical(
-            scrollable::Scrollbar::new()
-                .width(4)
-                .scroller_width(4)
-                .margin(3),
-        ))
+        .direction(scrollable::Direction::Vertical(scrollbar()))
         .style(|theme, status| {
             let mut style = scrollable::default(theme, status);
             let thumb = Color::from_rgba(0.5, 0.5, 0.5, 0.3);
@@ -129,6 +134,39 @@ pub fn row_style(
             ..button::Style::default()
         }
     }
+}
+
+/// A sidebar type's checkbox: a 15 px box in the type's color, filled
+/// with a check when the type is picked.
+pub fn type_checkbox<'a, Message: Clone + 'a>(
+    color: Color,
+    on: bool,
+    tokens: &Tokens,
+    on_toggle: Message,
+) -> Element<'a, Message> {
+    // The check reads on the type color: dark on the dark themes, white on
+    // Light's darker inks.
+    let mark = if tokens.light {
+        Color::WHITE
+    } else {
+        tokens.chrome
+    };
+    let check: Element<'a, Message> = if on {
+        icon(Icon::Check, 10.0, mark)
+    } else {
+        widget::space().into()
+    };
+    button(container(check).center(Fill))
+        .width(15)
+        .height(15)
+        .padding(0)
+        .on_press(on_toggle)
+        .style(move |_, _| button::Style {
+            background: on.then_some(Background::Color(color)),
+            border: Border::default().rounded(4).width(1.5).color(color),
+            ..button::Style::default()
+        })
+        .into()
 }
 
 /// A 30 px square icon button in the secondary color: Close, Settings.

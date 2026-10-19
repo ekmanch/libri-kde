@@ -1,10 +1,11 @@
 //! Application state, messages, `update` and `view`.
 
 use iced::keyboard::{self, Key, key::Named};
-use iced::widget::operation;
+use iced::widget::{operation, scrollable};
 use iced::window::{self, settings::PlatformSpecific};
 use iced::{Element, Size, Subscription, Task};
 
+use crate::model::Date;
 use crate::repo::{FixtureLibraryRepository, LibraryRepository};
 use crate::screens::{self, Screen, library, token_sheet};
 use crate::theme::{self, Accent, Theme, Tokens, font};
@@ -57,6 +58,10 @@ pub struct App {
     pub theme: Theme,
     pub accent: Accent,
     pub sync: SyncState,
+    /// Today, for Coming soon, Recently added and the plan card.
+    pub today: Date,
+    /// The keyboard modifiers held now, for Ctrl+click.
+    pub modifiers: keyboard::Modifiers,
     pub repo: Box<dyn LibraryRepository>,
     pub library: library::State,
     pub token_sheet: token_sheet::State,
@@ -68,6 +73,7 @@ pub enum Message {
     SetTheme(Theme),
     SetAccent(Accent),
     Key(KeyPress),
+    Modifiers(keyboard::Modifiers),
     Library(library::Message),
     TokenSheet(token_sheet::Message),
 }
@@ -107,6 +113,8 @@ impl App {
             theme: Theme::default(),
             accent: theme::PEACH,
             sync: SyncState::default(),
+            today: Date::today(),
+            modifiers: keyboard::Modifiers::default(),
             repo: Box::new(repo),
             library: library::State::default(),
             token_sheet: token_sheet::State::default(),
@@ -140,7 +148,24 @@ impl App {
                     return operation::focus(library::SEARCH_ID);
                 }
             }
+            Message::Modifiers(modifiers) => self.modifiers = modifiers,
+            Message::Library(library::Message::JumpToGroup(index)) => {
+                if let Some(&top) = self.library.group_tops.get(index) {
+                    let offset = scrollable::AbsoluteOffset {
+                        x: None,
+                        y: Some(top),
+                    };
+                    return operation::scroll_to(library::LIST_ID, offset);
+                }
+            }
             Message::Library(message) => {
+                // Ctrl+click on a sidebar type adds or removes it.
+                let message = match message {
+                    library::Message::ShowType(Some(media)) if self.modifiers.command() => {
+                        library::Message::ToggleType(media)
+                    }
+                    message => message,
+                };
                 if message.shows_library() {
                     self.screen = Screen::Library;
                 }
@@ -169,6 +194,7 @@ impl App {
 
     fn subscription(&self) -> Subscription<Message> {
         keyboard::listen().filter_map(|event| match event {
+            keyboard::Event::ModifiersChanged(modifiers) => Some(Message::Modifiers(modifiers)),
             keyboard::Event::KeyPressed { key, modifiers, .. } => {
                 let press = match key {
                     Key::Named(Named::Escape) => KeyPress::Escape,
@@ -224,7 +250,7 @@ mod tests {
     #[test]
     fn the_window_title_names_the_screen() {
         let mut app = App::new(Screen::Library);
-        assert_eq!(app.title(), "Everything — Libri");
+        assert_eq!(app.title(), "Library — Libri");
         let _ = app.update(Message::Library(library::Message::ShowType(Some(
             MediaType::Movies,
         ))));
@@ -239,5 +265,18 @@ mod tests {
         let _ = app.update(Message::Library(library::Message::PickTag("horror".into())));
         assert_eq!(app.screen, Screen::Library);
         assert_eq!(app.library.filter.tags, ["horror"]);
+    }
+
+    #[test]
+    fn ctrl_click_on_a_sidebar_type_adds_it() {
+        let mut app = App::new(Screen::Library);
+        let show = |media| Message::Library(library::Message::ShowType(Some(media)));
+        let _ = app.update(show(MediaType::Movies));
+        let _ = app.update(Message::Modifiers(keyboard::Modifiers::CTRL));
+        let _ = app.update(show(MediaType::Books));
+        assert_eq!(app.title(), "Movies + Books — Libri");
+        let _ = app.update(Message::Modifiers(keyboard::Modifiers::empty()));
+        let _ = app.update(show(MediaType::Games));
+        assert_eq!(app.title(), "Games — Libri");
     }
 }

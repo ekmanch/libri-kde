@@ -72,6 +72,7 @@ pub fn picker<'a>(
                 let on = picked.iter().any(|p| p == tag);
                 ui::filter_chip(
                     format!("#{tag}"),
+                    None,
                     Some(count),
                     on,
                     &tokens,
@@ -101,7 +102,7 @@ pub fn picker<'a>(
     let body = column![search, ui::scroll(list).height(440)].spacing(12);
 
     let summary = if picked.is_empty() {
-        "Shows entries with every selected tag".to_owned()
+        "Shows entries that have all selected tags".to_owned()
     } else {
         format!("{} selected · {} shown", picked.len(), listing.shown.len())
     };

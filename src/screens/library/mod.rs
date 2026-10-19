@@ -2,6 +2,7 @@
 //! narrowed by search, status, the Filter popover and the tag pickers.
 
 mod entries;
+mod overview;
 mod tags;
 mod toolbar;
 
@@ -14,24 +15,34 @@ pub use tags::all_tags_popover;
 
 use super::shell::shell;
 use crate::app::{App, Message as AppMessage};
-use crate::browse::{self, Decade, Filter, Sort};
-use crate::model::{Entry, EntryStatus, Library, MediaType, TagCategory};
+use crate::browse::{self, Decade, Filter, Section, Sort};
+use crate::model::{Date, Entry, EntryStatus, Library, MediaType, TagCategory};
 use crate::ui;
 
 /// The search field's id, for Ctrl+K and Ctrl+F.
 pub const SEARCH_ID: &str = "library-search";
+/// The entry list's scroll area, for the type rail's jumps.
+pub const LIST_ID: &str = "library-list";
 /// How many tags can be pinned to the sidebar.
 pub const MAX_PINS: usize = 8;
 /// How many of the most used tags the sidebar and the Filter popover list.
 pub const TOP_TAGS: usize = 6;
 
-/// The three views, remembered per type.
+/// The three views, remembered per type, for several types and for All.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub enum View {
     #[default]
     Grid,
     List,
     Text,
+}
+
+/// What a view choice is remembered for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ViewKey {
+    All,
+    Several,
+    Type(MediaType),
 }
 
 /// The popovers the library opens; one at a time.
@@ -51,6 +62,14 @@ pub enum SidebarTags {
     MostUsed,
 }
 
+/// Where the entry list is scrolled to, in px.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Scroll {
+    pub offset: f32,
+    pub viewport: f32,
+    pub content: f32,
+}
+
 /// The tag picker dialog, opened from the Filter popover's "All tags…".
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TagPicker {
@@ -61,13 +80,13 @@ pub struct TagPicker {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct State {
-    /// The type shown; `None` is everything.
-    pub media: Option<MediaType>,
+    /// The types shown, in type order; none is All.
+    pub types: BTreeSet<MediaType>,
     pub status: Option<EntryStatus>,
     pub filter: Filter,
     pub sort: Sort,
     pub query: String,
-    pub views: HashMap<Option<MediaType>, View>,
+    pub views: HashMap<ViewKey, View>,
     /// The selected entry's id.
     pub selected: Option<String>,
     pub popup: Option<Popup>,
@@ -75,11 +94,21 @@ pub struct State {
     pub all_tags_query: String,
     pub pins: Vec<String>,
     pub sidebar_tags: SidebarTags,
+    /// Checkboxes on the sidebar's types (a Settings choice in 1f).
+    pub type_boxes: bool,
+    pub scroll: Scroll,
+    /// Where each type group starts in the list, from its top.
+    pub group_tops: Vec<f32>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// A click on a sidebar type: shows only that type, or All.
     ShowType(Option<MediaType>),
+    /// Ctrl+click, a type checkbox or a Filter chip: adds or removes it.
+    ToggleType(MediaType),
+    /// An overview list's "See all".
+    SeeAll(Section),
     /// A sidebar tag: filters by it alone, or clears it when it is the only
     /// tag picked.
     PickTag(String),
@@ -96,6 +125,8 @@ pub enum Message {
     PickRating(u8),
     ClearRating,
     ToggleSeasonal,
+    ClearNotReleased,
+    ClearRecent,
     /// The Filter popover's Reset: the filter, not the status.
     ResetFilter,
     /// Clear all: the filter and the status.
@@ -112,6 +143,10 @@ pub enum Message {
     UnpinAll,
     /// Opens the Add entry dialog, built in 1c.
     Add,
+    Scrolled(Scroll),
+    GroupsMeasured(Vec<f32>),
+    /// A click on the type rail: the app scrolls the list there.
+    JumpToGroup(usize),
 }
 
 impl Message {
@@ -120,7 +155,10 @@ impl Message {
     pub fn shows_library(&self) -> bool {
         matches!(
             self,
-            Message::ShowType(_) | Message::PickTag(_) | Message::PickFromAllTags(_)
+            Message::ShowType(_)
+                | Message::ToggleType(_)
+                | Message::PickTag(_)
+                | Message::PickFromAllTags(_)
         )
     }
 }
@@ -129,10 +167,35 @@ impl State {
     pub fn update(&mut self, message: Message) {
         match message {
             Message::ShowType(media) => {
-                self.media = media;
+                self.types = media.into_iter().collect();
                 self.status = None;
                 self.selected = None;
                 self.popup = None;
+            }
+            Message::ToggleType(media) => {
+                if !self.types.remove(&media) {
+                    self.types.insert(media);
+                }
+                self.selected = None;
+            }
+            Message::SeeAll(section) => {
+                self.types.clear();
+                self.selected = None;
+                match section {
+                    Section::InProgress => self.status = Some(EntryStatus::InProgress),
+                    Section::ComingSoon => {
+                        self.filter.not_released = true;
+                        self.sort = Sort::YearOldest;
+                    }
+                    Section::RecentlyAdded => {
+                        self.filter.recent = true;
+                        self.sort = Sort::NewestAdded;
+                    }
+                    Section::TopRated => {
+                        self.filter.rating = Some((browse::TOP_RATED, 10));
+                        self.sort = Sort::RatingHighest;
+                    }
+                }
             }
             Message::PickTag(tag) => {
                 self.filter.tags = if self.filter.tags == [tag.as_str()] {
@@ -148,7 +211,7 @@ impl State {
             }
             Message::Search(query) => self.query = query,
             Message::SetView(view) => {
-                self.views.insert(self.media, view);
+                self.views.insert(self.view_key(), view);
             }
             Message::Select(id) => {
                 self.selected = if self.selected.as_deref() == Some(id.as_str()) {
@@ -174,10 +237,16 @@ impl State {
             Message::PickRating(n) => self.filter.pick_rating(n),
             Message::ClearRating => self.filter.rating = None,
             Message::ToggleSeasonal => self.filter.include_seasonal = !self.filter.include_seasonal,
-            Message::ResetFilter => self.filter = Filter::default(),
+            Message::ClearNotReleased => self.filter.not_released = false,
+            Message::ClearRecent => self.filter.recent = false,
+            Message::ResetFilter => {
+                self.filter = Filter::default();
+                self.clear_several_types();
+            }
             Message::ClearAll => {
                 self.filter = Filter::default();
                 self.status = None;
+                self.clear_several_types();
             }
             Message::OpenPicker => {
                 self.popup = None;
@@ -212,7 +281,9 @@ impl State {
                 None => {}
             },
             Message::UnpinAll => self.pins.clear(),
-            Message::Add => {}
+            Message::Add | Message::JumpToGroup(_) => {}
+            Message::Scrolled(scroll) => self.scroll = scroll,
+            Message::GroupsMeasured(tops) => self.group_tops = tops,
         }
     }
 
@@ -230,12 +301,62 @@ impl State {
         self.picker = None;
     }
 
-    pub fn title(&self) -> &'static str {
-        self.media.map_or("Everything", MediaType::label)
+    /// Several picked types count as a filter, so Reset and Clear all drop
+    /// them; one type is where the library is, so they keep it.
+    fn clear_several_types(&mut self) {
+        if self.types.len() > 1 {
+            self.types.clear();
+        }
+    }
+
+    /// The one type shown, when exactly one is.
+    pub fn single(&self) -> Option<MediaType> {
+        match self.types.len() {
+            1 => self.types.first().copied(),
+            _ => None,
+        }
+    }
+
+    /// All with nothing narrowing it shows the overview, not a list.
+    pub fn is_overview(&self) -> bool {
+        self.types.is_empty()
+            && self.filter.is_empty()
+            && self.status.is_none()
+            && self.query.trim().is_empty()
+    }
+
+    /// "Library", "Movies" or "Movies + Shows".
+    pub fn title(&self) -> String {
+        if self.types.is_empty() {
+            return "Library".into();
+        }
+        let names: Vec<&str> = self.types.iter().map(|m| m.label()).collect();
+        names.join(" + ")
+    }
+
+    fn view_key(&self) -> ViewKey {
+        match (self.types.len(), self.single()) {
+            (0, _) => ViewKey::All,
+            (_, Some(media)) => ViewKey::Type(media),
+            _ => ViewKey::Several,
+        }
     }
 
     pub fn view_mode(&self) -> View {
-        self.views.get(&self.media).copied().unwrap_or_default()
+        self.views
+            .get(&self.view_key())
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// The filter's count with several picked types, for the badge.
+    pub fn filter_count(&self) -> usize {
+        self.filter.count()
+            + if self.types.len() > 1 {
+                self.types.len()
+            } else {
+                0
+            }
     }
 
     /// The tags the sidebar lists, with their counts.
@@ -258,7 +379,7 @@ impl State {
 
     /// The entries the library shows: `base` is the type, the filter and
     /// the search; `shown` adds the status and the sort.
-    pub fn listing<'a>(&self, library: &'a Library) -> Listing<'a> {
+    pub fn listing<'a>(&self, library: &'a Library, today: Date) -> Listing<'a> {
         // A search looks at seasonal-only entries too, as on the phone.
         let filter = if self.query.trim().is_empty() {
             self.filter.clone()
@@ -268,12 +389,12 @@ impl State {
                 ..self.filter.clone()
             }
         };
-        let of_type = |e: &&Entry| self.media.is_none_or(|m| e.media == m);
+        let of_type = |e: &&Entry| self.types.is_empty() || self.types.contains(&e.media);
         let base: Vec<&Entry> = library
             .entries
             .iter()
             .filter(of_type)
-            .filter(|e| filter.matches(e) && browse::matches_search(e, &self.query))
+            .filter(|e| filter.matches(e, today) && browse::matches_search(e, &self.query))
             .collect();
         let mut shown: Vec<&Entry> = base
             .iter()
@@ -301,14 +422,22 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
     let tokens = app.tokens();
     let state = &app.library;
     let library = app.repo.library();
-    let listing = state.listing(library);
+    let listing = state.listing(library, app.today);
 
-    let content = column![
-        toolbar::toolbar(app, &listing),
-        toolbar::chips(app, &listing),
-        entries::body(app, &listing),
-        footer(&tokens),
-    ];
+    let content = if state.is_overview() {
+        column![
+            toolbar::toolbar(app, &listing),
+            overview::body(app),
+            footer(&tokens)
+        ]
+    } else {
+        column![
+            toolbar::toolbar(app, &listing),
+            toolbar::chips(app, &listing),
+            entries::body(app, &listing),
+            footer(&tokens),
+        ]
+    };
     let picker = state
         .picker
         .as_ref()
@@ -335,6 +464,10 @@ mod tests {
 
     fn library() -> Library {
         codec::decode(fixtures::LIBRARY_JSON).unwrap()
+    }
+
+    fn today() -> Date {
+        Date::parse("2026-10-19").unwrap()
     }
 
     #[test]
@@ -372,15 +505,13 @@ mod tests {
     #[test]
     fn the_listing_narrows_by_type_status_filter_and_search() {
         let library = library();
-        let mut state = State {
-            media: Some(MediaType::Movies),
-            ..State::default()
-        };
-        let all = state.listing(&library);
+        let mut state = State::default();
+        state.update(Message::ShowType(Some(MediaType::Movies)));
+        let all = state.listing(&library, today());
         assert_eq!(all.shown.len(), library.count(Some(MediaType::Movies)));
 
         state.status = Some(EntryStatus::Done);
-        let done = state.listing(&library);
+        let done = state.listing(&library, today());
         assert!(done.shown.iter().all(|e| e.status == EntryStatus::Done));
         assert_eq!(
             done.base.len(),
@@ -389,7 +520,7 @@ mod tests {
         );
 
         state.query = "mummy".into();
-        let found = state.listing(&library);
+        let found = state.listing(&library, today());
         assert_eq!(found.shown.len(), 1);
     }
 
@@ -400,7 +531,7 @@ mod tests {
         let mut state = State::default();
         assert!(
             !state
-                .listing(&library)
+                .listing(&library, today())
                 .shown
                 .iter()
                 .any(|e| e.id == seasonal.id)
@@ -408,7 +539,7 @@ mod tests {
         state.query = seasonal.title.clone();
         assert!(
             state
-                .listing(&library)
+                .listing(&library, today())
                 .shown
                 .iter()
                 .any(|e| e.id == seasonal.id)
@@ -435,5 +566,49 @@ mod tests {
         assert_eq!(state.popup, Some(Popup::Sort));
         assert!(state.dismiss_top());
         assert!(!state.dismiss_top());
+    }
+
+    #[test]
+    fn ctrl_click_builds_several_types_and_clear_all_drops_them() {
+        let mut state = State::default();
+        state.update(Message::ShowType(Some(MediaType::Movies)));
+        state.update(Message::ToggleType(MediaType::Shows));
+        assert_eq!(state.title(), "Movies + Shows");
+        assert_eq!(state.filter_count(), 2);
+        state.update(Message::ClearAll);
+        assert!(state.types.is_empty());
+
+        state.update(Message::ShowType(Some(MediaType::Books)));
+        state.update(Message::ClearAll);
+        assert_eq!(state.single(), Some(MediaType::Books), "one type is kept");
+    }
+
+    #[test]
+    fn all_is_an_overview_until_something_narrows_it() {
+        let mut state = State::default();
+        assert!(state.is_overview());
+        state.update(Message::Search("dune".into()));
+        assert!(!state.is_overview());
+        state.update(Message::Search(String::new()));
+        state.update(Message::SeeAll(Section::TopRated));
+        assert!(!state.is_overview());
+        assert_eq!(
+            (state.filter.rating, state.sort),
+            (Some((9, 10)), Sort::RatingHighest)
+        );
+    }
+
+    #[test]
+    fn the_overview_and_several_types_remember_their_own_view() {
+        let mut state = State::default();
+        state.update(Message::SetView(View::Text));
+        state.update(Message::ShowType(Some(MediaType::Movies)));
+        state.update(Message::ToggleType(MediaType::Shows));
+        state.update(Message::SetView(View::List));
+        state.update(Message::ShowType(None));
+        assert_eq!(state.view_mode(), View::Text);
+        state.update(Message::ToggleType(MediaType::Movies));
+        state.update(Message::ToggleType(MediaType::Shows));
+        assert_eq!(state.view_mode(), View::List);
     }
 }

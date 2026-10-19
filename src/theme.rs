@@ -121,6 +121,8 @@ pub fn cover_color(id: &str) -> Color {
 /// The status badge on a grid cover: its dark disc and the green mark.
 pub const BADGE: Color = hex(0x2A2D31);
 pub const BADGE_MARK: Color = hex(0x5EE08A);
+/// The DNF badge's mark.
+pub const BADGE_DNF: Color = hex(0xA3A8AE);
 
 /// The sync row's dot: in sync, and failing (the token expired).
 pub const SYNC_OK: Color = hex(0xA6E3A1);
@@ -157,6 +159,8 @@ pub struct Tokens {
     pub scrim: Color,
     /// Under popovers and dialogs.
     pub shadow: Color,
+    /// The outline that marks the view on the grouped list's type rail.
+    pub rail_thumb: Color,
     pub accent: Color,
     /// Accent text, icons and outlines.
     pub ink: Color,
@@ -206,6 +210,10 @@ impl Tokens {
             shadow: pick(
                 Color::from_rgba8(20, 22, 28, 0.18),
                 Color::from_rgba8(0, 0, 0, 0.6),
+            ),
+            rail_thumb: pick(
+                Color::from_rgba8(20, 22, 28, 0.75),
+                Color::from_rgba(1.0, 1.0, 1.0, 0.9),
             ),
             accent: accent.fill,
             ink: pick(accent.ink, accent.fill),

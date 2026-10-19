@@ -70,12 +70,16 @@ pub fn entry_card<'a, Message: Clone + 'a>(
             let tint = look.cover;
             move |_| container::background(tint).border(Border::default().rounded(8))
         });
+    // A long title is cut off before the year.
     let caption = row![
-        text(look.title)
-            .size(13.5)
-            .font(font::SEMIBOLD)
-            .width(Fill)
-            .wrapping(text::Wrapping::None),
+        container(
+            text(look.title)
+                .size(13.5)
+                .font(font::SEMIBOLD)
+                .wrapping(text::Wrapping::None)
+        )
+        .width(Fill)
+        .clip(true),
         mono(look.year, 12.0, tokens.sub),
     ]
     .spacing(8)
@@ -110,11 +114,12 @@ pub fn entry_card<'a, Message: Clone + 'a>(
 }
 
 /// The disc in a cover's corner: a check for done, a half-filled ring for
-/// in progress, nothing otherwise.
+/// in progress, a slashed circle for DNF, nothing for want.
 fn status_badge<'a, Message: 'a>(status: EntryStatus) -> Option<Element<'a, Message>> {
     const HALF_RING: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="none" stroke="#5EE08A" stroke-width="2"/><path d="M6 1a5 5 0 0 0 0 10z" fill="#5EE08A"/></svg>"##;
     let mark: Element<'a, Message> = match status {
         EntryStatus::Done => icon(Icon::Check, 14.0, theme::BADGE_MARK),
+        EntryStatus::Dnf => icon(Icon::Dnf, 14.0, theme::BADGE_DNF),
         EntryStatus::InProgress => Svg::new(svg::Handle::from_memory(HALF_RING.as_bytes()))
             .width(10)
             .height(10)
