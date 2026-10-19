@@ -49,6 +49,17 @@ impl Date {
         }
     }
 
+    /// The day of the week, Monday 0 to Sunday 6.
+    pub fn weekday(self) -> usize {
+        // 1970-01-01 was a Thursday.
+        (self.days() + 3).rem_euclid(7) as usize
+    }
+
+    /// The date `days` later, or earlier when negative.
+    pub fn add_days(self, days: i64) -> Date {
+        Date::from_days(self.days() + days)
+    }
+
     /// Days from this date to `later`; negative when `later` is earlier.
     pub fn days_until(self, later: Date) -> i64 {
         later.days() - self.days()
@@ -296,5 +307,7 @@ mod tests {
         assert_eq!(date("2026-10-19").days_until(date("2026-10-31")), 12);
         assert_eq!(date("2026-03-31").month_before(), date("2026-02-28"));
         assert_eq!(date("2026-01-15").month_before(), date("2025-12-15"));
+        assert_eq!(date("2026-10-19").weekday(), 0, "a Monday");
+        assert_eq!(date("2026-10-19").add_days(-20), date("2026-09-29"));
     }
 }

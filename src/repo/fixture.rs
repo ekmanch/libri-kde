@@ -218,4 +218,36 @@ mod tests {
             [("Rooster", 8), ("Down in a Hole", 9), ("Would?", 10)]
         );
     }
+
+    #[test]
+    fn plans_are_added_updated_and_deleted_and_a_tick_starts_one() {
+        let mut repo = repo();
+        let mut plan = repo.library().plan("christmas-2026").unwrap().clone();
+        assert!(!plan.started);
+        let library = repo
+            .apply(Operation::SetPlanItemDone {
+                plan: plan.id.clone(),
+                entry: plan.items[0].entry.clone(),
+                done: true,
+            })
+            .unwrap();
+        assert!(library.plan("christmas-2026").unwrap().started);
+
+        plan.id = "christmas-2027".into();
+        plan.year = Some(2027);
+        repo.apply(Operation::AddPlan(plan.clone())).unwrap();
+        assert_eq!(
+            repo.apply(Operation::AddPlan(plan.clone())),
+            Err(RepoError::DuplicatePlan(plan.id.clone()))
+        );
+        plan.name = "Xmas".into();
+        let library = repo.apply(Operation::UpdatePlan(plan.clone())).unwrap();
+        assert_eq!(library.plan("christmas-2027").unwrap().name, "Xmas");
+        let library = repo.apply(Operation::DeletePlan { id: plan.id }).unwrap();
+        assert!(library.plan("christmas-2027").is_none());
+        assert!(
+            library.entry("movies/die-hard-1988").is_some(),
+            "entries stay"
+        );
+    }
 }

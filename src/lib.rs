@@ -7,6 +7,7 @@ pub mod fixtures;
 pub mod lookup;
 pub mod model;
 pub mod music;
+pub mod plans;
 pub mod repo;
 pub mod screens;
 pub mod theme;

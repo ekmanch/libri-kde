@@ -382,8 +382,8 @@ impl<'a> Overview<'a> {
     }
 }
 
-/// The plan the overview's card shows: the first started plan with
-/// something left to do.
+/// The plan the overview's card shows: the first active one (started, or
+/// its first date has come, and not finished).
 pub struct ActivePlan<'a> {
     pub plan: &'a Plan,
     pub done: usize,
@@ -400,7 +400,7 @@ impl<'a> ActivePlan<'a> {
         let plan = library
             .plans
             .iter()
-            .find(|p| p.started && p.items.iter().any(|i| !i.done))?;
+            .find(|p| crate::plans::plan_state(p, today) == crate::plans::PlanState::Active)?;
         let mut open: Vec<_> = plan.items.iter().filter(|i| !i.done).collect();
         // A stable sort keeps plan order among undated items.
         open.sort_by_key(|i| i.when.map_or((1, None), |w| (0, Some(w.from))));

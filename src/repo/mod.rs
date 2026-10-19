@@ -44,6 +44,13 @@ pub enum Operation {
         entry: String,
         done: bool,
     },
+    AddPlan(Plan),
+    /// Replaces the plan with the same id, in place.
+    UpdatePlan(Plan),
+    /// Removes the plan; its entries stay in the library.
+    DeletePlan {
+        id: String,
+    },
     /// Files a new tag under a category. Only the entry form creates tags,
     /// right before the entry that uses it is saved.
     CreateTag {
@@ -102,6 +109,26 @@ impl Operation {
                 let plan = found.ok_or(RepoError::MissingPlan(plan))?;
                 let found = plan.items.iter_mut().find(|item| item.entry == entry);
                 found.ok_or(RepoError::MissingEntry(entry))?.done = done;
+                // Ticking an item also turns Started on, as on the phone.
+                if done {
+                    plan.started = true;
+                }
+            }
+            Operation::AddPlan(plan) => {
+                if library.plan(&plan.id).is_some() {
+                    return Err(RepoError::DuplicatePlan(plan.id));
+                }
+                library.plans.push(plan);
+            }
+            Operation::UpdatePlan(plan) => {
+                let id = plan.id.clone();
+                *plan_mut(library, &id)? = plan;
+                library.remove_unused_tags();
+            }
+            Operation::DeletePlan { id } => {
+                plan_mut(library, &id)?;
+                library.plans.retain(|plan| plan.id != id);
+                library.remove_unused_tags();
             }
             Operation::CreateTag { name, category } => {
                 if library.all_tags().any(|t| t == name) {
@@ -171,6 +198,7 @@ pub enum RepoError {
     MissingPlan(String),
     DuplicateEntry(String),
     DuplicateTag(String),
+    DuplicatePlan(String),
     InvalidRating(u8),
 }
 
@@ -181,6 +209,7 @@ impl fmt::Display for RepoError {
             RepoError::MissingPlan(id) => write!(f, "no plan {id}"),
             RepoError::DuplicateEntry(id) => write!(f, "an entry {id} already exists"),
             RepoError::DuplicateTag(name) => write!(f, "a tag #{name} already exists"),
+            RepoError::DuplicatePlan(id) => write!(f, "a plan {id} already exists"),
             RepoError::InvalidRating(rating) => write!(f, "rating {rating} is not 1 to 10"),
         }
     }
