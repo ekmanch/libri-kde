@@ -6,6 +6,7 @@ mod date;
 mod entry;
 mod plan;
 mod tag;
+pub mod text;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -81,6 +82,29 @@ impl Library {
         counts
     }
 
+    /// Drops tags no entry and no plan uses, and categories left empty, as
+    /// the phone does after a change.
+    pub fn remove_unused_tags(&mut self) {
+        let used: BTreeSet<String> = self.used_tags().into_iter().map(str::to_owned).collect();
+        for names in self.tags.values_mut() {
+            names.retain(|name| used.contains(name));
+        }
+        self.tags.retain(|_, names| !names.is_empty());
+    }
+
+    /// The category a tag is filed under.
+    pub fn category_of(&self, tag: &str) -> Option<TagCategory> {
+        self.tags
+            .iter()
+            .find(|(_, names)| names.iter().any(|n| n == tag))
+            .map(|(&category, _)| category)
+    }
+
+    /// Every tag name in the map, in any category.
+    pub fn all_tags(&self) -> impl Iterator<Item = &str> {
+        self.tags.values().flatten().map(String::as_str)
+    }
+
     /// Tags used by at least one entry or one plan.
     pub fn used_tags(&self) -> BTreeSet<&str> {
         let entry_tags = self.entries.iter().flat_map(|entry| &entry.tags);
@@ -111,6 +135,33 @@ mod tests {
             library.plan("halloween-2025").unwrap().title(),
             "Halloween 2025"
         );
+    }
+
+    #[test]
+    fn type_keys_are_the_json_names() {
+        for media in MediaType::ALL {
+            assert_eq!(
+                serde_json::to_string(&media).unwrap(),
+                format!("\"{}\"", media.key())
+            );
+        }
+    }
+
+    #[test]
+    fn unused_tags_go_but_plan_tags_stay() {
+        let mut library = codec::decode(fixtures::LIBRARY_JSON).unwrap();
+        library
+            .entries
+            .retain(|e| !e.tags.iter().any(|t| t == "christmas"));
+        library.remove_unused_tags();
+        assert!(
+            library.all_tags().any(|t| t == "christmas"),
+            "a plan still uses it"
+        );
+        library.entries.clear();
+        library.plans.clear();
+        library.remove_unused_tags();
+        assert!(library.tags.is_empty());
     }
 
     #[test]

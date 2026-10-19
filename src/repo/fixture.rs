@@ -35,7 +35,7 @@ impl LibraryRepository for FixtureLibraryRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::EntryStatus;
+    use crate::model::{EntryStatus, PlanItem, TagCategory};
 
     const MUMMY: &str = "movies/the-mummy-1999";
 
@@ -132,6 +132,67 @@ mod tests {
                 .item_for(entry)
                 .unwrap()
                 .done
+        );
+    }
+
+    #[test]
+    fn plan_items_are_added_replaced_and_removed() {
+        let mut repo = repo();
+        let item = PlanItem {
+            entry: MUMMY.into(),
+            done: false,
+            repeat: true,
+            note: String::new(),
+            when: None,
+        };
+        let plan = || "christmas-2026".to_owned();
+        repo.apply(Operation::SetPlanItem {
+            plan: plan(),
+            item: item.clone(),
+        })
+        .unwrap();
+        let library = repo
+            .apply(Operation::SetPlanItem {
+                plan: plan(),
+                item: PlanItem {
+                    note: "Again".into(),
+                    ..item
+                },
+            })
+            .unwrap();
+        let christmas = library.plan("christmas-2026").unwrap();
+        assert_eq!(
+            christmas.items.iter().filter(|i| i.entry == MUMMY).count(),
+            1
+        );
+        assert_eq!(christmas.item_for(MUMMY).unwrap().note, "Again");
+        let library = repo
+            .apply(Operation::RemovePlanItem {
+                plan: plan(),
+                entry: MUMMY.into(),
+            })
+            .unwrap();
+        assert!(
+            library
+                .plan("christmas-2026")
+                .unwrap()
+                .item_for(MUMMY)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_new_tag_is_filed_once() {
+        let mut repo = repo();
+        let create = |name: &str| Operation::CreateTag {
+            name: name.into(),
+            category: TagCategory::Mood,
+        };
+        let library = repo.apply(create("eerie")).unwrap();
+        assert_eq!(library.category_of("eerie"), Some(TagCategory::Mood));
+        assert_eq!(
+            repo.apply(create("horror")),
+            Err(RepoError::DuplicateTag("horror".into()))
         );
     }
 }

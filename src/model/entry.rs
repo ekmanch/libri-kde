@@ -24,6 +24,18 @@ impl MediaType {
         MediaType::Anime,
     ];
 
+    /// The type's name in `library.json` and in entry ids: "movies".
+    pub fn key(self) -> &'static str {
+        match self {
+            MediaType::Movies => "movies",
+            MediaType::Shows => "shows",
+            MediaType::Books => "books",
+            MediaType::Games => "games",
+            MediaType::Music => "music",
+            MediaType::Anime => "anime",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             MediaType::Movies => "Movies",
@@ -64,7 +76,7 @@ impl EntryStatus {
 }
 
 /// Formats a book is owned in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BookFormat {
     Audiobook,

@@ -66,6 +66,16 @@ impl TagCategory {
         }
     }
 
+    /// The category a new tag starts on: game genres for a game, music
+    /// genres for music, genres otherwise.
+    pub fn default_for(media: MediaType) -> TagCategory {
+        match media {
+            MediaType::Games => TagCategory::GameGenres,
+            MediaType::Music => TagCategory::MusicGenres,
+            _ => TagCategory::Genres,
+        }
+    }
+
     /// Whether the tag picker lists this category for an entry of `media`
     /// before anything is typed. A search finds every tag.
     pub fn offered_for(self, media: MediaType) -> bool {

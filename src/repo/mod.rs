@@ -8,7 +8,7 @@ use std::fmt;
 
 pub use fixture::FixtureLibraryRepository;
 
-use crate::model::{Entry, EntryStatus, Library};
+use crate::model::{Entry, EntryStatus, Library, Plan, PlanItem, TagCategory};
 
 pub trait LibraryRepository {
     /// The current library.
@@ -44,6 +44,21 @@ pub enum Operation {
         entry: String,
         done: bool,
     },
+    /// Files a new tag under a category. Only the entry form creates tags,
+    /// right before the entry that uses it is saved.
+    CreateTag {
+        name: String,
+        category: TagCategory,
+    },
+    /// Adds the item to the plan, or replaces the entry's item there.
+    SetPlanItem {
+        plan: String,
+        item: PlanItem,
+    },
+    RemovePlanItem {
+        plan: String,
+        entry: String,
+    },
 }
 
 impl Operation {
@@ -58,6 +73,7 @@ impl Operation {
             Operation::UpdateEntry(entry) => {
                 let id = entry.id.clone();
                 *entry_mut(library, &id)? = entry;
+                library.remove_unused_tags();
             }
             Operation::DeleteEntry { id } => {
                 entry_mut(library, &id)?;
@@ -65,6 +81,7 @@ impl Operation {
                 for plan in &mut library.plans {
                     plan.items.retain(|item| item.entry != id);
                 }
+                library.remove_unused_tags();
             }
             Operation::SetStatus { id, status } => entry_mut(library, &id)?.status = status,
             Operation::SetRating { id, rating } => {
@@ -79,9 +96,35 @@ impl Operation {
                 let found = plan.items.iter_mut().find(|item| item.entry == entry);
                 found.ok_or(RepoError::MissingEntry(entry))?.done = done;
             }
+            Operation::CreateTag { name, category } => {
+                if library.all_tags().any(|t| t == name) {
+                    return Err(RepoError::DuplicateTag(name));
+                }
+                library.tags.entry(category).or_default().push(name);
+            }
+            Operation::SetPlanItem { plan, item } => {
+                let plan = plan_mut(library, &plan)?;
+                match plan.items.iter_mut().find(|i| i.entry == item.entry) {
+                    Some(existing) => *existing = item,
+                    None => plan.items.push(item),
+                }
+            }
+            Operation::RemovePlanItem { plan, entry } => {
+                let plan = plan_mut(library, &plan)?;
+                let before = plan.items.len();
+                plan.items.retain(|item| item.entry != entry);
+                if plan.items.len() == before {
+                    return Err(RepoError::MissingEntry(entry));
+                }
+            }
         }
         Ok(())
     }
+}
+
+fn plan_mut<'a>(library: &'a mut Library, id: &str) -> Result<&'a mut Plan, RepoError> {
+    let found = library.plans.iter_mut().find(|plan| plan.id == id);
+    found.ok_or_else(|| RepoError::MissingPlan(id.to_owned()))
 }
 
 fn entry_mut<'a>(library: &'a mut Library, id: &str) -> Result<&'a mut Entry, RepoError> {
@@ -94,6 +137,7 @@ pub enum RepoError {
     MissingEntry(String),
     MissingPlan(String),
     DuplicateEntry(String),
+    DuplicateTag(String),
     InvalidRating(u8),
 }
 
@@ -103,6 +147,7 @@ impl fmt::Display for RepoError {
             RepoError::MissingEntry(id) => write!(f, "no entry {id}"),
             RepoError::MissingPlan(id) => write!(f, "no plan {id}"),
             RepoError::DuplicateEntry(id) => write!(f, "an entry {id} already exists"),
+            RepoError::DuplicateTag(name) => write!(f, "a tag #{name} already exists"),
             RepoError::InvalidRating(rating) => write!(f, "rating {rating} is not 1 to 10"),
         }
     }
