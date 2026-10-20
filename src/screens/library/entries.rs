@@ -9,7 +9,7 @@ use crate::app::{App, Message as AppMessage};
 use crate::browse;
 use crate::model::{Entry, MediaType};
 use crate::theme::{self, Tokens, font};
-use crate::ui::{self, EntryLook, Icon};
+use crate::ui::{self, EntryLook, FocusExt, Icon};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Library(message)
@@ -31,59 +31,54 @@ pub fn body<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> 
         return super::music::body(app, listing, view, &tokens);
     }
 
-    // One type is one block; All or several types get one group per type,
-    // in type order, each in the current sort.
-    let groups: Vec<(Option<MediaType>, Vec<&Entry>)> = match state.single() {
-        Some(_) => vec![(None, listing.shown.clone())],
-        None => MediaType::ALL
-            .into_iter()
-            .map(|media| {
-                let entries = listing
-                    .shown
-                    .iter()
-                    .copied()
-                    .filter(|e| e.media == media)
-                    .collect();
-                (Some(media), entries)
-            })
-            .filter(|(_, entries): &(_, Vec<&Entry>)| !entries.is_empty())
-            .collect(),
-    };
-    let children = groups.iter().map(|(media, entries)| {
-        let mut group = Column::new();
-        if let Some(media) = media {
-            group = group.push(group_header(*media, entries.len(), &tokens));
-        }
-        group.push(block(app, entries, view, &tokens)).into()
-    });
-    let list = ui::Groups::new(children, |tops| msg(Message::GroupsMeasured(tops)));
-    let grouped = groups.len() > 1;
-    let scrollbar = if grouped {
-        // The type-colored rail replaces it.
-        scrollable::Scrollbar::hidden()
+    // One type is one block, or the phone's long-list sections with a jump
+    // rail; All or several types get one group per type, in type order,
+    // each in the current sort.
+    let sections = (state.single().is_some() && state.is_long(listing.shown.len(), view))
+        .then(|| browse::sections(state.sort, &listing.shown, app.today))
+        .filter(|sections| sections.len() >= 2);
+    let list: Element<'a, AppMessage> = if let Some(sections) = sections {
+        let labels: Vec<String> = sections.iter().map(|s| s.short.clone()).collect();
+        let children = sections.iter().map(|section| {
+            column![
+                section_header(&section.label, section.entries.len(), &tokens),
+                block(app, &section.entries, view, &tokens)
+            ]
+            .into()
+        });
+        sectioned_list(app, children, &labels, &tokens)
     } else {
-        ui::scrollbar()
-    };
-    let scroll = ui::scroll(container(list).padding(Padding::new(24.0).top(4)))
-        .direction(scrollable::Direction::Vertical(scrollbar))
-        .id(super::LIST_ID)
-        .on_scroll(|viewport| {
-            msg(Message::Scrolled(super::Scroll {
-                offset: viewport.absolute_offset().y,
-                viewport: viewport.bounds().height,
-                content: viewport.content_bounds().height,
-            }))
-        })
-        .height(Fill);
-
-    let mut layers = stack![scroll];
-    if grouped {
-        if let Some(pinned) = pinned_header(state, &groups, &tokens) {
-            layers = layers.push(pinned);
+        let groups: Vec<(Option<MediaType>, Vec<&Entry>)> = match state.single() {
+            Some(_) => vec![(None, listing.shown.clone())],
+            None => MediaType::ALL
+                .into_iter()
+                .map(|media| {
+                    let entries = listing
+                        .shown
+                        .iter()
+                        .copied()
+                        .filter(|e| e.media == media)
+                        .collect();
+                    (Some(media), entries)
+                })
+                .filter(|(_, entries): &(_, Vec<&Entry>)| !entries.is_empty())
+                .collect(),
+        };
+        let children = groups.iter().map(|(media, entries)| {
+            let mut group = Column::new();
+            if let Some(media) = media {
+                group = group.push(group_header(*media, entries.len(), &tokens));
+            }
+            group.push(block(app, entries, view, &tokens)).into()
+        });
+        // The type-colored rail replaces the scrollbar.
+        let mut overlays = Vec::new();
+        if groups.len() > 1 {
+            overlays.extend(pinned_header(state, &groups, &tokens));
+            overlays.push(rail(state, &groups, &tokens));
         }
-        layers = layers.push(rail(state, &groups, &tokens));
-    }
-    let list: Element<'a, AppMessage> = layers.into();
+        scrolling(children, overlays, 24.0)
+    };
     if view == View::Text {
         // The table header stays above the scrolling rows.
         let creator = browse::creator_label(state.single());
@@ -95,6 +90,110 @@ pub fn body<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> 
     } else {
         list
     }
+}
+
+/// A scrolling list of `children`, measured by `Groups` for the rails and
+/// the pinned header, with `overlays` laid over it. The scrollbar gives
+/// way to a rail when there is one.
+fn scrolling<'a>(
+    children: impl IntoIterator<Item = Element<'a, AppMessage>>,
+    overlays: Vec<Element<'a, AppMessage>>,
+    right: f32,
+) -> Element<'a, AppMessage> {
+    let list = ui::Groups::new(children, |measure| msg(Message::GroupsMeasured(measure)));
+    let scrollbar = if overlays.is_empty() {
+        ui::scrollbar()
+    } else {
+        scrollable::Scrollbar::hidden()
+    };
+    let scroll = ui::scroll(container(list).padding(Padding::new(24.0).top(4).right(right)))
+        .direction(scrollable::Direction::Vertical(scrollbar))
+        .id(super::LIST_ID)
+        .on_scroll(|viewport| {
+            msg(Message::Scrolled(super::Scroll {
+                offset: viewport.absolute_offset().y,
+                viewport: viewport.bounds().height,
+                content: viewport.content_bounds().height,
+            }))
+        })
+        .height(Fill);
+    let mut layers = stack![scroll];
+    for overlay in overlays {
+        layers = layers.push(overlay);
+    }
+    layers.into()
+}
+
+/// A long list in sections: `children` are the sections, each with its
+/// header, and `labels` the rail's short labels, one per section.
+pub(super) fn sectioned_list<'a>(
+    app: &'a App,
+    children: impl IntoIterator<Item = Element<'a, AppMessage>>,
+    labels: &[String],
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    // The rail's labels need room beside the rows.
+    scrolling(
+        children,
+        vec![section_rail(&app.library, labels, tokens)],
+        64.0,
+    )
+}
+
+/// A long-list section's heading: the decade, letter or rating in gray
+/// caps, and the count.
+pub(super) fn section_header<'a>(
+    label: &str,
+    count: usize,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    container(
+        row![
+            text(label.to_uppercase())
+                .size(theme::size::SECTION)
+                .font(font::BOLD)
+                .color(tokens.sub),
+            ui::mono(count.to_string(), 12.0, tokens.sub),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+    )
+    .padding(Padding::new(0.0).top(14).bottom(8))
+    .into()
+}
+
+/// The jump rail of a long list: one short label per section down the
+/// right edge, the one being scrolled through marked; a click jumps there.
+fn section_rail<'a>(
+    state: &super::State,
+    labels: &[String],
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let current = current_group(state);
+    let items = labels.iter().enumerate().map(|(index, label)| {
+        let on = current == Some(index);
+        let (color, weight) = if on {
+            (tokens.text, font::BOLD)
+        } else {
+            (tokens.sub, font::SEMIBOLD)
+        };
+        button(text(label.clone()).size(10.5).font(weight).color(color))
+            .padding([1, 5])
+            .on_press(msg(Message::JumpToGroup(index)))
+            .style(ui::row_style(tokens, on, 5.0))
+            .focusable(5.0, tokens)
+    });
+    container(
+        Column::with_children(items)
+            .spacing(1)
+            .align_x(iced::Center),
+    )
+    .width(Fill)
+    .height(Fill)
+    .align_right(Fill)
+    .align_y(iced::Center)
+    .padding(Padding::new(0.0).right(6))
+    .into()
 }
 
 /// A type group's heading: the type in its color, caps, and the count.
@@ -381,13 +480,14 @@ mod tests {
             let _ = ui.simulate([iced::Event::Window(redraw)]);
             ui.into_messages().collect()
         };
-        let tops = messages.into_iter().find_map(|m| match m {
-            AppMessage::Library(Message::GroupsMeasured(tops)) => Some(tops),
+        let measure = messages.into_iter().find_map(|m| match m {
+            AppMessage::Library(Message::GroupsMeasured(measure)) => Some(measure),
             _ => None,
         });
-        let tops = tops.expect("the list measures its groups");
-        assert_eq!(tops.len(), 2);
-        assert!(tops[0] == 0.0 && tops[1] > 0.0);
+        let measure = measure.expect("the list measures its groups");
+        assert_eq!(measure.tops.len(), 2);
+        assert!(measure.tops[0] == 0.0 && measure.tops[1] > 0.0);
+        assert!(measure.viewport > 0.0, "and how tall its visible part is");
     }
 
     #[test]

@@ -116,8 +116,13 @@ pub struct State {
     /// The artist whose page is open, within Music.
     pub artist: Option<String>,
     pub scroll: Scroll,
-    /// Where each type group starts in the list, from its top.
+    /// Where each group or section starts in the list, from its top, and
+    /// how tall the list's visible part is.
     pub group_tops: Vec<f32>,
+    pub viewport: f32,
+    /// `LIBRI_LONG_LISTS=1`: section headers and the rail on every list,
+    /// to look at them with the small fixture.
+    pub force_long: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -166,7 +171,7 @@ pub enum Message {
     OpenArtist(String),
     CloseArtist,
     Scrolled(Scroll),
-    GroupsMeasured(Vec<f32>),
+    GroupsMeasured(ui::Measure),
     /// A click on the type rail: the app scrolls the list there.
     JumpToGroup(usize),
 }
@@ -317,7 +322,10 @@ impl State {
                 self.selected = None;
             }
             Message::CloseArtist => self.artist = None,
-            Message::GroupsMeasured(tops) => self.group_tops = tops,
+            Message::GroupsMeasured(measure) => {
+                self.group_tops = measure.tops;
+                self.viewport = measure.viewport;
+            }
         }
     }
 
@@ -417,6 +425,73 @@ impl State {
                         .find(|(tag, _)| tag == pin)
                         .map_or(0, |(_, n)| *n);
                     (pin.as_str(), count)
+                })
+                .collect(),
+        }
+    }
+
+    /// The phone's long-list rule: `rows` of `view` make a list at least
+    /// three screens tall (and the sort gives two sections or more, which
+    /// the caller checks).
+    pub fn is_long(&self, rows: usize, view: View) -> bool {
+        let row_height = match view {
+            View::Grid => return false,
+            View::List => 68.0,
+            View::Text => 43.0,
+        };
+        self.force_long || (self.viewport > 0.0 && rows as f32 * row_height >= 3.0 * self.viewport)
+    }
+
+    /// The ids in the order the list shows them, for the arrow keys: one
+    /// type in its sort, All and several types by type first. Music
+    /// follows its tab; the artist lists have no selection.
+    pub fn display_order(&self, library: &Library, today: Date) -> Vec<String> {
+        let listing = self.listing(library, today);
+        if self.is_overview() {
+            return Vec::new();
+        }
+        let ids = |entries: &[&Entry]| entries.iter().map(|e| e.id.clone()).collect();
+        if self.single() == Some(MediaType::Music) {
+            return match (self.artist.as_deref(), self.music_tab) {
+                (Some(name), _) => {
+                    let artists = crate::music::artists(&listing.shown);
+                    match artists.iter().find(|a| a.name.eq_ignore_ascii_case(name)) {
+                        Some(artist) => artist
+                            .albums
+                            .iter()
+                            .chain(&artist.songs)
+                            .map(|e| e.id.clone())
+                            .collect(),
+                        None => Vec::new(),
+                    }
+                }
+                (None, MusicTab::Artists) => Vec::new(),
+                (None, MusicTab::Albums) => listing
+                    .shown
+                    .iter()
+                    .filter(|e| !crate::music::is_song(e))
+                    .map(|e| e.id.clone())
+                    .collect(),
+                (None, MusicTab::Songs) => crate::music::songs(&listing.shown)
+                    .iter()
+                    .filter_map(|song| match song {
+                        crate::music::Song::Entry(e) => Some(e.id.clone()),
+                        crate::music::Song::Track { .. } => None,
+                    })
+                    .collect(),
+            };
+        }
+        match self.single() {
+            Some(_) => ids(&listing.shown),
+            None => MediaType::ALL
+                .into_iter()
+                .flat_map(|media| {
+                    listing
+                        .shown
+                        .iter()
+                        .filter(move |e| e.media == media)
+                        .map(|e| e.id.clone())
+                        .collect::<Vec<_>>()
                 })
                 .collect(),
         }

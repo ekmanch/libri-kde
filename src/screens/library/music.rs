@@ -34,6 +34,22 @@ pub fn body<'a>(
                 if artists.is_empty() {
                     return empty("No artists here", tokens);
                 }
+                // A long list gets letter sections and the jump rail.
+                if state.is_long(artists.len(), view) {
+                    let sections = artist_sections(artists);
+                    if sections.len() >= 2 {
+                        let labels: Vec<String> = sections.iter().map(|s| s.1.clone()).collect();
+                        let children = sections.into_iter().map(|(label, _, artists)| {
+                            column![
+                                super::entries::section_header(&label, artists.len(), tokens),
+                                artist_block(artists, view, tokens)
+                            ]
+                            .into()
+                        });
+                        return super::entries::sectioned_list(app, children, &labels, tokens);
+                    }
+                    return artist_block(artist_sections_flat(sections), view, tokens);
+                }
                 artist_block(artists, view, tokens)
             }
             MusicTab::Albums => {
@@ -71,6 +87,39 @@ fn empty<'a>(title: &str, tokens: &Tokens) -> Element<'a, AppMessage> {
         None,
         tokens,
     )
+}
+
+/// The letter sections of an artist list already in order: the first
+/// letter with a leading "The" ignored, and Various Artists on its own at
+/// the end. Each is (header, rail label, artists).
+#[allow(clippy::type_complexity)]
+fn artist_sections(
+    artists: Vec<music::Artist<'_>>,
+) -> Vec<(String, String, Vec<music::Artist<'_>>)> {
+    let mut sections: Vec<(String, String, Vec<music::Artist<'_>>)> = Vec::new();
+    for artist in artists {
+        let (various, key) = music::artist_key(artist.name);
+        let (label, short) = if various {
+            (music::VARIOUS_ARTISTS.to_owned(), "VA".to_owned())
+        } else {
+            let initial = crate::browse::title_initial(&key).to_string();
+            (initial.clone(), initial)
+        };
+        match sections.last_mut() {
+            Some(last) if last.0 == label => last.2.push(artist),
+            _ => sections.push((label, short, vec![artist])),
+        }
+    }
+    sections
+}
+
+fn artist_sections_flat(
+    sections: Vec<(String, String, Vec<music::Artist<'_>>)>,
+) -> Vec<music::Artist<'_>> {
+    sections
+        .into_iter()
+        .flat_map(|(_, _, artists)| artists)
+        .collect()
 }
 
 fn artist_block<'a>(

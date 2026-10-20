@@ -7,17 +7,25 @@ use iced::advanced::widget::{self, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell, overlay, renderer};
 use iced::{Element, Event, Length, Point, Rectangle, Size, Vector, mouse};
 
+/// What `Groups` reports: where each child starts, and how tall the
+/// visible part of the column is.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Measure {
+    pub tops: Vec<f32>,
+    pub viewport: f32,
+}
+
 pub struct Groups<'a, Message, Theme, Renderer> {
     children: Vec<Element<'a, Message, Theme, Renderer>>,
-    on_measure: Box<dyn Fn(Vec<f32>) -> Message + 'a>,
+    on_measure: Box<dyn Fn(Measure) -> Message + 'a>,
 }
 
 impl<'a, Message, Theme, Renderer> Groups<'a, Message, Theme, Renderer> {
     /// `on_measure` gets the top of every child, from the column's top,
-    /// each time they change.
+    /// and the viewport's height, each time they change.
     pub fn new(
         children: impl IntoIterator<Item = Element<'a, Message, Theme, Renderer>>,
-        on_measure: impl Fn(Vec<f32>) -> Message + 'a,
+        on_measure: impl Fn(Measure) -> Message + 'a,
     ) -> Self {
         Groups {
             children: children.into_iter().collect(),
@@ -28,9 +36,9 @@ impl<'a, Message, Theme, Renderer> Groups<'a, Message, Theme, Renderer> {
 
 #[derive(Default)]
 struct State {
-    tops: Vec<f32>,
+    measure: Measure,
     /// What was last sent, so a layout that moves nothing stays quiet.
-    sent: Option<Vec<f32>>,
+    sent: Option<Measure>,
 }
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
@@ -82,7 +90,7 @@ where
                 node
             })
             .collect();
-        tree.state.downcast_mut::<State>().tops = tops;
+        tree.state.downcast_mut::<State>().measure.tops = tops;
         layout::Node::with_children(Size::new(width, y), nodes)
     }
 
@@ -115,9 +123,10 @@ where
             );
         }
         let state = tree.state.downcast_mut::<State>();
-        if state.sent.as_ref() != Some(&state.tops) {
-            state.sent = Some(state.tops.clone());
-            shell.publish((self.on_measure)(state.tops.clone()));
+        state.measure.viewport = viewport.height;
+        if state.sent.as_ref() != Some(&state.measure) {
+            state.sent = Some(state.measure.clone());
+            shell.publish((self.on_measure)(state.measure.clone()));
         }
     }
 

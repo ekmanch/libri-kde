@@ -305,6 +305,75 @@ impl Sort {
     }
 }
 
+/// A section of a long list: its header, the rail's short label and its
+/// entries, in the list's order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListSection<'a> {
+    pub label: String,
+    pub short: String,
+    pub entries: Vec<&'a Entry>,
+}
+
+/// The phone's long-list sections of `entries`, already in `sort` order:
+/// decades for the year orders (Older before 1960, undated last), months
+/// of this year and then years for newest added, first letters for the
+/// title order (# for digits), and the ratings down to Unrated. Entries in
+/// a row with the same key share a section.
+pub fn sections<'a>(sort: Sort, entries: &[&'a Entry], today: Date) -> Vec<ListSection<'a>> {
+    let mut sections: Vec<ListSection<'a>> = Vec::new();
+    for &entry in entries {
+        let (label, short) = section_key(sort, entry, today);
+        match sections.last_mut() {
+            Some(last) if last.label == label => last.entries.push(entry),
+            _ => sections.push(ListSection {
+                label,
+                short,
+                entries: vec![entry],
+            }),
+        }
+    }
+    sections
+}
+
+fn section_key(sort: Sort, entry: &Entry, today: Date) -> (String, String) {
+    match sort {
+        Sort::TitleAz => {
+            let initial = title_initial(&entry.title).to_string();
+            (initial.clone(), initial)
+        }
+        Sort::YearNewest | Sort::YearOldest => match entry.year() {
+            None => ("Not released yet".into(), "None".into()),
+            Some(year) if year < 1960 => ("Older".into(), "Older".into()),
+            Some(year) => {
+                let decade = format!("{}s", year / 10 * 10);
+                (decade.clone(), decade)
+            }
+        },
+        Sort::NewestAdded if entry.added.year == today.year => {
+            let month = entry.added.month_name();
+            (month.into(), month[..3].into())
+        }
+        Sort::NewestAdded => {
+            let year = entry.added.year.to_string();
+            (year.clone(), year)
+        }
+        Sort::RatingHighest => match entry.rating {
+            Some(rating) => (rating.to_string(), rating.to_string()),
+            None => ("Unrated".into(), "None".into()),
+        },
+    }
+}
+
+/// The letter a title files under: its first letter or digit, in capitals,
+/// with "#" for a digit; punctuation in front is skipped.
+pub fn title_initial(title: &str) -> char {
+    match title.chars().find(|c| c.is_alphanumeric()) {
+        Some(c) if c.is_ascii_digit() => '#',
+        Some(c) => c.to_uppercase().next().unwrap_or(c),
+        None => '#',
+    }
+}
+
 /// The lowest rating Top rated lists.
 pub const TOP_RATED: u8 = 9;
 
@@ -583,6 +652,103 @@ mod tests {
             "No entries are both from before 1960 or from the 1990s and tagged #christmas. \
              Remove a filter to see more."
         );
+    }
+
+    #[test]
+    fn sections_follow_the_sort() {
+        let library = library();
+        let today = Date::parse("2026-10-19").unwrap();
+        let mut entries: Vec<&Entry> = library.entries.iter().collect();
+
+        Sort::TitleAz.apply(&mut entries);
+        let by_title = sections(Sort::TitleAz, &entries, today);
+        let labels: Vec<&str> = by_title.iter().map(|s| s.label.as_str()).collect();
+        assert!(
+            labels.windows(2).all(|w| w[0] < w[1]),
+            "letters in order: {labels:?}"
+        );
+        assert!(by_title.iter().all(|s| s.label.len() == 1));
+
+        Sort::YearNewest.apply(&mut entries);
+        let by_year = sections(Sort::YearNewest, &entries, today);
+        let labels: Vec<&str> = by_year.iter().map(|s| s.label.as_str()).collect();
+        assert!(labels.contains(&"2020s"), "{labels:?}");
+        assert!(labels.ends_with(&["Older"]) || labels.ends_with(&["Not released yet"]));
+
+        Sort::RatingHighest.apply(&mut entries);
+        let by_rating = sections(Sort::RatingHighest, &entries, today);
+        assert_eq!(by_rating.first().map(|s| s.label.as_str()), Some("10"));
+        let last = by_rating.last().unwrap();
+        assert_eq!(
+            (last.label.as_str(), last.short.as_str()),
+            ("Unrated", "None")
+        );
+
+        Sort::NewestAdded.apply(&mut entries);
+        let by_added = sections(Sort::NewestAdded, &entries, today);
+        assert_eq!(by_added[0].label, "October");
+        assert_eq!(by_added[0].short, "Oct");
+    }
+
+    #[test]
+    fn titles_file_under_their_first_letter_or_hash() {
+        assert_eq!(title_initial("the thing"), 'T');
+        assert_eq!(title_initial("1984"), '#');
+        assert_eq!(title_initial("\"Weird\" tales"), 'W');
+        assert_eq!(title_initial("éclair"), 'É');
+        assert_eq!(title_initial(""), '#');
+    }
+
+    #[test]
+    fn title_sort_ignores_case_and_year_sorts_put_undated_last() {
+        let library = library();
+        let mut entries: Vec<&Entry> = library.entries.iter().collect();
+        Sort::TitleAz.apply(&mut entries);
+        let titles: Vec<String> = entries.iter().map(|e| e.title.to_lowercase()).collect();
+        assert!(titles.windows(2).all(|w| w[0] <= w[1]), "{titles:?}");
+
+        Sort::YearNewest.apply(&mut entries);
+        let years: Vec<Option<u16>> = entries.iter().map(|e| e.year()).collect();
+        let dated: Vec<u16> = years.iter().flatten().copied().collect();
+        assert!(dated.windows(2).all(|w| w[0] >= w[1]), "{dated:?}");
+        let first_undated = years.iter().position(Option::is_none);
+        assert!(first_undated.is_none_or(|i| years[i..].iter().all(Option::is_none)));
+
+        Sort::YearOldest.apply(&mut entries);
+        let dated: Vec<u16> = entries.iter().filter_map(|e| e.year()).collect();
+        assert!(dated.windows(2).all(|w| w[0] <= w[1]), "{dated:?}");
+        // Same year: titles A to Z.
+        let same: Vec<&&Entry> = entries.iter().filter(|e| e.year() == Some(2023)).collect();
+        assert!(same.len() >= 2, "the fixture has several 2023 entries");
+        assert!(
+            same.windows(2)
+                .all(|w| w[0].title.to_lowercase() <= w[1].title.to_lowercase())
+        );
+    }
+
+    #[test]
+    fn filters_combine_type_status_decade_and_rating() {
+        let library = library();
+        let today = Date::parse("2026-10-19").unwrap();
+        let filter = Filter {
+            decades: [Decade::From(2020)].into_iter().collect(),
+            rating: Some((9, 10)),
+            ..Filter::default()
+        };
+        let shown: Vec<&Entry> = library
+            .entries
+            .iter()
+            .filter(|e| filter.matches(e, today))
+            .collect();
+        assert!(!shown.is_empty());
+        for entry in shown {
+            assert!(entry.year().is_some_and(|y| (2020..2030).contains(&y)));
+            assert!(entry.rating.is_some_and(|r| r >= 9));
+            assert!(
+                !entry.seasonal_only,
+                "seasonal-only stays out without the switch"
+            );
+        }
     }
 
     #[test]
