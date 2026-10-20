@@ -9,7 +9,6 @@ pub mod setup;
 pub mod shell;
 pub mod splash;
 pub mod token;
-pub mod token_sheet;
 
 use iced::Element;
 
@@ -23,19 +22,15 @@ pub enum Screen {
     Library,
     Plans,
     Settings,
-    /// Throwaway: every color, text style, button and icon, to compare with
-    /// the mockup. Removed at the end of phase 1.
-    TokenSheet,
 }
 
 impl Screen {
-    pub const ALL: [Screen; 6] = [
+    pub const ALL: [Screen; 5] = [
         Screen::Splash,
         Screen::Setup,
         Screen::Library,
         Screen::Plans,
         Screen::Settings,
-        Screen::TokenSheet,
     ];
 
     /// The `LIBRI_SCREEN` value, also used in screenshot file names.
@@ -46,7 +41,6 @@ impl Screen {
             Screen::Library => "library",
             Screen::Plans => "plans",
             Screen::Settings => "settings",
-            Screen::TokenSheet => "tokens",
         }
     }
 
@@ -63,7 +57,6 @@ pub fn view(app: &App) -> Element<'_, Message> {
         Screen::Library => library::view(app),
         Screen::Plans => plans::view(app),
         Screen::Settings => settings::view(app),
-        Screen::TokenSheet => token_sheet::view(app, app.tokens()),
     };
     // The token warning sits over every dialog.
     token::overlay(app, entry::overlay(app, plans::overlay(app, screen)))
@@ -77,7 +70,6 @@ pub fn title(app: &App) -> Option<String> {
         Screen::Library => return Some(app.library.title()),
         Screen::Plans => return Some(plans::title(app)),
         Screen::Settings => "Settings",
-        Screen::TokenSheet => "Token sheet",
     };
     Some(name.into())
 }
