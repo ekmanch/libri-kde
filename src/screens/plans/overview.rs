@@ -9,6 +9,7 @@ use crate::app::{App, Message as AppMessage};
 use crate::model::Plan;
 use crate::plans::{self as rules, PlanState, Season};
 use crate::screens::shell::shell;
+use crate::settings::Source;
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, Icon, seasonal::Art};
 
@@ -65,7 +66,7 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
 
     let content = column![
         ui::scroll(container(page).padding(Padding::new(32.0).top(24))).height(Fill),
-        footer(&tokens),
+        footer(app),
     ];
     shell(app, content)
 }
@@ -98,8 +99,8 @@ fn grid(cells: Vec<Element<'_, AppMessage>>, columns: usize) -> Element<'_, AppM
 }
 
 /// The accent inside a plan: the season's, or the regular one.
-pub fn plan_accent(plan: &Plan, tokens: &Tokens) -> Color {
-    match rules::season_of(plan) {
+pub fn plan_accent(app: &App, plan: &Plan, tokens: &Tokens) -> Color {
+    match super::shown_season(app, plan) {
         Some(Season::Halloween) => theme::HALLOWEEN,
         Some(Season::Christmas) => theme::CHRISTMAS,
         None => tokens.accent,
@@ -136,7 +137,7 @@ pub fn card_style(tokens: &Tokens, radius: f32) -> container::Style {
 /// holds, and its progress.
 fn card<'a>(app: &'a App, plan: &'a Plan, tokens: &Tokens) -> Element<'a, AppMessage> {
     let library = app.repo.library();
-    let top: Element<'a, AppMessage> = match rules::season_of(plan) {
+    let top: Element<'a, AppMessage> = match super::shown_season(app, plan) {
         Some(season) => ui::seasonal::art(season, Art::Card, Fill, 96, tokens),
         None => {
             let band = if tokens.light {
@@ -191,7 +192,7 @@ fn card<'a>(app: &'a App, plan: &'a Plan, tokens: &Tokens) -> Element<'a, AppMes
         .align_y(Center),
         text(meta).size(13).color(tokens.sub),
         row![
-            progress(plan, plan_accent(plan, tokens), 6.0, tokens),
+            progress(plan, plan_accent(app, plan, tokens), 6.0, tokens),
             text(rules::progress_label(plan))
                 .size(13)
                 .font(font::SEMIBOLD),
@@ -321,8 +322,11 @@ fn collection_card<'a>(
     )
 }
 
-pub fn footer<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
-    container(ui::mono("ekmanch/library · main", 12.0, tokens.sub))
+/// The repository and branch, quietly at the bottom of the content.
+pub fn footer<'a>(app: &App) -> Element<'a, AppMessage> {
+    let tokens = app.tokens();
+    let line = app.source.as_ref().map(Source::footer).unwrap_or_default();
+    container(ui::mono(line, 12.0, tokens.sub))
         .height(30)
         .width(Fill)
         .padding([0, 28])

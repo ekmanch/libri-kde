@@ -121,11 +121,12 @@ pub struct TagView {
 }
 
 impl PlanForm {
-    /// A new plan: no tags, the seasonal theme on and the timeline off
-    /// (the Settings defaults, 1f).
-    pub fn new_plan() -> PlanForm {
+    /// A new plan: no tags, the seasonal theme on and the timeline as
+    /// Settings → Plans has it.
+    pub fn new_plan(timeline: bool) -> PlanForm {
         PlanForm {
             seasonal: true,
+            timeline,
             ..PlanForm::default()
         }
     }
@@ -265,7 +266,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::SetCovers(covers) => set_style(app, |style| style.covers = covers),
         Message::NewPlan => {
             state.close_popovers();
-            app.plan_dialog = Some(Dialog::Form(PlanForm::new_plan()));
+            app.plan_dialog = Some(Dialog::Form(PlanForm::new_plan(app.settings.timeline)));
         }
         Message::NewYear => {
             state.close_popovers();
@@ -572,6 +573,16 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
             Some(plan) => plan::view(app, plan),
             None => overview::view(app),
         },
+    }
+}
+
+/// The season a plan shows: its own theme, unless Settings → Plans has
+/// turned seasonal touches off.
+pub fn shown_season(app: &App, plan: &Plan) -> Option<rules::Season> {
+    if app.settings.seasonal {
+        rules::season_of(plan)
+    } else {
+        None
     }
 }
 

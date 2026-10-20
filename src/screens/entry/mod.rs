@@ -229,8 +229,10 @@ impl Form {
         lookup::search(self.media, &self.query)
     }
 
-    /// Fills the form from a match. Every field stays editable.
-    fn fill(&mut self, found: &Match, library: &Library) {
+    /// Fills the form from a match. Every field stays editable. A game
+    /// starts with the default platform picked when it came out on it,
+    /// and with every platform otherwise.
+    fn fill(&mut self, found: &Match, library: &Library, default_platform: Option<&str>) {
         self.source = Some(found.source.to_owned());
         self.title = found.title.to_owned();
         self.creator = found.creator.to_owned();
@@ -242,7 +244,12 @@ impl Form {
             .iter()
             .map(|p| text::normalize_platform(p))
             .collect();
-        self.platforms_on = self.platforms.iter().cloned().collect();
+        self.platforms_on = match default_platform {
+            Some(default) if self.platforms.iter().any(|p| p == default) => {
+                BTreeSet::from([default.to_owned()])
+            }
+            _ => self.platforms.iter().cloned().collect(),
+        };
         // Tags the library has go on at once; new ones are offered.
         self.tags.clear();
         self.suggested.clear();
@@ -441,10 +448,13 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         message => {
             let library = app.repo.library().clone();
             let today = app.today;
+            let platform = app.settings.platform.clone();
             let Some(Dialog::Form(form)) = &mut app.dialog else {
                 return Task::none();
             };
-            if let Some(operations) = update_form(form, message, &library, today) {
+            if let Some(operations) =
+                update_form(form, message, &library, today, platform.as_deref())
+            {
                 let selected = operations.iter().find_map(|op| match op {
                     Operation::AddEntry(entry) | Operation::UpdateEntry(entry) => {
                         Some(entry.id.clone())
@@ -479,11 +489,13 @@ fn new_item(entry: String, done: bool) -> PlanItem {
 }
 
 /// Changes the form; on Save, returns the operations that make the change.
+/// `platform` is the default platform from Settings → Games.
 fn update_form(
     form: &mut Form,
     message: Message,
     library: &Library,
     today: crate::model::Date,
+    platform: Option<&str>,
 ) -> Option<Vec<Operation>> {
     match message {
         Message::Type(media) => {
@@ -497,7 +509,7 @@ fn update_form(
         Message::Pick(index) => {
             if let Some(found) = form.matches().get(index).copied() {
                 form.picked = Some(index);
-                form.fill(found, library);
+                form.fill(found, library, platform);
             }
         }
         Message::MovePick(step) => {
@@ -506,7 +518,7 @@ fn update_form(
                 let next = form.picked.map_or(0, |i| {
                     (i as isize + step).rem_euclid(count as isize) as usize
                 });
-                return update_form(form, Message::Pick(next), library, today);
+                return update_form(form, Message::Pick(next), library, today, platform);
             }
         }
         Message::Manual => {
@@ -631,7 +643,7 @@ fn update_form(
         Message::ReplaceKeepBoth | Message::ReplaceConfirm => {
             form.replace = None;
             form.replace_answer = Some(matches!(message, Message::ReplaceConfirm));
-            return update_form(form, Message::Save, library, today);
+            return update_form(form, Message::Save, library, today, platform);
         }
         Message::ReplaceCancel => {
             form.replace = None;
@@ -789,6 +801,22 @@ mod tests {
     }
 
     #[test]
+    fn without_a_default_platform_every_fetched_platform_is_picked() {
+        let mut app = app();
+        app.settings.platform = None;
+        send(&mut app, Message::Add);
+        send(&mut app, Message::Type(MediaType::Games));
+        send(&mut app, Message::Query("castlevania".into()));
+        send(&mut app, Message::Pick(0));
+        assert_eq!(form(&app).platforms_on.len(), 4);
+
+        // A default the game did not come out on changes nothing either.
+        app.settings.platform = Some("Steam Deck".into());
+        send(&mut app, Message::Pick(0));
+        assert_eq!(form(&app).platforms_on.len(), 4);
+    }
+
+    #[test]
     fn a_picked_match_fills_the_form_and_saves_a_new_entry() {
         let mut app = app();
         send(&mut app, Message::Add);
@@ -814,10 +842,8 @@ mod tests {
         let entry = library.entry(id).expect("saved");
         assert_eq!(entry.added, app.today);
         assert_eq!(entry.source.as_deref(), Some("igdb:305611"));
-        assert_eq!(
-            entry.platform.as_deref(),
-            Some("PC, PlayStation 5, Xbox Series X|S, Switch")
-        );
+        // The default platform from Settings, since the game came out on it.
+        assert_eq!(entry.platform.as_deref(), Some("PC"));
         assert!(
             library
                 .plan("halloween-2026")

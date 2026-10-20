@@ -19,6 +19,7 @@ use super::shell::shell;
 use crate::app::{App, Message as AppMessage};
 use crate::browse::{self, Decade, Filter, Section, Sort};
 use crate::model::{Date, Entry, EntryStatus, Library, MediaType, TagCategory};
+use crate::settings::Source;
 use crate::ui;
 
 /// The search field's id, for Ctrl+K and Ctrl+F.
@@ -472,14 +473,14 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
         column![
             toolbar::toolbar(app, &listing),
             overview::body(app),
-            footer(&tokens)
+            footer(app)
         ]
     } else {
         column![
             toolbar::toolbar(app, &listing),
             toolbar::chips(app, &listing),
             entries::body(app, &listing),
-            footer(&tokens),
+            footer(app),
         ]
     };
     let picker = state
@@ -500,8 +501,11 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
     ui::modal(shell(app, main), picker, close, &tokens)
 }
 
-fn footer<'a>(tokens: &crate::theme::Tokens) -> Element<'a, AppMessage> {
-    container(ui::mono("ekmanch/library · main", 12.0, tokens.sub))
+/// The repository and branch, quietly at the bottom of the content.
+fn footer<'a>(app: &App) -> Element<'a, AppMessage> {
+    let tokens = app.tokens();
+    let line = app.source.as_ref().map(Source::footer).unwrap_or_default();
+    container(ui::mono(line, 12.0, tokens.sub))
         .height(30)
         .width(Fill)
         .padding([0, 24])

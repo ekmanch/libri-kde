@@ -25,10 +25,10 @@ fn msg(message: Message) -> AppMessage {
 pub fn view<'a>(app: &'a App, plan: &'a Plan) -> Element<'a, AppMessage> {
     // Inside a seasonal plan the season's color is the accent.
     let base = app.tokens();
-    let accent = plan_accent(plan, &base);
+    let accent = plan_accent(app, plan, &base);
     let tokens = Tokens {
         accent,
-        ink: if rules::season_of(plan).is_some() {
+        ink: if super::shown_season(app, plan).is_some() {
             accent
         } else {
             base.ink
@@ -36,7 +36,7 @@ pub fn view<'a>(app: &'a App, plan: &'a Plan) -> Element<'a, AppMessage> {
         ..base
     };
     let on_collection = matches!(app.plans.page, Page::Collection(_));
-    let season = rules::season_of(plan);
+    let season = super::shown_season(app, plan);
 
     let mut main = Column::new();
     if let Some(season) = season {
@@ -55,7 +55,7 @@ pub fn view<'a>(app: &'a App, plan: &'a Plan) -> Element<'a, AppMessage> {
     };
     main = main
         .push(ui::scroll(container(body).padding(Padding::new(28.0).top(20))).height(Fill))
-        .push(footer(&tokens));
+        .push(footer(app));
 
     let side: Option<Element<'a, AppMessage>> = match app
         .plans
@@ -118,7 +118,7 @@ fn header<'a>(
     .spacing(6);
 
     let mut title = Row::new().spacing(12).align_y(Center);
-    if let Some(season) = rules::season_of(plan) {
+    if let Some(season) = super::shown_season(app, plan) {
         title = title.push(ui::seasonal::art(season, Art::Icon, 34, 34, tokens));
     }
     let name = if on_collection {
@@ -219,7 +219,7 @@ fn header<'a>(
         };
         header = header.push(
             row![
-                progress_with_marker(plan, tokens),
+                progress_with_marker(app, plan, tokens),
                 text(rules::progress_label(plan))
                     .size(14)
                     .font(font::SEMIBOLD),
@@ -230,7 +230,7 @@ fn header<'a>(
             .padding(Padding::new(0.0).top(4)),
         );
     }
-    let top = if rules::season_of(plan).is_some() {
+    let top = if super::shown_season(app, plan).is_some() {
         8.0
     } else {
         20.0
@@ -384,9 +384,9 @@ fn view_options<'a>(
 }
 
 /// The progress bar, with the season's marker riding on it.
-fn progress_with_marker<'a>(plan: &Plan, tokens: &Tokens) -> Element<'a, AppMessage> {
+fn progress_with_marker<'a>(app: &App, plan: &Plan, tokens: &Tokens) -> Element<'a, AppMessage> {
     let bar = container(progress(plan, tokens.accent, 8.0, tokens)).center_y(22);
-    let marker = match rules::season_of(plan) {
+    let marker = match super::shown_season(app, plan) {
         Some(Season::Halloween) => Icon::MarkerGhost,
         Some(Season::Christmas) => Icon::MarkerStar,
         None => return bar.width(Fill).into(),
