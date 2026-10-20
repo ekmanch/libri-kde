@@ -13,7 +13,7 @@ use std::collections::{BTreeSet, HashMap};
 use iced::{Element, Task};
 
 use crate::app::{App, Message as AppMessage};
-use crate::model::{Date, EntryStatus, Plan, PlanItem, TagCategory};
+use crate::model::{Date, EntryStatus, MediaType, Plan, PlanItem, TagCategory};
 use crate::plans::{self as rules, PlanState};
 use crate::repo::Operation;
 use crate::ui;
@@ -584,6 +584,34 @@ pub fn shown_season(app: &App, plan: &Plan) -> Option<rules::Season> {
     } else {
         None
     }
+}
+
+/// An arrow key on the plan page: moves the selection through the items
+/// in the order shown, the checklist's (by type, then the plan's order)
+/// or the timeline's.
+pub fn step_selection(app: &mut App, step: isize) {
+    let Some(plan) = current_plan(app) else {
+        return;
+    };
+    let library = app.repo.library();
+    let order: Vec<String> = if plan.timeline {
+        rules::timeline(plan, library, app.today)
+            .into_iter()
+            .flat_map(|group| group.items.into_iter().map(|item| item.entry.clone()))
+            .collect()
+    } else {
+        MediaType::ALL
+            .into_iter()
+            .flat_map(|media| {
+                plan.items
+                    .iter()
+                    .filter(|item| library.entry(&item.entry).is_some_and(|e| e.media == media))
+                    .map(|item| item.entry.clone())
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    };
+    app.plans.selected = crate::app::next_in(&order, app.plans.selected.as_deref(), step);
 }
 
 /// The open plan dialog over `base`.

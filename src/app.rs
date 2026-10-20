@@ -10,13 +10,15 @@ use iced::{Element, Size, Subscription, Task, time};
 use crate::model::Date;
 use crate::repo::Operation;
 use crate::repo::{FixtureLibraryRepository, LibraryRepository};
-use crate::screens::{self, Screen, entry, library, plans, setup, token, token_sheet};
+use crate::screens::{self, Screen, entry, library, plans, setup, token};
 use crate::settings::{Settings, Source, SyncState, ThemeChoice};
 use crate::theme::{Accent, Theme, Tokens, font};
 
-/// The default window size, and for now the minimum (settled in 1g).
+/// The default window size, and the minimum: 1080p at KDE's 150 %
+/// scaling, the smallest screen Libri is laid out for (docs/DESIGN.md
+/// section 10, phase 1g).
 pub const WINDOW_SIZE: Size = Size::new(1600.0, 900.0);
-pub const MIN_WINDOW_SIZE: Size = Size::new(1100.0, 680.0);
+pub const MIN_WINDOW_SIZE: Size = Size::new(1280.0, 720.0);
 
 pub fn run() -> iced::Result {
     let window = window::Settings {
@@ -81,9 +83,10 @@ pub struct App {
     pub plan_dialog: Option<plans::Dialog>,
     pub setup: setup::State,
     pub settings_page: screens::settings::State,
-    pub token_sheet: token_sheet::State,
     /// Where the splash's bar is in its sweep, 0 to 1.
     pub splash_phase: f32,
+    /// The window's logical size, for layouts that give way when narrow.
+    pub window: Size,
 }
 
 #[derive(Debug, Clone)]
@@ -95,13 +98,13 @@ pub enum Message {
     Modifiers(keyboard::Modifiers),
     /// A frame of the splash's bar.
     Tick,
+    Resized(Size),
     Library(library::Message),
     Entry(entry::Message),
     Plans(plans::Message),
     Setup(setup::Message),
     Settings(screens::settings::Message),
     Token(token::Message),
-    TokenSheet(token_sheet::Message),
 }
 
 /// The keys the app handles itself.
@@ -119,7 +122,10 @@ pub enum KeyPress {
     Search,
     /// Ctrl+Enter: saves the entry form.
     Save,
-    /// The arrow keys, in the entry form's lookup.
+    /// Ctrl+N: opens Add entry.
+    New,
+    /// The arrow keys: the entry form's lookup, or the selection in the
+    /// library's list and the plan's checklist.
     Up,
     Down,
     /// E: edits the selected entry.
@@ -152,6 +158,7 @@ impl App {
         if let Some(step) = var("LIBRI_SETUP").and_then(|name| setup::Step::from_name(&name)) {
             app.setup = setup::State::at(step, app.source.as_ref());
         }
+        app.library.force_long = var("LIBRI_LONG_LISTS").is_some();
         app
     }
 
@@ -175,8 +182,8 @@ impl App {
             plans: plans::State::default(),
             plan_dialog: None,
             settings_page: screens::settings::State::default(),
-            token_sheet: token_sheet::State::default(),
             splash_phase: 0.0,
+            window: WINDOW_SIZE,
         }
     }
 
@@ -204,12 +211,12 @@ impl App {
             Message::SetAccent(accent) => self.settings.accent = accent,
             // One sweep of the bar takes 1.4 s.
             Message::Tick => self.splash_phase = (self.splash_phase + 0.016 / 1.4) % 1.0,
+            Message::Resized(size) => self.window = size,
             Message::Key(KeyPress::Tab { back: false }) => return operation::focus_next(),
             Message::Key(KeyPress::Tab { back: true }) => return operation::focus_previous(),
+            // The token warning sits over everything; then a dialog; the
+            // sidebar's All tags popover also opens on Plans.
             Message::Key(KeyPress::Escape) => match self.screen {
-                Screen::TokenSheet => self.token_sheet.dismiss_top(),
-                // The token warning sits over everything; then a dialog;
-                // the sidebar's All tags popover also opens on Plans.
                 _ if self.token_warning => self.token_warning = false,
                 _ => {
                     if !entry::dismiss_top(self)
@@ -221,7 +228,6 @@ impl App {
                 }
             },
             Message::Key(KeyPress::Enter) => match self.screen {
-                Screen::TokenSheet => self.token_sheet.confirm(),
                 _ if self.token_warning => return token::update(self, token::Message::Replace),
                 Screen::Setup => return setup::update(self, setup::Message::Continue),
                 Screen::Settings if self.settings_page.disconnect_open => {
@@ -238,9 +244,17 @@ impl App {
                 return plans::update(self, plans::Message::Save);
             }
             Message::Key(KeyPress::Save) => return entry::update(self, entry::Message::Save),
-            Message::Key(KeyPress::Up) => return entry::update(self, entry::Message::MovePick(-1)),
-            Message::Key(KeyPress::Down) => {
-                return entry::update(self, entry::Message::MovePick(1));
+            Message::Key(KeyPress::Up) => return self.step(-1),
+            Message::Key(KeyPress::Down) => return self.step(1),
+            Message::Key(KeyPress::New) => {
+                if matches!(self.screen, Screen::Library | Screen::Plans)
+                    && self.dialog.is_none()
+                    && self.plan_dialog.is_none()
+                    && !self.token_warning
+                {
+                    let _ = entry::update(self, entry::Message::Add);
+                    return operation::focus(entry::LOOKUP_ID);
+                }
             }
             Message::Key(KeyPress::Edit) => {
                 let selected = match self.screen {
@@ -302,7 +316,26 @@ impl App {
             Message::Setup(message) => return setup::update(self, message),
             Message::Settings(message) => return screens::settings::update(self, message),
             Message::Token(message) => return token::update(self, message),
-            Message::TokenSheet(message) => self.token_sheet.update(message),
+        }
+        Task::none()
+    }
+
+    /// An arrow key: moves the lookup's pick in the entry form, or the
+    /// selection in the library's list or the plan's checklist.
+    fn step(&mut self, step: isize) -> Task<Message> {
+        if self.dialog.is_some() {
+            return entry::update(self, entry::Message::MovePick(step));
+        }
+        if self.plan_dialog.is_some() || self.token_warning {
+            return Task::none();
+        }
+        match self.screen {
+            Screen::Library => {
+                let order = self.library.display_order(self.repo.library(), self.today);
+                self.library.selected = next_in(&order, self.library.selected.as_deref(), step);
+            }
+            Screen::Plans => plans::step_selection(self, step),
+            _ => {}
         }
         Task::none()
     }
@@ -340,19 +373,35 @@ impl App {
                     Key::Character(c) if modifiers.command() && (c == "k" || c == "f") => {
                         KeyPress::Search
                     }
+                    Key::Character(c) if modifiers.command() && c == "n" => KeyPress::New,
                     _ => return None,
                 };
                 Some(Message::Key(press))
             }
             _ => None,
         });
+        let resizes = window::resize_events().map(|(_, size)| Message::Resized(size));
         if self.screen == Screen::Splash {
             let frames = time::every(Duration::from_millis(16)).map(|_| Message::Tick);
-            Subscription::batch([keys, frames])
+            Subscription::batch([keys, resizes, frames])
         } else {
-            keys
+            Subscription::batch([keys, resizes])
         }
     }
+}
+
+/// The id `step` places after `current` in `order`: the first with no
+/// selection, and the ends stop.
+pub fn next_in(order: &[String], current: Option<&str>, step: isize) -> Option<String> {
+    if order.is_empty() {
+        return current.map(str::to_owned);
+    }
+    let index = match current.and_then(|id| order.iter().position(|o| o == id)) {
+        Some(index) => (index as isize + step).clamp(0, order.len() as isize - 1) as usize,
+        None if step < 0 => order.len() - 1,
+        None => 0,
+    };
+    Some(order[index].clone())
 }
 
 #[cfg(test)]
@@ -448,6 +497,42 @@ mod tests {
         assert_eq!(app.library.popup, Some(library::Popup::Filter));
         let _ = app.update(Message::Key(KeyPress::Escape));
         assert_eq!(app.library.popup, None);
+    }
+
+    #[test]
+    fn arrow_keys_move_the_selection_through_the_list() {
+        let mut app = App::new(Screen::Library);
+        let _ = app.update(Message::Library(library::Message::ShowType(Some(
+            MediaType::Movies,
+        ))));
+        let order = app.library.display_order(app.repo.library(), app.today);
+        assert!(order.len() > 2);
+        let _ = app.update(Message::Key(KeyPress::Down));
+        assert_eq!(app.library.selected.as_deref(), Some(order[0].as_str()));
+        let _ = app.update(Message::Key(KeyPress::Down));
+        assert_eq!(app.library.selected.as_deref(), Some(order[1].as_str()));
+        let _ = app.update(Message::Key(KeyPress::Up));
+        let _ = app.update(Message::Key(KeyPress::Up));
+        assert_eq!(
+            app.library.selected.as_deref(),
+            Some(order[0].as_str()),
+            "the top stops"
+        );
+        // In the entry form the arrows move the lookup's pick instead.
+        let _ = app.update(Message::Key(KeyPress::New));
+        assert!(app.dialog.is_some());
+        let _ = app.update(Message::Key(KeyPress::Down));
+        assert_eq!(app.library.selected.as_deref(), Some(order[0].as_str()));
+    }
+
+    #[test]
+    fn next_in_starts_at_either_end_and_stops_there() {
+        let order: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+        assert_eq!(next_in(&order, None, 1).as_deref(), Some("a"));
+        assert_eq!(next_in(&order, None, -1).as_deref(), Some("c"));
+        assert_eq!(next_in(&order, Some("c"), 1).as_deref(), Some("c"));
+        assert_eq!(next_in(&order, Some("zz"), 1).as_deref(), Some("a"));
+        assert_eq!(next_in(&[], Some("a"), 1).as_deref(), Some("a"));
     }
 
     #[test]
