@@ -10,7 +10,7 @@ use super::setup;
 use crate::app::{self, App, Message as AppMessage};
 use crate::settings::SyncState;
 use crate::theme::font;
-use crate::ui::{self, ButtonKind, Icon};
+use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
 /// GitHub's fine-grained token settings, for Open GitHub.
 pub const TOKEN_SETTINGS_URL: &str = "https://github.com/settings/personal-access-tokens";
@@ -86,11 +86,15 @@ fn view(app: &App) -> Element<'_, AppMessage> {
         help
     ]
     .spacing(8);
-    let later = ui::labeled_button("Later", ButtonKind::Text, tokens, Some(msg(Message::Later)))
+    let later = iced::widget::button(text("Later").size(13.5))
+        .height(36)
+        .padding([0, 14])
+        .on_press(msg(Message::Later))
         .style(move |_, _| iced::widget::button::Style {
             text_color: tokens.sub,
             ..iced::widget::button::Style::default()
-        });
+        })
+        .focusable(8.0, &tokens);
     let open = iced::widget::button(
         row![
             text("Open GitHub").size(13.5),
@@ -102,7 +106,8 @@ fn view(app: &App) -> Element<'_, AppMessage> {
     .height(36)
     .padding([0, 14])
     .on_press(msg(Message::OpenGitHub))
-    .style(move |_, status| ui::button_style(ButtonKind::Outline, &tokens, status));
+    .style(move |_, status| ui::button_style(ButtonKind::Outline, &tokens, status))
+    .focusable(8.0, &tokens);
     let replace = ui::labeled_button(
         "Replace token",
         ButtonKind::Primary,

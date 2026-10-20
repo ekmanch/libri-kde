@@ -1,6 +1,7 @@
 use iced::widget::{Row, button, container, text};
 use iced::{Background, Border, Element, Fill};
 
+use super::FocusExt;
 use crate::theme::{Tokens, font};
 
 /// Joined buttons in one outline, sharing the width; the picked one in
@@ -31,7 +32,8 @@ pub fn segmented<'a, Message: Clone + 'a>(
                     },
                     text_color: if on { tokens.text } else { tokens.sub },
                     ..button::Style::default()
-                });
+                })
+                .focusable_inside(7.0, &tokens);
             // A line between neighbors.
             let line = tokens.line;
             let divider = container(iced::widget::space())

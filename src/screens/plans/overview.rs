@@ -11,7 +11,7 @@ use crate::plans::{self as rules, PlanState, Season};
 use crate::screens::shell::shell;
 use crate::settings::Source;
 use crate::theme::{self, Tokens, font};
-use crate::ui::{self, Icon, seasonal::Art};
+use crate::ui::{self, FocusExt, Icon, seasonal::Art};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Plans(message)
@@ -211,7 +211,7 @@ fn card<'a>(app: &'a App, plan: &'a Plan, tokens: &Tokens) -> Element<'a, AppMes
     .padding(0)
     .on_press(msg(Message::ShowPlan(plan.id.clone())))
     .style(|_, _| button::Style::default())
-    .into()
+    .focusable(16.0, &tokens)
 }
 
 /// A small gray pill: a plan's state, "In plan".
@@ -269,7 +269,8 @@ fn finished_row<'a>(plan: &'a Plan, tokens: &Tokens) -> Element<'a, AppMessage> 
             .width(Fill)
             .padding([9, 4])
             .on_press(msg(Message::ShowPlan(plan.id.clone())))
-            .style(ui::row_style(tokens, false, 8.0)),
+            .style(ui::row_style(tokens, false, 8.0))
+            .focusable(8.0, tokens),
         ui::rule(tokens.line.scale_alpha(0.5)),
     ]
     .into()
@@ -318,7 +319,7 @@ fn collection_card<'a>(
         .padding(0)
         .on_press(msg(Message::ShowCollection(plan.id.clone())))
         .style(|_, _| button::Style::default())
-        .into(),
+        .focusable(16.0, &tokens),
     )
 }
 

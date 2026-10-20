@@ -4,7 +4,7 @@
 use iced::widget::{Column, button, container, row, text};
 use iced::{Background, Border, Center, Element, Fill};
 
-use super::{Align, Icon, Popover, icon, panel_style, row_style};
+use super::{Align, FocusExt, Icon, Popover, icon, panel_style, row_style};
 use crate::theme::{Tokens, font};
 
 pub fn rating<'a, Message: Clone + 'a>(
@@ -40,7 +40,7 @@ pub fn rating<'a, Message: Clone + 'a>(
         })
     };
     let picker = open.then(|| picker(value, on_pick, tokens));
-    Popover::new(anchor, picker)
+    Popover::new(anchor.focusable(8.0, tokens), picker)
         .align(Align::Start)
         .on_dismiss(on_toggle)
         .into()
@@ -77,7 +77,7 @@ pub fn track_rating<'a, Message: Clone + 'a>(
             ..button::Style::default()
         });
     let picker = open.then(|| picker(value, on_pick, tokens));
-    Popover::new(anchor, picker)
+    Popover::new(anchor.focusable(7.0, tokens), picker)
         .align(Align::End)
         .on_dismiss(on_toggle)
         .into()
@@ -116,7 +116,7 @@ fn picker<'a, Message: Clone + 'a>(
                     ..button::Style::default()
                 }
             })
-            .into()
+            .focusable(7.0, &tokens)
     };
     let grid = Column::with_children([1u8, 6].map(|first| {
         iced::widget::Row::with_children((first..first + 5).map(&cell))
@@ -128,7 +128,8 @@ fn picker<'a, Message: Clone + 'a>(
         .width(Fill)
         .height(30)
         .on_press(on_pick(None))
-        .style(row_style(&tokens, false, 7.0));
+        .style(row_style(&tokens, false, 7.0))
+        .focusable(7.0, &tokens);
     container(Column::new().push(grid).push(clear).spacing(8).width(224))
         .padding(10)
         .style(move |_| panel_style(&tokens, 10.0))

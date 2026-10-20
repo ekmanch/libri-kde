@@ -5,7 +5,7 @@ use iced::widget::svg::{self, Svg};
 use iced::widget::{Space, button, column, container, row, stack, text};
 use iced::{Background, Border, Center, Color, Element, Fill, FillPortion, Length, Padding};
 
-use super::{Icon, icon, mono, row_style};
+use super::{FocusExt, Icon, icon, mono, row_style};
 use crate::model::EntryStatus;
 use crate::theme::{self, Tokens, font};
 
@@ -110,7 +110,7 @@ pub fn entry_card<'a, Message: Clone + 'a>(
                 ..button::Style::default()
             }
         })
-        .into()
+        .focusable(8.0, tokens)
 }
 
 /// The disc in a cover's corner: a check for done, a half-filled ring for
@@ -180,7 +180,7 @@ pub fn entry_list_row<'a, Message: Clone + 'a>(
         .padding([8, 12])
         .on_press(on_press)
         .style(row_style(tokens, look.selected, 10.0))
-        .into()
+        .focusable(10.0, tokens)
 }
 
 fn cell<'a, Message: 'a>(
@@ -260,7 +260,7 @@ pub fn entry_table_row<'a, Message: Clone + 'a>(
         .padding([0, 12])
         .on_press(on_press)
         .style(row_style(tokens, look.selected, 0.0))
-        .into()
+        .focusable(0.0, tokens)
 }
 
 /// A one-pixel horizontal line.

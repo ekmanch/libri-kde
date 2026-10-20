@@ -13,7 +13,7 @@ use super::Screen;
 use crate::app::{self, App, Message as AppMessage};
 use crate::settings::{Source, SyncState};
 use crate::theme::{Tokens, font};
-use crate::ui::{self, ButtonKind, Icon};
+use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
 /// GitHub's guide to fine-grained tokens, for "How do I create a token?".
 pub const TOKEN_HELP_URL: &str = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token";
@@ -465,12 +465,14 @@ fn wizard<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     .height(40)
     .padding([0, 16])
     .on_press(msg(Message::Back))
-    .style(action_style(ButtonKind::Outline, tokens));
+    .style(action_style(ButtonKind::Outline, tokens))
+    .focusable(9.0, tokens);
     let primary = button(text(state.primary_label()).size(14).font(font::BOLD))
         .height(40)
         .padding([0, 22])
         .on_press_maybe(state.can_continue().then_some(msg(Message::Continue)))
-        .style(action_style(ButtonKind::Primary, tokens));
+        .style(action_style(ButtonKind::Primary, tokens))
+        .focusable(9.0, tokens);
     let footer = container(
         container(
             row![back, space::horizontal(), primary]
@@ -569,7 +571,8 @@ fn connect<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
     .style(move |_, _| button::Style {
         text_color: ink,
         ..button::Style::default()
-    });
+    })
+    .focusable(4.0, tokens);
     column![
         intro(
             "Connect GitHub",
@@ -707,7 +710,7 @@ fn file<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
             }),
             ..button::Style::default()
         })
-        .into()
+        .focusable(12.0, &tokens)
     });
     column![
         column![heading("Your library file", tokens), lead].spacing(8),
@@ -944,7 +947,7 @@ fn radio_row<'a>(
         border: Border::default().rounded(10),
         ..button::Style::default()
     })
-    .into()
+    .focusable(10.0, &tokens)
 }
 
 /// An 18 px radio mark: the accent ring and dot when on.
@@ -993,7 +996,7 @@ fn big_button<'a>(
         style.border.radius = 10.0.into();
         style
     })
-    .into()
+    .focusable(10.0, &tokens)
 }
 
 /// Back and the main action at the bottom: 40 px with a 9 px radius.

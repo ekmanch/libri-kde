@@ -5,7 +5,7 @@
 use iced::widget::{Column, Row, button, column, container, row, space, text};
 use iced::{Background, Border, Center, Element, Fill};
 
-use super::{Icon, icon_button, mono};
+use super::{FocusExt, Icon, icon_button, mono};
 use crate::model::{Date, PlanWhen};
 use crate::theme::{Tokens, font};
 
@@ -122,7 +122,8 @@ pub fn calendar<'a, Message: Clone + 'a>(
                             .width(if is_today && !chosen { 1.0 } else { 0.0 })
                             .color(tokens.sub),
                         ..button::Style::default()
-                    }),
+                    })
+                    .focusable(8.0, &tokens),
             );
             day = day.add_days(1);
         }

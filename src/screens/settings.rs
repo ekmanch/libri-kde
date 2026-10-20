@@ -15,7 +15,7 @@ use crate::app::{App, Message as AppMessage};
 use crate::model::MediaType;
 use crate::settings::{PLATFORMS, SyncState, ThemeChoice};
 use crate::theme::{self, Accent, Theme, Tokens, font};
-use crate::ui::{self, ButtonKind};
+use crate::ui::{self, ButtonKind, FocusExt};
 
 /// The settings' scroll area, for the rail's jumps.
 pub const SCROLL_ID: &str = "settings-scroll";
@@ -163,7 +163,7 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
             games(app, &tokens),
             about(&tokens),
         ],
-        |tops| msg(Message::Measured(tops)),
+        |measure| msg(Message::Measured(measure.tops)),
     );
     let scroll = ui::scroll(
         container(container(sections).max_width(860))
@@ -217,7 +217,8 @@ fn rail<'a>(app: &App, tokens: &Tokens) -> Element<'a, AppMessage> {
                 .height(30)
                 .padding([0, 10])
                 .on_press(msg(Message::Jump(index)))
-                .style(ui::row_style(tokens, on, 7.0)),
+                .style(ui::row_style(tokens, on, 7.0))
+                .focusable(7.0, tokens),
         );
     }
     container(links)
@@ -395,7 +396,7 @@ fn theme_card<'a>(choice: ThemeChoice, app: &App, tokens: &Tokens) -> Element<'a
             border: Border::default().rounded(12),
             ..button::Style::default()
         })
-        .into()
+        .focusable(12.0, &tokens)
 }
 
 /// Which part of a theme's miniature a preview shows: the whole window,
@@ -551,7 +552,7 @@ fn accent_group<'a>(
             border: Border::default().rounded(10),
             ..button::Style::default()
         })
-        .into()
+        .focusable(10.0, &tokens)
     });
     column![
         text(name.to_uppercase())
@@ -576,9 +577,10 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     tokens.danger,
                     "Token expired",
                     "Libri can't sync until you add a new token.".to_owned(),
-                    ui::labeled_button(
+                    ui::sized_button(
                         "Replace token",
                         ButtonKind::Primary,
+                        32.0,
                         *tokens,
                         Some(msg(Message::ReplaceToken)),
                     ),
@@ -597,9 +599,10 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                             _ => String::new(),
                         }
                     ),
-                    ui::labeled_button(
+                    ui::sized_button(
                         "Sync now",
                         ButtonKind::Outline,
+                        32.0,
                         *tokens,
                         Some(msg(Message::SyncNow)),
                     ),
@@ -614,7 +617,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     ]
                     .spacing(1)
                     .width(Fill),
-                    action.height(32),
+                    action,
                 ]
                 .spacing(12)
                 .align_y(Center),
@@ -638,13 +641,13 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     .align_y(Center)
                     .style(move |_| container::background(field_bg)
                         .border(Border::default().rounded(8).width(1).color(line))),
-                ui::labeled_button(
+                ui::sized_button(
                     "Replace",
                     ButtonKind::Outline,
+                    38.0,
                     *tokens,
-                    Some(msg(Message::ReplaceToken))
-                )
-                .height(38),
+                    Some(msg(Message::ReplaceToken)),
+                ),
             ]
             .spacing(8);
             let fields = column![
@@ -666,15 +669,13 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                 text("The token is stored in your KDE Wallet, not in a config file.")
                     .size(12.5)
                     .color(tokens.sub),
-                row![
-                    ui::labeled_button(
-                        "Disconnect repository",
-                        ButtonKind::Destructive,
-                        *tokens,
-                        Some(msg(Message::Disconnect))
-                    )
-                    .height(34)
-                ],
+                row![ui::sized_button(
+                    "Disconnect repository",
+                    ButtonKind::Destructive,
+                    34.0,
+                    *tokens,
+                    Some(msg(Message::Disconnect)),
+                )],
             ]
             .spacing(14)
             .into()
@@ -692,13 +693,13 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     ]
                     .spacing(1)
                     .width(Fill),
-                    ui::labeled_button(
+                    ui::sized_button(
                         "Set up",
                         ButtonKind::Primary,
+                        32.0,
                         *tokens,
-                        Some(msg(Message::SetUp))
-                    )
-                    .height(32),
+                        Some(msg(Message::SetUp)),
+                    ),
                 ]
                 .spacing(12)
                 .align_y(Center),
@@ -777,7 +778,8 @@ fn switch_row<'a>(
     .style(move |_, _| button::Style {
         text_color,
         ..button::Style::default()
-    });
+    })
+    .focusable(6.0, tokens);
     row![
         container(text(name).size(14.5).font(font::SEMIBOLD))
             .width(230)
@@ -841,7 +843,7 @@ fn pill<'a>(
             }),
             ..button::Style::default()
         })
-        .into()
+        .focusable(16.0, &tokens)
 }
 
 fn about<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {

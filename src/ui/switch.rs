@@ -1,6 +1,7 @@
 use iced::widget::{button, column, container, row, space, text};
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
+use super::FocusExt;
 use crate::theme::{Tokens, font};
 
 /// A labeled on/off switch: the label on the left, a 30 × 18 track on the
@@ -85,5 +86,5 @@ fn toggle<'a, Message: Clone + 'a>(
             text_color: tokens.text,
             ..button::Style::default()
         })
-        .into()
+        .focusable(6.0, &tokens)
 }

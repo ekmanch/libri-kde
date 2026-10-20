@@ -1,10 +1,10 @@
 //! Pieces of the library toolbar: outlined menu buttons and the view
 //! switcher.
 
-use iced::widget::{Row, button, container, row, text};
+use iced::widget::{Row, button, container, text};
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
-use super::{Icon, icon};
+use super::{FocusExt, Icon, icon};
 use crate::theme::{Tokens, font};
 
 /// A 36 px outlined button that opens a popover: an optional icon, the
@@ -57,7 +57,7 @@ pub fn menu_button<'a, Message: Clone + 'a>(
             border: Border::default().rounded(8).width(1).color(tokens.line),
             ..button::Style::default()
         })
-        .into()
+        .focusable(8.0, &tokens)
 }
 
 /// Icon buttons joined in one outlined group; the picked one in the
@@ -80,7 +80,7 @@ pub fn icon_switch<'a, Message: Clone + 'a>(
                 ),
                 ..button::Style::default()
             })
-            .into()
+            .focusable_inside(7.0, &tokens)
     });
     container(Row::with_children(buttons))
         .padding(1)
@@ -99,29 +99,27 @@ pub fn add_button<'a, Message: Clone + 'a>(
     on_press: Message,
 ) -> Element<'a, Message> {
     let tokens = *tokens;
-    button(
-        row![
-            icon(Icon::Plus, 16.0, tokens.on_accent),
-            text(label).font(font::SEMIBOLD)
-        ]
-        .spacing(6)
-        .align_y(Center)
-        .height(Fill),
-    )
-    .height(36)
-    .padding([0, 14])
-    .on_press(on_press)
-    .style(move |_, status| button::Style {
-        background: Some(Background::Color(
-            if matches!(status, button::Status::Hovered) {
-                tokens.accent.scale_alpha(0.85)
-            } else {
-                tokens.accent
-            },
-        )),
-        text_color: tokens.on_accent,
-        border: Border::default().rounded(8),
-        ..button::Style::default()
-    })
-    .into()
+    let mut content = Row::new().spacing(6).align_y(Center).height(Fill);
+    content = content.push(icon(Icon::Plus, 16.0, tokens.on_accent));
+    // An empty label leaves the plus alone, for a tight toolbar.
+    if !label.is_empty() {
+        content = content.push(text(label).font(font::SEMIBOLD));
+    }
+    button(content)
+        .height(36)
+        .padding([0, if label.is_empty() { 10 } else { 14 }])
+        .on_press(on_press)
+        .style(move |_, status| button::Style {
+            background: Some(Background::Color(
+                if matches!(status, button::Status::Hovered) {
+                    tokens.accent.scale_alpha(0.85)
+                } else {
+                    tokens.accent
+                },
+            )),
+            text_color: tokens.on_accent,
+            border: Border::default().rounded(8),
+            ..button::Style::default()
+        })
+        .focusable(8.0, &tokens)
 }

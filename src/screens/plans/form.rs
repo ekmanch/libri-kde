@@ -11,7 +11,7 @@ use crate::app::{App, Message as AppMessage};
 use crate::model::{Plan, TagCategory};
 use crate::plans::{self as rules};
 use crate::theme::{Tokens, font};
-use crate::ui::{self, ButtonKind, Icon};
+use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Plans(message)
@@ -252,7 +252,7 @@ fn source_row<'a>(plan: &'a Plan, on: bool, app: &App, tokens: &Tokens) -> Eleme
     .padding([0, 10])
     .on_press(msg(Message::Source(plan.id.clone())))
     .style(ui::row_style(tokens, on, 7.0))
-    .into()
+    .focusable(8.0, tokens)
 }
 
 /// The linked hashtags, drilled into from the form: a search, the groups
@@ -332,6 +332,7 @@ fn tag_view<'a>(
             .padding(0)
             .on_press(msg(Message::CloseTags))
             .style(ui::row_style(&tokens, false, 8.0))
+            .focusable(8.0, &tokens)
     };
     let form_title = if form.editing.is_some() {
         "Edit plan"

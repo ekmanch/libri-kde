@@ -15,7 +15,7 @@ use crate::app::{App, Message as AppMessage};
 use crate::browse;
 use crate::model::{BookFormat, EntryStatus, MediaType, MusicKind, TagCategory, text as rules};
 use crate::theme::{self, Tokens, font};
-use crate::ui::{self, ButtonKind, Icon};
+use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Entry(message)
@@ -250,7 +250,7 @@ fn lookup<'a>(form: &'a Form, tokens: &Tokens) -> Element<'a, AppMessage> {
             .padding(8)
             .on_press(msg(Message::Pick(index)))
             .style(ui::row_style(tokens, picked, 10.0))
-            .into()
+            .focusable(10.0, tokens)
     }))
     .spacing(4);
     let manual = ui::add_chip("Enter manually instead", tokens, msg(Message::Manual));
@@ -711,7 +711,7 @@ fn hinted_button<'a>(
             .color(border.unwrap_or(Color::TRANSPARENT)),
         ..button::Style::default()
     })
-    .into()
+    .focusable(8.0, &tokens)
 }
 
 /// The form's tag picker: a search that can also create a tag (with a

@@ -12,7 +12,7 @@ use crate::browse::{self, ActivePlan, Overview, Section};
 use crate::model::{Date, Entry, Released};
 use crate::screens::Screen;
 use crate::theme::{self, Tokens, font};
-use crate::ui::{self, Icon};
+use crate::ui::{self, FocusExt, Icon};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Library(message)
@@ -123,7 +123,8 @@ fn shelf<'a>(
     .height(24)
     .padding(0)
     .on_press(msg(Message::SeeAll(section)))
-    .style(text_button(tokens.sub));
+    .style(text_button(tokens.sub))
+    .focusable(6.0, tokens);
     let selected = app.library.selected.as_deref();
     let covers = Row::with_children(list.iter().take(7).map(|entry| {
         let dimmed = selected.is_some_and(|id| id != entry.id);
@@ -170,7 +171,7 @@ fn shelf_cover<'a>(
         .padding(0)
         .on_press(msg(Message::Select(entry.id.clone())))
         .style(text_button(tokens.text))
-        .into()
+        .focusable(8.0, tokens)
 }
 
 /// How an overview row starts: a type dot (text view) or a small cover
@@ -209,7 +210,8 @@ fn list_section<'a>(
     .height(24)
     .padding([0, 2])
     .on_press(msg(Message::SeeAll(section)))
-    .style(text_button(tokens.ink));
+    .style(text_button(tokens.ink))
+    .focusable(6.0, tokens);
     let header = row![
         ui::section_header(section.title(), tokens),
         space::horizontal(),
@@ -267,7 +269,8 @@ fn overview_row<'a>(
         .height(height)
         .padding([4, 8])
         .on_press(msg(Message::Select(entry.id.clone())))
-        .style(ui::row_style(tokens, selected, 0.0));
+        .style(ui::row_style(tokens, selected, 0.0))
+        .focusable(0.0, tokens);
     column![
         row_button,
         container(space())
@@ -291,7 +294,8 @@ fn plan_card<'a>(active: &ActivePlan<'a>, tokens: &Tokens) -> Element<'a, AppMes
     )
     .padding(0)
     .on_press(AppMessage::Show(Screen::Plans))
-    .style(text_button(tokens.ink));
+    .style(text_button(tokens.ink))
+    .focusable(6.0, tokens);
     let year = active.plan.year.map(|y| y.to_string()).unwrap_or_default();
     let title = row![
         text(&active.plan.name).size(20).font(font::EXTRABOLD),

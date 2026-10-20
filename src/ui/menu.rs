@@ -1,7 +1,7 @@
 use iced::widget::{Column, button, container, row, text};
 use iced::{Background, Border, Center, Element};
 
-use super::{panel_style, row_style, section_header};
+use super::{FocusExt, panel_style, row_style, section_header};
 use crate::theme::Tokens;
 
 /// A menu of mutually exclusive choices with radio rings, as the Sort menu:
@@ -32,7 +32,7 @@ pub fn radio_menu<'a, Message: Clone + 'a>(
                 style
             }
         })
-        .into()
+        .focusable(8.0, tokens)
     });
     let header = container(section_header(title, tokens)).padding([8, 10]);
     container(Column::new().push(header).extend(rows))

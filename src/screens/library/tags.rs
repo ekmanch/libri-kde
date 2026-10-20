@@ -10,7 +10,7 @@ use super::{Listing, MAX_PINS, Message, TagPicker};
 use crate::app::{App, Message as AppMessage};
 use crate::model::{Library, TagCategory};
 use crate::theme::{Tokens, font};
-use crate::ui::{self, ButtonKind, Icon};
+use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Library(message)
@@ -156,7 +156,7 @@ fn owned_button<'a>(
         border: Border::default().rounded(8),
         ..button::Style::default()
     })
-    .into()
+    .focusable(8.0, &tokens)
 }
 
 /// The sidebar's All tags popover: every tag by category with its count and
@@ -255,7 +255,8 @@ fn tag_row<'a>(
     .height(34)
     .padding([0, 8])
     .on_press(msg(Message::PickFromAllTags(tag.to_owned())))
-    .style(ui::row_style(tokens, false, 7.0));
+    .style(ui::row_style(tokens, false, 7.0))
+    .focusable(7.0, tokens);
 
     let tokens = *tokens;
     // Eight pinned: the other pins fade and do nothing.
@@ -278,7 +279,8 @@ fn tag_row<'a>(
             },
             border: Border::default().rounded(7),
             ..button::Style::default()
-        });
+        })
+        .focusable(7.0, &tokens);
     Row::new()
         .push(pick)
         .push(pin)

@@ -4,7 +4,7 @@
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Border, Center, Color, Element, Fill};
 
-use super::{mono, row_style};
+use super::{FocusExt, mono, row_style};
 use crate::theme::{self, Tokens, font};
 
 /// "AC" for Alice in Chains, "B" for The Beatles: the first letters of
@@ -62,7 +62,7 @@ pub fn artist_row<'a, Message: Clone + 'a>(
         .padding([0, 12])
         .on_press(on_press)
         .style(row_style(tokens, false, 0.0))
-        .into()
+        .focusable(0.0, tokens)
 }
 
 /// An artist in the list view: the disc, the name and what is saved.
@@ -87,7 +87,7 @@ pub fn artist_list_row<'a, Message: Clone + 'a>(
         .padding([8, 12])
         .on_press(on_press)
         .style(row_style(tokens, false, 10.0))
-        .into()
+        .focusable(10.0, tokens)
 }
 
 /// An artist in the grid: a large disc, the name and what is saved,
@@ -110,7 +110,7 @@ pub fn artist_card<'a, Message: Clone + 'a>(
         .padding([8, 0])
         .on_press(on_press)
         .style(row_style(tokens, false, 12.0))
-        .into()
+        .focusable(12.0, tokens)
 }
 
 /// What a song row shows: a song entry or a rated album track.
@@ -148,7 +148,7 @@ pub fn song_row<'a, Message: Clone + 'a>(
         .padding([0, 12])
         .on_press(on_press)
         .style(row_style(tokens, look.selected, 0.0))
-        .into()
+        .focusable(0.0, tokens)
 }
 
 /// A song in the list view: a square cover, the title over "Artist ·
@@ -179,7 +179,7 @@ pub fn song_list_row<'a, Message: Clone + 'a>(
         .padding([8, 12])
         .on_press(on_press)
         .style(row_style(tokens, look.selected, 10.0))
-        .into()
+        .focusable(10.0, tokens)
 }
 
 /// A song in the grid: a square cover with the title on it, then
@@ -222,7 +222,7 @@ pub fn song_card<'a, Message: Clone + 'a>(
             text_color,
             ..button::Style::default()
         })
-        .into()
+        .focusable(8.0, tokens)
 }
 
 #[cfg(test)]

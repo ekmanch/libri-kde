@@ -4,7 +4,7 @@
 use iced::widget::{Row, button, row, text};
 use iced::{Background, Border, Center, Color, Element, Padding};
 
-use super::{Icon, icon, mono};
+use super::{FocusExt, Icon, icon, mono};
 use crate::theme::{Tokens, font};
 
 /// An option in the Filter popover and the tag picker: 30 px, the
@@ -120,7 +120,7 @@ pub fn add_chip<'a, Message: Clone + 'a>(
             border: Border::default().rounded(13).width(1).color(tokens.line),
             ..button::Style::default()
         })
-        .into()
+        .focusable(13.0, &tokens)
 }
 
 fn chip<'a, Message: Clone + 'a>(
@@ -159,5 +159,5 @@ fn chip<'a, Message: Clone + 'a>(
             ..button::Style::default()
         }
     })
-    .into()
+    .focusable(height / 2.0, &tokens)
 }

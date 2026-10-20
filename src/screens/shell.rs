@@ -11,7 +11,15 @@ use crate::model::MediaType;
 use crate::plans as rules;
 use crate::settings::SyncState;
 use crate::theme::{self, Tokens, font};
-use crate::ui::{self, Icon, Placement, Popover};
+use crate::ui::{self, FocusExt, Icon, Placement, Popover};
+
+/// The sidebar's width, so the content knows what is left of the window.
+pub const SIDEBAR_WIDTH: f32 = 232.0;
+
+/// How wide the content pane is, with a side pane `side` px wide open.
+pub fn content_width(app: &App, side: f32) -> f32 {
+    app.window.width - SIDEBAR_WIDTH - side
+}
 
 pub fn shell<'a>(app: &'a App, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     let tokens = app.tokens();
@@ -119,7 +127,8 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
                 .width(Fill)
                 .padding([7, 10])
                 .on_press(Message::Plans(plans::Message::ShowPlan(plan.id.clone())))
-                .style(ui::row_style(tokens, selected, 8.0)),
+                .style(ui::row_style(tokens, selected, 8.0))
+                .focusable(8.0, tokens),
         );
     }
     let on_overview = on_plans && open_plan.is_none();
@@ -138,7 +147,7 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
 
     let column = column![ui::scroll(items).height(Fill), sync_row(app, tokens)];
     container(column)
-        .width(232)
+        .width(SIDEBAR_WIDTH)
         .height(Fill)
         .padding(Padding::new(0.0).top(6).left(12).right(12))
         .into()
@@ -202,7 +211,8 @@ fn plans_header<'a>(tokens: &Tokens, new_plan: Option<Message>) -> Element<'a, M
                 .height(22)
                 .padding(0)
                 .on_press(message)
-                .style(ui::row_style(tokens, false, 6.0)),
+                .style(ui::row_style(tokens, false, 6.0))
+                .focusable(6.0, tokens),
         );
     }
     container(content)
@@ -245,7 +255,7 @@ fn item<'a>(
         .padding([0, 10])
         .on_press(on_press)
         .style(ui::row_style(tokens, selected, 8.0))
-        .into()
+        .focusable(8.0, tokens)
 }
 
 /// "All plans" and "All tags": the more icon, the label and the total.
@@ -270,7 +280,7 @@ fn more_row<'a>(
         .padding([0, 10])
         .on_press_maybe(on_press)
         .style(ui::row_style(tokens, selected, 8.0))
-        .into()
+        .focusable(8.0, tokens)
 }
 
 /// The sync state and the Settings gear, pinned to the bottom. The gear
@@ -307,7 +317,8 @@ fn sync_row<'a>(app: &App, tokens: &Tokens) -> Element<'a, Message> {
             .style(move |_, _| button::Style {
                 text_color: ink,
                 ..button::Style::default()
-            }),
+            })
+            .focusable(4.0, tokens),
         );
     }
     let on_settings = app.screen == Screen::Settings;
@@ -317,7 +328,8 @@ fn sync_row<'a>(app: &App, tokens: &Tokens) -> Element<'a, Message> {
             .height(26)
             .padding(0)
             .on_press(Message::Show(Screen::Settings))
-            .style(ui::row_style(tokens, on_settings, 8.0)),
+            .style(ui::row_style(tokens, on_settings, 8.0))
+            .focusable(8.0, tokens),
     );
     container(content)
         .height(40)

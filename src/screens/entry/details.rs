@@ -15,7 +15,7 @@ use crate::model::{Entry, EntryStatus, MediaType, Plan};
 use crate::music;
 use crate::screens::plans;
 use crate::theme::{self, Tokens, font};
-use crate::ui::{self, Align, ButtonKind, Icon, Popover};
+use crate::ui::{self, Align, ButtonKind, FocusExt, Icon, Popover};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Entry(message)
@@ -102,7 +102,8 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
             background: Some(Background::Color(tokens.field)),
             border: Border::default().rounded(8).width(1).color(tokens.line),
             ..button::Style::default()
-        });
+        })
+        .focusable(8.0, &tokens);
 
     let library = app.repo.library();
     let plans: Vec<_> = library
@@ -123,7 +124,8 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
                 .style(move |_, _| button::Style {
                     text_color: ink,
                     ..button::Style::default()
-                }),
+                })
+                .focusable(4.0, &tokens),
         );
     }
     in_plans = in_plans.push(ui::add_chip(
@@ -148,7 +150,7 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
     }
     sections = sections
         .push(section("Tags", tags.into(), &tokens))
-        .push(section("Note", note.into(), &tokens));
+        .push(section("Note", note, &tokens));
     if !entry.description.is_empty() {
         let about = text(&entry.description)
             .size(14)
@@ -227,7 +229,8 @@ fn in_plan<'a>(
                 .width(1)
                 .color(tokens_copy.line),
             ..button::Style::default()
-        });
+        })
+        .focusable(8.0, tokens);
         let calendar = open.then(|| {
             let picked = ui::calendar::calendar(
                 plans::shown_month(app),

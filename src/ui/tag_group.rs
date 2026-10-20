@@ -1,7 +1,7 @@
 use iced::widget::{Column, Row, button, container, row, space, text};
 use iced::{Center, Element, Fill, Padding};
 
-use super::{Icon, icon, mono, row_style};
+use super::{FocusExt, Icon, icon, mono, row_style};
 use crate::theme::{Tokens, font, size};
 
 /// A collapsible group of tag chips, as in the tag picker: a chevron, the
@@ -43,7 +43,8 @@ pub fn tag_group<'a, Message: Clone + 'a>(
     .height(36)
     .padding([0, 4])
     .on_press(on_toggle)
-    .style(row_style(tokens, false, 8.0));
+    .style(row_style(tokens, false, 8.0))
+    .focusable(8.0, tokens);
 
     let mut group = Column::new().push(header).spacing(4);
     if open {

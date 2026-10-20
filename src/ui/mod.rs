@@ -7,6 +7,7 @@ pub mod dialog;
 pub mod empty;
 pub mod entry;
 pub mod field;
+pub mod focus;
 pub mod groups;
 pub mod icon;
 pub mod menu;
@@ -31,7 +32,8 @@ pub use dialog::{dialog, modal, panel};
 pub use empty::empty_state;
 pub use entry::{EntryLook, entry_card, entry_list_row, entry_table_header, entry_table_row, rule};
 pub use field::{labeled, text_field};
-pub use groups::Groups;
+pub use focus::{Barrier, FocusExt, Focusable};
+pub use groups::{Groups, Measure};
 pub use icon::{Icon, icon};
 pub use menu::radio_menu;
 pub use popover::{Align, Placement, Popover};
@@ -182,7 +184,7 @@ pub fn type_checkbox<'a, Message: Clone + 'a>(
             border: Border::default().rounded(4).width(1.5).color(color),
             ..button::Style::default()
         })
-        .into()
+        .focusable(4.0, tokens)
 }
 
 /// A 30 px square icon button in the secondary color: Close, Settings.
@@ -198,7 +200,7 @@ pub fn icon_button<'a, Message: Clone + 'a>(
         .padding(0)
         .on_press(on_press)
         .style(row_style(tokens, false, 8.0))
-        .into()
+        .focusable(8.0, tokens)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,14 +228,24 @@ impl ButtonKind {
     ];
 }
 
-/// A 36 px button with a SemiBold label. Returned as a button, so a
-/// caller can widen it.
+/// A 36 px button with a SemiBold label.
 pub fn labeled_button<'a, Message: Clone + 'a>(
     label: impl text::IntoFragment<'a>,
     kind: ButtonKind,
     tokens: Tokens,
     on_press: Option<Message>,
-) -> button::Button<'a, Message> {
+) -> Element<'a, Message> {
+    sized_button(label, kind, 36.0, tokens, on_press)
+}
+
+/// A labeled button of another height: the compact ones in Settings.
+pub fn sized_button<'a, Message: Clone + 'a>(
+    label: impl text::IntoFragment<'a>,
+    kind: ButtonKind,
+    height: f32,
+    tokens: Tokens,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
     button(
         text(label)
             .size(size::BODY)
@@ -241,10 +253,11 @@ pub fn labeled_button<'a, Message: Clone + 'a>(
             .height(Fill)
             .align_y(Vertical::Center),
     )
-    .height(36)
+    .height(height)
     .padding(Padding::from([0, 16]))
     .on_press_maybe(on_press)
     .style(move |_, status| button_style(kind, &tokens, status))
+    .focusable(8.0, &tokens)
 }
 
 /// A labeled button that fills the width, its label centered: Edit in
@@ -254,7 +267,7 @@ pub fn wide_button<'a, Message: Clone + 'a>(
     kind: ButtonKind,
     tokens: Tokens,
     on_press: Option<Message>,
-) -> button::Button<'a, Message> {
+) -> Element<'a, Message> {
     button(
         text(label)
             .size(size::BODY)
@@ -269,6 +282,7 @@ pub fn wide_button<'a, Message: Clone + 'a>(
     .padding(Padding::from([0, 16]))
     .on_press_maybe(on_press)
     .style(move |_, status| button_style(kind, &tokens, status))
+    .focusable(8.0, &tokens)
 }
 
 /// The fill, text and border of a `ButtonKind`, for buttons built by hand.

@@ -3,7 +3,7 @@
 use iced::widget::{center, column, container, mouse_area, opaque, row, stack, text};
 use iced::{Center, Element, Length};
 
-use super::{Icon, icon_button, panel_style};
+use super::{Barrier, Icon, icon_button, panel_style};
 use crate::theme::{Tokens, font};
 
 /// `base` with `dialog` over it while it is `Some`. A click on the scrim
@@ -20,7 +20,8 @@ pub fn modal<'a, Message: Clone + 'a>(
     let scrim = tokens.scrim;
     let layer = mouse_area(center(opaque(dialog)).style(move |_| container::background(scrim)))
         .on_press(on_dismiss);
-    stack![base.into(), opaque(layer)].into()
+    // Focus and keys stay in the dialog.
+    stack![Barrier::new(base), opaque(layer)].into()
 }
 
 /// The dialog panel: a title with a close button, the body, and a footer
