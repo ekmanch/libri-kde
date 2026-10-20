@@ -43,7 +43,10 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 ```fish
 cargo run                          # opens the app (library screen)
 LIBRI_SCREEN=tokens cargo run      # starts on another screen: splash, setup, library, plans, settings, tokens
-LIBRI_SYNC=expired cargo run       # the sync row's expired-token state
+LIBRI_SYNC=expired cargo run       # the sync row's expired-token state; expires-in-6 shows the warning
+LIBRI_PLASMA=light cargo run       # a light Plasma, for the System theme
+LIBRI_FIRST_RUN=1 cargo run        # no repository yet (the splash's first-run line, Settings not connected)
+LIBRI_SETUP=branch cargo run       # with LIBRI_SCREEN=setup: welcome, connect, branch, file, create, existing, done
 ICED_BACKEND=tiny-skia cargo run   # software renderer
 ```
 

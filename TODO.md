@@ -92,12 +92,12 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Remove from plan or delete everywhere; Delete plan
 
 ### 1f. Settings and states
-- [ ] Settings: type checkboxes (off or on), theme (System, Graphite, Charcoal, Catppuccin Mocha, Light; System follows Plasma's color scheme through the desktop portal), background style (two-tone or flat, with the flat tokens in `theme`), sidebar tags (pinned or most used), accent color (Vivid and Catppuccin groups, Peach default), timeline default, seasonal theme default, tags, About row
-- [ ] Library connection section (UI only)
-- [ ] Splash: logo, wordmark, indeterminate bar; first-run and returning variants
-- [ ] Setup wizard, full window (UI only): Welcome, Connect GitHub (repo and token, "stored in KDE Wallet" copy), Branch, Library file (new or existing), Create / Pick existing, All set
-- [ ] Token-expiry dialog: "Your GitHub token expires in 6 days" with Later / Open GitHub / Replace token; 1-day and expired variants; the sync row's "Replace token" link when expired (driven by fake states)
-- [ ] Light theme pass over every screen
+- [x] Settings: type checkboxes (off or on), theme (System, Graphite, Charcoal, Catppuccin Mocha, Light; System follows Plasma's color scheme through the desktop portal), background style (two-tone or flat, with the flat tokens in `theme`), sidebar tags (pinned or most used), accent color (Vivid and Catppuccin groups, Peach default), timeline default, seasonal theme default, tags, About row
+- [x] Library connection section (UI only)
+- [x] Splash: logo, wordmark, indeterminate bar; first-run and returning variants
+- [x] Setup wizard, full window (UI only): Welcome, Connect GitHub (repo and token, "stored in KDE Wallet" copy), Branch, Library file (new or existing), Create / Pick existing, All set
+- [x] Token-expiry dialog: "Your GitHub token expires in 6 days" with Later / Open GitHub / Replace token; 1-day and expired variants; the sync row's "Replace token" link when expired (driven by fake states)
+- [x] Light theme pass over every screen
 
 ### 1g. Phase 1 wrap-up
 - [ ] Walk through every mockup screen next to the app and list the differences; fix them or record the decision in DESIGN.md
@@ -113,10 +113,11 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [ ] Persist the library to a local file (`~/.local/share/libri/`), changes survive a restart
 - [ ] Operations layer: every change is a small named operation with a readable summary, as on the phone
 - [ ] Display preferences on the device (`~/.config/libri/`), never synced
+- [ ] System theme for real: read Plasma's color scheme from the desktop portal (`org.freedesktop.appearance` `color-scheme`) and follow it while Libri runs. Needs a D-Bus crate (`ashpd` or `zbus`) or a `busctl` call; decide which. Until then `LIBRI_PLASMA=light` fakes a light Plasma
 
 ## Phase 3: GitHub sync
 
-- [ ] Setup for real: token in KDE Wallet (Secret Service), repo, branch, file
+- [ ] Setup for real: token in KDE Wallet (Secret Service), repo, branch, file; the real branch and file lists, the mockup's "Checking access…" and "Creating library.json…" states, Sync now and Disconnect repository doing their work
 - [ ] Read, bundled saves with readable commit messages, three-way sync and conflicts, offline queue, the same rules as the phone (DESIGN.md section 10b)
 - [ ] Real token expiry from GitHub's response header drives the warning dialog
 
