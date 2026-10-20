@@ -68,6 +68,15 @@ pub fn mono<'a>(value: impl text::IntoFragment<'a>, text_size: f32, color: Color
     text(value).size(text_size).font(font::MONO).color(color)
 }
 
+/// The Libri logo (the book) at `width` px; it is 7:5.
+pub fn logo<'a, Message>(width: f32) -> Element<'a, Message> {
+    let bytes: &'static [u8] = include_bytes!("../../assets/logos/libri/svg/libri_book_rect.svg");
+    widget::svg(widget::svg::Handle::from_memory(bytes))
+        .width(width)
+        .height(width * 5.0 / 7.0)
+        .into()
+}
+
 /// A small colored square or circle: type dots, the sync dot, swatches.
 pub fn dot<'a, Message: 'a>(color: Color, diameter: f32, radius: f32) -> Element<'a, Message> {
     container(widget::space())
@@ -262,7 +271,8 @@ pub fn wide_button<'a, Message: Clone + 'a>(
     .style(move |_, status| button_style(kind, &tokens, status))
 }
 
-fn button_style(kind: ButtonKind, tokens: &Tokens, status: button::Status) -> button::Style {
+/// The fill, text and border of a `ButtonKind`, for buttons built by hand.
+pub fn button_style(kind: ButtonKind, tokens: &Tokens, status: button::Status) -> button::Style {
     let (fill, text_color, border) = match kind {
         ButtonKind::Primary => (Some(tokens.accent), tokens.on_accent, None),
         ButtonKind::Outline => (None, tokens.text, Some(tokens.line)),

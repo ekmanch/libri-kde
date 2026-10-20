@@ -166,28 +166,59 @@ pub struct Tokens {
     pub ink: Color,
     /// Text on an accent fill.
     pub on_accent: Color,
+    /// The green of a connected state, and its faint card fill.
+    pub success: Color,
+    pub success_fill: Color,
+    /// The amber of a warning (the token expiry dialog), and its disc.
+    pub warning: Color,
+    pub warning_fill: Color,
+    /// The faint red card fill behind an error state.
+    pub danger_fill: Color,
 }
 
 impl Tokens {
+    /// The two-tone tokens: a darker chrome and a lighter content pane.
     pub fn new(theme: Theme, accent: Accent) -> Tokens {
+        Tokens::styled(theme, accent, false)
+    }
+
+    /// The tokens for a theme and accent; `flat` uses one shade for the
+    /// chrome and the content (docs/DESIGN.md section 8).
+    pub fn styled(theme: Theme, accent: Accent, flat: bool) -> Tokens {
         let accent = accent.for_theme(theme);
-        let (chrome, content, raised, field, line, text, sub) = match theme {
-            Theme::Graphite => (
+        let (chrome, content, raised, field, line, text, sub) = match (theme, flat) {
+            (Theme::Graphite, false) => (
                 0x131416, 0x1D1F22, 0x2A2D31, 0x1D1F22, 0x3A3E44, 0xEEF0F2, 0xA3A8AE,
             ),
-            Theme::Charcoal => (
+            (Theme::Graphite, true) => (
+                0x151515, 0x151515, 0x252525, 0x151515, 0x2A2A2A, 0xEEF0F2, 0xA3A8AE,
+            ),
+            (Theme::Charcoal, false) => (
                 0x151515, 0x1C1C1C, 0x272727, 0x202020, 0x2E2E2E, 0xEDEDED, 0xA3A3A3,
             ),
-            Theme::Mocha => (
+            (Theme::Charcoal, true) => (
+                0x151515, 0x151515, 0x242424, 0x202020, 0x2E2E2E, 0xEDEDED, 0xA3A3A3,
+            ),
+            (Theme::Mocha, false) => (
                 0x181825, 0x1E1E2E, 0x2B2C3E, 0x232334, 0x313244, 0xCDD6F4, 0xA6ADC8,
             ),
-            Theme::Light => (
+            (Theme::Mocha, true) => (
+                0x181825, 0x181825, 0x2A2B3C, 0x232334, 0x313244, 0xCDD6F4, 0xA6ADC8,
+            ),
+            (Theme::Light, false) => (
                 0xF4F5F7, 0xFFFFFF, 0xE9EBEE, 0xFFFFFF, 0xD5D9DE, 0x17181B, 0x5B616B,
+            ),
+            (Theme::Light, true) => (
+                0xFFFFFF, 0xFFFFFF, 0xE9EBEE, 0xFFFFFF, 0xD5D9DE, 0x17181B, 0x5B616B,
             ),
         };
         let content = hex(content);
         let light = theme.is_light();
         let pick = |on_light: Color, on_dark: Color| if light { on_light } else { on_dark };
+        let faint = |color: Color| color.scale_alpha(0.08);
+        let success = pick(hex(0x40A02B), hex(0xA6E3A1));
+        let warning = pick(hex(0xA36706), hex(0xF2B544));
+        let danger = pick(hex(0xD7263D), hex(0xF0525F));
         Tokens {
             theme,
             light,
@@ -202,7 +233,12 @@ impl Tokens {
             hover: pick(hex(0xF1F2F4), mix_white(content, 0.07)),
             track: pick(hex(0xE3E5E9), mix_white(content, 0.12)),
             popover: pick(hex(0xFFFFFF), hex(raised)),
-            danger: pick(hex(0xD7263D), hex(0xF0525F)),
+            danger,
+            success,
+            success_fill: faint(success),
+            warning,
+            warning_fill: pick(hex(0xFDEBD9), hex(0xF2B544).scale_alpha(0.16)),
+            danger_fill: faint(danger),
             scrim: pick(
                 Color::from_rgba8(20, 22, 28, 0.32),
                 Color::from_rgba8(8, 9, 10, 0.62),
@@ -342,6 +378,19 @@ mod tests {
         let graphite = Tokens::new(Theme::Graphite, PEACH);
         assert_eq!(graphite.selection.into_rgba8(), [0x3D, 0x3E, 0x41, 0xFF]);
         assert_eq!(Tokens::new(Theme::Light, PEACH).selection, hex(0xE9EBEE));
+    }
+
+    #[test]
+    fn flat_uses_one_shade_for_chrome_and_content() {
+        let flat = Tokens::styled(Theme::Graphite, PEACH, true);
+        assert_eq!(flat.chrome, flat.content);
+        assert_eq!(flat.chrome, hex(0x151515));
+        assert_eq!(flat.raised, hex(0x252525));
+        // mixWhite("#151515", 0.14).
+        assert_eq!(flat.selection.into_rgba8(), [0x36, 0x36, 0x36, 0xFF]);
+        let light = Tokens::styled(Theme::Light, PEACH, true);
+        assert_eq!(light.chrome, Color::WHITE);
+        assert_ne!(Tokens::new(Theme::Light, PEACH).chrome, Color::WHITE);
     }
 
     #[test]

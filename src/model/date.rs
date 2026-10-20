@@ -55,6 +55,25 @@ impl Date {
         (self.days() + 3).rem_euclid(7) as usize
     }
 
+    /// "October 24", for the token warning.
+    pub fn month_day(self) -> String {
+        const MONTHS: [&str; 12] = [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        ];
+        format!("{} {}", MONTHS[usize::from(self.month) - 1], self.day)
+    }
+
     /// The date `days` later, or earlier when negative.
     pub fn add_days(self, days: i64) -> Date {
         Date::from_days(self.days() + days)

@@ -12,7 +12,7 @@ pub fn switch<'a, Message: Clone + 'a>(
     on_toggle: Message,
 ) -> Element<'a, Message> {
     let label = text(label).size(13.5).width(Fill);
-    let content = row![label, track(on, tokens)]
+    let content = row![label, track(on, 30.0, tokens)]
         .spacing(10)
         .align_y(Center)
         .height(Fill);
@@ -34,30 +34,37 @@ pub fn setting_switch<'a, Message: Clone + 'a>(
     ]
     .spacing(3)
     .width(Fill);
-    let content = row![label, track(on, tokens)].spacing(14);
+    let content = row![label, track(on, 30.0, tokens)].spacing(14);
     toggle(content, iced::Shrink, tokens, on_toggle)
 }
 
-fn track<'a, Message: 'a>(on: bool, tokens: &Tokens) -> Element<'a, Message> {
+/// The switch alone, `width` px wide (30 in dialogs, 38 in Settings),
+/// for a row that lays its own label out.
+pub fn track<'a, Message: 'a>(on: bool, width: f32, tokens: &Tokens) -> Element<'a, Message> {
     let (track, knob) = if on {
         (tokens.accent, tokens.on_accent)
     } else {
         (tokens.line, tokens.sub)
     };
+    let height = width * 0.6;
     let knob = container(space())
-        .width(14)
-        .height(14)
-        .style(move |_| container::background(knob).border(Border::default().rounded(7)));
+        .width(height - 4.0)
+        .height(height - 4.0)
+        .style(move |_| {
+            container::background(knob).border(Border::default().rounded(height / 2.0 - 2.0))
+        });
     let track = container(knob)
-        .width(30)
-        .height(18)
+        .width(width)
+        .height(height)
         .padding(Padding::new(2.0))
         .align_x(if on {
             iced::alignment::Horizontal::Right
         } else {
             iced::alignment::Horizontal::Left
         })
-        .style(move |_| container::background(track).border(Border::default().rounded(9)));
+        .style(move |_| {
+            container::background(track).border(Border::default().rounded(height / 2.0))
+        });
     track.into()
 }
 
