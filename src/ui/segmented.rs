@@ -1,3 +1,4 @@
+use iced::border::Radius;
 use iced::widget::{Row, button, container, text};
 use iced::{Background, Border, Element, Fill};
 
@@ -18,6 +19,7 @@ pub fn segmented<'a, Message: Clone + 'a>(
         .into_iter()
         .enumerate()
         .map(|(index, (label, on, message))| {
+            let radius = segment_radius(index, last, 7.0);
             let segment = button(container(text(label).size(13).font(font::SEMIBOLD)).center(Fill))
                 .width(Fill)
                 .height(height)
@@ -31,6 +33,10 @@ pub fn segmented<'a, Message: Clone + 'a>(
                             .then_some(Background::Color(tokens.hover))
                     },
                     text_color: if on { tokens.text } else { tokens.sub },
+                    border: Border {
+                        radius,
+                        ..Border::default()
+                    },
                     ..button::Style::default()
                 })
                 .focusable_inside(7.0, &tokens);
@@ -50,4 +56,17 @@ pub fn segmented<'a, Message: Clone + 'a>(
                 .border(Border::default().rounded(8).width(1).color(tokens.line))
         })
         .into()
+}
+
+/// The outer corners of a joined group's first and last segment, so a
+/// fill follows the group's outline; the inner corners stay square.
+pub fn segment_radius(index: usize, last: usize, radius: f32) -> Radius {
+    let mut corners = Radius::default();
+    if index == 0 {
+        corners = corners.top_left(radius).bottom_left(radius);
+    }
+    if index == last {
+        corners = corners.top_right(radius).bottom_right(radius);
+    }
+    corners
 }

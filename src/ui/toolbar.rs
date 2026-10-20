@@ -67,21 +67,31 @@ pub fn icon_switch<'a, Message: Clone + 'a>(
     tokens: &Tokens,
 ) -> Element<'a, Message> {
     let tokens = *tokens;
-    let buttons = items.into_iter().map(|(which, on, message)| {
-        let color = if on { tokens.text } else { tokens.sub };
-        button(container(icon(which, 16.0, color)).center(Fill))
-            .width(38)
-            .height(34)
-            .padding(0)
-            .on_press(message)
-            .style(move |_, status| button::Style {
-                background: (on || matches!(status, button::Status::Hovered)).then_some(
-                    Background::Color(if on { tokens.selection } else { tokens.hover }),
-                ),
-                ..button::Style::default()
-            })
-            .focusable_inside(7.0, &tokens)
-    });
+    let items: Vec<_> = items.into_iter().collect();
+    let last = items.len().saturating_sub(1);
+    let buttons = items
+        .into_iter()
+        .enumerate()
+        .map(|(index, (which, on, message))| {
+            let color = if on { tokens.text } else { tokens.sub };
+            let radius = super::segmented::segment_radius(index, last, 7.0);
+            button(container(icon(which, 16.0, color)).center(Fill))
+                .width(38)
+                .height(34)
+                .padding(0)
+                .on_press(message)
+                .style(move |_, status| button::Style {
+                    background: (on || matches!(status, button::Status::Hovered)).then_some(
+                        Background::Color(if on { tokens.selection } else { tokens.hover }),
+                    ),
+                    border: Border {
+                        radius,
+                        ..Border::default()
+                    },
+                    ..button::Style::default()
+                })
+                .focusable_inside(7.0, &tokens)
+        });
     container(Row::with_children(buttons))
         .padding(1)
         .style(move |_| {

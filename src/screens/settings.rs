@@ -537,6 +537,7 @@ fn accent_group<'a>(
         button(
             column![disc, text(accent.name).size(12).font(weight).color(fg)]
                 .spacing(6)
+                .width(Fill)
                 .align_x(Center),
         )
         .width(74)
@@ -825,25 +826,29 @@ fn pill<'a>(
     platform: Option<&'a str>,
 ) -> Element<'a, AppMessage> {
     let tokens = *tokens;
-    button(text(label).size(13).font(font::SEMIBOLD))
-        .height(32)
-        .padding([0, 14])
-        .on_press(msg(Message::Platform(platform.map(str::to_owned))))
-        .style(move |_, status| button::Style {
-            background: match status {
-                _ if on => Some(Background::Color(tokens.accent)),
-                button::Status::Hovered => Some(Background::Color(tokens.hover)),
-                _ => None,
-            },
-            text_color: if on { tokens.on_accent } else { tokens.sub },
-            border: Border::default().rounded(16).width(1).color(if on {
-                tokens.accent
-            } else {
-                tokens.line
-            }),
-            ..button::Style::default()
-        })
-        .focusable(16.0, &tokens)
+    button(
+        container(text(label).size(13).font(font::SEMIBOLD))
+            .height(Fill)
+            .align_y(Center),
+    )
+    .height(32)
+    .padding([0, 14])
+    .on_press(msg(Message::Platform(platform.map(str::to_owned))))
+    .style(move |_, status| button::Style {
+        background: match status {
+            _ if on => Some(Background::Color(tokens.accent)),
+            button::Status::Hovered => Some(Background::Color(tokens.hover)),
+            _ => None,
+        },
+        text_color: if on { tokens.on_accent } else { tokens.sub },
+        border: Border::default().rounded(16).width(1).color(if on {
+            tokens.accent
+        } else {
+            tokens.line
+        }),
+        ..button::Style::default()
+    })
+    .focusable(16.0, &tokens)
 }
 
 fn about<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
