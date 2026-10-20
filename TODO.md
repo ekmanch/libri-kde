@@ -100,13 +100,13 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Light theme pass over every screen
 
 ### 1g. Phase 1 wrap-up
-- [ ] Walk through every mockup screen next to the app and list the differences; fix them or record the decision in DESIGN.md
-- [ ] Window sizes: the minimum size, 1366×768, 1920×1080, 2560×1440; KDE fractional scaling at 125 % and 150 %
-- [ ] Long lists as on the phone (L1 to L6): letter headers and an alphabet rail for artists and title order, decade headers for the year orders, once a list is three screens tall with two sections or more
-- [ ] Keyboard pass: Ctrl+N new entry (Ctrl+K and Ctrl+F already focus the search), arrow keys in lists, focus visible everywhere. iced 0.14 can focus only text fields, so buttons, chips and rows need a focusable wrapper widget with a visible focus ring
-- [ ] Contrast check of the inks and type colors in dark and light
-- [ ] Tests for filtering, sorting and the similar-tag check
-- [ ] `cargo clippy -- -D warnings` clean; remove the token sheet
+- [x] Walk through every mockup screen next to the app and list the differences; fix them or record the decision in DESIGN.md
+- [x] Window sizes: the minimum size, 1366×768, 1920×1080, 2560×1440; KDE fractional scaling at 125 % and 150 %
+- [x] Long lists as on the phone (L1 to L6): letter headers and an alphabet rail for artists and title order, decade headers for the year orders, once a list is three screens tall with two sections or more
+- [x] Keyboard pass: Ctrl+N new entry (Ctrl+K and Ctrl+F already focus the search), arrow keys in lists, focus visible everywhere. iced 0.14 can focus only text fields, so buttons, chips and rows need a focusable wrapper widget with a visible focus ring
+- [x] Contrast check of the inks and type colors in dark and light
+- [x] Tests for filtering, sorting and the similar-tag check
+- [x] `cargo clippy -- -D warnings` clean; remove the token sheet
 
 ## Phase 2: Local data
 

@@ -20,7 +20,7 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 - `app`: state, `Message`, `update`, `view`, window settings and font loading.
 - `theme`: design tokens from the mockup (backgrounds, type colors, accents, fonts, text sizes). Never hard-code a color or font in a screen; add it here.
 - `ui`: widgets shared by every screen (buttons, headers, icons). UI that repeats across screens is one shared widget here, never copied.
-- `screens`: one module per screen (splash, setup, library, plans, settings), plus the throwaway token sheet.
+- `screens`: one module per screen (splash, setup, library, plans, settings), the window shell and the token warning.
 - `model`: the `library.json` model and `model::codec`, the canonical JSON encoding.
 - `repo`: the `LibraryRepository` trait and its implementations (the fixture one for now).
 - `fixtures`: the bundled fixture library.
@@ -42,11 +42,12 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 
 ```fish
 cargo run                          # opens the app (library screen)
-LIBRI_SCREEN=tokens cargo run      # starts on another screen: splash, setup, library, plans, settings, tokens
+LIBRI_SCREEN=plans cargo run       # starts on another screen: splash, setup, library, plans, settings
 LIBRI_SYNC=expired cargo run       # the sync row's expired-token state; expires-in-6 shows the warning
 LIBRI_PLASMA=light cargo run       # a light Plasma, for the System theme
 LIBRI_FIRST_RUN=1 cargo run        # no repository yet (the splash's first-run line, Settings not connected)
 LIBRI_SETUP=branch cargo run       # with LIBRI_SCREEN=setup: welcome, connect, branch, file, create, existing, done
+LIBRI_LONG_LISTS=1 cargo run       # section headers and the jump rail on every list, since the fixture is short
 ICED_BACKEND=tiny-skia cargo run   # software renderer
 ```
 
@@ -58,7 +59,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-To look at a screen, capture it rather than taking a desktop screenshot. This renders every screen in Graphite and Light at 1600 × 900 (2× scale) to `screenshots/` (git-ignored):
+To look at a screen, capture it rather than taking a desktop screenshot. This renders every screen in Graphite and Light at 1600 × 900 (2× scale) to `screenshots/` (git-ignored), and the window sizes of phase 1g to `screenshots/sizes/`:
 
 ```fish
 cargo test --test screenshots -- --ignored
@@ -68,4 +69,4 @@ Compare each capture with its board in `design/canvas.html`. When a screen is bu
 
 The pre-commit hook in `.githooks/` runs the formatter and clippy; enable it once per clone with `git config core.hooksPath .githooks`.
 
-Screen tests use `iced_test::simulator` on a screen's `view` (see `screens/token_sheet.rs`); logic tests call `App::update` directly (message in, state out).
+Screen tests use `iced_test::simulator` on the app's `view` (see the tests in `screens/library/entries.rs`); logic tests call `App::update` directly (message in, state out).
