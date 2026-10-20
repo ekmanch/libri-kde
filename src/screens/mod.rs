@@ -4,17 +4,16 @@
 pub mod entry;
 pub mod library;
 pub mod plans;
-mod settings;
-mod setup;
+pub mod settings;
+pub mod setup;
 pub mod shell;
-mod splash;
+pub mod splash;
+pub mod token;
 pub mod token_sheet;
 
-use iced::widget::{container, space};
-use iced::{Element, Fill};
+use iced::Element;
 
 use crate::app::{App, Message};
-use crate::theme::Tokens;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Screen {
@@ -58,38 +57,29 @@ impl Screen {
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let tokens = app.tokens();
     let screen = match app.screen {
-        Screen::Splash => splash::view(&tokens),
-        Screen::Setup => setup::view(&tokens),
+        Screen::Splash => splash::view(app),
+        Screen::Setup => setup::view(app),
         Screen::Library => library::view(app),
         Screen::Plans => plans::view(app),
-        Screen::Settings => settings::view(&tokens),
-        Screen::TokenSheet => token_sheet::view(app, tokens),
+        Screen::Settings => settings::view(app),
+        Screen::TokenSheet => token_sheet::view(app, app.tokens()),
     };
-    entry::overlay(app, plans::overlay(app, screen))
+    // The token warning sits over every dialog.
+    token::overlay(app, entry::overlay(app, plans::overlay(app, screen)))
 }
 
 /// The screen's part of the window title, or `None` for plain "Libri".
 pub fn title(app: &App) -> Option<String> {
     let name = match app.screen {
-        Screen::Splash | Screen::Setup => return None,
+        Screen::Splash => return None,
+        Screen::Setup => return app.setup.in_wizard().then(|| "Set up Libri".into()),
         Screen::Library => return Some(app.library.title()),
         Screen::Plans => return Some(plans::title(app)),
         Screen::Settings => "Settings",
         Screen::TokenSheet => "Token sheet",
     };
     Some(name.into())
-}
-
-/// An empty window in the theme's chrome, until the screen is built.
-fn placeholder<'a>(tokens: &Tokens) -> Element<'a, Message> {
-    let chrome = tokens.chrome;
-    container(space())
-        .width(Fill)
-        .height(Fill)
-        .style(move |_| container::background(chrome))
-        .into()
 }
 
 #[cfg(test)]

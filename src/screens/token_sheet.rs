@@ -7,6 +7,7 @@ use iced::{Background, Border, Color, Element, Fill};
 
 use crate::app::{App, Message as AppMessage};
 use crate::model::{MediaType, TagCategory};
+use crate::settings::ThemeChoice;
 use crate::theme::{self, Accent, Tokens, font, size};
 use crate::ui::{self, Align, ButtonKind, Icon, Popover};
 
@@ -106,7 +107,7 @@ impl State {
 
 pub fn view(app: &App, tokens: Tokens) -> Element<'_, AppMessage> {
     let themes = row(theme::Theme::ALL.map(|choice| {
-        let kind = if choice == app.theme {
+        let kind = if choice == app.theme() {
             ButtonKind::Primary
         } else {
             ButtonKind::Neutral
@@ -115,7 +116,7 @@ pub fn view(app: &App, tokens: Tokens) -> Element<'_, AppMessage> {
             choice.label(),
             kind,
             tokens,
-            Some(AppMessage::SetTheme(choice)),
+            Some(AppMessage::SetTheme(ThemeChoice::Fixed(choice))),
         )
         .into()
     }))
@@ -194,7 +195,13 @@ pub fn view(app: &App, tokens: Tokens) -> Element<'_, AppMessage> {
             ButtonKind::Destructive => "Delete",
             ButtonKind::Text => "Text",
         };
-        ui::labeled_button(label, kind, tokens, Some(AppMessage::SetAccent(app.accent))).into()
+        ui::labeled_button(
+            label,
+            kind,
+            tokens,
+            Some(AppMessage::SetAccent(app.settings.accent)),
+        )
+        .into()
     }))
     .push(ui::labeled_button(
         "Disabled",
@@ -416,7 +423,7 @@ fn section<'a>(
 
 fn accents<'a>(palette: &[Accent], app: &App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let tokens = *tokens;
-    let (current, theme) = (app.accent, app.theme);
+    let (current, theme) = (app.settings.accent, app.theme());
     let swatches = palette.iter().map(|&accent| {
         let label = row![
             ui::dot(accent.for_theme(theme).fill, 14.0, 7.0),
@@ -477,8 +484,8 @@ mod tests {
             ui.click("Light").unwrap();
             ui.click("Lavender").unwrap();
         });
-        assert_eq!(app.theme, theme::Theme::Light);
-        assert_eq!(app.accent.name, "Lavender");
+        assert_eq!(app.theme(), theme::Theme::Light);
+        assert_eq!(app.settings.accent.name, "Lavender");
     }
 
     #[test]

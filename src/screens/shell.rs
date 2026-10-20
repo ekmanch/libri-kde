@@ -5,10 +5,11 @@ use iced::border::Radius;
 use iced::widget::{Column, button, column, container, progress_bar, row, space, text};
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
-use super::{Screen, library, plans};
-use crate::app::{App, Message, SyncState};
+use super::{Screen, library, plans, setup};
+use crate::app::{App, Message};
 use crate::model::MediaType;
 use crate::plans as rules;
+use crate::settings::SyncState;
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, Icon, Placement, Popover};
 
@@ -101,7 +102,7 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
         .align_y(iced::alignment::Vertical::Bottom);
         // On Plans the bars take each plan's own accent.
         let (track, fill) = if on_plans {
-            (tokens.track, plans::plan_accent(plan, tokens))
+            (tokens.track, plans::plan_accent(app, plan, tokens))
         } else {
             (tokens.line, tokens.accent)
         };
@@ -135,7 +136,7 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
         items = tags(app, items, tokens);
     }
 
-    let column = column![ui::scroll(items).height(Fill), sync_row(app.sync, tokens)];
+    let column = column![ui::scroll(items).height(Fill), sync_row(app, tokens)];
     container(column)
         .width(232)
         .height(Fill)
@@ -272,39 +273,55 @@ fn more_row<'a>(
         .into()
 }
 
-/// The sync state and the Settings gear, pinned to the bottom.
-fn sync_row<'a>(sync: SyncState, tokens: &Tokens) -> Element<'a, Message> {
+/// The sync state and the Settings gear, pinned to the bottom. The gear
+/// is marked while Settings is open.
+fn sync_row<'a>(app: &App, tokens: &Tokens) -> Element<'a, Message> {
+    let sync = app.sync;
     let (dot, label, color) = match sync {
-        SyncState::Synced => (theme::SYNC_OK, "Synced 2 min ago", tokens.sub),
+        SyncState::Synced | SyncState::ExpiresIn(_) => {
+            (theme::SYNC_OK, "Synced 2 min ago", tokens.sub)
+        }
         SyncState::TokenExpired => (theme::SYNC_ERROR, "Token expired", tokens.text),
     };
     let mut content = row![
         ui::dot(dot, 8.0, 4.0),
-        text(label).size(12.5).color(color).width(Fill)
+        text(label)
+            .size(12)
+            .color(color)
+            .wrapping(text::Wrapping::None)
+            .width(Fill)
     ]
-    .spacing(8)
+    .spacing(5)
     .align_y(Center);
     if sync == SyncState::TokenExpired {
         let ink = tokens.ink;
         content = content.push(
-            button(text("Replace token").size(12.5).font(font::SEMIBOLD))
-                .padding([0, 4])
-                .on_press(Message::Show(Screen::Setup))
-                .style(move |_, _| button::Style {
-                    text_color: ink,
-                    ..button::Style::default()
-                }),
+            button(
+                text("Replace token")
+                    .size(12)
+                    .font(font::SEMIBOLD)
+                    .wrapping(text::Wrapping::None),
+            )
+            .padding(0)
+            .on_press(Message::Setup(setup::Message::ReplaceToken))
+            .style(move |_, _| button::Style {
+                text_color: ink,
+                ..button::Style::default()
+            }),
         );
     }
-    content = content.push(ui::icon_button(
-        Icon::Settings,
-        18.0,
-        tokens,
-        Message::Show(Screen::Settings),
-    ));
+    let on_settings = app.screen == Screen::Settings;
+    content = content.push(
+        button(container(ui::icon(Icon::Settings, 18.0, tokens.sub)).center(Fill))
+            .width(26)
+            .height(26)
+            .padding(0)
+            .on_press(Message::Show(Screen::Settings))
+            .style(ui::row_style(tokens, on_settings, 8.0)),
+    );
     container(content)
         .height(40)
-        .padding(Padding::new(0.0).left(12).right(4))
+        .padding(Padding::new(0.0).left(6).right(2))
         .align_y(Center)
         .into()
 }
