@@ -14,9 +14,9 @@ use crate::browse;
 use crate::model::{Entry, EntryStatus, MediaType, Plan, PlanItem};
 use crate::plans::{self as rules, Season, TimelineState};
 use crate::screens::entry;
-use crate::screens::shell::shell;
+use crate::screens::shell::{self, shell};
 use crate::theme::{self, Tokens, font};
-use crate::ui::{self, Align, ButtonKind, Icon, Popover, seasonal::Art};
+use crate::ui::{self, Align, ButtonKind, FocusExt, Icon, Popover, seasonal::Art};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Plans(message)
@@ -111,7 +111,8 @@ fn header<'a>(
             .style(move |_, _| button::Style {
                 text_color: ink_sub,
                 ..button::Style::default()
-            }),
+            })
+            .focusable(4.0, tokens),
         text("›").size(13).color(tokens.sub),
         text(crumb_text).size(13).color(tokens.sub),
     ]
@@ -144,9 +145,10 @@ fn header<'a>(
             .map(|s| rules::format_when(s, plan.year))
             .unwrap_or_default()
     };
-    title = title
-        .push(ui::mono(dates, 13.0, tokens.sub))
-        .push(space::horizontal());
+    title = title.push(ui::mono(dates, 13.0, tokens.sub));
+    // The scope tabs, View and Edit plan: beside the title, or on a row of
+    // their own when the window is narrow.
+    let mut actions = Row::new().spacing(12).align_y(Center);
     if !plan.tags.is_empty() {
         let scope = [
             (
@@ -160,7 +162,7 @@ fn header<'a>(
                 msg(Message::ShowCollection(plan.id.clone())),
             ),
         ];
-        title = title.push(container(ui::segmented(scope, 32.0, tokens)).width(200));
+        actions = actions.push(container(ui::segmented(scope, 32.0, tokens)).width(200));
     }
     let view_button = ui::menu_button(
         Some(Icon::Sliders),
@@ -172,21 +174,26 @@ fn header<'a>(
     );
     let view_popover =
         (state.popup == Some(Popup::View)).then(|| view_options(app, plan, on_collection, tokens));
-    title = title.push(
+    actions = actions.push(
         Popover::new(view_button, view_popover)
             .align(Align::End)
             .on_dismiss(msg(Message::ClosePopup)),
     );
     if !on_collection {
-        title = title.push(ui::labeled_button(
+        actions = actions.push(ui::labeled_button(
             "Edit plan",
             ButtonKind::Outline,
             *tokens,
             Some(msg(Message::EditPlan)),
         ));
     }
-
-    let mut header = Column::new().spacing(12).push(crumb).push(title);
+    let narrow = shell::content_width(app, entry::details::WIDTH) < 1000.0;
+    let mut header = Column::new().spacing(12).push(crumb);
+    if narrow {
+        header = header.push(title).push(row![space::horizontal(), actions]);
+    } else {
+        header = header.push(title.push(space::horizontal()).push(actions));
+    }
     if on_collection {
         let all = rules::collection(plan, library).len();
         let tags = plan
@@ -270,7 +277,8 @@ fn year_menu<'a>(
             .width(1)
             .color(tokens_copy.line),
         ..button::Style::default()
-    });
+    })
+    .focusable(8.0, tokens);
     let menu = open.then(|| {
         let library = app.repo.library();
         let mut items = Column::new();
@@ -290,7 +298,8 @@ fn year_menu<'a>(
                 .height(36)
                 .padding([0, 10])
                 .on_press(msg(Message::ShowPlan(other.id.clone())))
-                .style(ui::row_style(tokens, other.id == plan.id, 8.0)),
+                .style(ui::row_style(tokens, other.id == plan.id, 8.0))
+                .focusable(8.0, tokens),
             );
         }
         let ink = tokens.ink;
@@ -309,7 +318,8 @@ fn year_menu<'a>(
             .style(move |_, _| button::Style {
                 text_color: ink,
                 ..button::Style::default()
-            }),
+            })
+            .focusable(8.0, tokens),
         );
         let tokens = *tokens;
         container(items.spacing(2))
@@ -521,7 +531,7 @@ fn tick<'a>(
                 .color(if done { tokens.accent } else { tokens.sub }),
             ..button::Style::default()
         })
-        .into()
+        .focusable(size / 2.0, &tokens)
 }
 
 fn cover<'a>(id: &str, width: f32, height: f32) -> Element<'a, AppMessage> {
@@ -581,7 +591,8 @@ fn plan_row<'a>(
             .width(Fill)
             .padding([6, 4])
             .on_press(msg(Message::Select(entry.id.clone())))
-            .style(ui::row_style(tokens, selected, 8.0)),
+            .style(ui::row_style(tokens, selected, 8.0))
+            .focusable(8.0, tokens),
         ui::rule(tokens.line.scale_alpha(0.5)),
     ]
     .into()
@@ -703,7 +714,7 @@ fn timeline_item<'a>(
             }
             style
         })
-        .into()
+        .focusable(8.0, &tokens)
 }
 
 /// All of the plan's tags: by type, with "In plan" or a + to add.
@@ -784,7 +795,7 @@ fn plus<'a>(tokens: &Tokens, on_press: AppMessage) -> Element<'a, AppMessage> {
             border: Border::default().rounded(8).width(1).color(tokens.line),
             ..button::Style::default()
         })
-        .into()
+        .focusable(8.0, &tokens)
 }
 
 /// "Add to this plan": entries with the plan's tags not in it yet (wanted

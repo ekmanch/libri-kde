@@ -8,8 +8,9 @@ use super::{Listing, Message, MusicTab, Popup, SEARCH_ID, TOP_TAGS, View};
 use crate::app::{App, Message as AppMessage};
 use crate::browse::{self, Decade, Sort};
 use crate::model::{Entry, MediaType};
+use crate::screens::{entry, shell};
 use crate::theme::{Tokens, font};
-use crate::ui::{self, Align, ButtonKind, Icon, Popover};
+use crate::ui::{self, Align, ButtonKind, FocusExt, Icon, Popover};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Library(message)
@@ -25,6 +26,14 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         Some(media) => search_hint(media),
         None => "Search everything",
     };
+    // With the details pane open on a small window the toolbar gives way:
+    // a shorter search, then icons and short labels alone.
+    let side = if app.library.selected.is_some() {
+        entry::details::WIDTH
+    } else {
+        0.0
+    };
+    let density = Density::for_width(shell::content_width(app, side));
     let search = container(ui::search_field(
         placeholder,
         &state.query,
@@ -33,12 +42,20 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         Some(SEARCH_ID),
         &tokens,
     ))
-    .width(280);
+    .width(match density {
+        Density::Full => 280,
+        Density::Compact => 180,
+        Density::Tight => 150,
+    });
 
     let filter_count = state.filter_count();
+    let filter_label: Element<'a, AppMessage> = match density {
+        Density::Tight => space().width(0).into(),
+        _ => text("Filter").into(),
+    };
     let filter_button = ui::menu_button(
         Some(Icon::Filter),
-        text("Filter"),
+        filter_label,
         (filter_count > 0).then_some(filter_count),
         state.popup == Some(Popup::Filter) || filter_count > 0,
         &tokens,
@@ -49,7 +66,11 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         .align(Align::End)
         .on_dismiss(msg(Message::ClosePopup));
 
-    let sort_label = row![text("Sort").color(tokens.sub), text(state.sort.short())].spacing(6);
+    let sort_label = match density {
+        Density::Full => row![text("Sort").color(tokens.sub), text(state.sort.short())].spacing(6),
+        Density::Compact => row![text(state.sort.short())],
+        Density::Tight => row![text("Sort")],
+    };
     let sort_button = ui::menu_button(
         None,
         sort_label,
@@ -106,7 +127,11 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         filter,
         sort,
         views,
-        ui::add_button("Add", &tokens, msg(Message::Add)),
+        ui::add_button(
+            if density == Density::Tight { "" } else { "Add" },
+            &tokens,
+            msg(Message::Add)
+        ),
     ]
     .spacing(10)
     .align_y(Center);
@@ -115,6 +140,28 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         .padding(Padding::new(0.0).left(24).right(20))
         .align_y(Center)
         .into()
+}
+
+/// How much room the toolbar has: everything, short labels, or icons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Density {
+    Full,
+    Compact,
+    Tight,
+}
+
+impl Density {
+    /// The toolbar needs about 1000 px for everything and 820 for the
+    /// compact form.
+    pub fn for_width(width: f32) -> Density {
+        if width >= 1000.0 {
+            Density::Full
+        } else if width >= 820.0 {
+            Density::Compact
+        } else {
+            Density::Tight
+        }
+    }
 }
 
 fn search_hint(media: MediaType) -> &'static str {
@@ -311,7 +358,7 @@ fn rating_cell<'a>(n: u8, on: bool, tokens: &Tokens) -> Element<'a, AppMessage> 
         }),
         ..button::Style::default()
     })
-    .into()
+    .focusable(7.0, &tokens)
 }
 
 /// The status chips with counts, then the active filters as removable
@@ -421,7 +468,8 @@ pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage>
             .style(move |_, _| button::Style {
                 text_color: ink,
                 ..button::Style::default()
-            }),
+            })
+            .focusable(6.0, &tokens),
         );
     }
     container(chips.wrap().vertical_spacing(6))
