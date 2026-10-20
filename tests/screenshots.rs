@@ -8,10 +8,12 @@
 
 use std::path::PathBuf;
 
-use libri::app::{self, App};
-use libri::model::Date;
-use libri::screens::Screen;
+use libri::app::{self, App, Message};
+use libri::browse::Sort;
+use libri::model::{Date, MediaType};
+use libri::screens::library::{self, View};
 use libri::screens::setup::{self, Step};
+use libri::screens::{Screen, plans};
 use libri::settings::{SyncState, ThemeChoice};
 use libri::theme::Theme;
 
@@ -78,13 +80,44 @@ fn capture_every_screen() {
                 app.sync = SyncState::TokenExpired;
             }),
         ),
+        (
+            Screen::Library,
+            ("library-long-text", |app| {
+                app.library.force_long = true;
+                let _ = app.update(Message::Library(library::Message::ShowType(Some(
+                    MediaType::Movies,
+                ))));
+                let _ = app.update(Message::Library(library::Message::SetView(View::Text)));
+                let _ = app.update(Message::Library(library::Message::Sort(Sort::TitleAz)));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("library-long-list", |app| {
+                app.library.force_long = true;
+                let _ = app.update(Message::Library(library::Message::ShowType(Some(
+                    MediaType::Games,
+                ))));
+                let _ = app.update(Message::Library(library::Message::SetView(View::List)));
+                let _ = app.update(Message::Library(library::Message::Sort(Sort::YearNewest)));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("music-artists-long", |app| {
+                app.library.force_long = true;
+                let _ = app.update(Message::Library(library::Message::ShowType(Some(
+                    MediaType::Music,
+                ))));
+                let _ = app.update(Message::Library(library::Message::SetView(View::Text)));
+            }),
+        ),
         (Screen::Plans, ("plans", nothing)),
         (Screen::Settings, ("settings", nothing)),
         (
             Screen::Settings,
             ("settings-flat", |app| app.settings.flat = true),
         ),
-        (Screen::TokenSheet, ("tokens", nothing)),
     ];
 
     for (screen, (name, change)) in variants {
@@ -111,6 +144,63 @@ fn capture_every_screen() {
             let _ = std::fs::remove_file(&written);
             snapshot.matches_image(&path).unwrap();
             assert!(written.exists() || path.exists(), "no capture for {name}");
+        }
+    }
+}
+
+/// The window sizes of phase 1g: the minimum, the common screens, and
+/// 1080p and 1440p at KDE's 125 % and 150 % scaling (their logical sizes).
+/// Captures the library with the details pane, the overview and a plan
+/// page in Graphite, to `screenshots/sizes/`.
+#[test]
+#[ignore = "writes PNGs; run with --ignored"]
+fn capture_window_sizes() {
+    let folder = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("screenshots/sizes");
+    std::fs::create_dir_all(&folder).unwrap();
+
+    let sizes = [
+        ("min", app::MIN_WINDOW_SIZE),
+        ("1280x720", iced::Size::new(1280.0, 720.0)),
+        ("1366x768", iced::Size::new(1366.0, 768.0)),
+        ("1536x864", iced::Size::new(1536.0, 864.0)),
+        ("1706x960", iced::Size::new(1706.0, 960.0)),
+        ("1920x1080", iced::Size::new(1920.0, 1080.0)),
+        ("2048x1152", iced::Size::new(2048.0, 1152.0)),
+        ("2560x1440", iced::Size::new(2560.0, 1440.0)),
+    ];
+    let pages: Vec<Variant> = vec![
+        ("overview", nothing),
+        ("library", |app| {
+            let _ = app.update(Message::Library(library::Message::ShowType(Some(
+                MediaType::Movies,
+            ))));
+            let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+            let _ = app.update(Message::Library(library::Message::Select(
+                "movies/die-hard-1988".into(),
+            )));
+        }),
+        ("plan", |app| {
+            let _ = app.update(Message::Plans(plans::Message::ShowPlan(
+                "halloween-2026".into(),
+            )));
+            let _ = app.update(Message::Plans(plans::Message::Select(
+                "movies/die-hard-1988".into(),
+            )));
+        }),
+    ];
+    for (size_name, size) in sizes {
+        for (page, change) in &pages {
+            let mut app = App::new(Screen::Library);
+            app.settings.theme = ThemeChoice::Fixed(Theme::Graphite);
+            app.today = Date::parse("2026-10-19").unwrap();
+            change(&mut app);
+            app.window = size;
+            let mut ui = iced_test::Simulator::with_size(app::settings(), size, app.view());
+            let snapshot = ui.snapshot(&app.tokens().iced_theme()).unwrap();
+            let name = format!("{size_name}-{page}");
+            let path = folder.join(format!("{name}.png"));
+            let _ = std::fs::remove_file(folder.join(format!("{name}-wgpu.png")));
+            snapshot.matches_image(&path).unwrap();
         }
     }
 }

@@ -288,6 +288,38 @@ mod tests {
     }
 
     #[test]
+    fn the_similar_tag_check_folds_case_and_punctuation_and_prefers_the_closest() {
+        let existing = [
+            "scifi",
+            "sci-fi-horror",
+            "rpg",
+            "arpg",
+            "comedy",
+            "comedies-of-manners",
+        ];
+        // Case, spaces and hyphens fold before comparing.
+        assert_eq!(find_similar_tag("Sci Fi", existing), Some("scifi"));
+        assert_eq!(find_similar_tag("SCI-FI", existing), Some("scifi"));
+        // A short tag allows one edit, a long one two.
+        assert_eq!(find_similar_tag("rpgs", existing), Some("rpg"), "a plural");
+        assert_eq!(find_similar_tag("rpb", existing), Some("rpg"));
+        assert_eq!(
+            find_similar_tag("rxx", existing),
+            None,
+            "two edits on a short tag"
+        );
+        assert_eq!(find_similar_tag("comedx", existing), Some("comedy"));
+        assert_eq!(
+            find_similar_tag("comdey", existing),
+            Some("comedy"),
+            "a swap"
+        );
+        // The closest wins: the same letters beat a plural beats an edit.
+        assert_eq!(find_similar_tag("comedies", existing), Some("comedy"));
+        assert_eq!(find_similar_tag("", existing), None);
+    }
+
+    #[test]
     fn platforms_are_spelled_out() {
         assert_eq!(normalize_platform("PS5"), "PlayStation 5");
         assert_eq!(normalize_platform(" nintendo  switch "), "Switch");

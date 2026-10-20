@@ -368,9 +368,79 @@ pub mod size {
     pub const MONO: f32 = 12.0;
 }
 
+/// WCAG 2 contrast between two colors, 1 to 21.
+pub fn contrast(a: Color, b: Color) -> f32 {
+    fn luminance(color: Color) -> f32 {
+        let channel = |c: f32| {
+            if c <= 0.03928 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+    }
+    let (light, dark) = {
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b), a.min(b))
+    };
+    (light + 0.05) / (dark + 0.05)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The contrast check of phase 1g (docs/DESIGN.md section 10): body
+    /// and secondary text reach AA (4.5), the accent inks and the type
+    /// colors, used for labels and headings in SemiBold or larger, reach
+    /// 3, on the content and the chrome of every theme, two-tone and flat.
+    #[test]
+    fn inks_and_type_colors_read_on_every_theme() {
+        let mut table = String::new();
+        let mut failures = Vec::new();
+        let mut check = |what: String, fg: Color, bg: Color, least: f32| {
+            let ratio = contrast(fg, bg);
+            table.push_str(&format!("{what}: {ratio:.2}\n"));
+            if ratio < least {
+                failures.push(format!("{what} is {ratio:.2}, under {least}"));
+            }
+        };
+        for theme in Theme::ALL {
+            for flat in [false, true] {
+                let tokens = Tokens::styled(theme, PEACH, flat);
+                let name = format!("{}{}", theme.label(), if flat { " flat" } else { "" });
+                for (surface, bg) in [("content", tokens.content), ("chrome", tokens.chrome)] {
+                    check(format!("{name} text on {surface}"), tokens.text, bg, 4.5);
+                    check(format!("{name} sub on {surface}"), tokens.sub, bg, 4.5);
+                    for media in MediaType::ALL {
+                        let what = format!("{name} {} on {surface}", media.label());
+                        check(what, tokens.type_color(media), bg, 3.0);
+                    }
+                    for accent in VIVID.iter().chain(&CATPPUCCIN) {
+                        let ink = Tokens::styled(theme, *accent, flat).ink;
+                        check(
+                            format!("{name} {} ink on {surface}", accent.name),
+                            ink,
+                            bg,
+                            3.0,
+                        );
+                    }
+                }
+                for accent in VIVID.iter().chain(&CATPPUCCIN) {
+                    let t = Tokens::styled(theme, *accent, flat);
+                    check(
+                        format!("{name} text on {} fill", accent.name),
+                        t.on_accent,
+                        t.accent,
+                        4.5,
+                    );
+                }
+            }
+        }
+        println!("{table}");
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
 
     #[test]
     fn selection_gray_matches_the_mockup() {
