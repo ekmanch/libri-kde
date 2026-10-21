@@ -107,6 +107,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Contrast check of the inks and type colors in dark and light
 - [x] Tests for filtering, sorting and the similar-tag check
 - [x] `cargo clippy -- -D warnings` clean; remove the token sheet
+- [x] Mouse Back and Forward buttons (and Alt+Left, Alt+Right) move through the places visited: screens, library views, artist pages, plan pages
 
 ## Phase 2: Local data
 

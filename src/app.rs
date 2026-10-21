@@ -5,8 +5,9 @@ use std::time::Duration;
 use iced::keyboard::{self, Key, key::Named};
 use iced::widget::{operation, scrollable};
 use iced::window::{self, settings::PlatformSpecific};
-use iced::{Element, Size, Subscription, Task, time};
+use iced::{Element, Event, Size, Subscription, Task, event, mouse, time};
 
+use crate::history::{Direction, History, Place};
 use crate::model::Date;
 use crate::repo::Operation;
 use crate::repo::{FixtureLibraryRepository, LibraryRepository};
@@ -87,6 +88,8 @@ pub struct App {
     pub splash_phase: f32,
     /// The window's logical size, for layouts that give way when narrow.
     pub window: Size,
+    /// The places visited, for Back and Forward.
+    pub history: History,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +99,8 @@ pub enum Message {
     SetAccent(Accent),
     Key(KeyPress),
     Modifiers(keyboard::Modifiers),
+    /// The mouse's Back or Forward button, or Alt+Left and Alt+Right.
+    History(Direction),
     /// A frame of the splash's bar.
     Tick,
     Resized(Size),
@@ -105,6 +110,34 @@ pub enum Message {
     Setup(setup::Message),
     Settings(screens::settings::Message),
     Token(token::Message),
+}
+
+impl Message {
+    /// Whether the message moves to another place the history remembers:
+    /// a screen, what the library shows, an artist page or a plan page.
+    fn navigates(&self) -> bool {
+        use library::Message as L;
+        use plans::Message as P;
+        match self {
+            Message::Show(_) => true,
+            Message::Library(message) => matches!(
+                message,
+                L::ShowType(_)
+                    | L::ToggleType(_)
+                    | L::SeeAll(_)
+                    | L::PickTag(_)
+                    | L::PickFromAllTags(_)
+                    | L::MusicTab(_)
+                    | L::OpenArtist(_)
+                    | L::CloseArtist
+            ),
+            Message::Plans(message) => matches!(
+                message,
+                P::ShowOverview | P::ShowPlan(_) | P::ShowCollection(_)
+            ),
+            _ => false,
+        }
+    }
 }
 
 /// The keys the app handles itself.
@@ -184,6 +217,7 @@ impl App {
             settings_page: screens::settings::State::default(),
             splash_phase: 0.0,
             window: WINDOW_SIZE,
+            history: History::default(),
         }
     }
 
@@ -204,9 +238,57 @@ impl App {
         Tokens::styled(self.theme(), self.settings.accent, self.settings.flat)
     }
 
+    /// Handles `message`, and records the place left when it moved to a
+    /// new one. The splash and the setup are not places to come back to.
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let from = (message.navigates() && self.screen.in_history()).then(|| self.place());
+        let task = self.handle(message);
+        if let Some(from) = from
+            && from != self.place()
+        {
+            self.history.visit(from);
+        }
+        task
+    }
+
+    /// Where the app is, for the history.
+    pub fn place(&self) -> Place {
+        Place {
+            screen: self.screen,
+            library: self.library.place(),
+            plans: self.plans.page.clone(),
+        }
+    }
+
+    /// Back or Forward: the place before or after this one, with the
+    /// selection and the popovers closed. Nothing happens over a dialog or
+    /// the token warning. On the setup, Back is the wizard's own Back.
+    fn travel(&mut self, direction: Direction) -> Task<Message> {
+        if self.token_warning || self.dialog.is_some() || self.plan_dialog.is_some() {
+            return Task::none();
+        }
+        match self.screen {
+            Screen::Splash => {}
+            Screen::Setup => {
+                if direction == Direction::Back {
+                    return setup::update(self, setup::Message::Back);
+                }
+            }
+            _ => {
+                if let Some(place) = self.history.go(direction, self.place()) {
+                    self.screen = place.screen;
+                    self.library.go_to(place.library);
+                    self.plans.go_to(place.plans);
+                }
+            }
+        }
+        Task::none()
+    }
+
+    fn handle(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Show(screen) => self.screen = screen,
+            Message::History(direction) => return self.travel(direction),
             Message::SetTheme(choice) => self.settings.theme = choice,
             Message::SetAccent(accent) => self.settings.accent = accent,
             // One sweep of the bar takes 1.4 s.
@@ -361,6 +443,12 @@ impl App {
             keyboard::Event::ModifiersChanged(modifiers) => Some(Message::Modifiers(modifiers)),
             keyboard::Event::KeyPressed { key, modifiers, .. } => {
                 let press = match key {
+                    Key::Named(Named::ArrowLeft) if modifiers.alt() => {
+                        return Some(Message::History(Direction::Back));
+                    }
+                    Key::Named(Named::ArrowRight) if modifiers.alt() => {
+                        return Some(Message::History(Direction::Forward));
+                    }
                     Key::Named(Named::Escape) => KeyPress::Escape,
                     Key::Named(Named::Enter) if modifiers.command() => KeyPress::Save,
                     Key::Named(Named::Enter) => KeyPress::Enter,
@@ -380,12 +468,22 @@ impl App {
             }
             _ => None,
         });
+        // The Back and Forward buttons of a mouse; no widget takes them.
+        let buttons = event::listen_with(|event, _status, _window| match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Back)) => {
+                Some(Message::History(Direction::Back))
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Forward)) => {
+                Some(Message::History(Direction::Forward))
+            }
+            _ => None,
+        });
         let resizes = window::resize_events().map(|(_, size)| Message::Resized(size));
         if self.screen == Screen::Splash {
             let frames = time::every(Duration::from_millis(16)).map(|_| Message::Tick);
-            Subscription::batch([keys, resizes, frames])
+            Subscription::batch([keys, buttons, resizes, frames])
         } else {
-            Subscription::batch([keys, resizes])
+            Subscription::batch([keys, buttons, resizes])
         }
     }
 }
@@ -420,6 +518,122 @@ mod tests {
         assert_eq!(app.sync, SyncState::Synced);
         assert!(app.source.is_some());
         assert!(!app.repo.library().entries.is_empty());
+    }
+
+    fn back(app: &mut App) {
+        let _ = app.update(Message::History(Direction::Back));
+    }
+
+    fn forward(app: &mut App) {
+        let _ = app.update(Message::History(Direction::Forward));
+    }
+
+    #[test]
+    fn back_and_forward_walk_through_the_places_visited() {
+        let mut app = App::new(Screen::Library);
+        let _ = app.update(Message::Library(library::Message::ShowType(Some(
+            MediaType::Movies,
+        ))));
+        let _ = app.update(Message::Plans(plans::Message::ShowPlan(
+            "halloween-2026".into(),
+        )));
+        let _ = app.update(Message::Show(Screen::Settings));
+        assert_eq!(app.screen, Screen::Settings);
+
+        back(&mut app);
+        assert_eq!(app.screen, Screen::Plans);
+        assert_eq!(app.plans.page, plans::Page::Plan("halloween-2026".into()));
+        back(&mut app);
+        assert_eq!(app.screen, Screen::Library);
+        assert_eq!(app.library.single(), Some(MediaType::Movies));
+        back(&mut app);
+        assert_eq!(app.screen, Screen::Library);
+        assert!(app.library.types.is_empty());
+        back(&mut app);
+        assert_eq!(app.screen, Screen::Library);
+        assert!(app.library.types.is_empty());
+
+        forward(&mut app);
+        assert_eq!(app.library.single(), Some(MediaType::Movies));
+        forward(&mut app);
+        assert_eq!(app.screen, Screen::Plans);
+        forward(&mut app);
+        assert_eq!(app.screen, Screen::Settings);
+        forward(&mut app);
+        assert_eq!(app.screen, Screen::Settings);
+    }
+
+    #[test]
+    fn a_new_place_after_going_back_drops_the_places_ahead() {
+        let mut app = App::new(Screen::Library);
+        let _ = app.update(Message::Show(Screen::Settings));
+        back(&mut app);
+        assert_eq!(app.screen, Screen::Library);
+        let _ = app.update(Message::Show(Screen::Plans));
+        forward(&mut app);
+        assert_eq!(app.screen, Screen::Plans);
+        back(&mut app);
+        assert_eq!(app.screen, Screen::Library);
+    }
+
+    #[test]
+    fn back_closes_an_artist_page_and_keeps_the_search() {
+        let mut app = App::new(Screen::Library);
+        let _ = app.update(Message::Library(library::Message::ShowType(Some(
+            MediaType::Music,
+        ))));
+        let _ = app.update(Message::Library(library::Message::Search("met".into())));
+        let _ = app.update(Message::Library(library::Message::OpenArtist(
+            "Metallica".into(),
+        )));
+        back(&mut app);
+        assert_eq!(app.library.artist, None);
+        assert_eq!(app.library.single(), Some(MediaType::Music));
+        assert_eq!(app.library.query, "met");
+        forward(&mut app);
+        assert_eq!(app.library.artist.as_deref(), Some("Metallica"));
+    }
+
+    #[test]
+    fn a_pick_of_the_same_place_is_not_a_visit() {
+        let mut app = App::new(Screen::Library);
+        let _ = app.update(Message::Library(library::Message::ShowType(None)));
+        let _ = app.update(Message::Plans(plans::Message::ShowOverview));
+        let _ = app.update(Message::Plans(plans::Message::ShowOverview));
+        back(&mut app);
+        assert_eq!(app.screen, Screen::Library);
+        assert!(!app.history.can_go(Direction::Back));
+    }
+
+    #[test]
+    fn back_waits_while_a_dialog_or_the_token_warning_is_open() {
+        let mut app = App::new(Screen::Library);
+        let _ = app.update(Message::Show(Screen::Plans));
+        let _ = app.update(Message::Plans(plans::Message::NewPlan));
+        assert!(app.plan_dialog.is_some());
+        back(&mut app);
+        assert_eq!(app.screen, Screen::Plans);
+        app.plan_dialog = None;
+        app.token_warning = true;
+        back(&mut app);
+        assert_eq!(app.screen, Screen::Plans);
+        app.token_warning = false;
+        back(&mut app);
+        assert_eq!(app.screen, Screen::Library);
+    }
+
+    #[test]
+    fn on_the_setup_back_is_the_wizards_back_and_the_splash_is_no_place() {
+        let mut app = App::new(Screen::Splash);
+        let _ = app.update(Message::Show(Screen::Library));
+        assert!(!app.history.can_go(Direction::Back));
+
+        let _ = app.update(Message::Setup(setup::Message::ReplaceToken));
+        assert_eq!(app.screen, Screen::Setup);
+        forward(&mut app);
+        assert_eq!(app.screen, Screen::Setup);
+        back(&mut app);
+        assert_eq!(app.screen, Screen::Library);
     }
 
     #[test]

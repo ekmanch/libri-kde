@@ -4,6 +4,7 @@
 pub mod app;
 pub mod browse;
 pub mod fixtures;
+pub mod history;
 pub mod lookup;
 pub mod model;
 pub mod music;

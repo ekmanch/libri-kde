@@ -48,6 +48,12 @@ impl Screen {
     pub fn from_name(name: &str) -> Option<Screen> {
         Screen::ALL.into_iter().find(|screen| screen.name() == name)
     }
+
+    /// Whether Back and Forward can return here: the splash and the setup
+    /// are passed through, not visited.
+    pub fn in_history(self) -> bool {
+        matches!(self, Screen::Library | Screen::Plans | Screen::Settings)
+    }
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {

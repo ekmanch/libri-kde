@@ -79,6 +79,14 @@ impl State {
         self.when_open = false;
         self.anchor = None;
     }
+
+    /// Returns to `page` (Back or Forward): the selection and the
+    /// popovers close.
+    pub fn go_to(&mut self, page: Page) {
+        self.page = page;
+        self.selected = None;
+        self.close_popovers();
+    }
 }
 
 /// A plan dialog open over the window.

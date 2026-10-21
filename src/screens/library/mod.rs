@@ -90,6 +90,20 @@ pub struct TagPicker {
     pub toggled: BTreeSet<TagCategory>,
 }
 
+/// What the library shows, as the history remembers it: the types, the
+/// status, the filter, the sort, the search, the music tab and the artist
+/// page. Not the selection, the popovers or the scroll position.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Place {
+    pub types: BTreeSet<MediaType>,
+    pub status: Option<EntryStatus>,
+    pub filter: Filter,
+    pub sort: Sort,
+    pub query: String,
+    pub music_tab: MusicTab,
+    pub artist: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct State {
     /// The types shown, in type order; none is All.
@@ -191,6 +205,34 @@ impl Message {
 }
 
 impl State {
+    /// Where the library is, for the history.
+    pub fn place(&self) -> Place {
+        Place {
+            types: self.types.clone(),
+            status: self.status,
+            filter: self.filter.clone(),
+            sort: self.sort,
+            query: self.query.clone(),
+            music_tab: self.music_tab,
+            artist: self.artist.clone(),
+        }
+    }
+
+    /// Returns to `place` (Back or Forward): the selection and the
+    /// popovers close, the pins and the views stay.
+    pub fn go_to(&mut self, place: Place) {
+        self.types = place.types;
+        self.status = place.status;
+        self.filter = place.filter;
+        self.sort = place.sort;
+        self.query = place.query;
+        self.music_tab = place.music_tab;
+        self.artist = place.artist;
+        self.selected = None;
+        self.popup = None;
+        self.picker = None;
+    }
+
     pub fn update(&mut self, message: Message) {
         match message {
             Message::ShowType(media) => {
