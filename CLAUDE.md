@@ -49,6 +49,8 @@ LIBRI_FIRST_RUN=1 cargo run        # no repository yet (the splash's first-run l
 LIBRI_SETUP=branch cargo run       # with LIBRI_SCREEN=setup: welcome, connect, branch, file, create, existing, done
 LIBRI_LONG_LISTS=1 cargo run       # section headers and the jump rail on every list, since the fixture is short
 ICED_BACKEND=tiny-skia cargo run   # software renderer
+WGPU_BACKEND=gl cargo run          # OpenGL instead of Vulkan (the freeze A/B test, TODO.md 1g)
+ICED_PRESENT_MODE=mailbox cargo run # Vulkan without FIFO waits (the freeze A/B test, TODO.md 1g)
 ```
 
 Before saying a task is done, run all three and tell me if any fail:

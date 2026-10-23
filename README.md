@@ -10,6 +10,8 @@ Needs Rust 1.99 or newer with cargo (the system package is fine), and on Plasma 
 cargo run                          # build and start
 cargo run --release                # optimized build
 ICED_BACKEND=tiny-skia cargo run   # software renderer, without the GPU
+WGPU_BACKEND=gl cargo run          # OpenGL instead of Vulkan
+ICED_PRESENT_MODE=mailbox cargo run # Vulkan without FIFO waits
 cargo test                         # unit and headless screen tests
 ```
 
