@@ -7,6 +7,7 @@ use iced::widget::{operation, scrollable};
 use iced::window::{self, settings::PlatformSpecific};
 use iced::{Element, Event, Size, Subscription, Task, event, mouse, time};
 
+use crate::decoration::TitleBar;
 use crate::history::{Direction, History, Place};
 use crate::model::Date;
 use crate::repo::Operation;
@@ -90,6 +91,8 @@ pub struct App {
     pub window: Size,
     /// The places visited, for Back and Forward.
     pub history: History,
+    /// KWin's title bar, once the window is open on Plasma Wayland.
+    pub title_bar: Option<TitleBar>,
 }
 
 #[derive(Debug, Clone)]
@@ -104,6 +107,8 @@ pub enum Message {
     /// A frame of the splash's bar.
     Tick,
     Resized(Size),
+    /// The hold on KWin's title bar, once the window is open.
+    TitleBar(Option<TitleBar>),
     Library(library::Message),
     Entry(entry::Message),
     Plans(plans::Message),
@@ -171,7 +176,7 @@ impl App {
     /// `LIBRI_SYNC` fakes the sync state ("expired", "expires-in-6"),
     /// `LIBRI_PLASMA=light` a light Plasma, and `LIBRI_SETUP` picks the
     /// setup step (welcome, connect, branch, file, create, existing, done).
-    fn boot() -> App {
+    fn boot() -> (App, Task<Message>) {
         let var = |name| std::env::var(name).ok();
         let screen = var("LIBRI_SCREEN")
             .and_then(|name| Screen::from_name(&name))
@@ -192,7 +197,7 @@ impl App {
             app.setup = setup::State::at(step, app.source.as_ref());
         }
         app.library.force_long = var("LIBRI_LONG_LISTS").is_some();
-        app
+        (app, TitleBar::take().map(Message::TitleBar))
     }
 
     /// The app on `screen`, connected to the fixture repository.
@@ -218,6 +223,7 @@ impl App {
             splash_phase: 0.0,
             window: WINDOW_SIZE,
             history: History::default(),
+            title_bar: None,
         }
     }
 
@@ -240,6 +246,7 @@ impl App {
 
     /// Handles `message`, and records the place left when it moved to a
     /// new one. The splash and the setup are not places to come back to.
+    /// The title bar follows the theme.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let from = (message.navigates() && self.screen.in_history()).then(|| self.place());
         let task = self.handle(message);
@@ -247,6 +254,10 @@ impl App {
             && from != self.place()
         {
             self.history.visit(from);
+        }
+        let (theme, flat) = (self.theme(), self.settings.flat);
+        if let Some(title_bar) = &mut self.title_bar {
+            title_bar.set(theme, flat);
         }
         task
     }
@@ -294,6 +305,7 @@ impl App {
             // One sweep of the bar takes 1.4 s.
             Message::Tick => self.splash_phase = (self.splash_phase + 0.016 / 1.4) % 1.0,
             Message::Resized(size) => self.window = size,
+            Message::TitleBar(title_bar) => self.title_bar = title_bar,
             Message::Key(KeyPress::Tab { back: false }) => return operation::focus_next(),
             Message::Key(KeyPress::Tab { back: true }) => return operation::focus_previous(),
             // The token warning sits over everything; then a dialog; the

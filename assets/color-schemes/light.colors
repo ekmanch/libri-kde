@@ -1,0 +1,21 @@
+[General]
+ColorScheme=LibriLight
+Name=Libri Light
+
+[Colors:Window]
+BackgroundNormal=244,245,247
+ForegroundNormal=23,24,27
+
+[Colors:Header]
+BackgroundNormal=244,245,247
+ForegroundNormal=91,97,107
+
+[Colors:Header][Inactive]
+BackgroundNormal=244,245,247
+ForegroundNormal=168,171,177
+
+[WM]
+activeBackground=244,245,247
+activeForeground=91,97,107
+inactiveBackground=244,245,247
+inactiveForeground=168,171,177

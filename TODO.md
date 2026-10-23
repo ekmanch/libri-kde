@@ -108,6 +108,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Tests for filtering, sorting and the similar-tag check
 - [x] `cargo clippy -- -D warnings` clean; remove the token sheet
 - [x] Mouse Back and Forward buttons (and Alt+Left, Alt+Right) move through the places visited: screens, library views, artist pages, plan pages
+- [x] KWin's title bar in Libri's colors: a KDE color scheme per theme and style under `assets/color-schemes/`, named to KWin through Plasma's decoration palette protocol (`src/decoration.rs`). Needs a decoration that follows color schemes (Klassy, Breeze, Darkly); an Aurorae theme paints its own
 
 ## Phase 2: Local data
 
@@ -130,5 +131,6 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 ## Phase 5: Packaging
 
 - [ ] `.desktop` file and app icon from `assets/logos/libri`; a local PKGBUILD so Shelly can install it
+- [ ] Install the title bar color schemes (`assets/color-schemes/`) with the app and point `decoration::scheme_path` at the installed copy; until then they are read from the checkout, so an installed binary would keep KWin's default bar
 
 ## Later

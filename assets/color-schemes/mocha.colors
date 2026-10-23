@@ -1,0 +1,21 @@
+[General]
+ColorScheme=LibriMocha
+Name=Libri Catppuccin Mocha
+
+[Colors:Window]
+BackgroundNormal=24,24,37
+ForegroundNormal=205,214,244
+
+[Colors:Header]
+BackgroundNormal=24,24,37
+ForegroundNormal=166,173,200
+
+[Colors:Header][Inactive]
+BackgroundNormal=24,24,37
+ForegroundNormal=95,99,119
+
+[WM]
+activeBackground=24,24,37
+activeForeground=166,173,200
+inactiveBackground=24,24,37
+inactiveForeground=95,99,119

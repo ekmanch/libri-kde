@@ -1,0 +1,21 @@
+[General]
+ColorScheme=LibriGraphiteFlat
+Name=Libri Graphite flat
+
+[Colors:Window]
+BackgroundNormal=21,21,21
+ForegroundNormal=238,240,242
+
+[Colors:Header]
+BackgroundNormal=21,21,21
+ForegroundNormal=163,168,174
+
+[Colors:Header][Inactive]
+BackgroundNormal=21,21,21
+ForegroundNormal=92,95,98
+
+[WM]
+activeBackground=21,21,21
+activeForeground=163,168,174
+inactiveBackground=21,21,21
+inactiveForeground=92,95,98

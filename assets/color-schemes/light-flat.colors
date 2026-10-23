@@ -1,0 +1,21 @@
+[General]
+ColorScheme=LibriLightFlat
+Name=Libri Light flat
+
+[Colors:Window]
+BackgroundNormal=255,255,255
+ForegroundNormal=23,24,27
+
+[Colors:Header]
+BackgroundNormal=255,255,255
+ForegroundNormal=91,97,107
+
+[Colors:Header][Inactive]
+BackgroundNormal=255,255,255
+ForegroundNormal=173,176,181
+
+[WM]
+activeBackground=255,255,255
+activeForeground=91,97,107
+inactiveBackground=255,255,255
+inactiveForeground=173,176,181

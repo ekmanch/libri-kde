@@ -1,0 +1,21 @@
+[General]
+ColorScheme=LibriCharcoal
+Name=Libri Charcoal
+
+[Colors:Window]
+BackgroundNormal=21,21,21
+ForegroundNormal=237,237,237
+
+[Colors:Header]
+BackgroundNormal=21,21,21
+ForegroundNormal=163,163,163
+
+[Colors:Header][Inactive]
+BackgroundNormal=21,21,21
+ForegroundNormal=92,92,92
+
+[WM]
+activeBackground=21,21,21
+activeForeground=163,163,163
+inactiveBackground=21,21,21
+inactiveForeground=92,92,92

@@ -1944,8 +1944,11 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "iced_test",
+ "raw-window-handle",
  "serde",
  "serde_json",
+ "wayland-client",
+ "wayland-protocols-plasma",
 ]
 
 [[package]]

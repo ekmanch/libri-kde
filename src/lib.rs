@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod browse;
+pub mod decoration;
 pub mod fixtures;
 pub mod history;
 pub mod lookup;
