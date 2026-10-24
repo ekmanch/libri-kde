@@ -232,14 +232,14 @@ fn filter_panel<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessa
         }
     }
     let tags = Row::with_children(quick.into_iter().map(|tag| {
-        let on = filter.tags.iter().any(|t| t == tag);
+        let on = filter.has_tag(tag, None);
         ui::filter_chip(
             format!("#{tag}"),
             None,
             None,
             on,
             &tokens,
-            msg(Message::ToggleTag(tag.to_owned())),
+            msg(Message::ToggleTag(tag.to_owned(), None)),
         )
     }))
     .push(ui::add_chip("All tags…", &tokens, msg(Message::OpenPicker)))
@@ -420,33 +420,59 @@ pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage>
 
     let mut active = Vec::new();
     // Each removable chip keeps 6 px more room than the status chips.
-    let mut add = |label: String, dot, message| {
-        let chip = ui::removable_chip(label, dot, &tokens, msg(message));
+    let mut add = |label: String, detail: Option<String>, dot, message| {
+        let chip = ui::removable_chip(label, detail, dot, &tokens, msg(message));
         active.push(container(chip).padding(Padding::new(0.0).left(6)).into());
     };
     if state.types.len() > 1 {
         for &media in &state.types {
             let dot = Some(tokens.type_color(media));
-            add(media.label().to_owned(), dot, Message::ToggleType(media));
+            add(
+                media.label().to_owned(),
+                None,
+                dot,
+                Message::ToggleType(media),
+            );
         }
     }
     if filter.not_released {
-        add("Not released yet".into(), None, Message::ClearNotReleased);
+        add(
+            "Not released yet".into(),
+            None,
+            None,
+            Message::ClearNotReleased,
+        );
     }
     if filter.recent {
-        add("Added in the past month".into(), None, Message::ClearRecent);
+        add(
+            "Added in the past month".into(),
+            None,
+            None,
+            Message::ClearRecent,
+        );
     }
-    for tag in &filter.tags {
-        add(format!("#{tag}"), None, Message::ToggleTag(tag.clone()));
+    for (tag, category) in filter.tag_chips() {
+        let role = category.map(|c| c.role_label().to_owned());
+        add(
+            format!("#{tag}"),
+            role,
+            None,
+            Message::ToggleTag(tag, category),
+        );
     }
     for &decade in &filter.decades {
-        add(decade.label(), None, Message::ToggleDecade(decade));
+        add(decade.label(), None, None, Message::ToggleDecade(decade));
     }
     if filter.include_seasonal {
-        add("Incl. seasonal-only".into(), None, Message::ToggleSeasonal);
+        add(
+            "Incl. seasonal-only".into(),
+            None,
+            None,
+            Message::ToggleSeasonal,
+        );
     }
     if let Some(label) = filter.rating_label() {
-        add(label, None, Message::ClearRating);
+        add(label, None, None, Message::ClearRating);
     }
     chips = chips.extend(active);
 

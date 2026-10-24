@@ -5,7 +5,9 @@ use super::{FocusExt, Icon, icon, mono, row_style};
 use crate::theme::{Tokens, font, size};
 
 /// A collapsible group of tag chips, as in the tag picker: a chevron, the
-/// category in gray caps, its count, and "n selected" on the right.
+/// category in gray caps, its count, and "n selected" on the right. `rows`
+/// follow the chips (the picker's "+ Add to Directors" rows).
+#[allow(clippy::too_many_arguments)]
 pub fn tag_group<'a, Message: Clone + 'a>(
     name: &str,
     count: usize,
@@ -13,6 +15,7 @@ pub fn tag_group<'a, Message: Clone + 'a>(
     open: bool,
     on_toggle: Message,
     chips: Vec<Element<'a, Message>>,
+    rows: Vec<Element<'a, Message>>,
     tokens: &Tokens,
 ) -> Element<'a, Message> {
     let chevron = if open {
@@ -48,10 +51,16 @@ pub fn tag_group<'a, Message: Clone + 'a>(
 
     let mut group = Column::new().push(header).spacing(4);
     if open {
-        let body = Row::with_children(chips)
-            .spacing(6)
-            .wrap()
-            .vertical_spacing(6);
+        let mut body = Column::new().spacing(8);
+        if !chips.is_empty() {
+            body = body.push(
+                Row::with_children(chips)
+                    .spacing(6)
+                    .wrap()
+                    .vertical_spacing(6),
+            );
+        }
+        body = body.extend(rows);
         group = group.push(container(body).padding(Padding::new(0.0).left(26).right(4).bottom(12)));
     }
     group.into()

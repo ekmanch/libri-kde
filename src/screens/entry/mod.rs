@@ -8,7 +8,7 @@ mod form;
 
 pub use form::LOOKUP_ID;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use iced::widget::text_editor;
 use iced::{Element, Task};
@@ -16,11 +16,12 @@ use iced::{Element, Task};
 use crate::app::{App, Message as AppMessage};
 use crate::lookup::{self, Match};
 use crate::model::{
-    BookFormat, Entry, EntryStatus, Library, MediaType, MusicKind, PlanItem, Released, TagCategory,
-    text,
+    BookFormat, Entry, EntryKind, EntryStatus, Library, MediaType, PlanItem, Released, TagCategory,
+    TagPicks, text,
 };
 use crate::music;
 use crate::repo::Operation;
+use crate::tags::{self, PickerMessage, PickerState};
 use crate::ui;
 
 /// The dialog open over the library, if any.
@@ -51,22 +52,32 @@ pub struct Form {
     /// The "+ Other" platform being typed.
     pub other_platform: Option<String>,
     pub formats: BTreeSet<BookFormat>,
-    pub kind: MusicKind,
+    pub kind: EntryKind,
     pub album: String,
     pub status: EntryStatus,
     pub rating: Option<u8>,
     pub rating_open: bool,
     pub tags: Vec<String>,
-    /// Tags created in this form, filed when it is saved.
-    pub new_tags: Vec<(String, TagCategory)>,
+    /// Which of a tag's categories it is ticked in on this entry, for tags
+    /// in more than one category; a tag with no pick counts in all of them.
+    pub tag_categories: BTreeMap<String, Vec<TagCategory>>,
+    /// Tags created in this form with their categories, filed when it is
+    /// saved.
+    pub new_tags: Vec<(String, Vec<TagCategory>)>,
+    /// Existing tags whose categories change when the form is saved
+    /// ("+ Add to Actors", the categories dialog).
+    pub recategorized: BTreeMap<String, Vec<TagCategory>>,
     /// The match's tag suggestions not taken yet.
     pub suggested: Vec<String>,
     pub description: text_editor::Content,
     pub note: String,
     /// "Also add to plan", a plan id.
     pub also_plan: Option<String>,
-    pub picker: Option<TagPicker>,
+    pub picker: Option<PickerState>,
     pub new_tag: Option<NewTag>,
+    /// A tag's categories being edited (right-click › Categories… or Move
+    /// to another group…).
+    pub categories: Option<CategoriesDialog>,
     /// The phone's replace question, asked on Save (D12, D13).
     pub replace: Option<Replace>,
     /// The answer, once given: replace (true) or keep both (false).
@@ -86,19 +97,22 @@ pub enum Replace {
     },
 }
 
-/// The form's tag picker.
-#[derive(Debug, Default)]
-pub struct TagPicker {
-    pub query: String,
-    /// Groups folded or unfolded by hand, against their default.
-    pub toggled: BTreeSet<TagCategory>,
-}
-
-/// Confirming a new tag and picking its category.
+/// Confirming a new tag and picking its categories: one, or several of
+/// one kind.
 #[derive(Debug, Clone)]
 pub struct NewTag {
     pub name: String,
-    pub category: TagCategory,
+    pub categories: Vec<TagCategory>,
+}
+
+/// Editing a tag's categories: the categories of its kind as chips, at
+/// least one picked; or, for a tag of a kind with one category each,
+/// exactly one of those groups, to move it.
+#[derive(Debug, Clone)]
+pub struct CategoriesDialog {
+    pub tag: String,
+    pub draft: Vec<TagCategory>,
+    pub single: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -136,28 +150,35 @@ pub enum Message {
     OtherPlatform(String),
     AddOtherPlatform,
     ToggleFormat(BookFormat),
-    Kind(MusicKind),
+    Kind(EntryKind),
     Album(String),
     Status(EntryStatus),
     ToggleRating,
     Rate(Option<u8>),
-    RemoveTag(String),
+    /// A tag's chip in the Tags box: the whole tag, or one role of a tag
+    /// in several categories.
+    RemoveTag(String, Option<TagCategory>),
     AddSuggested(String),
     Description(text_editor::Action),
     Note(String),
     AlsoPlan(Option<String>),
     Save,
-    // The form's tag picker and new-tag confirmation.
+    // The form's tag picker, the new-tag confirmation and the categories
+    // dialog.
     OpenPicker,
     ClosePicker,
-    PickerQuery(String),
-    PickerToggleGroup(TagCategory),
-    PickerToggleTag(String),
+    Picker(PickerMessage),
     PickerClear,
     CreateTag,
+    /// A category chip in the new-tag dialog: toggled within its kind; one
+    /// of another kind starts over.
     NewTagCategory(TagCategory),
     ConfirmNewTag,
     CancelNewTag,
+    /// A category chip in the categories dialog.
+    CategoryDraft(TagCategory),
+    SaveCategories,
+    CancelCategories,
     /// The replace question's answers.
     ReplaceKeepBoth,
     ReplaceConfirm,
@@ -183,19 +204,22 @@ impl Form {
             platforms_on: BTreeSet::new(),
             other_platform: None,
             formats: BTreeSet::new(),
-            kind: MusicKind::Album,
+            kind: EntryKind::Album,
             album: String::new(),
             status: EntryStatus::Want,
             rating: None,
             rating_open: false,
             tags: Vec::new(),
+            tag_categories: BTreeMap::new(),
             new_tags: Vec::new(),
+            recategorized: BTreeMap::new(),
             suggested: Vec::new(),
             description: text_editor::Content::new(),
             note: String::new(),
             also_plan: None,
             picker: None,
             new_tag: None,
+            categories: None,
             replace: None,
             replace_answer: None,
         }
@@ -213,11 +237,16 @@ impl Form {
             platforms_on: platforms.iter().cloned().collect(),
             platforms,
             formats: entry.formats.iter().flatten().copied().collect(),
-            kind: entry.kind.unwrap_or(MusicKind::Album),
+            kind: entry.kind.unwrap_or(EntryKind::Album),
             album: entry.album.clone().unwrap_or_default(),
             status: entry.status,
             rating: entry.rating,
             tags: entry.tags.clone(),
+            tag_categories: entry
+                .tag_categories
+                .iter()
+                .flat_map(|picks| picks.0.iter().cloned())
+                .collect(),
             description: text_editor::Content::with_text(&entry.description),
             note: entry.note.clone(),
             ..Form::add(entry.media)
@@ -238,7 +267,7 @@ impl Form {
         self.creator = found.creator.to_owned();
         self.released = found.released.to_owned();
         self.description = text_editor::Content::with_text(found.description);
-        self.kind = found.kind.unwrap_or(MusicKind::Album);
+        self.kind = found.kind.unwrap_or(EntryKind::Album);
         self.platforms = found
             .platforms
             .iter()
@@ -252,13 +281,198 @@ impl Form {
         };
         // Tags the library has go on at once; new ones are offered.
         self.tags.clear();
+        self.tag_categories.clear();
         self.suggested.clear();
         for tag in found.tags {
             if library.all_tags().any(|t| t == *tag) {
-                self.tags.push((*tag).to_owned());
+                self.tick(tag, None, library);
             } else {
                 self.suggested.push((*tag).to_owned());
             }
+        }
+    }
+
+    /// The categories of `tag` as they will be once the entry is saved.
+    pub fn categories_of(&self, tag: &str, library: &Library) -> Vec<TagCategory> {
+        if let Some((_, categories)) = self.new_tags.iter().find(|(t, _)| t == tag) {
+            return categories.clone();
+        }
+        if let Some(categories) = self.recategorized.get(tag) {
+            return categories.clone();
+        }
+        library.categories_of(tag)
+    }
+
+    /// Whether `tag` is on the entry as `category` (`None`: at all).
+    pub fn has_tag_as(&self, tag: &str, category: Option<TagCategory>, library: &Library) -> bool {
+        if !self.tags.iter().any(|t| t == tag) {
+            return false;
+        }
+        let Some(category) = category else {
+            return true;
+        };
+        let categories = self.categories_of(tag, library);
+        if !categories.contains(&category) {
+            return false;
+        }
+        categories.len() < 2
+            || self
+                .tag_categories
+                .get(tag)
+                .is_none_or(|picked| picked.contains(&category))
+    }
+
+    /// Puts `tag` on the entry, as `category` when one is given: a tag in
+    /// more than one category is ticked in that one; a tag the library has
+    /// only under other categories of the same kind gets this one too, as
+    /// "+ Add to Actors" in the picker does; any other tag goes on as it
+    /// is.
+    pub fn tick(&mut self, tag: &str, category: Option<TagCategory>, library: &Library) {
+        let mut categories = self.categories_of(tag, library);
+        if let Some(category) = category
+            && let Some(&first) = categories.first()
+            && !categories.contains(&category)
+            && first.shares_kind_with(category)
+        {
+            // On the entry already: it keeps the categories it had here.
+            if self.tags.iter().any(|t| t == tag) && !self.tag_categories.contains_key(tag) {
+                self.tag_categories
+                    .insert(tag.to_owned(), categories.clone());
+            }
+            categories = TagCategory::ALL
+                .into_iter()
+                .filter(|c| *c == category || categories.contains(c))
+                .collect();
+            match self.new_tags.iter_mut().find(|(t, _)| t == tag) {
+                Some((_, filed)) => *filed = categories.clone(),
+                None => {
+                    self.recategorized
+                        .insert(tag.to_owned(), categories.clone());
+                }
+            }
+        }
+        if !self.tags.iter().any(|t| t == tag) {
+            self.tags.push(tag.to_owned());
+        }
+        if categories.len() < 2 {
+            self.tag_categories.remove(tag);
+            return;
+        }
+        let picked = match (self.tag_categories.get(tag), category) {
+            (Some(picked), _) => picked.clone(),
+            (None, None) => categories.clone(),
+            (None, Some(_)) => Vec::new(),
+        };
+        self.tag_categories.insert(
+            tag.to_owned(),
+            categories
+                .iter()
+                .copied()
+                .filter(|&c| Some(c) == category || picked.contains(&c))
+                .collect(),
+        );
+    }
+
+    /// Takes `tag` off the entry, or one of its roles: the last role
+    /// unticked takes the tag off.
+    pub fn untick(&mut self, tag: &str, category: Option<TagCategory>, library: &Library) {
+        let categories = self.categories_of(tag, library);
+        if let Some(category) = category
+            && categories.len() > 1
+        {
+            let mut picked = self
+                .tag_categories
+                .get(tag)
+                .cloned()
+                .unwrap_or_else(|| categories.clone());
+            picked.retain(|c| *c != category);
+            if !picked.is_empty() {
+                self.tag_categories.insert(tag.to_owned(), picked);
+                return;
+            }
+        }
+        self.tags.retain(|t| t != tag);
+        self.tag_categories.remove(tag);
+        self.new_tags.retain(|(t, _)| t != tag);
+    }
+
+    /// The roles shown after `tag` in the Tags box: its ticked categories
+    /// for a tag in several, nothing for a tag in one.
+    pub fn roles_on(&self, tag: &str, library: &Library) -> Vec<TagCategory> {
+        let categories = self.categories_of(tag, library);
+        if categories.len() < 2 {
+            return Vec::new();
+        }
+        match self.tag_categories.get(tag) {
+            Some(picked) => categories
+                .into_iter()
+                .filter(|c| picked.contains(c))
+                .collect(),
+            None => categories,
+        }
+    }
+
+    /// Every tag per category as the picker lists them: the library's,
+    /// with the tags created or recategorized in this form.
+    pub fn picker_groups(&self, library: &Library) -> Vec<(TagCategory, Vec<String>)> {
+        let mut groups: BTreeMap<TagCategory, Vec<String>> = library.tags.clone();
+        for (tag, categories) in self.recategorized.iter().chain(&self.new_tags_map()) {
+            for names in groups.values_mut() {
+                names.retain(|n| n != tag);
+            }
+            for &category in categories {
+                groups.entry(category).or_default().push(tag.clone());
+            }
+        }
+        groups
+            .into_iter()
+            .filter(|(_, names)| !names.is_empty())
+            .collect()
+    }
+
+    fn new_tags_map(&self) -> BTreeMap<String, Vec<TagCategory>> {
+        self.new_tags.iter().cloned().collect()
+    }
+
+    /// Where `tag` is used, for the categories dialog.
+    pub fn usage(&self, tag: &str, library: &Library) -> String {
+        if self.new_tags.iter().any(|(t, _)| t == tag) {
+            return "Not used on any entry yet.".into();
+        }
+        library.tag_usage(tag)
+    }
+
+    /// Opens `category` in the picker, after a tag was created or filed
+    /// into it.
+    fn open_group(&mut self, category: TagCategory) {
+        if let Some(picker) = &mut self.picker {
+            // A group holding a tag on this entry is open by default.
+            picker.open(category, true);
+        }
+    }
+
+    /// Re-keys the entry's pick for `tag` after its categories change from
+    /// `before` to `after`, as the phone does on save: the roles it kept,
+    /// else the tag comes off (one category left keeps it as that one).
+    fn rekey(&mut self, tag: &str, before: &[TagCategory], after: &[TagCategory]) {
+        if !self.tags.iter().any(|t| t == tag) {
+            return;
+        }
+        if after.len() == 1 {
+            self.tag_categories.remove(tag);
+            return;
+        }
+        let had = self
+            .tag_categories
+            .get(tag)
+            .cloned()
+            .unwrap_or_else(|| before.to_vec());
+        let kept: Vec<TagCategory> = after.iter().copied().filter(|c| had.contains(c)).collect();
+        if kept.is_empty() {
+            self.tags.retain(|t| t != tag);
+            self.tag_categories.remove(tag);
+        } else {
+            self.tag_categories.insert(tag.to_owned(), kept);
         }
     }
 
@@ -320,6 +534,7 @@ impl Form {
             status: self.status,
             rating: None,
             tags: Vec::new(),
+            tag_categories: None,
             note: String::new(),
             description: String::new(),
             seasonal_only: false,
@@ -327,6 +542,8 @@ impl Form {
             source: None,
             platform: None,
             formats: None,
+            pages: None,
+            series: None,
             kind: None,
             album: None,
             tracks: None,
@@ -346,21 +563,50 @@ impl Form {
         entry.status = self.status;
         entry.rating = self.rating;
         entry.tags = self.tags.clone();
+        // The pick is written for every tag in several categories, as the
+        // phone does whenever it saves such an entry.
+        let picks: Vec<(String, Vec<TagCategory>)> = self
+            .tags
+            .iter()
+            .filter_map(|tag| {
+                let categories = self.categories_of(tag, library);
+                (categories.len() > 1).then(|| {
+                    let picked = self
+                        .tag_categories
+                        .get(tag)
+                        .cloned()
+                        .unwrap_or_else(|| categories.clone());
+                    (tag.clone(), picked)
+                })
+            })
+            .collect();
+        entry.tag_categories = (!picks.is_empty()).then_some(TagPicks(picks));
         entry.note = self.note.trim().to_owned();
         entry.description = self.description.text().trim().to_owned();
         entry.platform =
             (is(MediaType::Games) && !platform.is_empty()).then(|| platform.join(", "));
         entry.formats = (is(MediaType::Books) && !self.formats.is_empty())
             .then(|| self.formats.iter().copied().collect());
-        entry.kind = is(MediaType::Music).then_some(self.kind);
+        // An anime keeps its series-or-movie kind (edited in phase 1i); any
+        // other type but music has none.
+        entry.kind = match self.media {
+            MediaType::Music => Some(self.kind),
+            MediaType::Anime => base
+                .and_then(|b| b.kind)
+                .filter(|k| matches!(k, EntryKind::Series | EntryKind::Movie)),
+            _ => None,
+        };
         let album = self.album.trim();
-        entry.album = (is(MediaType::Music) && self.kind == MusicKind::Song && !album.is_empty())
+        entry.album = (is(MediaType::Music) && self.kind == EntryKind::Song && !album.is_empty())
             .then(|| album.to_owned());
-        if !is(MediaType::Music) || self.kind == MusicKind::Song {
+        if !is(MediaType::Music) || self.kind == EntryKind::Song {
             entry.tracks = None;
         }
-        if !is(MediaType::Shows) {
+        if !entry.uses_seasons() {
             entry.seasons = None;
+        }
+        if !is(MediaType::Books) {
+            entry.pages = None;
         }
         entry
     }
@@ -369,6 +615,9 @@ impl Form {
 /// Opens the dialog for `message` or changes the open one. Returns any
 /// task to run (none for now).
 pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
+    if let Message::Picker(PickerMessage::Jump(offset)) = &message {
+        return tags::jump(*offset);
+    }
     match message {
         Message::SetStatus(id, status) => app.apply(Operation::SetStatus { id, status }),
         Message::SetRating(id, rating) => {
@@ -410,7 +659,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::EditTags(id) => {
             let entry = app.repo.library().entry(&id).expect("checked above");
             let mut form = Form::edit(entry);
-            form.picker = Some(TagPicker::default());
+            form.picker = Some(PickerState::default());
             app.dialog = Some(Dialog::Form(Box::new(form)));
         }
         Message::Delete(id) => app.dialog = Some(Dialog::Delete { id }),
@@ -565,49 +814,51 @@ fn update_form(
             form.rating = rating;
             form.rating_open = false;
         }
-        Message::RemoveTag(tag) => {
-            form.tags.retain(|t| *t != tag);
-            form.new_tags.retain(|(t, _)| *t != tag);
-        }
+        Message::RemoveTag(tag, category) => form.untick(&tag, category, library),
         Message::AddSuggested(tag) => {
             form.suggested.retain(|t| *t != tag);
             if library.all_tags().any(|t| t == tag) {
-                form.tags.push(tag);
+                form.tick(&tag, None, library);
             } else {
                 // A new tag still goes through the confirmation.
                 form.new_tag = Some(NewTag {
                     name: tag,
-                    category: TagCategory::default_for(form.media),
+                    categories: vec![TagCategory::default_for(form.media)],
                 });
             }
         }
         Message::Description(action) => form.description.perform(action),
         Message::Note(note) => form.note = note,
         Message::AlsoPlan(plan) => form.also_plan = plan,
-        Message::OpenPicker => form.picker = Some(TagPicker::default()),
+        Message::OpenPicker => form.picker = Some(PickerState::default()),
         Message::ClosePicker => form.picker = None,
-        Message::PickerQuery(query) => {
+        Message::Picker(message) => {
             if let Some(picker) = &mut form.picker {
-                picker.query = query;
+                picker.update(&message);
             }
-        }
-        Message::PickerToggleGroup(category) => {
-            if let Some(picker) = &mut form.picker
-                && !picker.toggled.remove(&category)
-            {
-                picker.toggled.insert(category);
-            }
-        }
-        Message::PickerToggleTag(tag) => {
-            if form.tags.contains(&tag) {
-                form.tags.retain(|t| *t != tag);
-                form.new_tags.retain(|(t, _)| *t != tag);
-            } else {
-                form.tags.push(tag);
+            match message {
+                PickerMessage::Toggle(tag, category) => {
+                    if form.has_tag_as(&tag, category, library) {
+                        form.untick(&tag, category, library);
+                    } else {
+                        form.tick(&tag, category, library);
+                    }
+                }
+                PickerMessage::AddTo(tag, category) => {
+                    form.tick(&tag, Some(category), library);
+                    form.open_group(category);
+                }
+                PickerMessage::Categories(tag) => {
+                    let draft = form.categories_of(&tag, library);
+                    let single = draft.first().is_none_or(|c| c.kind().is_none());
+                    form.categories = Some(CategoriesDialog { tag, draft, single });
+                }
+                _ => {}
             }
         }
         Message::PickerClear => {
             form.tags.clear();
+            form.tag_categories.clear();
             form.new_tags.clear();
         }
         Message::CreateTag => {
@@ -619,27 +870,86 @@ fn update_form(
             if !name.is_empty() {
                 form.new_tag = Some(NewTag {
                     name,
-                    category: TagCategory::default_for(form.media),
+                    categories: vec![TagCategory::default_for(form.media)],
                 });
             }
         }
         Message::NewTagCategory(category) => {
             if let Some(new_tag) = &mut form.new_tag {
-                new_tag.category = category;
+                let same_kind = new_tag
+                    .categories
+                    .first()
+                    .is_some_and(|first| first.shares_kind_with(category));
+                if new_tag.categories.contains(&category) {
+                    new_tag.categories.retain(|c| *c != category);
+                } else if same_kind {
+                    new_tag.categories.push(category);
+                    new_tag.categories.sort();
+                } else {
+                    new_tag.categories = vec![category];
+                }
             }
         }
         Message::ConfirmNewTag => {
-            if let Some(NewTag { name, category }) = form.new_tag.take() {
+            if form
+                .new_tag
+                .as_ref()
+                .is_some_and(|n| n.categories.is_empty())
+            {
+                return None;
+            }
+            if let Some(NewTag { name, categories }) = form.new_tag.take() {
                 if !form.tags.contains(&name) {
                     form.tags.push(name.clone());
                 }
-                form.new_tags.push((name, category));
+                if categories.len() > 1 {
+                    form.tag_categories.insert(name.clone(), categories.clone());
+                }
+                for &category in &categories {
+                    form.open_group(category);
+                }
+                form.new_tags.push((name, categories));
                 if let Some(picker) = &mut form.picker {
                     picker.query.clear();
                 }
             }
         }
         Message::CancelNewTag => form.new_tag = None,
+        Message::CategoryDraft(category) => {
+            if let Some(dialog) = &mut form.categories {
+                if dialog.single {
+                    dialog.draft = vec![category];
+                } else if dialog.draft.contains(&category) {
+                    if dialog.draft.len() > 1 {
+                        dialog.draft.retain(|c| *c != category);
+                    }
+                } else {
+                    dialog.draft.push(category);
+                    dialog.draft.sort();
+                }
+            }
+        }
+        Message::SaveCategories => {
+            if let Some(CategoriesDialog { tag, draft, .. }) = form.categories.take() {
+                let before = form.categories_of(&tag, library);
+                if before != draft {
+                    match form.new_tags.iter_mut().find(|(t, _)| *t == tag) {
+                        Some((_, filed)) => *filed = draft.clone(),
+                        None if library.categories_of(&tag) == draft => {
+                            form.recategorized.remove(&tag);
+                        }
+                        None => {
+                            form.recategorized.insert(tag.clone(), draft.clone());
+                        }
+                    }
+                    form.rekey(&tag, &before, &draft);
+                }
+                if let Some(&first) = draft.first() {
+                    form.open_group(first);
+                }
+            }
+        }
+        Message::CancelCategories => form.categories = None,
         Message::ReplaceKeepBoth | Message::ReplaceConfirm => {
             form.replace = None;
             form.replace_answer = Some(matches!(message, Message::ReplaceConfirm));
@@ -694,15 +1004,26 @@ fn update_form(
                     .collect();
             }
 
+            // New tags are filed, then category changes made in the picker
+            // are applied, right before the entry is saved, as on the phone.
             let mut operations: Vec<Operation> = form
                 .new_tags
                 .iter()
                 .filter(|(name, _)| form.tags.contains(name))
-                .map(|(name, category)| Operation::CreateTag {
+                .map(|(name, categories)| Operation::CreateTag {
                     name: name.clone(),
-                    category: *category,
+                    categories: categories.clone(),
                 })
                 .collect();
+            operations.extend(
+                form.recategorized
+                    .iter()
+                    .filter(|(name, categories)| library.categories_of(name) != **categories)
+                    .map(|(name, categories)| Operation::SetTagCategories {
+                        name: name.clone(),
+                        categories: categories.clone(),
+                    }),
+            );
             let id = entry.id.clone();
             let done = entry.status == EntryStatus::Done;
             operations.push(if base.is_some() {
@@ -735,6 +1056,8 @@ pub fn dismiss_top(app: &mut App) -> bool {
         Some(Dialog::Form(form)) => {
             if form.replace.take().is_none()
                 && form.new_tag.take().is_none()
+                && form.categories.take().is_none()
+                && !form.picker.as_mut().is_some_and(PickerState::dismiss_inner)
                 && form.picker.take().is_none()
                 && !std::mem::take(&mut form.rating_open)
             {
@@ -755,6 +1078,7 @@ pub fn dismiss_top(app: &mut App) -> bool {
 pub fn confirm(app: &mut App) -> Task<AppMessage> {
     let message = match &app.dialog {
         Some(Dialog::Form(form)) if form.new_tag.is_some() => Message::ConfirmNewTag,
+        Some(Dialog::Form(form)) if form.categories.is_some() => Message::SaveCategories,
         Some(Dialog::Form(form)) if form.picker.is_some() => Message::ClosePicker,
         Some(Dialog::Form(form)) if form.picked.is_none() && !form.matches().is_empty() => {
             Message::Pick(0)
@@ -860,11 +1184,14 @@ mod tests {
         send(&mut app, Message::Add);
         send(&mut app, Message::Title("Night of the Comet".into()));
         send(&mut app, Message::OpenPicker);
-        send(&mut app, Message::PickerQuery("B Movie".into()));
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Query("B Movie".into())),
+        );
         send(&mut app, Message::CreateTag);
         assert_eq!(
-            form(&app).new_tag.as_ref().unwrap().category,
-            TagCategory::Genres
+            form(&app).new_tag.as_ref().unwrap().categories,
+            [TagCategory::Genres]
         );
         send(&mut app, Message::NewTagCategory(TagCategory::Other));
         send(&mut app, Message::ConfirmNewTag);
@@ -968,7 +1295,10 @@ mod tests {
         let mut app = app();
         send(&mut app, Message::Add);
         send(&mut app, Message::OpenPicker);
-        send(&mut app, Message::PickerQuery("eerie".into()));
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Query("eerie".into())),
+        );
         send(&mut app, Message::CreateTag);
         assert!(dismiss_top(&mut app));
         assert!(form(&app).new_tag.is_none() && form(&app).picker.is_some());
@@ -1007,7 +1337,7 @@ mod tests {
         let mut app = app();
         send(&mut app, Message::Add);
         send(&mut app, Message::Type(MediaType::Music));
-        send(&mut app, Message::Kind(MusicKind::Song));
+        send(&mut app, Message::Kind(EntryKind::Song));
         send(&mut app, Message::Title("Rooster".into()));
         send(&mut app, Message::Creator("Alice in Chains".into()));
         send(&mut app, Message::Album("Dirt".into()));
@@ -1030,5 +1360,239 @@ mod tests {
         send(&mut app, Message::Add);
         assert_eq!(app.library.track_rating_open, None);
         assert!(!app.library.details_rating_open);
+    }
+
+    fn edit_baby(app: &mut App) {
+        send(
+            app,
+            Message::EditTags("movies/million-dollar-baby-2004".into()),
+        );
+    }
+
+    #[test]
+    fn a_tag_in_two_categories_is_ticked_per_group_and_the_last_untick_takes_it_off() {
+        let mut app = app();
+        edit_baby(&mut app);
+        let library = app.repo.library().clone();
+        let f = form(&app);
+        assert!(f.has_tag_as("clint-eastwood", Some(TagCategory::Directors), &library));
+        assert!(f.has_tag_as("clint-eastwood", Some(TagCategory::Actors), &library));
+        assert_eq!(
+            f.roles_on("clint-eastwood", &library),
+            [TagCategory::Directors, TagCategory::Actors]
+        );
+        assert!(f.roles_on("drama", &library).is_empty());
+
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Toggle(
+                "clint-eastwood".into(),
+                Some(TagCategory::Directors),
+            )),
+        );
+        let f = form(&app);
+        assert!(!f.has_tag_as("clint-eastwood", Some(TagCategory::Directors), &library));
+        assert_eq!(
+            f.roles_on("clint-eastwood", &library),
+            [TagCategory::Actors]
+        );
+        send(
+            &mut app,
+            Message::RemoveTag("clint-eastwood".into(), Some(TagCategory::Actors)),
+        );
+        assert!(!form(&app).tags.iter().any(|t| t == "clint-eastwood"));
+
+        // Ticked again under one group, saved with that pick alone.
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Toggle(
+                "clint-eastwood".into(),
+                Some(TagCategory::Actors),
+            )),
+        );
+        send(&mut app, Message::ClosePicker);
+        send(&mut app, Message::Save);
+        let baby = app
+            .repo
+            .library()
+            .entry("movies/million-dollar-baby-2004")
+            .unwrap();
+        assert_eq!(
+            baby.tag_categories.as_ref().unwrap().get("clint-eastwood"),
+            Some(&[TagCategory::Actors][..])
+        );
+    }
+
+    #[test]
+    fn a_new_tag_can_take_two_categories_of_one_kind_and_another_kind_starts_over() {
+        let mut app = app();
+        edit_baby(&mut app);
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Query("gothic".into())),
+        );
+        send(&mut app, Message::CreateTag);
+        send(&mut app, Message::NewTagCategory(TagCategory::MusicGenres));
+        assert_eq!(
+            form(&app).new_tag.as_ref().unwrap().categories,
+            [TagCategory::Genres, TagCategory::MusicGenres]
+        );
+        send(&mut app, Message::NewTagCategory(TagCategory::Actors));
+        assert_eq!(
+            form(&app).new_tag.as_ref().unwrap().categories,
+            [TagCategory::Actors],
+            "another kind starts over"
+        );
+        send(&mut app, Message::NewTagCategory(TagCategory::Actors));
+        assert!(form(&app).new_tag.as_ref().unwrap().categories.is_empty());
+        send(&mut app, Message::ConfirmNewTag);
+        assert!(form(&app).new_tag.is_some(), "Create needs a category");
+        send(&mut app, Message::NewTagCategory(TagCategory::Genres));
+        send(&mut app, Message::NewTagCategory(TagCategory::MusicGenres));
+        send(&mut app, Message::ConfirmNewTag);
+        let library = app.repo.library().clone();
+        assert_eq!(
+            form(&app).roles_on("gothic", &library),
+            [TagCategory::Genres, TagCategory::MusicGenres],
+            "ticked in both on this entry"
+        );
+        send(&mut app, Message::ClosePicker);
+        send(&mut app, Message::Save);
+        let library = app.repo.library();
+        assert_eq!(
+            library.categories_of("gothic"),
+            [TagCategory::Genres, TagCategory::MusicGenres]
+        );
+        let baby = library.entry("movies/million-dollar-baby-2004").unwrap();
+        assert_eq!(
+            baby.tag_categories.as_ref().unwrap().get("gothic"),
+            Some(&[TagCategory::Genres, TagCategory::MusicGenres][..])
+        );
+    }
+
+    #[test]
+    fn add_to_directors_files_the_person_there_on_save() {
+        let mut app = app();
+        edit_baby(&mut app);
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::AddTo(
+                "morgan-freeman".into(),
+                TagCategory::Directors,
+            )),
+        );
+        let library = app.repo.library().clone();
+        let f = form(&app);
+        assert_eq!(
+            f.categories_of("morgan-freeman", &library),
+            [TagCategory::Directors, TagCategory::Actors]
+        );
+        assert_eq!(
+            f.roles_on("morgan-freeman", &library),
+            [TagCategory::Directors, TagCategory::Actors],
+            "he was on the entry already, as an actor, and is now a director too"
+        );
+        assert_eq!(
+            library.categories_of("morgan-freeman"),
+            [TagCategory::Actors],
+            "nothing changes before Save"
+        );
+        send(&mut app, Message::ClosePicker);
+        send(&mut app, Message::Save);
+        assert_eq!(
+            app.repo.library().categories_of("morgan-freeman"),
+            [TagCategory::Directors, TagCategory::Actors]
+        );
+    }
+
+    #[test]
+    fn the_categories_dialog_takes_a_role_away_everywhere_and_moves_a_tag() {
+        let mut app = app();
+        edit_baby(&mut app);
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Categories("clint-eastwood".into())),
+        );
+        let dialog = form(&app).categories.as_ref().unwrap();
+        assert!(!dialog.single);
+        assert_eq!(dialog.draft, [TagCategory::Directors, TagCategory::Actors]);
+        send(&mut app, Message::CategoryDraft(TagCategory::Actors));
+        send(&mut app, Message::CategoryDraft(TagCategory::Directors));
+        assert_eq!(
+            form(&app).categories.as_ref().unwrap().draft,
+            [TagCategory::Directors],
+            "at least one stays"
+        );
+        send(&mut app, Message::SaveCategories);
+        let library = app.repo.library().clone();
+        assert_eq!(
+            form(&app).categories_of("clint-eastwood", &library),
+            [TagCategory::Directors]
+        );
+        assert!(form(&app).roles_on("clint-eastwood", &library).is_empty());
+
+        // Move #classic from Other to Languages.
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Categories("classic".into())),
+        );
+        assert!(form(&app).categories.as_ref().unwrap().single);
+        send(&mut app, Message::CategoryDraft(TagCategory::Languages));
+        send(&mut app, Message::SaveCategories);
+        send(&mut app, Message::ClosePicker);
+        send(&mut app, Message::Save);
+        let library = app.repo.library();
+        assert_eq!(
+            library.categories_of("clint-eastwood"),
+            [TagCategory::Directors]
+        );
+        assert!(
+            !library
+                .entry("movies/the-good-the-bad-and-the-ugly-1966")
+                .unwrap()
+                .tags
+                .iter()
+                .any(|t| t == "clint-eastwood"),
+            "an actor-only entry loses him"
+        );
+        assert_eq!(library.categories_of("classic"), [TagCategory::Languages]);
+    }
+
+    #[test]
+    fn the_picker_offers_add_to_directors_for_a_person_found_under_actors() {
+        let mut app = app();
+        edit_baby(&mut app);
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Query("freeman".into())),
+        );
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        assert!(ui.find("Not a director tag yet").is_ok());
+        assert!(ui.find("+ Add to Directors").is_ok());
+        assert!(
+            ui.find("+ Add to Authors").is_ok(),
+            "Authors has no match of its own either"
+        );
+    }
+
+    #[test]
+    fn the_details_pane_shows_the_roles_merged() {
+        let mut app = app();
+        let _ = app.update(AppMessage::Library(
+            crate::screens::library::Message::ShowType(Some(MediaType::Movies)),
+        ));
+        let _ = app.update(AppMessage::Library(
+            crate::screens::library::Message::Select("movies/million-dollar-baby-2004".into()),
+        ));
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        assert!(ui.find("· Director, Actor").is_ok());
     }
 }

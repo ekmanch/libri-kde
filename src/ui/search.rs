@@ -8,7 +8,7 @@ use crate::theme::{Tokens, size};
 /// ("Ctrl K") on the right. One outline around all of it. `id` lets a
 /// shortcut focus the field.
 pub fn search_field<'a, Message: Clone + 'a>(
-    placeholder: &'a str,
+    placeholder: &str,
     value: &'a str,
     on_input: impl Fn(String) -> Message + 'a,
     shortcut: Option<&'a str>,

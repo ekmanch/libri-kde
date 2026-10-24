@@ -2,20 +2,21 @@
 //! only), the form on the right, and the footer with "Also add to plan".
 //! The tag picker and the new-tag confirmation open over it.
 
-use std::collections::HashMap;
 use std::fmt;
+use std::rc::Rc;
 
 use iced::widget::{
     Column, Row, button, column, container, pick_list, row, space, text, text_editor,
 };
-use iced::{Background, Border, Center, Color, Element, Fill, Length, Padding, Shadow, Vector};
+use iced::{Background, Border, Center, Color, Element, Fill, Padding, Shadow, Vector};
 
-use super::{Form, Message, NewTag, Replace, TagPicker};
+use super::{CategoriesDialog, Form, Message, NewTag, Replace};
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
-use crate::model::{BookFormat, EntryStatus, MediaType, MusicKind, TagCategory, text as rules};
+use crate::model::{BookFormat, EntryKind, EntryStatus, MediaType, TagCategory, text as rules};
+use crate::tags::PickerState;
 use crate::theme::{self, Tokens, font};
-use crate::ui::{self, ButtonKind, FocusExt, Icon};
+use crate::ui::{self, ButtonKind, FocusExt, Icon, Picker};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Entry(message)
@@ -74,20 +75,29 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
     let with_new_tag = match &form.new_tag {
         Some(new_tag) => ui::modal(
             with_picker,
-            Some(new_tag_dialog(new_tag, &tokens)),
+            Some(new_tag_dialog(new_tag, form.media, &tokens)),
             msg(Message::CancelNewTag),
             &tokens,
         ),
         None => with_picker,
     };
+    let with_categories = match &form.categories {
+        Some(dialog) => ui::modal(
+            with_new_tag,
+            Some(categories_dialog(app, form, dialog, &tokens)),
+            msg(Message::CancelCategories),
+            &tokens,
+        ),
+        None => with_new_tag,
+    };
     match &form.replace {
         Some(replace) => ui::modal(
-            with_new_tag,
+            with_categories,
             Some(replace_dialog(replace, &tokens)),
             msg(Message::ReplaceCancel),
             &tokens,
         ),
-        None => with_new_tag,
+        None => with_categories,
     }
 }
 
@@ -502,14 +512,14 @@ fn type_fields<'a>(
             Some(ui::labeled("Formats", chips, tokens))
         }
         MediaType::Music => {
-            let kinds = [("Album", MusicKind::Album), ("Song", MusicKind::Song)]
+            let kinds = [("Album", EntryKind::Album), ("Song", EntryKind::Song)]
                 .map(|(label, kind)| (label, form.kind == kind, msg(Message::Kind(kind))));
             let kind = ui::labeled(
                 "Album or song",
                 container(ui::segmented(kinds, 34.0, tokens)).width(200),
                 tokens,
             );
-            let album = (form.kind == MusicKind::Song).then(|| {
+            let album = (form.kind == EntryKind::Song).then(|| {
                 ui::labeled(
                     "Album (optional)",
                     ui::text_field(
@@ -538,14 +548,28 @@ fn tags<'a>(
     library: &crate::model::Library,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
+    // A tag in several categories is one chip per role it has here.
     let mut chosen = Row::new().spacing(6).align_y(Center);
     for tag in &form.tags {
-        chosen = chosen.push(ui::removable_chip(
-            format!("#{tag}"),
-            None,
-            tokens,
-            msg(Message::RemoveTag(tag.clone())),
-        ));
+        let roles = form.roles_on(tag, library);
+        if roles.is_empty() {
+            chosen = chosen.push(ui::removable_chip(
+                format!("#{tag}"),
+                None,
+                None,
+                tokens,
+                msg(Message::RemoveTag(tag.clone(), None)),
+            ));
+        }
+        for role in roles {
+            chosen = chosen.push(ui::removable_chip(
+                format!("#{tag}"),
+                Some(role.role_label().to_owned()),
+                None,
+                tokens,
+                msg(Message::RemoveTag(tag.clone(), Some(role))),
+            ));
+        }
     }
     let more = if form.tags.is_empty() {
         "Add tags ›"
@@ -714,120 +738,70 @@ fn hinted_button<'a>(
     .focusable(8.0, &tokens)
 }
 
-/// The form's tag picker: a search that can also create a tag (with a
-/// "Did you mean" for near misses), groups that fold, Clear and Done.
+/// The form's tag picker: the shared picker with a search that can also
+/// create a tag (with a "Did you mean" for near misses), the right-click
+/// menu and "+ Add to Directors", then Clear and Done.
 fn tag_picker<'a>(
     app: &'a App,
     form: &'a Form,
-    picker: &'a TagPicker,
+    state: &'a PickerState,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let library = app.repo.library();
-    let query = rules::normalize_tag(&picker.query);
+    let query = rules::normalize_tag(&state.query);
     let searching = !query.is_empty();
-    let counts: HashMap<&str, usize> = library.tag_counts().into_iter().collect();
+    let groups = form.picker_groups(library);
+    let holds_a_tag: Vec<TagCategory> = groups
+        .iter()
+        .filter(|(_, names)| names.iter().any(|n| form.tags.contains(n)))
+        .map(|(c, _)| *c)
+        .collect();
+    let media = form.media;
 
-    // The library's groups, plus the tags created in this form.
-    let mut groups: Vec<(TagCategory, Vec<&str>)> = Vec::new();
-    for category in TagCategory::ALL {
-        let mut names: Vec<&str> = library
-            .tags
-            .get(&category)
-            .into_iter()
-            .flatten()
-            .map(String::as_str)
-            .collect();
-        names.extend(
-            form.new_tags
-                .iter()
-                .filter(|(_, c)| *c == category)
-                .map(|(n, _)| n.as_str()),
-        );
-        names.retain(|n| n.contains(&query));
-        names.sort_by_key(|n| n.to_lowercase());
-        let offered = searching
-            || category.offered_for(form.media)
-            || names.iter().any(|n| form.tags.iter().any(|t| t == n));
-        if !names.is_empty() && offered {
-            groups.push((category, names));
-        }
-    }
+    let picker = Picker {
+        state,
+        groups,
+        counts: library.tag_counts().into_iter().collect(),
+        categories_of: Box::new(move |tag| form.categories_of(tag, library)),
+        is_on: Box::new(move |tag, category| form.has_tag_as(tag, category, library)),
+        // Other types' genres, Actors and Streaming stay out of the way
+        // unless a group holds a tag on this entry, or you search.
+        visible: Box::new(move |category| {
+            category.offered_for(media) || holds_a_tag.contains(&category)
+        }),
+        default_open: Box::new(|_, selected| selected > 0),
+        long_group: crate::screens::library::long_group(app),
+        with_menu: true,
+        with_add_to: true,
+        height: 340.0,
+        map: Rc::new(|message| msg(Message::Picker(message))),
+    };
 
-    let mut list = Column::new().spacing(2);
-    for (category, names) in &groups {
-        let selected = names
-            .iter()
-            .filter(|n| form.tags.iter().any(|t| t == *n))
-            .count();
-        // Groups holding a tag on this entry start open; a search opens all.
-        let open = searching || ((selected > 0) != picker.toggled.contains(category));
-        let chips = names
-            .iter()
-            .map(|&name| {
-                let on = form.tags.iter().any(|t| t == name);
-                let count = counts.get(name).copied().unwrap_or(0);
-                ui::filter_chip(
-                    format!("#{name}"),
-                    None,
-                    Some(count),
-                    on,
-                    tokens,
-                    msg(Message::PickerToggleTag(name.to_owned())),
-                )
-            })
-            .collect();
-        list = list.push(ui::tag_group(
-            category.name(),
-            names.len(),
-            selected,
-            open,
-            msg(Message::PickerToggleGroup(*category)),
-            chips,
-            tokens,
-        ));
-    }
-
-    let mut body = Column::new().spacing(12).push(ui::search_field(
-        "Search or create a tag",
-        &picker.query,
-        |q| msg(Message::PickerQuery(q)),
-        None,
-        None,
-        tokens,
-    ));
     let exists =
         library.all_tags().any(|t| t == query) || form.new_tags.iter().any(|(t, _)| *t == query);
-    if searching && !exists {
-        body = body.push(create_box(app, form, &query, tokens));
-    } else if groups.is_empty() {
-        body = body.push(text("No tags match.").size(13.5).color(tokens.sub));
-    }
-    body = body.push(ui::scroll(list).height(Length::Fixed(340.0)));
+    let create = (searching && !exists).then(|| create_box(app, form, &query, tokens));
+    let header = picker.header("Tags", None, None, msg(Message::ClosePicker), tokens);
+    let body = picker.body("Search or create a tag", create, tokens);
 
     let summary = if form.tags.is_empty() {
         "No tags selected".to_owned()
     } else {
-        let names: Vec<String> = form.tags.iter().map(|t| format!("#{t}")).collect();
+        let names: Vec<String> = form
+            .tags
+            .iter()
+            .map(|t| crate::model::tag_label(t, &form.roles_on(t, library)))
+            .collect();
         format!("{} selected: {}", form.tags.len(), names.join(", "))
     };
-    let footer = row![
-        ui::labeled_button(
-            "Clear",
-            ButtonKind::Outline,
-            *tokens,
-            Some(msg(Message::PickerClear))
-        ),
-        text(summary).size(13).color(tokens.sub).width(Fill),
-        ui::labeled_button(
-            "Done",
-            ButtonKind::Primary,
-            *tokens,
-            Some(msg(Message::ClosePicker))
-        ),
-    ]
-    .spacing(10)
-    .align_y(Center);
-    ui::dialog("Tags", body, footer, 560, tokens, msg(Message::ClosePicker))
+    let footer = ui::tag_picker::footer(
+        "Clear",
+        Some(msg(Message::PickerClear)),
+        summary,
+        "Done".to_owned(),
+        msg(Message::ClosePicker),
+        tokens,
+    );
+    ui::panel(header, body, footer, 560, tokens)
 }
 
 /// Shown while the search names a tag the library does not have: a
@@ -855,7 +829,10 @@ fn create_box<'a>(
                         None,
                         false,
                         tokens,
-                        msg(Message::PickerToggleTag(existing.clone()))
+                        msg(Message::Picker(crate::tags::PickerMessage::Toggle(
+                            existing.clone(),
+                            None
+                        )))
                     ),
                     text("?").size(13),
                 ]
@@ -889,21 +866,40 @@ fn create_box<'a>(
         .into()
 }
 
-/// Creating a tag: confirm it and pick its category.
-fn new_tag_dialog<'a>(new_tag: &'a NewTag, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let categories = Row::with_children(TagCategory::ALL.map(|category| {
-        ui::filter_chip(
-            category.name().to_owned(),
-            None,
-            None,
-            new_tag.category == category,
-            tokens,
-            msg(Message::NewTagCategory(category)),
-        )
-    }))
+/// Creating a tag: confirm it and pick its categories, one or several of
+/// one kind. Streaming is left out for every type but movies and shows.
+fn new_tag_dialog<'a>(
+    new_tag: &'a NewTag,
+    media: MediaType,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let categories = Row::with_children(
+        TagCategory::ALL
+            .into_iter()
+            .filter(|c| c.used_for(media))
+            .map(|category| {
+                ui::filter_chip(
+                    category.name().to_owned(),
+                    None,
+                    None,
+                    new_tag.categories.contains(&category),
+                    tokens,
+                    msg(Message::NewTagCategory(category)),
+                )
+            }),
+    )
     .spacing(6)
     .wrap()
     .vertical_spacing(6);
+    let sentence = if new_tag.categories.is_empty() {
+        "Pick at least one category.".to_owned()
+    } else {
+        let names: Vec<&str> = new_tag.categories.iter().map(|c| c.name()).collect();
+        format!(
+            "It will be added to your tag list under {}.",
+            join_names(&names)
+        )
+    };
     let body = column![
         row![
             text(format!("#{}", new_tag.name)).size(14).font(font::BOLD),
@@ -911,12 +907,14 @@ fn new_tag_dialog<'a>(new_tag: &'a NewTag, tokens: &Tokens) -> Element<'a, AppMe
                 .size(14)
                 .color(tokens.sub),
         ],
-        column![ui::section_header("Category", tokens), categories].spacing(8),
-        text(format!(
-            "It will be added to your tag list under {}.",
-            new_tag.category.name()
-        ))
-        .size(13)
+        column![ui::section_header("Categories", tokens), categories].spacing(8),
+        text(sentence).size(13).color(tokens.sub),
+        text(
+            "People can be in more than one people category (Authors, Directors, Actors), \
+             genres in more than one genre category. Picking a category of another kind \
+             starts over with it."
+        )
+        .size(12.5)
         .color(tokens.sub),
     ]
     .spacing(14);
@@ -932,7 +930,7 @@ fn new_tag_dialog<'a>(new_tag: &'a NewTag, tokens: &Tokens) -> Element<'a, AppMe
             "Create tag",
             ButtonKind::Primary,
             *tokens,
-            Some(msg(Message::ConfirmNewTag))
+            (!new_tag.categories.is_empty()).then(|| msg(Message::ConfirmNewTag))
         ),
     ]
     .spacing(8);
@@ -940,8 +938,99 @@ fn new_tag_dialog<'a>(new_tag: &'a NewTag, tokens: &Tokens) -> Element<'a, AppMe
         "Create a new tag?",
         body,
         footer,
-        480,
+        500,
         tokens,
         msg(Message::CancelNewTag),
+    )
+}
+
+/// "Genres", "Genres and Music genres", "Authors, Directors and Actors".
+fn join_names(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [only] => (*only).to_owned(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// A tag's categories (right-click › Categories…): the categories of its
+/// kind as chips, at least one picked, with where the tag is used; or, for
+/// a tag of a kind with one category each, the group to move it to.
+fn categories_dialog<'a>(
+    app: &'a App,
+    form: &'a Form,
+    dialog: &'a CategoriesDialog,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let library = app.repo.library();
+    let family = if dialog.single {
+        TagCategory::single_category_groups()
+    } else {
+        dialog.draft.first().map(|c| c.family()).unwrap_or_default()
+    };
+    let chips = Row::with_children(family.into_iter().map(|category| {
+        ui::filter_chip(
+            category.name().to_owned(),
+            None,
+            None,
+            dialog.draft.contains(&category),
+            tokens,
+            msg(Message::CategoryDraft(category)),
+        )
+    }))
+    .spacing(6)
+    .wrap()
+    .vertical_spacing(6);
+    let (head, hint, save) = if dialog.single {
+        (
+            "Group",
+            "Moves the tag to another group. It stays on all its entries.",
+            "Move",
+        )
+    } else if dialog.draft.first().and_then(|c| c.kind()) == Some(crate::model::TagKind::People) {
+        (
+            "Categories",
+            "A person can be in Authors, Directors and Actors. At least one stays; unticking \
+             one takes that role off every entry.",
+            "Save",
+        )
+    } else {
+        (
+            "Categories",
+            "A genre can be in Genres, Game genres and Music genres. At least one stays.",
+            "Save",
+        )
+    };
+    let body = column![
+        text(form.usage(&dialog.tag, library))
+            .size(13)
+            .color(tokens.sub),
+        column![ui::section_header(head, tokens), chips].spacing(8),
+        text(hint).size(12.5).color(tokens.sub),
+    ]
+    .spacing(14);
+    let footer = row![
+        space::horizontal(),
+        ui::labeled_button(
+            "Cancel",
+            ButtonKind::Outline,
+            *tokens,
+            Some(msg(Message::CancelCategories))
+        ),
+        ui::labeled_button(
+            save,
+            ButtonKind::Primary,
+            *tokens,
+            Some(msg(Message::SaveCategories))
+        ),
+    ]
+    .spacing(8);
+    ui::dialog(
+        format!("#{}", dialog.tag),
+        body,
+        footer,
+        500,
+        tokens,
+        msg(Message::CancelCategories),
     )
 }

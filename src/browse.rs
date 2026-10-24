@@ -3,9 +3,11 @@
 //! library_sort.dart, library_search.dart).
 
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use crate::model::{Date, Entry, EntryStatus, Library, MediaType, MusicKind, Plan};
+use crate::model::{
+    Date, Entry, EntryKind, EntryStatus, Library, MediaType, Plan, TagCategory, tag_label,
+};
 
 /// A release decade in the filter: "Older" for everything before 1960,
 /// then one per decade.
@@ -65,11 +67,21 @@ impl Decade {
 /// chosen tag must be on the entry; the rating range leaves out unrated
 /// entries. Seasonal-only entries are hidden unless included. The last two
 /// come from the overview's "See all" links.
+///
+/// A tag in more than one category is chosen per category: Directors ›
+/// #clint-eastwood matches only entries where he is picked as a director.
+/// Such a choice is the tag in `tags` plus its categories in
+/// `tag_categories`; a tag there with no categories (one in a single
+/// category, or chosen by name from the sidebar) matches whatever category
+/// it has on the entry.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Filter {
     pub decades: BTreeSet<Decade>,
     /// In the order they were picked, as the chips show them.
     pub tags: Vec<String>,
+    /// The categories a tag in `tags` is chosen as, for tags chosen per
+    /// category. Never an empty set: a tag with none is not in the map.
+    pub tag_categories: BTreeMap<String, BTreeSet<TagCategory>>,
     /// Lowest and highest rating, inclusive.
     pub rating: Option<(u8, u8)>,
     pub include_seasonal: bool,
@@ -87,7 +99,7 @@ impl Filter {
     /// The number on the Filter button's badge.
     pub fn count(&self) -> usize {
         self.decades.len()
-            + self.tags.len()
+            + self.tag_chips().len()
             + usize::from(self.rating.is_some())
             + usize::from(self.include_seasonal)
             + usize::from(self.not_released)
@@ -114,7 +126,13 @@ impl Filter {
         {
             return false;
         }
-        self.tags.iter().all(|tag| entry.tags.contains(tag))
+        self.tags.iter().all(|tag| {
+            entry.tags.contains(tag)
+                && self
+                    .tag_categories
+                    .get(tag)
+                    .is_none_or(|categories| categories.iter().all(|&c| entry.has_tag_as(tag, c)))
+        })
     }
 
     pub fn toggle_decade(&mut self, decade: Decade) {
@@ -123,13 +141,67 @@ impl Filter {
         }
     }
 
-    pub fn toggle_tag(&mut self, tag: &str) {
-        match self.tags.iter().position(|t| t == tag) {
-            Some(at) => {
-                self.tags.remove(at);
+    /// Toggles a tag, as `category` for a tag chosen per category: the
+    /// first category chooses the tag, the last one taken away drops it.
+    /// With no category the tag is toggled by name, which also clears its
+    /// categories. A tag chosen by name and then toggled as a category
+    /// keeps only that category.
+    pub fn toggle_tag(&mut self, tag: &str, category: Option<TagCategory>) {
+        let Some(category) = category else {
+            self.tag_categories.remove(tag);
+            match self.tags.iter().position(|t| t == tag) {
+                Some(at) => {
+                    self.tags.remove(at);
+                }
+                None => self.tags.push(tag.to_owned()),
             }
-            None => self.tags.push(tag.to_owned()),
+            return;
+        };
+        let by_name = !self.tag_categories.contains_key(tag) && self.tags.iter().any(|t| t == tag);
+        let mut chosen = if by_name {
+            BTreeSet::from([category])
+        } else {
+            let mut chosen = self.tag_categories.remove(tag).unwrap_or_default();
+            if !chosen.remove(&category) {
+                chosen.insert(category);
+            }
+            chosen
+        };
+        if chosen.is_empty() {
+            self.tags.retain(|t| t != tag);
+            return;
         }
+        if !self.tags.iter().any(|t| t == tag) {
+            self.tags.push(tag.to_owned());
+        }
+        self.tag_categories
+            .insert(tag.to_owned(), std::mem::take(&mut chosen));
+    }
+
+    /// Whether `tag` is chosen, as `category` when one is given: chosen in
+    /// that category, or chosen by name alone (which counts in every one).
+    pub fn has_tag(&self, tag: &str, category: Option<TagCategory>) -> bool {
+        self.tags.iter().any(|t| t == tag)
+            && match (category, self.tag_categories.get(tag)) {
+                (Some(category), Some(categories)) => categories.contains(&category),
+                _ => true,
+            }
+    }
+
+    /// The removable chips for the chosen tags: "#horror", and for a tag
+    /// chosen per category one per category ("#clint-eastwood · Director");
+    /// each the tag and the category a click toggles.
+    pub fn tag_chips(&self) -> Vec<(String, Option<TagCategory>)> {
+        let mut chips = Vec::new();
+        for tag in &self.tags {
+            match self.tag_categories.get(tag) {
+                Some(categories) => {
+                    chips.extend(categories.iter().map(|&c| (tag.clone(), Some(c))));
+                }
+                None => chips.push((tag.clone(), None)),
+            }
+        }
+        chips
     }
 
     /// A tap on a rating: the first picks one rating, a second makes a
@@ -203,7 +275,11 @@ impl Filter {
             });
         }
         if !self.tags.is_empty() {
-            let tags: Vec<String> = self.tags.iter().map(|t| format!("#{t}")).collect();
+            let tags: Vec<String> = self
+                .tag_chips()
+                .iter()
+                .map(|(tag, category)| tag_label(tag, category.as_slice()))
+                .collect();
             conditions.push(format!("tagged {}", join(&tags, "and")));
         }
         const TAIL: &str = "Remove a filter to see more.";
@@ -541,7 +617,7 @@ pub fn kind_label(entry: &Entry) -> &'static str {
         MediaType::Shows => "Show",
         MediaType::Books => "Book",
         MediaType::Games => "Game",
-        MediaType::Music if entry.kind == Some(MusicKind::Song) => "Song",
+        MediaType::Music if entry.kind == Some(EntryKind::Song) => "Song",
         MediaType::Music => "Album",
         MediaType::Anime => "Anime",
     }
@@ -588,8 +664,8 @@ mod tests {
     fn every_tag_must_match_and_decades_any() {
         let library = library();
         let mut filter = Filter::default();
-        filter.toggle_tag("horror");
-        filter.toggle_tag("halloween");
+        filter.toggle_tag("horror", None);
+        filter.toggle_tag("halloween", None);
         assert!(
             library
                 .entries
@@ -637,7 +713,7 @@ mod tests {
     #[test]
     fn a_filter_that_matches_nothing_spells_itself_out() {
         let mut filter = Filter::default();
-        filter.toggle_tag("christmas");
+        filter.toggle_tag("christmas", None);
         assert_eq!(
             filter.no_matches_text(
                 &BTreeSet::from([MediaType::Books]),
@@ -889,5 +965,51 @@ mod tests {
         assert_eq!(active.days_left, Some(12));
         let next: Vec<_> = active.next_up.iter().map(|e| e.title.as_str()).collect();
         assert_eq!(next, ["Mononoke", "The Mummy"]);
+    }
+
+    #[test]
+    fn a_tag_chosen_per_category_matches_only_that_role() {
+        let library = library();
+        let baby = "movies/million-dollar-baby-2004";
+        let ugly = "movies/the-good-the-bad-and-the-ugly-1966";
+        let ids = |filter: &Filter| -> Vec<&str> {
+            library
+                .entries
+                .iter()
+                .filter(|e| filter.matches(e, today()))
+                .map(|e| e.id.as_str())
+                .collect()
+        };
+        let mut filter = Filter::default();
+        filter.toggle_tag("clint-eastwood", Some(TagCategory::Directors));
+        assert_eq!(ids(&filter), [baby]);
+        assert_eq!(filter.count(), 1);
+        assert!(filter.has_tag("clint-eastwood", Some(TagCategory::Directors)));
+        assert!(!filter.has_tag("clint-eastwood", Some(TagCategory::Actors)));
+
+        filter.toggle_tag("clint-eastwood", Some(TagCategory::Actors));
+        assert_eq!(ids(&filter), [baby], "both roles: where he is both");
+        assert_eq!(filter.count(), 2);
+        assert_eq!(
+            filter.no_matches_text(&BTreeSet::new(), None),
+            "No entries are tagged #clint-eastwood · Director and #clint-eastwood · Actor. \
+             Remove a filter to see more."
+        );
+
+        filter.toggle_tag("clint-eastwood", Some(TagCategory::Directors));
+        assert_eq!(ids(&filter), [baby, ugly]);
+
+        // The last role taken away drops the tag; by name it matches any role.
+        filter.toggle_tag("clint-eastwood", Some(TagCategory::Actors));
+        assert!(filter.is_empty());
+        filter.toggle_tag("clint-eastwood", None);
+        assert_eq!(ids(&filter), [baby, ugly]);
+        assert!(filter.has_tag("clint-eastwood", Some(TagCategory::Directors)));
+        filter.toggle_tag("clint-eastwood", Some(TagCategory::Actors));
+        assert_eq!(
+            filter.tag_chips(),
+            [("clint-eastwood".to_owned(), Some(TagCategory::Actors))],
+            "a tag chosen by name keeps only the role toggled"
+        );
     }
 }

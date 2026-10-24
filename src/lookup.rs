@@ -1,7 +1,7 @@
 //! Online lookup, faked for phase 1: a small fixed catalog the Add entry
 //! dialog searches. Phase 4 asks the real providers instead.
 
-use crate::model::{MediaType, MusicKind};
+use crate::model::{EntryKind, MediaType};
 
 /// One match a lookup returns.
 #[derive(Debug, Clone, PartialEq)]
@@ -14,7 +14,7 @@ pub struct Match {
     /// Tag suggestions, already in the library's spelling.
     pub tags: &'static [&'static str],
     pub platforms: &'static [&'static str],
-    pub kind: Option<MusicKind>,
+    pub kind: Option<EntryKind>,
     /// The lookup id, "igdb:1234".
     pub source: &'static str,
 }
@@ -59,7 +59,7 @@ const fn other(
         tags,
         platforms: &[],
         kind: if matches!(media, MediaType::Music) {
-            Some(MusicKind::Album)
+            Some(EntryKind::Album)
         } else {
             None
         },

@@ -1,17 +1,18 @@
 //! The New and Edit plan dialog with its linked hashtags view, and the
 //! phone's D4 (remove from a plan) and D5 (delete a plan).
 
-use std::collections::HashMap;
+use std::rc::Rc;
 
 use iced::widget::{Column, Row, button, column, container, row, space, text};
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
-use super::{Message, PlanForm, TagView};
+use super::{Message, PlanForm};
 use crate::app::{App, Message as AppMessage};
 use crate::model::{Plan, TagCategory};
 use crate::plans::{self as rules};
+use crate::tags::PickerState;
 use crate::theme::{Tokens, font};
-use crate::ui::{self, ButtonKind, FocusExt, Icon};
+use crate::ui::{self, ButtonKind, FocusExt, Picker};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Plans(message)
@@ -76,6 +77,7 @@ pub fn view<'a>(app: &'a App, form: &'a PlanForm) -> Element<'a, AppMessage> {
     for tag in &form.tags {
         chips = chips.push(ui::removable_chip(
             format!("#{tag}"),
+            None,
             None,
             &tokens,
             msg(Message::TagToggle(tag.clone())),
@@ -255,124 +257,61 @@ fn source_row<'a>(plan: &'a Plan, on: bool, app: &App, tokens: &Tokens) -> Eleme
     .focusable(8.0, tokens)
 }
 
-/// The linked hashtags, drilled into from the form: a search, the groups
-/// (Season open first), Clear, a summary and Done.
+/// The linked hashtags, drilled into from the form: the shared tag picker
+/// with every group (Season open first), Clear, a summary and Done. A tag
+/// is linked by name, whatever its categories.
 fn tag_view<'a>(
     app: &'a App,
     form: &'a PlanForm,
-    view: &'a TagView,
+    state: &'a PickerState,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let library = app.repo.library();
-    let query = view.query.trim().trim_start_matches('#').to_lowercase();
-    let searching = !query.is_empty();
-    let counts: HashMap<&str, usize> = library.tag_counts().into_iter().collect();
-
-    let mut list = Column::new().spacing(2);
-    let mut any = false;
-    for category in TagCategory::ALL {
-        let mut names: Vec<&str> = library
+    let picker = Picker {
+        state,
+        groups: library
             .tags
-            .get(&category)
-            .into_iter()
-            .flatten()
-            .map(String::as_str)
-            .filter(|n| n.contains(&query))
-            .collect();
-        if names.is_empty() {
-            continue;
-        }
-        any = true;
-        names.sort_by_key(|n| n.to_lowercase());
-        let selected = names
             .iter()
-            .filter(|n| form.tags.iter().any(|t| t == *n))
-            .count();
-        let open =
-            searching || ((category == TagCategory::Season) != view.toggled.contains(&category));
-        let chips = names
-            .iter()
-            .map(|&name| {
-                ui::filter_chip(
-                    format!("#{name}"),
-                    None,
-                    Some(counts.get(name).copied().unwrap_or(0)),
-                    form.tags.iter().any(|t| t == name),
-                    tokens,
-                    msg(Message::TagToggle(name.to_owned())),
-                )
-            })
-            .collect();
-        list = list.push(ui::tag_group(
-            category.name(),
-            names.len(),
-            selected,
-            open,
-            msg(Message::TagToggleGroup(category)),
-            chips,
-            tokens,
-        ));
-    }
-    if !any {
-        list = list.push(text("No tags match.").size(13.5).color(tokens.sub));
-    }
-    let search = ui::search_field(
-        "Search tags",
-        &view.query,
-        |q| msg(Message::TagQuery(q)),
-        None,
-        None,
-        tokens,
-    );
-    let back = {
-        let tokens = *tokens;
-        button(container(ui::icon(Icon::ChevronLeft, 18.0, tokens.text)).center(Fill))
-            .width(32)
-            .height(32)
-            .padding(0)
-            .on_press(msg(Message::CloseTags))
-            .style(ui::row_style(&tokens, false, 8.0))
-            .focusable(8.0, &tokens)
+            .map(|(&c, names)| (c, names.clone()))
+            .collect(),
+        counts: library.tag_counts().into_iter().collect(),
+        categories_of: Box::new(|tag| library.categories_of(tag)),
+        is_on: Box::new(|tag, _| form.tags.iter().any(|t| t == tag)),
+        visible: Box::new(|_| true),
+        default_open: Box::new(|category, _| category == TagCategory::Season),
+        long_group: crate::screens::library::long_group(app),
+        with_menu: false,
+        with_add_to: false,
+        height: 400.0,
+        map: Rc::new(|message| msg(Message::Picker(message))),
     };
     let form_title = if form.editing.is_some() {
         "Edit plan"
     } else {
         "New plan"
     };
-    let heading = row![
-        back,
-        text("Linked hashtags").size(19).font(font::EXTRABOLD),
-        text(form_title).size(13).color(tokens.sub),
-        space::horizontal(),
-        ui::icon_button(Icon::Close, 16.0, tokens, msg(Message::Close)),
-    ]
-    .spacing(8)
-    .align_y(Center);
-    let body = column![search, ui::scroll(list).height(400)].spacing(12);
-
+    let heading = picker.header(
+        "Linked hashtags",
+        Some(form_title.to_owned()),
+        Some(msg(Message::CloseTags)),
+        msg(Message::Close),
+        tokens,
+    );
+    let body = picker.body("Search tags", None, tokens);
     let summary = if form.tags.is_empty() {
         "No tags selected".to_owned()
     } else {
         let names: Vec<String> = form.tags.iter().map(|t| format!("#{t}")).collect();
         format!("{} selected: {}", form.tags.len(), names.join(", "))
     };
-    let footer = row![
-        ui::labeled_button(
-            "Clear",
-            ButtonKind::Outline,
-            *tokens,
-            Some(msg(Message::TagClear))
-        ),
-        text(summary).size(13).color(tokens.sub).width(Fill),
-        ui::labeled_button(
-            "Done",
-            ButtonKind::Primary,
-            *tokens,
-            Some(msg(Message::CloseTags))
-        ),
-    ]
-    .spacing(10)
-    .align_y(Center);
+    let footer = ui::tag_picker::footer(
+        "Clear",
+        Some(msg(Message::TagClear)),
+        summary,
+        "Done".to_owned(),
+        msg(Message::CloseTags),
+        tokens,
+    );
     ui::panel(heading, body, footer, 560, tokens)
 }
 

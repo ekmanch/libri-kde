@@ -51,11 +51,20 @@ pub enum Operation {
     DeletePlan {
         id: String,
     },
-    /// Files a new tag under a category. Only the entry form creates tags,
-    /// right before the entry that uses it is saved.
+    /// Files a new tag under one or more categories of one kind. Only the
+    /// entry form creates tags, right before the entry that uses it is
+    /// saved.
     CreateTag {
         name: String,
-        category: TagCategory,
+        categories: Vec<TagCategory>,
+    },
+    /// Changes the categories a tag is in. A category taken away takes the
+    /// role off every entry, and an entry left with the tag in no category
+    /// loses the tag; a move between one-category groups keeps every entry.
+    /// A tag back to one category has its picks removed everywhere.
+    SetTagCategories {
+        name: String,
+        categories: Vec<TagCategory>,
     },
     /// Adds the item to the plan, or replaces the entry's item there.
     SetPlanItem {
@@ -130,11 +139,48 @@ impl Operation {
                 library.plans.retain(|plan| plan.id != id);
                 library.remove_unused_tags();
             }
-            Operation::CreateTag { name, category } => {
+            Operation::CreateTag { name, categories } => {
                 if library.all_tags().any(|t| t == name) {
                     return Err(RepoError::DuplicateTag(name));
                 }
-                library.tags.entry(category).or_default().push(name);
+                if categories.is_empty() {
+                    return Err(RepoError::NoCategory(name));
+                }
+                for category in in_order(&categories) {
+                    library.tags.entry(category).or_default().push(name.clone());
+                }
+            }
+            Operation::SetTagCategories { name, categories } => {
+                let before = library.categories_of(&name);
+                let after = in_order(&categories);
+                if before.is_empty() {
+                    return Err(RepoError::MissingTag(name));
+                }
+                if after.is_empty() {
+                    return Err(RepoError::NoCategory(name));
+                }
+                if before == after {
+                    return Ok(());
+                }
+                for category in TagCategory::ALL {
+                    let listed = library
+                        .tags
+                        .get(&category)
+                        .is_some_and(|names| names.contains(&name));
+                    if after.contains(&category) && !listed {
+                        library.tags.entry(category).or_default().push(name.clone());
+                    } else if !after.contains(&category) && listed {
+                        let names = library.tags.get_mut(&category).expect("listed");
+                        names.retain(|n| *n != name);
+                        if names.is_empty() {
+                            library.tags.remove(&category);
+                        }
+                    }
+                }
+                for entry in &mut library.entries {
+                    retag(entry, &name, &before, &after);
+                }
+                library.remove_unused_tags();
             }
             Operation::SetPlanItem { plan, item } => {
                 let plan = plan_mut(library, &plan)?;
@@ -182,6 +228,38 @@ impl Operation {
     }
 }
 
+/// `categories` without repeats, in category order.
+fn in_order(categories: &[TagCategory]) -> Vec<TagCategory> {
+    TagCategory::ALL
+        .into_iter()
+        .filter(|c| categories.contains(c))
+        .collect()
+}
+
+/// An entry's share of a tag's category change, as the phone's
+/// `SetTagCategories` does it.
+fn retag(entry: &mut Entry, name: &str, before: &[TagCategory], after: &[TagCategory]) {
+    if !entry.tags.iter().any(|t| t == name) {
+        return;
+    }
+    if before.len() == 1 && after.len() == 1 {
+        // A move: the tag is on the entry as its one category, whatever
+        // it was.
+        entry.set_tag_pick(name, Vec::new());
+        return;
+    }
+    let had = entry.categories_of(name, before);
+    let kept: Vec<TagCategory> = after.iter().copied().filter(|c| had.contains(c)).collect();
+    if kept.is_empty() {
+        entry.tags.retain(|t| t != name);
+        entry.set_tag_pick(name, Vec::new());
+    } else if after.len() == 1 {
+        entry.set_tag_pick(name, Vec::new());
+    } else {
+        entry.set_tag_pick(name, kept);
+    }
+}
+
 fn plan_mut<'a>(library: &'a mut Library, id: &str) -> Result<&'a mut Plan, RepoError> {
     let found = library.plans.iter_mut().find(|plan| plan.id == id);
     found.ok_or_else(|| RepoError::MissingPlan(id.to_owned()))
@@ -198,6 +276,8 @@ pub enum RepoError {
     MissingPlan(String),
     DuplicateEntry(String),
     DuplicateTag(String),
+    MissingTag(String),
+    NoCategory(String),
     DuplicatePlan(String),
     InvalidRating(u8),
 }
@@ -209,6 +289,8 @@ impl fmt::Display for RepoError {
             RepoError::MissingPlan(id) => write!(f, "no plan {id}"),
             RepoError::DuplicateEntry(id) => write!(f, "an entry {id} already exists"),
             RepoError::DuplicateTag(name) => write!(f, "a tag #{name} already exists"),
+            RepoError::MissingTag(name) => write!(f, "no tag #{name}"),
+            RepoError::NoCategory(name) => write!(f, "#{name} needs at least one category"),
             RepoError::DuplicatePlan(id) => write!(f, "a plan {id} already exists"),
             RepoError::InvalidRating(rating) => write!(f, "rating {rating} is not 1 to 10"),
         }

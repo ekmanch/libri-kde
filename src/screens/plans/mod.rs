@@ -8,14 +8,15 @@ mod plan;
 
 pub use overview::plan_accent;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use iced::{Element, Task};
 
 use crate::app::{App, Message as AppMessage};
-use crate::model::{Date, EntryStatus, MediaType, Plan, PlanItem, TagCategory};
+use crate::model::{Date, EntryStatus, MediaType, Plan, PlanItem};
 use crate::plans::{self as rules, PlanState};
 use crate::repo::Operation;
+use crate::tags::{self, PickerMessage, PickerState};
 use crate::ui;
 
 /// What the Plans screen shows.
@@ -118,14 +119,7 @@ pub struct PlanForm {
     pub copy: bool,
     pub source: Option<String>,
     /// The linked hashtags view, drilled into from the form.
-    pub tag_view: Option<TagView>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct TagView {
-    pub query: String,
-    /// Groups folded or unfolded by hand; Season starts open.
-    pub toggled: BTreeSet<TagCategory>,
+    pub tag_view: Option<PickerState>,
 }
 
 impl PlanForm {
@@ -227,8 +221,9 @@ pub enum Message {
     Source(String),
     OpenTags,
     CloseTags,
-    TagQuery(String),
-    TagToggleGroup(TagCategory),
+    /// The linked hashtags picker; a tag is toggled by name, whatever its
+    /// categories.
+    Picker(PickerMessage),
     TagToggle(String),
     TagClear,
     Save,
@@ -238,6 +233,9 @@ pub enum Message {
 }
 
 pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
+    if let Message::Picker(PickerMessage::Jump(offset)) = &message {
+        return tags::jump(*offset);
+    }
     let today = app.today;
     let state = &mut app.plans;
     match message {
@@ -401,18 +399,14 @@ fn update_form(form: &mut PlanForm, message: Message) {
         Message::Timeline(on) => form.timeline = on,
         Message::StartWith { copy } => form.copy = copy,
         Message::Source(id) => form.source = Some(id),
-        Message::OpenTags => form.tag_view = Some(TagView::default()),
+        Message::OpenTags => form.tag_view = Some(PickerState::default()),
         Message::CloseTags => form.tag_view = None,
-        Message::TagQuery(query) => {
+        Message::Picker(message) => {
             if let Some(view) = &mut form.tag_view {
-                view.query = query;
+                view.update(&message);
             }
-        }
-        Message::TagToggleGroup(category) => {
-            if let Some(view) = &mut form.tag_view
-                && !view.toggled.remove(&category)
-            {
-                view.toggled.insert(category);
+            if let PickerMessage::Toggle(tag, _) = message {
+                update_form(form, Message::TagToggle(tag));
             }
         }
         Message::TagToggle(tag) => {
@@ -533,7 +527,15 @@ fn update_selected_item(app: &mut App, change: impl FnOnce(&mut PlanItem)) {
 /// Esc: the innermost layer first. False when nothing was open.
 pub fn dismiss_top(app: &mut App) -> bool {
     match &mut app.plan_dialog {
-        Some(Dialog::Form(form)) if form.tag_view.is_some() => form.tag_view = None,
+        Some(Dialog::Form(form)) if form.tag_view.is_some() => {
+            if !form
+                .tag_view
+                .as_mut()
+                .is_some_and(PickerState::dismiss_inner)
+            {
+                form.tag_view = None;
+            }
+        }
         Some(_) => app.plan_dialog = None,
         None => {
             let state = &mut app.plans;

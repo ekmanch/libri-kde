@@ -12,7 +12,7 @@ use std::collections::{BTreeSet, HashMap};
 use iced::widget::{column, container, row};
 use iced::{Element, Fill};
 
-pub use tags::all_tags_popover;
+pub use tags::{all_tags_popover, long_group};
 
 use super::entry;
 use super::shell::shell;
@@ -20,6 +20,7 @@ use crate::app::{App, Message as AppMessage};
 use crate::browse::{self, Decade, Filter, Section, Sort};
 use crate::model::{Date, Entry, EntryStatus, Library, MediaType, TagCategory};
 use crate::settings::Source;
+use crate::tags::{PickerMessage, PickerState};
 use crate::ui;
 
 /// The search field's id, for Ctrl+K and Ctrl+F.
@@ -82,14 +83,6 @@ pub struct Scroll {
     pub content: f32,
 }
 
-/// The tag picker dialog, opened from the Filter popover's "All tags…".
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct TagPicker {
-    pub query: String,
-    /// Groups folded or unfolded by hand, against their default.
-    pub toggled: BTreeSet<TagCategory>,
-}
-
 /// What the library shows, as the history remembers it: the types, the
 /// status, the filter, the sort, the search, the music tab and the artist
 /// page. Not the selection, the popovers or the scroll position.
@@ -116,7 +109,8 @@ pub struct State {
     /// The selected entry's id.
     pub selected: Option<String>,
     pub popup: Option<Popup>,
-    pub picker: Option<TagPicker>,
+    /// The tag picker dialog, opened from the Filter popover's "All tags…".
+    pub picker: Option<PickerState>,
     pub all_tags_query: String,
     pub pins: Vec<String>,
     pub sidebar_tags: SidebarTags,
@@ -159,7 +153,9 @@ pub enum Message {
     ClosePopup,
     Sort(Sort),
     ToggleDecade(Decade),
-    ToggleTag(String),
+    /// A tag, as a category for a tag in several (`None` toggles it by
+    /// name, which matches whatever category it has on an entry).
+    ToggleTag(String, Option<TagCategory>),
     PickRating(u8),
     ClearRating,
     ToggleSeasonal,
@@ -171,12 +167,12 @@ pub enum Message {
     ClearAll,
     OpenPicker,
     ClosePicker,
-    PickerSearch(String),
-    TogglePickerGroup(TagCategory),
+    Picker(PickerMessage),
     ClearTags,
     AllTagsSearch(String),
-    /// A tag in the All tags popover: filters by it alone.
-    PickFromAllTags(String),
+    /// A tag in the All tags popover: filters by it alone, as the category
+    /// it was listed under when it is in several.
+    PickFromAllTags(String, Option<TagCategory>),
     TogglePin(String),
     UnpinAll,
     /// Opens the Add entry dialog.
@@ -199,7 +195,7 @@ impl Message {
             Message::ShowType(_)
                 | Message::ToggleType(_)
                 | Message::PickTag(_)
-                | Message::PickFromAllTags(_)
+                | Message::PickFromAllTags(..)
         )
     }
 }
@@ -268,6 +264,7 @@ impl State {
                 }
             }
             Message::PickTag(tag) => {
+                self.filter.tag_categories.clear();
                 self.filter.tags = if self.filter.tags == [tag.as_str()] {
                     Vec::new()
                 } else {
@@ -305,7 +302,7 @@ impl State {
                 self.popup = None;
             }
             Message::ToggleDecade(decade) => self.filter.toggle_decade(decade),
-            Message::ToggleTag(tag) => self.filter.toggle_tag(&tag),
+            Message::ToggleTag(tag, category) => self.filter.toggle_tag(&tag, category),
             Message::PickRating(n) => self.filter.pick_rating(n),
             Message::ClearRating => self.filter.rating = None,
             Message::ToggleSeasonal => self.filter.include_seasonal = !self.filter.include_seasonal,
@@ -322,25 +319,26 @@ impl State {
             }
             Message::OpenPicker => {
                 self.close_popovers();
-                self.picker = Some(TagPicker::default());
+                self.picker = Some(PickerState::default());
             }
             Message::ClosePicker => self.picker = None,
-            Message::PickerSearch(query) => {
+            Message::Picker(message) => {
                 if let Some(picker) = &mut self.picker {
-                    picker.query = query;
+                    picker.update(&message);
+                }
+                if let PickerMessage::Toggle(tag, category) = message {
+                    self.filter.toggle_tag(&tag, category);
                 }
             }
-            Message::TogglePickerGroup(category) => {
-                if let Some(picker) = &mut self.picker
-                    && !picker.toggled.remove(&category)
-                {
-                    picker.toggled.insert(category);
-                }
+            Message::ClearTags => {
+                self.filter.tags.clear();
+                self.filter.tag_categories.clear();
             }
-            Message::ClearTags => self.filter.tags.clear(),
             Message::AllTagsSearch(query) => self.all_tags_query = query,
-            Message::PickFromAllTags(tag) => {
-                self.filter.tags = vec![tag];
+            Message::PickFromAllTags(tag, category) => {
+                self.filter.tags.clear();
+                self.filter.tag_categories.clear();
+                self.filter.toggle_tag(&tag, category);
                 self.selected = None;
                 self.popup = None;
                 self.all_tags_query.clear();
@@ -374,7 +372,10 @@ impl State {
     /// Esc: the tag picker first, then a popover. False when nothing was
     /// open.
     pub fn dismiss_top(&mut self) -> bool {
-        if self.picker.take().is_some() {
+        if let Some(picker) = &mut self.picker {
+            if !picker.dismiss_inner() {
+                self.picker = None;
+            }
             return true;
         }
         self.popup.take().is_some()
@@ -671,7 +672,7 @@ mod tests {
         let mut state = State::default();
         state.update(Message::Status(Some(EntryStatus::Done)));
         state.update(Message::Select("movies/the-mummy-1999".into()));
-        state.update(Message::ToggleTag("horror".into()));
+        state.update(Message::ToggleTag("horror".into(), None));
         state.update(Message::ShowType(Some(MediaType::Movies)));
         assert_eq!((state.status, state.selected.as_deref()), (None, None));
         assert_eq!(state.filter.tags, ["horror"]);
@@ -736,7 +737,7 @@ mod tests {
     fn esc_closes_the_picker_before_a_popover() {
         let mut state = State::default();
         state.update(Message::Toggle(Popup::Sort));
-        state.picker = Some(TagPicker::default());
+        state.picker = Some(PickerState::default());
         assert!(state.dismiss_top());
         assert_eq!(state.popup, Some(Popup::Sort));
         assert!(state.dismiss_top());
@@ -801,5 +802,44 @@ mod tests {
             (state.artist.as_deref(), state.title().as_str()),
             (None, "Books")
         );
+    }
+
+    #[test]
+    fn the_picker_toggles_a_tag_per_category_and_all_tags_picks_as_listed() {
+        let mut state = State::default();
+        state.update(Message::OpenPicker);
+        state.update(Message::Picker(PickerMessage::Toggle(
+            "clint-eastwood".into(),
+            Some(TagCategory::Directors),
+        )));
+        assert_eq!(state.filter.tags, ["clint-eastwood"]);
+        assert!(
+            state
+                .filter
+                .has_tag("clint-eastwood", Some(TagCategory::Directors))
+        );
+        assert!(
+            !state
+                .filter
+                .has_tag("clint-eastwood", Some(TagCategory::Actors))
+        );
+        state.update(Message::Picker(PickerMessage::Drill(
+            TagCategory::Directors,
+        )));
+        assert!(state.dismiss_top(), "Esc leaves the long group first");
+        assert!(state.picker.as_ref().is_some_and(|p| p.drill.is_none()));
+        assert!(state.dismiss_top());
+        assert!(state.picker.is_none());
+
+        state.update(Message::PickFromAllTags(
+            "clint-eastwood".into(),
+            Some(TagCategory::Actors),
+        ));
+        assert_eq!(
+            state.filter.tag_chips(),
+            [("clint-eastwood".to_owned(), Some(TagCategory::Actors))]
+        );
+        state.update(Message::ClearTags);
+        assert!(state.filter.tag_categories.is_empty());
     }
 }

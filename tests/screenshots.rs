@@ -10,11 +10,12 @@ use std::path::PathBuf;
 
 use libri::app::{self, App, Message};
 use libri::browse::Sort;
-use libri::model::{Date, MediaType};
+use libri::model::{Date, MediaType, TagCategory};
 use libri::screens::library::{self, View};
 use libri::screens::setup::{self, Step};
-use libri::screens::{Screen, plans};
+use libri::screens::{Screen, entry, plans};
 use libri::settings::{SyncState, ThemeChoice};
+use libri::tags::PickerMessage;
 use libri::theme::Theme;
 
 /// A capture: its file name and how it differs from the screen's start.
@@ -24,6 +25,27 @@ fn nothing(_: &mut App) {}
 
 fn setup_at(step: Step) -> impl Fn(&mut App) {
     move |app| app.setup = setup::State::at(step, app.source.as_ref())
+}
+
+/// The movie list with Million Dollar Baby, whose #clint-eastwood is a
+/// director and an actor.
+fn movies(app: &mut App) {
+    let _ = app.update(Message::Library(library::Message::ShowType(Some(
+        MediaType::Movies,
+    ))));
+    let _ = app.update(Message::Library(library::Message::SetView(View::List)));
+}
+
+/// Edit Million Dollar Baby with the tag picker open.
+fn edit_baby_tags(app: &mut App) {
+    movies(app);
+    let _ = app.update(Message::Entry(entry::Message::EditTags(
+        "movies/million-dollar-baby-2004".into(),
+    )));
+}
+
+fn picker(app: &mut App, message: PickerMessage) {
+    let _ = app.update(Message::Entry(entry::Message::Picker(message)));
 }
 
 #[test]
@@ -110,6 +132,110 @@ fn capture_every_screen() {
                     MediaType::Music,
                 ))));
                 let _ = app.update(Message::Library(library::Message::SetView(View::Text)));
+            }),
+        ),
+        // Phase 1h: tags in several categories, the long groups and the
+        // dialogs around them.
+        (
+            Screen::Library,
+            ("library-tag-roles", |app| {
+                movies(app);
+                let _ = app.update(Message::Library(library::Message::Select(
+                    "movies/million-dollar-baby-2004".into(),
+                )));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("library-filter-director", |app| {
+                movies(app);
+                let _ = app.update(Message::Library(library::Message::ToggleTag(
+                    "clint-eastwood".into(),
+                    Some(TagCategory::Directors),
+                )));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("tags-filter-picker", |app| {
+                let _ = app.update(Message::Library(library::Message::OpenPicker));
+                let _ = app.update(Message::Library(library::Message::Picker(
+                    PickerMessage::Toggle("clint-eastwood".into(), Some(TagCategory::Directors)),
+                )));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("tags-filter-picker-long", |app| {
+                app.library.force_long = true;
+                let _ = app.update(Message::Library(library::Message::OpenPicker));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("tags-filter-picker-drill", |app| {
+                app.library.force_long = true;
+                let _ = app.update(Message::Library(library::Message::OpenPicker));
+                let _ = app.update(Message::Library(library::Message::Picker(
+                    PickerMessage::Drill(TagCategory::Genres),
+                )));
+            }),
+        ),
+        (Screen::Library, ("edit-tag-picker", edit_baby_tags)),
+        (
+            Screen::Library,
+            ("edit-tag-menu", |app| {
+                edit_baby_tags(app);
+                picker(
+                    app,
+                    PickerMessage::Menu(Some(("clint-eastwood".into(), TagCategory::Directors))),
+                );
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-tag-categories", |app| {
+                edit_baby_tags(app);
+                picker(app, PickerMessage::Categories("clint-eastwood".into()));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-tag-add-to", |app| {
+                edit_baby_tags(app);
+                picker(app, PickerMessage::Query("freeman".into()));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-tag-move", |app| {
+                edit_baby_tags(app);
+                picker(app, PickerMessage::Categories("classic".into()));
+                let _ = app.update(Message::Entry(entry::Message::CategoryDraft(
+                    TagCategory::Languages,
+                )));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-new-tag-two-categories", |app| {
+                edit_baby_tags(app);
+                picker(app, PickerMessage::Query("gothic".into()));
+                let _ = app.update(Message::Entry(entry::Message::CreateTag));
+                let _ = app.update(Message::Entry(entry::Message::NewTagCategory(
+                    TagCategory::MusicGenres,
+                )));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-show-tag-picker", |app| {
+                let _ = app.update(Message::Library(library::Message::ShowType(Some(
+                    MediaType::Shows,
+                ))));
+                let _ = app.update(Message::Entry(entry::Message::EditTags(
+                    "shows/stranger-things-2016".into(),
+                )));
             }),
         ),
         (Screen::Plans, ("plans", nothing)),

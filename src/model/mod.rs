@@ -13,9 +13,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 pub use date::{Date, Released};
-pub use entry::{BookFormat, Entry, EntryStatus, MediaType, MusicKind, Season, Track};
+pub use entry::{
+    BookFormat, Entry, EntryKind, EntryStatus, MediaType, Season, Series, TagPicks, Track,
+};
 pub use plan::{Plan, PlanItem, PlanWhen};
-pub use tag::TagCategory;
+pub use tag::{TagCategory, TagKind, sort_tags, tag_display_name, tag_label, tag_sort_key};
 
 /// The whole `library.json` file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -92,12 +94,87 @@ impl Library {
         self.tags.retain(|_, names| !names.is_empty());
     }
 
-    /// The category a tag is filed under.
-    pub fn category_of(&self, tag: &str) -> Option<TagCategory> {
+    /// The categories a tag is in, in category order: one for most tags,
+    /// several for a person or a genre listed in more than one category of
+    /// its kind (#clint-eastwood under Directors and Actors). Empty for a
+    /// tag the map does not have.
+    pub fn categories_of(&self, tag: &str) -> Vec<TagCategory> {
         self.tags
             .iter()
-            .find(|(_, names)| names.iter().any(|n| n == tag))
+            .filter(|(_, names)| names.iter().any(|n| n == tag))
             .map(|(&category, _)| category)
+            .collect()
+    }
+
+    /// The first category a tag is filed under.
+    pub fn category_of(&self, tag: &str) -> Option<TagCategory> {
+        self.categories_of(tag).first().copied()
+    }
+
+    /// Whether a tag is in more than one category.
+    pub fn is_multi_category(&self, tag: &str) -> bool {
+        self.categories_of(tag).len() > 1
+    }
+
+    /// The categories `tag` has on `entry`: the entry's own pick for a tag
+    /// in several categories, else every category the tag is in.
+    pub fn categories_on(&self, entry: &Entry, tag: &str) -> Vec<TagCategory> {
+        entry.categories_of(tag, &self.categories_of(tag))
+    }
+
+    /// The roles shown after a tag's name on `entry`: its picked categories
+    /// for a tag in several, nothing for a tag in one.
+    pub fn roles_on(&self, entry: &Entry, tag: &str) -> Vec<TagCategory> {
+        let all = self.categories_of(tag);
+        if all.len() < 2 {
+            return Vec::new();
+        }
+        entry.categories_of(tag, &all)
+    }
+
+    /// How many entries carry `tag` as `category`.
+    pub fn count_tag_as(&self, tag: &str, category: TagCategory) -> usize {
+        self.entries
+            .iter()
+            .filter(|e| e.has_tag_as(tag, category))
+            .count()
+    }
+
+    /// "Used on 6 entries: as an actor on 4, as a director on 2." for a tag
+    /// in more than one category, "Used on 3 entries." otherwise, and "Not
+    /// used on any entry yet." for a tag on none. The roles go by count,
+    /// largest first.
+    pub fn tag_usage(&self, tag: &str) -> String {
+        let total = self
+            .entries
+            .iter()
+            .filter(|e| e.tags.iter().any(|t| t == tag))
+            .count();
+        if total == 0 {
+            return "Not used on any entry yet.".into();
+        }
+        let head = format!(
+            "Used on {total} {}",
+            if total == 1 { "entry" } else { "entries" }
+        );
+        let categories = self.categories_of(tag);
+        if categories.len() < 2 {
+            return format!("{head}.");
+        }
+        let mut counts: Vec<(TagCategory, usize)> = categories
+            .into_iter()
+            .map(|c| (c, self.count_tag_as(tag, c)))
+            .filter(|(_, n)| *n > 0)
+            .collect();
+        counts.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        if counts.is_empty() {
+            return format!("{head}.");
+        }
+        let parts: Vec<String> = counts
+            .iter()
+            .map(|(c, n)| format!("as {} on {n}", c.role_with_article()))
+            .collect();
+        format!("{head}: {}.", parts.join(", "))
     }
 
     /// Every tag name in the map, in any category.
@@ -168,17 +245,17 @@ mod tests {
     fn counts_leave_out_seasonal_only_entries() {
         let library = codec::decode(fixtures::LIBRARY_JSON).unwrap();
         assert_eq!(library.count(Some(MediaType::Music)), 12);
-        assert_eq!(library.count(None), 52);
+        assert_eq!(library.count(None), 59);
     }
 
     #[test]
     fn tag_counts_are_most_used_first_then_a_to_z() {
         let library = codec::decode(fixtures::LIBRARY_JSON).unwrap();
         let counts = library.tag_counts();
-        assert_eq!(counts.len(), 39);
+        assert_eq!(counts.len(), 47);
         assert_eq!(
             &counts[..3],
-            &[("halloween", 16), ("classic", 12), ("favorite", 12)]
+            &[("halloween", 16), ("dark", 14), ("fantasy", 14)]
         );
     }
 

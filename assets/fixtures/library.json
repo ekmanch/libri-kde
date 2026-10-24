@@ -11,7 +11,8 @@
       "thriller",
       "crime",
       "mystery",
-      "romance"
+      "romance",
+      "manga"
     ],
     "Game genres": [
       "rpg",
@@ -43,9 +44,25 @@
       "halloween",
       "christmas"
     ],
+    "Languages": [
+      "japanese",
+      "french"
+    ],
+    "Directors": [
+      "clint-eastwood"
+    ],
+    "Actors": [
+      "clint-eastwood",
+      "hilary-swank",
+      "morgan-freeman"
+    ],
     "Studios": [
       "studio-ghibli",
       "fromsoftware"
+    ],
+    "Streaming": [
+      "netflix",
+      "apple-tv"
     ],
     "Animation style": [
       "2d",
@@ -169,7 +186,8 @@
       "tags": [
         "2d",
         "christmas",
-        "cozy"
+        "cozy",
+        "netflix"
       ],
       "note": "",
       "description": "",
@@ -261,7 +279,8 @@
       "tags": [
         "romance",
         "comedy",
-        "lighthearted"
+        "lighthearted",
+        "french"
       ],
       "note": "",
       "description": "",
@@ -273,14 +292,15 @@
       "id": "shows/severance-2022",
       "type": "shows",
       "title": "Severance",
-      "released": "2022",
+      "released": null,
       "creator": "Dan Erickson",
       "status": "in_progress",
       "rating": null,
       "tags": [
         "scifi",
         "thriller",
-        "mystery"
+        "mystery",
+        "apple-tv"
       ],
       "note": "Season 2, episode 4.",
       "description": "",
@@ -304,7 +324,7 @@
       "id": "shows/the-haunting-of-hill-house-2018",
       "type": "shows",
       "title": "The Haunting of Hill House",
-      "released": "2018",
+      "released": null,
       "creator": "Mike Flanagan",
       "status": "done",
       "rating": 8,
@@ -330,7 +350,7 @@
       "id": "shows/twin-peaks-1990",
       "type": "shows",
       "title": "Twin Peaks",
-      "released": "1990",
+      "released": null,
       "creator": "David Lynch",
       "status": "done",
       "rating": 10,
@@ -368,7 +388,7 @@
       "id": "shows/over-the-garden-wall-2014",
       "type": "shows",
       "title": "Over the Garden Wall",
-      "released": "2014",
+      "released": null,
       "creator": "Patrick McHale",
       "status": "done",
       "rating": 9,
@@ -382,13 +402,21 @@
       "description": "",
       "seasonal_only": true,
       "added": "2025-10-24",
-      "source": null
+      "source": null,
+      "seasons": [
+        {
+          "season": 1,
+          "released": "2014",
+          "status": "done",
+          "manual": true
+        }
+      ]
     },
     {
       "id": "shows/the-bear-2022",
       "type": "shows",
       "title": "The Bear",
-      "released": "2022",
+      "released": null,
       "creator": "Christopher Storer",
       "status": "want",
       "rating": null,
@@ -400,19 +428,28 @@
       "description": "",
       "seasonal_only": false,
       "added": "2026-07-18",
-      "source": null
+      "source": null,
+      "seasons": [
+        {
+          "season": 1,
+          "released": "2022",
+          "status": "want",
+          "manual": true
+        }
+      ]
     },
     {
       "id": "shows/stranger-things-2016",
       "type": "shows",
       "title": "Stranger Things",
-      "released": "2016",
+      "released": null,
       "creator": "The Duffer Brothers",
       "status": "dnf",
       "rating": null,
       "tags": [
         "scifi",
-        "horror"
+        "horror",
+        "netflix"
       ],
       "note": "",
       "description": "",
@@ -451,7 +488,7 @@
       "id": "shows/what-we-do-in-the-shadows-2019",
       "type": "shows",
       "title": "What We Do in the Shadows",
-      "released": "2019",
+      "released": null,
       "creator": "Jemaine Clement",
       "status": "done",
       "rating": 8,
@@ -503,7 +540,7 @@
       "id": "shows/the-expanse-2015",
       "type": "shows",
       "title": "The Expanse",
-      "released": "2015",
+      "released": null,
       "creator": "Mark Fergus",
       "status": "want",
       "rating": null,
@@ -515,7 +552,15 @@
       "description": "",
       "seasonal_only": false,
       "added": "2026-01-09",
-      "source": null
+      "source": null,
+      "seasons": [
+        {
+          "season": 1,
+          "released": "2015",
+          "status": "want",
+          "manual": true
+        }
+      ]
     },
     {
       "id": "books/dracula-1897",
@@ -538,7 +583,8 @@
       "formats": [
         "audiobook",
         "physical"
-      ]
+      ],
+      "pages": 418
     },
     {
       "id": "books/the-shining-1977",
@@ -560,7 +606,8 @@
       "source": null,
       "formats": [
         "physical"
-      ]
+      ],
+      "pages": 447
     },
     {
       "id": "books/a-christmas-carol-1843",
@@ -875,7 +922,8 @@
         "fantasy",
         "studio-ghibli",
         "favorite",
-        "classic"
+        "classic",
+        "japanese"
       ],
       "note": "",
       "description": "",
@@ -907,7 +955,7 @@
       "id": "anime/frieren-beyond-journeys-end-2023",
       "type": "anime",
       "title": "Frieren: Beyond Journey's End",
-      "released": "2023",
+      "released": null,
       "creator": "Madhouse",
       "status": "in_progress",
       "rating": null,
@@ -916,11 +964,24 @@
         "fantasy",
         "melancholic"
       ],
-      "note": "Episode 17.",
+      "note": "Saving the last few episodes of season 2 for a quiet weekend.",
       "description": "",
       "seasonal_only": false,
       "added": "2026-09-12",
-      "source": null
+      "source": null,
+      "kind": "series",
+      "seasons": [
+        {
+          "season": 1,
+          "released": "2023-09-29",
+          "status": "done"
+        },
+        {
+          "season": 2,
+          "released": "2026-01-16",
+          "status": "in_progress"
+        }
+      ]
     },
     {
       "id": "anime/chainsaw-man-2022",
@@ -1446,6 +1507,182 @@
       "source": null,
       "kind": "song",
       "album": "Bad Music for Bad People"
+    },
+    {
+      "id": "movies/the-lord-of-the-rings-the-fellowship-of-the-ring-2001",
+      "type": "movies",
+      "title": "The Lord of the Rings: The Fellowship of the Ring",
+      "released": "2001",
+      "creator": "Peter Jackson",
+      "status": "done",
+      "rating": 10,
+      "tags": [
+        "fantasy",
+        "adventure",
+        "epic"
+      ],
+      "note": "Extended editions only. Rewatch every December.",
+      "description": "A hobbit inherits a ring of terrible power and sets out with eight companions to destroy it.",
+      "seasonal_only": false,
+      "added": "2025-12-14",
+      "source": null,
+      "series": {
+        "name": "The Lord of the Rings",
+        "number": 1
+      }
+    },
+    {
+      "id": "movies/the-lord-of-the-rings-the-two-towers-2002",
+      "type": "movies",
+      "title": "The Lord of the Rings: The Two Towers",
+      "released": "2002",
+      "creator": "Peter Jackson",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "fantasy",
+        "adventure",
+        "epic"
+      ],
+      "note": "",
+      "description": "The fellowship is broken. Frodo and Sam head for Mordor while the others fight for Rohan.",
+      "seasonal_only": false,
+      "added": "2026-01-03",
+      "source": null,
+      "series": {
+        "name": "The Lord of the Rings",
+        "number": 2
+      }
+    },
+    {
+      "id": "books/berserk-vol-1-1990",
+      "type": "books",
+      "title": "Berserk, Vol. 1",
+      "released": "1990",
+      "creator": "Kentaro Miura",
+      "status": "done",
+      "rating": 8,
+      "tags": [
+        "fantasy",
+        "dark",
+        "manga"
+      ],
+      "note": "",
+      "description": "Guts, a lone mercenary with a huge sword, fights his way through a dark medieval world.",
+      "seasonal_only": false,
+      "added": "2025-06-02",
+      "source": null,
+      "formats": [
+        "physical"
+      ],
+      "pages": 224,
+      "series": {
+        "name": "Berserk",
+        "number": 1
+      }
+    },
+    {
+      "id": "books/berserk-vol-42-2021",
+      "type": "books",
+      "title": "Berserk, Vol. 42",
+      "released": "2021",
+      "creator": "Kentaro Miura, Kouji Mori",
+      "status": "in_progress",
+      "rating": null,
+      "tags": [
+        "fantasy",
+        "dark",
+        "manga"
+      ],
+      "note": "",
+      "description": "Guts and his companions face new threats as the story continues after the creator's passing.",
+      "seasonal_only": false,
+      "added": "2026-09-20",
+      "source": null,
+      "formats": [
+        "physical"
+      ],
+      "pages": 240,
+      "series": {
+        "name": "Berserk",
+        "number": 42
+      }
+    },
+    {
+      "id": "books/berserk-vol-43-2025",
+      "type": "books",
+      "title": "Berserk, Vol. 43",
+      "released": "2025",
+      "creator": "Kentaro Miura, Kouji Mori",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "fantasy",
+        "dark",
+        "manga"
+      ],
+      "note": "Waiting for the English release.",
+      "description": "Guts and his companions face new threats as the story continues after the creator's passing.",
+      "seasonal_only": false,
+      "added": "2026-10-05",
+      "source": null,
+      "formats": [
+        "physical"
+      ],
+      "series": {
+        "name": "Berserk",
+        "number": 43
+      }
+    },
+    {
+      "id": "movies/million-dollar-baby-2004",
+      "type": "movies",
+      "title": "Million Dollar Baby",
+      "released": "2004-12-15",
+      "creator": "Clint Eastwood",
+      "status": "done",
+      "rating": 9,
+      "tags": [
+        "drama",
+        "clint-eastwood",
+        "hilary-swank",
+        "morgan-freeman"
+      ],
+      "tag_categories": {
+        "clint-eastwood": [
+          "Directors",
+          "Actors"
+        ]
+      },
+      "note": "Rewatch with the commentary on.",
+      "description": "A hardened boxing trainer reluctantly takes on a determined young fighter.",
+      "seasonal_only": false,
+      "added": "2025-12-05",
+      "source": null
+    },
+    {
+      "id": "movies/the-good-the-bad-and-the-ugly-1966",
+      "type": "movies",
+      "title": "The Good, the Bad and the Ugly",
+      "released": "1966",
+      "creator": "Sergio Leone",
+      "status": "want",
+      "rating": null,
+      "tags": [
+        "adventure",
+        "classic",
+        "clint-eastwood"
+      ],
+      "tag_categories": {
+        "clint-eastwood": [
+          "Actors"
+        ]
+      },
+      "note": "",
+      "description": "Three gunslingers race to find a buried fortune during the Civil War.",
+      "seasonal_only": false,
+      "added": "2025-06-14",
+      "source": null
     }
   ],
   "plans": [

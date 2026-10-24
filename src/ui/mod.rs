@@ -19,6 +19,7 @@ pub mod seasonal;
 pub mod segmented;
 pub mod switch;
 pub mod tag_group;
+pub mod tag_picker;
 pub mod toolbar;
 
 use iced::alignment::Vertical;
@@ -42,6 +43,7 @@ pub use search::search_field;
 pub use segmented::segmented;
 pub use switch::{setting_switch, switch};
 pub use tag_group::tag_group;
+pub use tag_picker::Picker;
 pub use toolbar::{add_button, icon_switch, menu_button};
 
 /// A section header in small gray caps.

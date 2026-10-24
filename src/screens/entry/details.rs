@@ -56,7 +56,7 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
     if let Some(album) = &entry.album {
         facts = facts.push(text(album).size(14).font(font::ITALIC).color(tokens.sub));
     }
-    if let Some(released) = entry.released {
+    if let Some(released) = entry.first_released() {
         facts = facts.push(ui::mono(released.to_string(), 12.5, tokens.sub));
     }
     let header = row![cover, facts.width(Fill)].spacing(16);
@@ -79,9 +79,16 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
         &tokens,
     );
 
+    // A tag in several categories shows its roles here, merged.
+    let library = app.repo.library();
     let mut tags = iced::widget::Row::new().spacing(6);
     for tag in &entry.tags {
-        tags = tags.push(ui::tag_chip(format!("#{tag}"), &tokens));
+        let roles = library.roles_on(entry, tag);
+        let detail = (!roles.is_empty()).then(|| {
+            let roles: Vec<&str> = roles.iter().map(|c| c.role_label()).collect();
+            roles.join(", ")
+        });
+        tags = tags.push(ui::tag_chip(format!("#{tag}"), detail, &tokens));
     }
     let tags = tags
         .push(ui::add_chip("+ Tag", &tokens, msg(Message::EditTags(id()))))
@@ -105,7 +112,6 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
         })
         .focusable(8.0, &tokens);
 
-    let library = app.repo.library();
     let plans: Vec<_> = library
         .plans
         .iter()

@@ -63,9 +63,11 @@ pub fn status_chip<'a, Message: Clone + 'a>(
 }
 
 /// An active filter in the chips row, removed by a click: "#horror ×",
-/// with a type's dot in front for a picked type.
+/// with a type's dot in front for a picked type, and a tag's role after
+/// it in the secondary color ("#clint-eastwood · Director").
 pub fn removable_chip<'a, Message: Clone + 'a>(
     label: String,
+    detail: Option<String>,
     dot: Option<Color>,
     tokens: &Tokens,
     on_remove: Message,
@@ -74,9 +76,11 @@ pub fn removable_chip<'a, Message: Clone + 'a>(
     if let Some(color) = dot {
         content = content.push(super::dot(color, 8.0, 3.0));
     }
-    let content = content
-        .push(text(label).size(13).font(font::SEMIBOLD))
-        .push(icon(Icon::Close, 12.0, tokens.text));
+    content = content.push(text(label).size(13).font(font::SEMIBOLD));
+    if let Some(detail) = detail {
+        content = content.push(text(format!("· {detail}")).size(12.5).color(tokens.sub));
+    }
+    let content = content.push(icon(Icon::Close, 12.0, tokens.text));
     chip(
         content,
         28.0,
@@ -88,10 +92,22 @@ pub fn removable_chip<'a, Message: Clone + 'a>(
     )
 }
 
-/// One of an entry's tags, not clickable.
-pub fn tag_chip<'a, Message: 'a>(label: String, tokens: &Tokens) -> Element<'a, Message> {
+/// One of an entry's tags, not clickable, with its roles after it in the
+/// secondary color for a tag in several categories ("· Director, Actor").
+pub fn tag_chip<'a, Message: 'a>(
+    label: String,
+    detail: Option<String>,
+    tokens: &Tokens,
+) -> Element<'a, Message> {
     let raised = tokens.raised;
-    iced::widget::container(text(label).size(13))
+    let mut content = Row::new()
+        .spacing(5)
+        .align_y(Center)
+        .push(text(label).size(13));
+    if let Some(detail) = detail {
+        content = content.push(text(format!("· {detail}")).size(12.5).color(tokens.sub));
+    }
+    iced::widget::container(content)
         .height(26)
         .padding([0, 10])
         .align_y(Center)

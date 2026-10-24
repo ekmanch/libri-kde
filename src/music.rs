@@ -2,7 +2,7 @@
 //! rated album tracks together), and the matching behind the phone's
 //! replace dialogs (DESIGN.md section 5 of the phone's design).
 
-use crate::model::{Entry, MediaType, MusicKind, Track};
+use crate::model::{Entry, EntryKind, MediaType, Track};
 
 /// Pinned after Z in the artist list.
 pub const VARIOUS_ARTISTS: &str = "Various Artists";
@@ -20,7 +20,7 @@ pub fn artist_of(entry: &Entry) -> &str {
 }
 
 pub fn is_song(entry: &Entry) -> bool {
-    entry.kind == Some(MusicKind::Song)
+    entry.kind == Some(EntryKind::Song)
 }
 
 /// How an artist sorts: a leading "The" ignored, case ignored, Various
@@ -270,7 +270,7 @@ mod tests {
         let album = Entry {
             id: "music/bad-music-for-bad-people-the-cramps".into(),
             title: "Bad Music for Bad People".into(),
-            kind: Some(MusicKind::Album),
+            kind: Some(EntryKind::Album),
             tracks: None,
             ..human_fly.clone()
         };

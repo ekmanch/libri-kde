@@ -2,15 +2,17 @@
 //! All tags popover (from the sidebar), which also pins tags.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use iced::widget::{Column, Row, button, column, container, row, space, text};
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
-use super::{Listing, MAX_PINS, Message, TagPicker};
+use super::{Listing, MAX_PINS, Message};
 use crate::app::{App, Message as AppMessage};
-use crate::model::{Library, TagCategory};
+use crate::model::{Library, TagCategory, sort_tags};
+use crate::tags::{self, PickerState};
 use crate::theme::{Tokens, font};
-use crate::ui::{self, ButtonKind, FocusExt, Icon};
+use crate::ui::{self, FocusExt, Icon, Picker};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Library(message)
@@ -18,7 +20,7 @@ fn msg(message: Message) -> AppMessage {
 
 /// The library's tags by category, in category order, A to Z within each,
 /// with how many entries use them. Only tags matching `query`, when set; a
-/// leading "#" is ignored.
+/// leading "#" is ignored. A tag in several categories is under each.
 fn groups<'a>(library: &'a Library, query: &str) -> Vec<(TagCategory, Vec<(&'a str, usize)>)> {
     let query = query.trim().trim_start_matches('#').to_lowercase();
     let counts: HashMap<&str, usize> = library.tag_counts().into_iter().collect();
@@ -26,141 +28,99 @@ fn groups<'a>(library: &'a Library, query: &str) -> Vec<(TagCategory, Vec<(&'a s
         .tags
         .iter()
         .filter_map(|(&category, names)| {
-            let mut tags: Vec<(&str, usize)> = names
-                .iter()
-                .filter(|name| name.contains(&query))
-                .map(|name| {
-                    (
-                        name.as_str(),
-                        counts.get(name.as_str()).copied().unwrap_or(0),
-                    )
-                })
-                .collect();
-            tags.sort_by_key(|(name, _)| name.to_lowercase());
+            let tags: Vec<(&str, usize)> = sort_tags(
+                names
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|n| n.contains(&query)),
+            )
+            .into_iter()
+            .map(|name| (name, counts.get(name).copied().unwrap_or(0)))
+            .collect();
             (!tags.is_empty()).then_some((category, tags))
         })
         .collect()
 }
 
-/// The tag picker: a search across every group, collapsible groups (Genres
-/// and groups with a picked tag start open; a search opens them all), then
-/// Clear tags, a summary and Done.
+/// The long-group threshold: the phone's, or three with `LIBRI_LONG_LISTS`
+/// so the short fixture shows a long group.
+pub fn long_group(app: &App) -> usize {
+    if app.library.force_long {
+        3
+    } else {
+        tags::LONG_GROUP
+    }
+}
+
+/// The tag picker: a search across every group, groups that fold (those
+/// with a picked tag start open), a long group as a row, then Clear tags,
+/// a summary and Done.
 pub fn picker<'a>(
     app: &'a App,
-    picker: &'a TagPicker,
+    state: &'a PickerState,
     listing: &Listing<'a>,
 ) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
-    let picked = &app.library.filter.tags;
-    let searching = !picker.query.trim().is_empty();
+    let library = app.repo.library();
+    let filter = &app.library.filter;
+    let types = &app.library.types;
 
-    let mut list = Column::new().spacing(2);
-    let found = groups(app.repo.library(), &picker.query);
-    if found.is_empty() {
-        list = list.push(text("No tags match.").size(13.5).color(tokens.sub));
-    }
-    for (category, tags) in found {
-        let selected = tags
+    let picker = Picker {
+        state,
+        groups: library
+            .tags
             .iter()
-            .filter(|(tag, _)| picked.iter().any(|p| p == tag))
-            .count();
-        let default_open = category == TagCategory::Genres || selected > 0;
-        let open = searching || default_open != picker.toggled.contains(&category);
-        let chips = tags
-            .iter()
-            .map(|&(tag, count)| {
-                let on = picked.iter().any(|p| p == tag);
-                ui::filter_chip(
-                    format!("#{tag}"),
-                    None,
-                    Some(count),
-                    on,
-                    &tokens,
-                    msg(Message::ToggleTag(tag.to_owned())),
-                )
-            })
-            .collect();
-        list = list.push(ui::tag_group(
-            category.name(),
-            tags.len(),
-            selected,
-            open,
-            msg(Message::TogglePickerGroup(category)),
-            chips,
-            &tokens,
-        ));
-    }
+            .map(|(&c, names)| (c, names.clone()))
+            .collect(),
+        counts: library.tag_counts().into_iter().collect(),
+        categories_of: Box::new(|tag| library.categories_of(tag)),
+        is_on: Box::new(|tag, category| filter.has_tag(tag, category)),
+        // Game genres only with Games among the types, Actors and Streaming
+        // with Movies or Shows; everything with no type chosen.
+        visible: Box::new(|category| {
+            types.is_empty() || types.iter().any(|&media| category.offered_for(media))
+        }),
+        default_open: Box::new(|_, selected| selected > 0),
+        long_group: long_group(app),
+        with_menu: false,
+        with_add_to: false,
+        height: 440.0,
+        map: Rc::new(|message| msg(Message::Picker(message))),
+    };
 
-    let search = ui::search_field(
-        "Search tags",
-        &picker.query,
-        |query| msg(Message::PickerSearch(query)),
-        None,
-        None,
-        &tokens,
-    );
-    let body = column![search, ui::scroll(list).height(440)].spacing(12);
-
-    let summary = if picked.is_empty() {
+    let chips = filter.tag_chips().len();
+    let summary = if chips == 0 {
         "Shows entries that have all selected tags".to_owned()
     } else {
-        format!("{} selected · {} shown", picked.len(), listing.shown.len())
+        format!("{chips} selected · {} shown", listing.shown.len())
     };
-    let done = if picked.is_empty() {
+    let done = if chips == 0 {
         "Done".to_owned()
     } else {
         format!("Show {}", listing.shown.len())
     };
-    let footer = row![
-        ui::labeled_button(
-            "Clear tags",
-            ButtonKind::Outline,
-            tokens,
-            Some(msg(Message::ClearTags))
-        ),
-        text(summary).size(13).color(tokens.sub).width(Fill),
-        owned_button(done, &tokens, msg(Message::ClosePicker)),
-    ]
-    .spacing(10)
-    .align_y(Center);
-    ui::dialog(
+    let header = picker.header(
         "Filter by tags",
-        body,
-        footer,
-        560,
-        &tokens,
+        None,
+        None,
         msg(Message::ClosePicker),
-    )
-}
-
-/// A primary button whose label is built at runtime.
-fn owned_button<'a>(
-    label: String,
-    tokens: &Tokens,
-    on_press: AppMessage,
-) -> Element<'a, AppMessage> {
-    let tokens = *tokens;
-    button(
-        text(label)
-            .size(13.5)
-            .font(font::SEMIBOLD)
-            .height(Fill)
-            .align_y(Center),
-    )
-    .height(34)
-    .padding([0, 16])
-    .on_press(on_press)
-    .style(move |_, _| button::Style {
-        background: Some(Background::Color(tokens.accent)),
-        text_color: tokens.on_accent,
-        border: Border::default().rounded(8),
-        ..button::Style::default()
-    })
-    .focusable(8.0, &tokens)
+        &tokens,
+    );
+    let body = picker.body("Search tags", None, &tokens);
+    let footer = ui::tag_picker::footer(
+        "Clear tags",
+        Some(msg(Message::ClearTags)),
+        summary,
+        done,
+        msg(Message::ClosePicker),
+        &tokens,
+    );
+    ui::panel(header, body, footer, 560, &tokens)
 }
 
 /// The sidebar's All tags popover: every tag by category with its count and
-/// a pin; a click on a tag filters the library by it alone.
+/// a pin; a click on a tag filters the library by it alone (as the category
+/// it is listed under, for a tag in several).
 pub fn all_tags_popover<'a>(app: &'a App) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
     let state = &app.library;
@@ -206,7 +166,8 @@ pub fn all_tags_popover<'a>(app: &'a App) -> Element<'a, AppMessage> {
         );
         for (tag, count) in tags {
             let pinned = state.pins.iter().any(|p| p == tag);
-            list = list.push(tag_row(tag, count, pinned, full, &tokens));
+            let key = library.is_multi_category(tag).then_some(category);
+            list = list.push(tag_row(tag, key, count, pinned, full, &tokens));
         }
     }
 
@@ -217,7 +178,7 @@ pub fn all_tags_popover<'a>(app: &'a App) -> Element<'a, AppMessage> {
             .width(Fill),
         ui::labeled_button(
             "Unpin all",
-            ButtonKind::Outline,
+            ui::ButtonKind::Outline,
             tokens,
             Some(msg(Message::UnpinAll))
         ),
@@ -237,6 +198,7 @@ pub fn all_tags_popover<'a>(app: &'a App) -> Element<'a, AppMessage> {
 /// A tag with its count, and the pin button beside it.
 fn tag_row<'a>(
     tag: &'a str,
+    key: Option<TagCategory>,
     count: usize,
     pinned: bool,
     full: bool,
@@ -254,7 +216,7 @@ fn tag_row<'a>(
     .width(Fill)
     .height(34)
     .padding([0, 8])
-    .on_press(msg(Message::PickFromAllTags(tag.to_owned())))
+    .on_press(msg(Message::PickFromAllTags(tag.to_owned(), key)))
     .style(ui::row_style(tokens, false, 7.0))
     .focusable(7.0, tokens);
 

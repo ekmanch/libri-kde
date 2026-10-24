@@ -14,6 +14,7 @@ use crate::repo::Operation;
 use crate::repo::{FixtureLibraryRepository, LibraryRepository};
 use crate::screens::{self, Screen, entry, library, plans, setup, token};
 use crate::settings::{Settings, Source, SyncState, ThemeChoice};
+use crate::tags;
 use crate::theme::{Accent, Theme, Tokens, font};
 
 /// The default window size, and the minimum: 1080p at KDE's 150 %
@@ -131,7 +132,7 @@ impl Message {
                     | L::ToggleType(_)
                     | L::SeeAll(_)
                     | L::PickTag(_)
-                    | L::PickFromAllTags(_)
+                    | L::PickFromAllTags(..)
                     | L::MusicTab(_)
                     | L::OpenArtist(_)
                     | L::CloseArtist
@@ -389,6 +390,9 @@ impl App {
                     };
                     return operation::scroll_to(library::LIST_ID, offset);
                 }
+            }
+            Message::Library(library::Message::Picker(tags::PickerMessage::Jump(offset))) => {
+                return tags::jump(offset);
             }
             Message::Library(message) => {
                 // Ctrl+click on a sidebar type adds or removes it.

@@ -186,7 +186,7 @@ mod tests {
         let mut repo = repo();
         let create = |name: &str| Operation::CreateTag {
             name: name.into(),
-            category: TagCategory::Mood,
+            categories: vec![TagCategory::Mood],
         };
         let library = repo.apply(create("eerie")).unwrap();
         assert_eq!(library.category_of("eerie"), Some(TagCategory::Mood));
@@ -248,6 +248,98 @@ mod tests {
         assert!(
             library.entry("movies/die-hard-1988").is_some(),
             "entries stay"
+        );
+    }
+
+    #[test]
+    fn a_tag_can_be_created_in_two_categories_of_one_kind() {
+        let mut repo = repo();
+        let library = repo
+            .apply(Operation::CreateTag {
+                name: "gothic".into(),
+                categories: vec![TagCategory::MusicGenres, TagCategory::Genres],
+            })
+            .unwrap();
+        assert_eq!(
+            library.categories_of("gothic"),
+            [TagCategory::Genres, TagCategory::MusicGenres],
+            "in category order"
+        );
+        assert_eq!(
+            repo.apply(Operation::CreateTag {
+                name: "empty".into(),
+                categories: Vec::new(),
+            }),
+            Err(RepoError::NoCategory("empty".into()))
+        );
+    }
+
+    #[test]
+    fn taking_a_role_away_drops_the_tag_where_it_had_only_that_role() {
+        let mut repo = repo();
+        let library = repo
+            .apply(Operation::SetTagCategories {
+                name: "clint-eastwood".into(),
+                categories: vec![TagCategory::Directors],
+            })
+            .unwrap();
+        assert_eq!(
+            library.categories_of("clint-eastwood"),
+            [TagCategory::Directors]
+        );
+        let baby = library.entry("movies/million-dollar-baby-2004").unwrap();
+        assert!(baby.tags.iter().any(|t| t == "clint-eastwood"));
+        assert!(baby.tag_categories.is_none(), "one category: no pick");
+        let ugly = library
+            .entry("movies/the-good-the-bad-and-the-ugly-1966")
+            .unwrap();
+        assert!(
+            !ugly.tags.iter().any(|t| t == "clint-eastwood"),
+            "he was only an actor there"
+        );
+        assert!(ugly.tag_categories.is_none());
+    }
+
+    #[test]
+    fn adding_a_role_keeps_every_entry_as_it_was() {
+        let mut repo = repo();
+        let library = repo
+            .apply(Operation::SetTagCategories {
+                name: "hilary-swank".into(),
+                categories: vec![TagCategory::Actors, TagCategory::Directors],
+            })
+            .unwrap();
+        let baby = library.entry("movies/million-dollar-baby-2004").unwrap();
+        assert_eq!(
+            library.categories_on(baby, "hilary-swank"),
+            [TagCategory::Actors],
+            "the new role is not ticked anywhere"
+        );
+    }
+
+    #[test]
+    fn moving_a_one_category_tag_keeps_every_entry() {
+        let mut repo = repo();
+        let before = repo.library().tag_counts();
+        let classic = before.iter().find(|(t, _)| *t == "classic").unwrap().1;
+        let library = repo
+            .apply(Operation::SetTagCategories {
+                name: "classic".into(),
+                categories: vec![TagCategory::Languages],
+            })
+            .unwrap();
+        assert_eq!(library.categories_of("classic"), [TagCategory::Languages]);
+        let after = library.tag_counts();
+        assert_eq!(
+            after.iter().find(|(t, _)| *t == "classic").unwrap().1,
+            classic
+        );
+        assert_eq!(
+            repo.apply(Operation::SetTagCategories {
+                name: "nobody".into(),
+                categories: vec![TagCategory::Other],
+            }),
+            Err(RepoError::MissingTag("nobody".into()))
         );
     }
 }
