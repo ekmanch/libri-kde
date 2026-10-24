@@ -53,6 +53,8 @@ LIBRI_LOOKUP=offline cargo run     # the Add dialog's lookup state: loading, off
 ICED_BACKEND=tiny-skia cargo run   # software renderer
 WGPU_BACKEND=gl cargo run          # OpenGL instead of Vulkan (the freeze A/B test, TODO.md 1g)
 ICED_PRESENT_MODE=mailbox cargo run # Vulkan without FIFO waits (the freeze A/B test, TODO.md 1g)
+__NV_DISABLE_EXPLICIT_SYNC=1 cargo run # frames without explicit-sync fences (the freeze A/B test, TODO.md 1g)
+scripts/freeze-monitor.sh &        # before a session: logs KWin, VRAM and thread states every 2 s for the freeze
 ```
 
 Before saying a task is done, run all three and tell me if any fail:
