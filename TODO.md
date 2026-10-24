@@ -154,6 +154,7 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [x] Captures of every new state in Graphite and Light
 
 ## Phase 2: Local data
+- [x] Fix: opening a dialog (the licenses, Disconnect, the tag picker, any `ui::modal`) scrolled the screen under it back to the top, since the stack only existed with a dialog open and iced rebuilt the tree. The stack and the barrier are always there now, the barrier inactive without a dialog (2026-10-24)
 
 - [ ] Persist the library to a local file (`~/.local/share/libri/`), changes survive a restart
 - [ ] Operations layer: every change is a small named operation with a readable summary, as on the phone

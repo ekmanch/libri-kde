@@ -63,54 +63,48 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
         })
         .into();
     // Keep the dialog inside a small window.
-    let panel = container(panel).padding([30, 40]).center(Fill).into();
+    let panel: Element<'_, AppMessage> = container(panel).padding([30, 40]).center(Fill).into();
 
-    let with_cover = if form.cover_dialog {
-        ui::modal(
-            panel,
-            Some(cover_dialog(form, &tokens)),
-            msg(Message::CloseCover),
-            &tokens,
-        )
-    } else {
-        panel
-    };
-    let with_picker = match &form.picker {
-        Some(picker) => ui::modal(
-            with_cover,
-            Some(tag_picker(app, form, picker, &tokens)),
-            msg(Message::ClosePicker),
-            &tokens,
-        ),
-        None => with_cover,
-    };
-    let with_new_tag = match &form.new_tag {
-        Some(new_tag) => ui::modal(
-            with_picker,
-            Some(new_tag_dialog(new_tag, form.media, &tokens)),
-            msg(Message::CancelNewTag),
-            &tokens,
-        ),
-        None => with_picker,
-    };
-    let with_categories = match &form.categories {
-        Some(dialog) => ui::modal(
-            with_new_tag,
-            Some(categories_dialog(app, form, dialog, &tokens)),
-            msg(Message::CancelCategories),
-            &tokens,
-        ),
-        None => with_new_tag,
-    };
-    match &form.replace {
-        Some(replace) => ui::modal(
-            with_categories,
-            Some(replace_dialog(replace, &tokens)),
-            msg(Message::ReplaceCancel),
-            &tokens,
-        ),
-        None => with_categories,
-    }
+    // Every layer goes through `ui::modal` whether or not its dialog is
+    // open, so the tree keeps its shape and the form keeps its state.
+    let with_cover = ui::modal(
+        panel,
+        form.cover_dialog.then(|| cover_dialog(form, &tokens)),
+        msg(Message::CloseCover),
+        &tokens,
+    );
+    let with_picker = ui::modal(
+        with_cover,
+        form.picker
+            .as_ref()
+            .map(|picker| tag_picker(app, form, picker, &tokens)),
+        msg(Message::ClosePicker),
+        &tokens,
+    );
+    let with_new_tag = ui::modal(
+        with_picker,
+        form.new_tag
+            .as_ref()
+            .map(|new_tag| new_tag_dialog(new_tag, form.media, &tokens)),
+        msg(Message::CancelNewTag),
+        &tokens,
+    );
+    let with_categories = ui::modal(
+        with_new_tag,
+        form.categories
+            .as_ref()
+            .map(|dialog| categories_dialog(app, form, dialog, &tokens)),
+        msg(Message::CancelCategories),
+        &tokens,
+    );
+    ui::modal(
+        with_categories,
+        form.replace
+            .as_ref()
+            .map(|replace| replace_dialog(replace, &tokens)),
+        msg(Message::ReplaceCancel),
+        &tokens,
+    )
 }
 
 /// The phone's D12 and D13: keep both, replace, or go back to the form.

@@ -295,17 +295,27 @@ where
 }
 
 /// The screen under a modal dialog: drawn and laid out as usual, but
-/// focus operations and keys stop here, so Tab and Enter stay in the
-/// dialog.
+/// while `active`, focus operations and keys stop here, so Tab and Enter
+/// stay in the dialog. Inactive (no dialog open) it passes everything
+/// through; it stays in the tree so the tree keeps its shape, see
+/// `ui::modal`.
 pub struct Barrier<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     child: Element<'a, Message, Theme, Renderer>,
+    active: bool,
 }
 
 impl<'a, Message, Theme, Renderer> Barrier<'a, Message, Theme, Renderer> {
     pub fn new(child: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
         Barrier {
             child: child.into(),
+            active: true,
         }
+    }
+
+    /// Whether keys and focus operations stop here.
+    pub fn active(mut self, active: bool) -> Self {
+        self.active = active;
+        self
     }
 }
 
@@ -358,7 +368,7 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        if matches!(event, Event::Keyboard(_)) {
+        if self.active && matches!(event, Event::Keyboard(_)) {
             return;
         }
         self.child.as_widget_mut().update(
@@ -413,11 +423,20 @@ where
 
     fn operate(
         &mut self,
-        _tree: &mut Tree,
-        _layout: Layout<'_>,
-        _renderer: &Renderer,
-        _operation: &mut dyn widget::Operation,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
     ) {
+        if self.active {
+            return;
+        }
+        self.child.as_widget_mut().operate(
+            &mut tree.children[0],
+            layout.children().next().expect("the child's layout"),
+            renderer,
+            operation,
+        );
     }
 
     fn overlay<'b>(
