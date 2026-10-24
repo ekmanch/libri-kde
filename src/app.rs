@@ -69,7 +69,12 @@ pub struct App {
     pub plasma_dark: bool,
     /// The connected repository, or `None` on a first run.
     pub source: Option<Source>,
+    /// Disconnected with the library kept on this computer: browsing and
+    /// editing go on without a sync until a repo is connected again.
+    pub kept_locally: bool,
     pub sync: SyncState,
+    /// "Keep which copy?", over everything.
+    pub conflict_open: bool,
     /// The token expiry warning over the window (docs/DESIGN.md 4.6).
     pub token_warning: bool,
     /// Today, for Coming soon, Recently added and the plan card.
@@ -114,12 +119,28 @@ pub enum Message {
     Resized(Size),
     /// The hold on KWin's title bar, once the window is open.
     TitleBar(Option<TitleBar>),
+    /// The sync row's and the banner's actions, and the conflict dialog.
+    Sync(SyncMessage),
     Library(library::Message),
     Entry(entry::Message),
     Plans(plans::Message),
     Setup(setup::Message),
     Settings(screens::settings::Message),
     Token(token::Message),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncMessage {
+    /// "Could not save": try the save again.
+    Retry,
+    /// "Library not found": Settings › Library source.
+    Fix,
+    OpenConflict,
+    CloseConflict,
+    /// This computer's copy replaces GitHub's.
+    KeepMine,
+    /// GitHub's copy replaces this computer's and the queue is dropped.
+    KeepTheirs,
 }
 
 impl Message {
@@ -193,6 +214,11 @@ impl App {
             app.source = None;
             app.setup = setup::State::at(setup::Step::Welcome, None);
         }
+        // `LIBRI_LOCAL`: the library kept on this computer, not connected.
+        if var("LIBRI_LOCAL").is_some() {
+            app.source = None;
+            app.kept_locally = true;
+        }
         if let Some(sync) = var("LIBRI_SYNC").and_then(|value| SyncState::from_env(&value)) {
             app.sync = sync;
             app.token_warning = sync.warns();
@@ -230,7 +256,9 @@ impl App {
             plasma_dark: true,
             setup: setup::State::at(setup::Step::Welcome, Some(&source)),
             source: Some(source),
+            kept_locally: false,
             sync: SyncState::default(),
+            conflict_open: false,
             token_warning: false,
             today: Date::today(),
             modifiers: keyboard::Modifiers::default(),
@@ -327,12 +355,29 @@ impl App {
             Message::Tick => self.splash_phase = (self.splash_phase + 0.016 / 1.4) % 1.0,
             Message::Resized(size) => self.window = size,
             Message::TitleBar(title_bar) => self.title_bar = title_bar,
+            // Phase 3 syncs for real; until then the fake state moves on.
+            Message::Sync(SyncMessage::Retry) => self.sync = SyncState::Saving { changes: 3 },
+            Message::Sync(SyncMessage::Fix) => {
+                self.screen = Screen::Settings;
+                return screens::settings::update(self, screens::settings::Message::Jump(1));
+            }
+            Message::Sync(SyncMessage::OpenConflict) => self.conflict_open = true,
+            Message::Sync(SyncMessage::CloseConflict) => self.conflict_open = false,
+            Message::Sync(SyncMessage::KeepMine) => {
+                self.conflict_open = false;
+                self.sync = SyncState::Saving { changes: 3 };
+            }
+            Message::Sync(SyncMessage::KeepTheirs) => {
+                self.conflict_open = false;
+                self.sync = SyncState::Synced;
+            }
             Message::Key(KeyPress::Tab { back: false }) => return operation::focus_next(),
             Message::Key(KeyPress::Tab { back: true }) => return operation::focus_previous(),
             // The token warning sits over everything; then a dialog; the
             // sidebar's All tags popover also opens on Plans.
             Message::Key(KeyPress::Escape) => match self.screen {
                 _ if self.token_warning => self.token_warning = false,
+                _ if self.conflict_open => self.conflict_open = false,
                 _ => {
                     if !entry::dismiss_top(self)
                         && !plans::dismiss_top(self)
@@ -345,10 +390,22 @@ impl App {
             Message::Key(KeyPress::Enter) => match self.screen {
                 _ if self.token_warning => return token::update(self, token::Message::Replace),
                 Screen::Setup => return setup::update(self, setup::Message::Continue),
-                Screen::Settings if self.settings_page.disconnect_open => {
+                // Enter in the Disconnect dialog takes the safe step: on to
+                // keep or delete, then Keep it on this computer.
+                Screen::Settings if self.settings_page.disconnect.is_some() => {
+                    let step = self.settings_page.disconnect;
+                    let message = match step {
+                        Some(screens::settings::DisconnectStep::Confirm) => {
+                            screens::settings::Message::ConfirmDisconnect
+                        }
+                        _ => screens::settings::Message::DisconnectKeep,
+                    };
+                    return screens::settings::update(self, message);
+                }
+                Screen::Settings if self.settings_page.licenses_open => {
                     return screens::settings::update(
                         self,
-                        screens::settings::Message::ConfirmDisconnect,
+                        screens::settings::Message::CloseLicenses,
                     );
                 }
                 _ if self.dialog.is_some() => return entry::confirm(self),

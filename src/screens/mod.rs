@@ -64,8 +64,9 @@ pub fn view(app: &App) -> Element<'_, Message> {
         Screen::Plans => plans::view(app),
         Screen::Settings => settings::view(app),
     };
-    // The token warning sits over every dialog.
-    token::overlay(app, entry::overlay(app, plans::overlay(app, screen)))
+    // The conflict dialog and the token warning sit over every dialog.
+    let screen = entry::overlay(app, plans::overlay(app, screen));
+    token::overlay(app, shell::conflict_overlay(app, screen))
 }
 
 /// The screen's part of the window title, or `None` for plain "Libri".

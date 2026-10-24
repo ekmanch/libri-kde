@@ -160,6 +160,19 @@ pub struct State {
     /// Replacing the token from the warning: the Connect step alone, then
     /// back to this screen.
     pub replacing: Option<Screen>,
+    /// "Which library?": reconnecting a library kept on this computer to
+    /// an existing file, and which copy was picked.
+    pub which: Option<Which>,
+}
+
+/// The copy that stays when a kept library meets a file on GitHub.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Which {
+    /// This computer's library, uploaded over the file.
+    #[default]
+    Here,
+    /// The file on GitHub, which replaces this computer's library.
+    GitHub,
 }
 
 impl State {
@@ -246,6 +259,10 @@ pub enum Message {
     ReplaceToken,
     /// "How do I create a token?"
     TokenHelp,
+    /// "Which library?": a pick, Cancel, and "Use this one".
+    PickWhich(Which),
+    CloseWhich,
+    ConfirmWhich,
 }
 
 fn msg(message: Message) -> AppMessage {
@@ -290,8 +307,21 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                         Choice::Existing => Step::Existing,
                     }
                 }
+                // A kept library meeting an existing file asks which to
+                // keep; a new file is made from the kept library, no
+                // question asked.
+                Step::Existing if app.kept_locally && state.which.is_none() => {
+                    state.which = Some(Which::Here);
+                }
                 Step::Create | Step::Existing => state.step = Step::Done,
                 Step::Done => return update(app, Message::Open),
+            }
+        }
+        Message::PickWhich(which) => state.which = Some(which),
+        Message::CloseWhich => state.which = None,
+        Message::ConfirmWhich => {
+            if state.which.is_some() {
+                state.step = Step::Done;
             }
         }
         Message::Open => {
@@ -301,6 +331,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                 file: state.file_name(),
                 token_hint: token_hint(&state.token),
             });
+            app.kept_locally = false;
             app.screen = Screen::Library;
         }
         Message::ReplaceToken => {
@@ -342,15 +373,102 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
     let state = &app.setup;
     let body = match state.step {
         Step::Welcome => welcome(&tokens),
-        Step::Done => done(state, &tokens),
+        Step::Done => done(app, &tokens),
         _ => wizard(app, &tokens),
     };
     let chrome = tokens.chrome;
-    container(body)
+    let screen = container(body)
         .width(Fill)
         .height(Fill)
-        .style(move |_| container::background(chrome).color(tokens.text))
-        .into()
+        .style(move |_| container::background(chrome).color(tokens.text));
+    // "Which library?" asks over the file step.
+    let which = state
+        .which
+        .filter(|_| state.step == Step::Existing)
+        .map(|picked| which_dialog(app, picked, &tokens));
+    ui::modal(screen, which, msg(Message::CloseWhich), &tokens)
+}
+
+/// "Which library?": this computer's kept library or the file on GitHub,
+/// as radio rows with what each means; Cancel, or "Use this one".
+fn which_dialog<'a>(app: &'a App, picked: Which, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let state = &app.setup;
+    let here = app.repo.library().entries.len();
+    let file = state.file_name();
+    let options = [
+        (
+            Which::Here,
+            "This computer's",
+            format!(
+                "{} entries · changed Oct 20. Uploaded over {file} on GitHub.",
+                thousands(here)
+            ),
+        ),
+        (
+            Which::GitHub,
+            "The one on GitHub",
+            "1,279 entries · last commit Oct 13. Replaces the library on this computer.".to_owned(),
+        ),
+    ];
+    let rows = options.into_iter().map(|(which, title, sub)| {
+        radio_row(
+            text(title).size(14.5).font(font::SEMIBOLD).into(),
+            sub,
+            which == picked,
+            true,
+            tokens,
+            msg(Message::PickWhich(which)),
+        )
+    });
+    let body = column![
+        text(format!(
+            "This computer still has the library you kept when you disconnected, and {file} on GitHub has its own. Keep one; the other is replaced."
+        ))
+        .size(14)
+        .line_height(1.45),
+        Column::with_children(rows).spacing(6),
+        text("Earlier versions stay in the repo's history either way.")
+            .size(12.5)
+            .color(tokens.sub),
+    ]
+    .spacing(14);
+    let footer = row![
+        space::horizontal(),
+        ui::labeled_button(
+            "Cancel",
+            ui::ButtonKind::Outline,
+            *tokens,
+            Some(msg(Message::CloseWhich))
+        ),
+        ui::labeled_button(
+            "Use this one",
+            ui::ButtonKind::Primary,
+            *tokens,
+            Some(msg(Message::ConfirmWhich))
+        ),
+    ]
+    .spacing(8);
+    ui::dialog(
+        "Which library?",
+        body,
+        footer,
+        560,
+        tokens,
+        msg(Message::CloseWhich),
+    )
+}
+
+/// "1,284".
+fn thousands(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Logo, "Welcome to Libri", a line about the app and Get started.
@@ -807,21 +925,35 @@ fn existing<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
 }
 
 /// "You're all set": a check, the summary and Open Libri.
-fn done<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
+fn done<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let state = &app.setup;
+    let kept = app.kept_locally.then(|| app.repo.library().entries.len());
     let tokens = *tokens;
     let disc = container(ui::icon(Icon::Check, 36.0, tokens.success))
         .center(72)
         .style(move |_| {
             container::background(tokens.selection).border(Border::default().rounded(36))
         });
-    let words = match state.choice {
-        Choice::New => format!(
+    let words = match (state.choice, kept, state.which) {
+        (Choice::New, Some(n), _) => format!(
+            "{} is now in {} on {}, made from the {} entries kept on this computer.",
+            state.file_name(),
+            state.repo.trim(),
+            state.branch_name(),
+            thousands(n)
+        ),
+        (Choice::New, None, _) => format!(
             "{} is now in {} on {}. Add your first entry with the Add button.",
             state.file_name(),
             state.repo.trim(),
             state.branch_name()
         ),
-        Choice::Existing => format!("Loaded 214 entries from {}.", state.file_name()),
+        (Choice::Existing, Some(n), Some(Which::Here)) => format!(
+            "Replaced {} with the {} entries kept on this computer.",
+            state.file_name(),
+            thousands(n)
+        ),
+        (Choice::Existing, _, _) => format!("Loaded 214 entries from {}.", state.file_name()),
     };
     let summary = |label: &'static str, value: String| {
         row![
@@ -924,7 +1056,7 @@ fn mono_span<'a>(words: &str, tokens: &Tokens) -> iced::widget::text::Span<'a, (
 /// cannot be picked is dimmed.
 fn radio_row<'a>(
     title: Element<'a, AppMessage>,
-    info: &'a str,
+    info: impl text::IntoFragment<'a>,
     on: bool,
     enabled: bool,
     tokens: &Tokens,
@@ -1094,5 +1226,35 @@ mod tests {
         assert!(!State::at(Step::Welcome, None).in_wizard());
         assert!(State::at(Step::Create, None).in_wizard());
         assert!(!State::at(Step::Done, None).in_wizard());
+    }
+
+    #[test]
+    fn a_kept_library_meeting_an_existing_file_asks_which_to_keep() {
+        let mut app = App::new(Screen::Setup);
+        app.source = None;
+        app.kept_locally = true;
+        app.setup = State::at(Step::File, None);
+        app.setup.repo = "ekmanch/library".into();
+        let _ = update(&mut app, Message::Choose(Choice::Existing));
+        let _ = update(&mut app, Message::Continue);
+        assert_eq!(app.setup.step, Step::Existing);
+        let _ = update(&mut app, Message::Continue);
+        assert_eq!(app.setup.which, Some(Which::Here), "asked, not done");
+        assert_eq!(app.setup.step, Step::Existing);
+        let _ = update(&mut app, Message::CloseWhich);
+        assert!(app.setup.which.is_none(), "Cancel goes back to the file");
+        let _ = update(&mut app, Message::Continue);
+        let _ = update(&mut app, Message::PickWhich(Which::GitHub));
+        let _ = update(&mut app, Message::ConfirmWhich);
+        assert_eq!(app.setup.step, Step::Done);
+        let _ = update(&mut app, Message::Open);
+        assert!(!app.kept_locally && app.source.is_some());
+
+        // A new file asks nothing: it is made from the kept library.
+        let mut app = App::new(Screen::Setup);
+        app.kept_locally = true;
+        app.setup = State::at(Step::Create, None);
+        let _ = update(&mut app, Message::Continue);
+        assert_eq!(app.setup.step, Step::Done);
     }
 }

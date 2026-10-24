@@ -15,7 +15,7 @@ use crate::app::{App, Message as AppMessage};
 use crate::model::MediaType;
 use crate::settings::{PLATFORMS, SyncState, ThemeChoice};
 use crate::theme::{self, Accent, Theme, Tokens, font};
-use crate::ui::{self, ButtonKind, FocusExt};
+use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
 /// The settings' scroll area, for the rail's jumps.
 pub const SCROLL_ID: &str = "settings-scroll";
@@ -28,8 +28,17 @@ pub struct State {
     pub tops: Vec<f32>,
     pub offset: f32,
     pub at_end: bool,
-    /// The Disconnect repository confirmation.
-    pub disconnect_open: bool,
+    /// Disconnect, in two steps: confirm, then keep or delete the library
+    /// on this computer.
+    pub disconnect: Option<DisconnectStep>,
+    /// The open-source licenses dialog.
+    pub licenses_open: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisconnectStep {
+    Confirm,
+    KeepOrDelete,
 }
 
 impl State {
@@ -66,9 +75,23 @@ pub enum Message {
     /// Nothing until phase 3.
     SyncNow,
     ReplaceToken,
+    /// "Disconnect repository": the first step.
     Disconnect,
+    /// The first step's Disconnect: on to keep or delete.
     ConfirmDisconnect,
+    /// Keeps the library on this computer, disconnected.
+    DisconnectKeep,
+    /// Deletes it from this computer and opens the setup.
+    DisconnectDelete,
     CloseDisconnect,
+    /// "Library not found": the setup's file step with the repo kept.
+    PickFile,
+    /// Local mode's "Connect to GitHub".
+    Connect,
+    OpenLicenses,
+    CloseLicenses,
+    /// A data source's row: its website.
+    OpenSource(&'static str),
     /// With no repository: opens the setup's Connect step.
     SetUp,
     Timeline(bool),
@@ -119,17 +142,39 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         }
         Message::SyncNow => {}
         Message::ReplaceToken => return setup::update(app, setup::Message::ReplaceToken),
-        Message::Disconnect => page.disconnect_open = true,
-        Message::ConfirmDisconnect => {
-            page.disconnect_open = false;
+        Message::Disconnect => page.disconnect = Some(DisconnectStep::Confirm),
+        Message::ConfirmDisconnect => page.disconnect = Some(DisconnectStep::KeepOrDelete),
+        Message::DisconnectKeep => {
+            // The token, the queue and the sync meta go; the library stays
+            // and can be browsed and edited until a repo is connected.
+            page.disconnect = None;
             app.source = None;
+            app.kept_locally = true;
             app.sync = SyncState::Synced;
+            app.conflict_open = false;
+            app.screen = super::Screen::Library;
         }
-        Message::CloseDisconnect => page.disconnect_open = false,
-        Message::SetUp => {
+        Message::DisconnectDelete => {
+            page.disconnect = None;
+            app.source = None;
+            app.kept_locally = false;
+            app.sync = SyncState::Synced;
+            app.conflict_open = false;
+            app.setup = setup::State::at(setup::Step::Welcome, None);
+            app.screen = super::Screen::Setup;
+        }
+        Message::CloseDisconnect => page.disconnect = None,
+        Message::PickFile => {
+            app.setup = setup::State::at(setup::Step::File, app.source.as_ref());
+            app.screen = super::Screen::Setup;
+        }
+        Message::Connect | Message::SetUp => {
             app.setup = setup::State::at(setup::Step::Connect, None);
             app.screen = super::Screen::Setup;
         }
+        Message::OpenLicenses => page.licenses_open = true,
+        Message::CloseLicenses => page.licenses_open = false,
+        Message::OpenSource(url) => crate::app::open_url(url),
         Message::Timeline(on) => app.settings.timeline = on,
         Message::Seasonal(on) => app.settings.seasonal = on,
         Message::Platform(platform) => app.settings.platform = platform,
@@ -137,9 +182,11 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
     Task::none()
 }
 
-/// Esc: closes the Disconnect confirmation. False when it was not open.
+/// Esc: closes the licenses or the Disconnect dialog. False when neither
+/// was open.
 pub fn dismiss_top(app: &mut App) -> bool {
-    std::mem::take(&mut app.settings_page.disconnect_open)
+    let page = &mut app.settings_page;
+    std::mem::take(&mut page.licenses_open) || page.disconnect.take().is_some()
 }
 
 pub fn view(app: &App) -> Element<'_, AppMessage> {
@@ -161,7 +208,7 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
             source(app, &tokens),
             plans(app, &tokens),
             games(app, &tokens),
-            about(&tokens),
+            about(app, &tokens),
         ],
         |measure| msg(Message::Measured(measure.tops)),
     );
@@ -180,16 +227,16 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
     let body = row![scroll, rail(app, &tokens)];
     let content = column![header, body];
 
-    let dialog = app
-        .settings_page
-        .disconnect_open
-        .then(|| disconnect_dialog(app, &tokens));
-    ui::modal(
-        shell(app, content),
-        dialog,
-        msg(Message::CloseDisconnect),
-        &tokens,
-    )
+    let page = &app.settings_page;
+    let (dialog, close) = match page.disconnect {
+        Some(step) => (
+            Some(disconnect_dialog(app, step, &tokens)),
+            Message::CloseDisconnect,
+        ),
+        None if page.licenses_open => (Some(licenses_dialog(&tokens)), Message::CloseLicenses),
+        None => (None, Message::CloseDisconnect),
+    };
+    ui::modal(shell(app, content), dialog, msg(close), &tokens)
 }
 
 /// "On this page": one link per section, the current one marked.
@@ -586,6 +633,75 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                         Some(msg(Message::ReplaceToken)),
                     ),
                 ),
+                SyncState::Conflict { .. } => (
+                    tokens.danger_fill,
+                    tokens.danger,
+                    "Changed here and on GitHub",
+                    "Pick which copy to keep".to_owned(),
+                    ui::sized_button(
+                        "Choose",
+                        ButtonKind::Outline,
+                        32.0,
+                        *tokens,
+                        Some(AppMessage::Sync(crate::app::SyncMessage::OpenConflict)),
+                    ),
+                ),
+                SyncState::NotFound(missing) => (
+                    tokens.danger_fill,
+                    tokens.danger,
+                    "Library not found on GitHub",
+                    format!(
+                        "{} Pick the file again, or restore it on GitHub.",
+                        SyncState::missing_text(missing, Some(source))
+                    ),
+                    ui::sized_button(
+                        "Pick a file",
+                        ButtonKind::Outline,
+                        32.0,
+                        *tokens,
+                        Some(msg(Message::PickFile)),
+                    ),
+                ),
+                SyncState::Failed { kept } => (
+                    tokens.danger_fill,
+                    tokens.danger,
+                    "Could not save",
+                    format!(
+                        "GitHub didn't answer. {kept} {} kept on this computer; Libri tries again by itself.",
+                        if kept == 1 {
+                            "change is"
+                        } else {
+                            "changes are"
+                        }
+                    ),
+                    ui::sized_button(
+                        "Retry",
+                        ButtonKind::Outline,
+                        32.0,
+                        *tokens,
+                        Some(AppMessage::Sync(crate::app::SyncMessage::Retry)),
+                    ),
+                ),
+                SyncState::Offline { kept } => (
+                    tokens.raised,
+                    tokens.sub,
+                    "Offline",
+                    format!(
+                        "{kept} {} kept on this computer and saved when you're back online.",
+                        if kept == 1 {
+                            "change is"
+                        } else {
+                            "changes are"
+                        }
+                    ),
+                    ui::sized_button(
+                        "Sync now",
+                        ButtonKind::Outline,
+                        32.0,
+                        *tokens,
+                        Some(msg(Message::SyncNow)),
+                    ),
+                ),
                 sync => (
                     tokens.success_fill,
                     tokens.success,
@@ -683,31 +799,56 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
         }
         None => {
             let raised = tokens.raised;
-            container(
+            // Disconnected with the library kept: local mode, with the way
+            // back to GitHub; else nothing connected at all.
+            let (detail, action, message) = if app.kept_locally {
+                (
+                    "Your library is kept on this computer",
+                    "Connect to GitHub",
+                    Message::Connect,
+                )
+            } else {
+                (
+                    "Connect a GitHub repo to sync your library.",
+                    "Set up",
+                    Message::SetUp,
+                )
+            };
+            let card = container(
                 row![
                     ui::dot(tokens.sub, 9.0, 4.5),
                     column![
                         text("Not connected").size(14).font(font::SEMIBOLD),
-                        text("Connect a GitHub repo to sync your library.")
-                            .size(12.5)
-                            .color(tokens.sub)
+                        text(detail).size(12.5).color(tokens.sub)
                     ]
                     .spacing(1)
                     .width(Fill),
                     ui::sized_button(
-                        "Set up",
+                        action,
                         ButtonKind::Primary,
                         32.0,
                         *tokens,
-                        Some(msg(Message::SetUp)),
+                        Some(msg(message))
                     ),
                 ]
                 .spacing(12)
                 .align_y(Center),
             )
             .padding([12, 14])
-            .style(move |_| container::background(raised).border(Border::default().rounded(10)))
-            .into()
+            .style(move |_| container::background(raised).border(Border::default().rounded(10)));
+            if app.kept_locally {
+                column![
+                    card,
+                    text("You can keep browsing and editing. Changes stay on this computer until you connect a repo again; connecting then asks which library to keep.")
+                        .size(12.5)
+                        .line_height(1.45)
+                        .color(tokens.sub),
+                ]
+                .spacing(12)
+                .into()
+            } else {
+                card.into()
+            }
         }
     };
     section(
@@ -851,24 +992,199 @@ fn pill<'a>(
     .focusable(16.0, &tokens)
 }
 
-fn about<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
+/// A service Libri asks, credited in About: its name, what it is used
+/// for, its website and its logo where the service's terms want one.
+struct DataSource {
+    name: &'static str,
+    text: &'static str,
+    url: &'static str,
+    logo: Option<Logo>,
+}
+
+#[derive(Clone, Copy)]
+enum Logo {
+    Tmdb,
+    Deezer,
+}
+
+/// The only place a provider is named in the UI. TMDB's terms want its
+/// logo and the exact sentence; Deezer's want its logo, in the light or
+/// dark variant.
+const DATA_SOURCES: [DataSource; 8] = [
+    DataSource {
+        name: "TMDB",
+        text: "Movies and shows; also anime seasons and episodes, behind the scenes. This product uses the TMDB API but is not endorsed or certified by TMDB.",
+        url: "https://www.themoviedb.org",
+        logo: Some(Logo::Tmdb),
+    },
+    DataSource {
+        name: "IGDB",
+        text: "Games: details and covers from IGDB.com.",
+        url: "https://www.igdb.com",
+        logo: None,
+    },
+    DataSource {
+        name: "Apple Books",
+        text: "Books: descriptions and covers, and books Open Library lacks.",
+        url: "https://books.apple.com",
+        logo: None,
+    },
+    DataSource {
+        name: "Open Library",
+        text: "Books: details and covers from the Internet Archive.",
+        url: "https://openlibrary.org",
+        logo: None,
+    },
+    DataSource {
+        name: "Google Books",
+        text: "Books it found before Apple Books.",
+        url: "https://books.google.com",
+        logo: None,
+    },
+    DataSource {
+        name: "Deezer",
+        text: "Music: albums, songs and covers.",
+        url: "https://www.deezer.com",
+        logo: Some(Logo::Deezer),
+    },
+    DataSource {
+        name: "AniList",
+        text: "Anime: details, covers, and seasons when TMDB has none.",
+        url: "https://anilist.co",
+        logo: None,
+    },
+    DataSource {
+        name: "Wikidata",
+        text: "Book series and their order.",
+        url: "https://www.wikidata.org",
+        logo: None,
+    },
+];
+
+/// The crates and fonts Libri ships, for the licenses dialog. Phase 5
+/// generates the full list with their texts at build time.
+const LICENSES: [(&str, &str); 8] = [
+    ("iced", "MIT"),
+    (
+        "wgpu, winit and the Rust ecosystem iced builds on",
+        "MIT, Apache-2.0, BSD and Zlib",
+    ),
+    ("serde and serde_json", "MIT or Apache-2.0"),
+    ("raw-window-handle", "MIT, Apache-2.0 or Zlib"),
+    ("wayland-client and wayland-protocols-plasma", "MIT"),
+    ("Figtree", "SIL Open Font License 1.1"),
+    ("JetBrains Mono", "SIL Open Font License 1.1"),
+    ("Libri", "MIT"),
+];
+
+/// A service's logo at the height its terms allow: TMDB's 13 px, Deezer's
+/// 22 px, the white wordmark on the dark themes.
+fn source_logo<'a>(logo: Logo, tokens: &Tokens) -> Element<'a, AppMessage> {
+    use iced::widget::image;
+    // The 2.0x files, so the logos stay sharp at the usual 2x scale; the
+    // size is set outright since iced decodes PNGs on a worker thread and
+    // cannot measure them on the first frame.
+    let (bytes, width, height): (&'static [u8], f32, f32) = match (logo, tokens.light) {
+        (Logo::Tmdb, _) => (
+            include_bytes!("../../assets/logos/tmdb/2.0x/tmdb.png"),
+            101.0,
+            13.0,
+        ),
+        (Logo::Deezer, true) => (
+            include_bytes!("../../assets/logos/deezer/2.0x/deezer.png"),
+            80.0,
+            22.0,
+        ),
+        (Logo::Deezer, false) => (
+            include_bytes!("../../assets/logos/deezer/2.0x/deezer_on_dark.png"),
+            80.0,
+            22.0,
+        ),
+    };
+    image(image::Handle::from_bytes(bytes))
+        .width(width)
+        .height(height)
+        .into()
+}
+
+/// About: the icon, the name, the version and build, the licenses row and
+/// the data sources, each opening its website.
+fn about<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let _ = app;
     let words = column![
         text("Libri").size(20).font(font::EXTRABOLD),
         text(format!(
-            "Version {} · Rust + iced · Your data stays in your own GitHub repo",
-            env!("CARGO_PKG_VERSION")
+            "Version {} (build {}) · Rust + iced · Your data stays in your own GitHub repo",
+            env!("CARGO_PKG_VERSION"),
+            env!("LIBRI_BUILD")
         ))
         .size(13)
         .color(tokens.sub),
     ]
     .spacing(2);
+    let identity = row![ui::logo(64.0), words].spacing(16).align_y(Center);
+
+    let licenses = button(
+        row![
+            text("Open-source licenses").size(14.5).width(Fill),
+            ui::icon(Icon::ChevronRight, 15.0, tokens.sub),
+        ]
+        .align_y(Center)
+        .height(Fill),
+    )
+    .width(Fill)
+    .height(46)
+    .padding([0, 4])
+    .on_press(msg(Message::OpenLicenses))
+    .style(ui::row_style(tokens, false, 8.0))
+    .focusable(8.0, tokens);
+
+    let sources_head = column![
+        text("Data sources").size(14.5).font(font::SEMIBOLD),
+        text("Used when you add something, to fetch details and covers. Each opens the service's website.")
+            .size(13)
+            .color(tokens.sub),
+    ]
+    .spacing(4);
+    let rows = DATA_SOURCES.iter().map(|source| {
+        let mut words = column![text(source.name).size(14.5).font(font::SEMIBOLD)].spacing(3);
+        words = words.push(
+            text(source.text)
+                .size(12.5)
+                .line_height(1.4)
+                .color(tokens.sub),
+        );
+        if let Some(logo) = source.logo {
+            words = words
+                .push(container(source_logo(logo, tokens)).padding(iced::Padding::new(0.0).top(4)));
+        }
+        button(
+            row![
+                words.width(Fill),
+                ui::icon(Icon::ExternalLink, 15.0, tokens.sub),
+            ]
+            .spacing(12)
+            .align_y(Center),
+        )
+        .width(Fill)
+        .padding([10, 4])
+        .on_press(msg(Message::OpenSource(source.url)))
+        .style(ui::row_style(tokens, false, 8.0))
+        .focusable(8.0, tokens)
+    });
+    let mut list = Column::new();
+    for (index, source_row) in rows.enumerate() {
+        if index > 0 {
+            list = list.push(ui::rule(tokens.line.scale_alpha(0.6)));
+        }
+        list = list.push(source_row);
+    }
     section(
-        "About",
+        "About Libri",
         vec![
-            row![ui::logo(64.0), words]
-                .spacing(16)
-                .align_y(Center)
-                .into(),
+            identity.into(),
+            column![ui::rule(tokens.line), licenses, ui::rule(tokens.line)].into(),
+            column![sources_head, list].spacing(10).into(),
         ],
         18.0,
         0.0,
@@ -876,44 +1192,141 @@ fn about<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
     )
 }
 
-/// "Disconnect ekmanch/library?"
-fn disconnect_dialog<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
+/// The open-source licenses, as a list of the crates and fonts and what
+/// they are under.
+fn licenses_dialog<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
+    let rows = LICENSES.iter().map(|(name, license)| {
+        row![
+            text(*name).size(14).width(Fill),
+            text(*license).size(13).color(tokens.sub),
+        ]
+        .spacing(12)
+        .into()
+    });
+    let body = column![
+        text("Libri is open source and builds on these.").size(14),
+        Column::with_children(rows).spacing(8),
+        text("The full license texts come with the package (phase 5).")
+            .size(12.5)
+            .color(tokens.sub),
+    ]
+    .spacing(14);
+    let footer = row![
+        space::horizontal(),
+        ui::labeled_button(
+            "Done",
+            ButtonKind::Primary,
+            *tokens,
+            Some(msg(Message::CloseLicenses))
+        ),
+    ];
+    ui::dialog(
+        "Open-source licenses",
+        body,
+        footer,
+        520,
+        tokens,
+        msg(Message::CloseLicenses),
+    )
+}
+
+/// Disconnect in two steps: "Disconnect from GitHub?" (Cancel /
+/// Disconnect), then "Keep your library on this computer?" (Cancel /
+/// Delete it from this computer / Keep it on this computer).
+fn disconnect_dialog<'a>(
+    app: &'a App,
+    step: DisconnectStep,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
     let repo = app
         .source
         .as_ref()
         .map_or("the repository", |source| source.repo.as_str());
-    let body = column![
-        text("Libri forgets the repository, branch and token on this computer. The library on GitHub stays as it is.")
-            .size(14),
-        text("You can connect again from the setup.")
-            .size(13)
-            .color(tokens.sub),
-    ]
-    .spacing(10);
-    let footer = row![
-        space::horizontal(),
-        ui::labeled_button(
-            "Cancel",
-            ButtonKind::Outline,
-            *tokens,
-            Some(msg(Message::CloseDisconnect))
-        ),
-        ui::labeled_button(
-            "Disconnect",
-            ButtonKind::Destructive,
-            *tokens,
-            Some(msg(Message::ConfirmDisconnect))
-        ),
-    ]
-    .spacing(8);
-    ui::dialog(
-        format!("Disconnect {repo}?"),
-        body,
-        footer,
-        460,
-        tokens,
-        msg(Message::CloseDisconnect),
-    )
+    match step {
+        DisconnectStep::Confirm => {
+            let body = column![
+                text(format!(
+                    "Libri stops syncing with {repo}. Next you choose what happens to the library on this computer."
+                ))
+                .size(14),
+                text("The repo on GitHub is never touched.")
+                    .size(13)
+                    .color(tokens.sub),
+            ]
+            .spacing(10);
+            let footer = row![
+                space::horizontal(),
+                ui::labeled_button(
+                    "Cancel",
+                    ButtonKind::Outline,
+                    *tokens,
+                    Some(msg(Message::CloseDisconnect))
+                ),
+                ui::labeled_button(
+                    "Disconnect",
+                    ButtonKind::Destructive,
+                    *tokens,
+                    Some(msg(Message::ConfirmDisconnect))
+                ),
+            ]
+            .spacing(8);
+            ui::dialog(
+                "Disconnect from GitHub?",
+                body,
+                footer,
+                480,
+                tokens,
+                msg(Message::CloseDisconnect),
+            )
+        }
+        DisconnectStep::KeepOrDelete => {
+            let warning = row![
+                ui::dot(tokens.danger, 9.0, 4.5),
+                text("If you delete it, Libri is empty until you connect a GitHub repo again. Your library on GitHub is not affected.")
+                    .size(13)
+                    .width(Fill),
+            ]
+            .spacing(10)
+            .align_y(Center);
+            let body = column![
+                text("You can keep browsing and editing it. Changes stay on this computer until you connect a repo again.")
+                    .size(14),
+                warning,
+            ]
+            .spacing(12);
+            let footer = row![
+                ui::labeled_button(
+                    "Cancel",
+                    ButtonKind::Text,
+                    *tokens,
+                    Some(msg(Message::CloseDisconnect))
+                ),
+                space::horizontal(),
+                ui::labeled_button(
+                    "Delete it from this computer",
+                    ButtonKind::Destructive,
+                    *tokens,
+                    Some(msg(Message::DisconnectDelete))
+                ),
+                ui::labeled_button(
+                    "Keep it on this computer",
+                    ButtonKind::Neutral,
+                    *tokens,
+                    Some(msg(Message::DisconnectKeep))
+                ),
+            ]
+            .spacing(8)
+            .align_y(Center);
+            ui::dialog(
+                "Keep your library on this computer?",
+                body,
+                footer,
+                540,
+                tokens,
+                msg(Message::CloseDisconnect),
+            )
+        }
+    }
 }
 
 /// "1,284".
@@ -967,19 +1380,54 @@ mod tests {
     }
 
     #[test]
-    fn disconnecting_asks_first_and_then_forgets_the_repository() {
+    fn disconnecting_takes_two_steps_and_can_keep_the_library_on_this_computer() {
         let mut app = App::new(Screen::Settings);
         let _ = update(&mut app, Message::Disconnect);
-        assert!(app.settings_page.disconnect_open);
+        assert_eq!(app.settings_page.disconnect, Some(DisconnectStep::Confirm));
         assert!(dismiss_top(&mut app));
-        assert!(app.source.is_some());
+        assert!(app.source.is_some(), "Cancel changes nothing");
         let _ = update(&mut app, Message::Disconnect);
         let _ = update(&mut app, Message::ConfirmDisconnect);
-        assert!(app.source.is_none());
-        let _ = update(&mut app, Message::SetUp);
+        assert_eq!(
+            app.settings_page.disconnect,
+            Some(DisconnectStep::KeepOrDelete)
+        );
+        assert!(app.source.is_some(), "not before the second step");
+        let _ = update(&mut app, Message::DisconnectKeep);
+        assert!(app.source.is_none() && app.kept_locally);
+        assert_eq!(app.screen, Screen::Library);
+        assert!(
+            !app.repo.library().entries.is_empty(),
+            "the library stays and can be browsed"
+        );
+        let _ = update(&mut app, Message::Connect);
         assert_eq!(app.screen, Screen::Setup);
         assert_eq!(app.setup.step, setup::Step::Connect);
         assert!(app.setup.repo.is_empty());
+    }
+
+    #[test]
+    fn deleting_the_library_opens_the_first_run_and_the_states_have_their_actions() {
+        let mut app = App::new(Screen::Settings);
+        let _ = update(&mut app, Message::Disconnect);
+        let _ = update(&mut app, Message::ConfirmDisconnect);
+        let _ = update(&mut app, Message::DisconnectDelete);
+        assert!(app.source.is_none() && !app.kept_locally);
+        assert_eq!(app.screen, Screen::Setup);
+        assert_eq!(app.setup.step, setup::Step::Welcome);
+
+        let mut app = App::new(Screen::Settings);
+        app.sync = SyncState::NotFound(crate::settings::Missing::File);
+        let _ = update(&mut app, Message::PickFile);
+        assert_eq!(app.screen, Screen::Setup);
+        assert_eq!(app.setup.step, setup::Step::File);
+        assert_eq!(app.setup.repo, "ekmanch/library", "the repo is kept");
+
+        let mut app = App::new(Screen::Settings);
+        let _ = update(&mut app, Message::OpenLicenses);
+        assert!(app.settings_page.licenses_open);
+        assert!(dismiss_top(&mut app));
+        assert!(!app.settings_page.licenses_open);
     }
 
     #[test]

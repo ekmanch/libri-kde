@@ -171,12 +171,41 @@ impl Source {
     }
 }
 
-/// The sync row's state and the token warning (docs/DESIGN.md 4.6). Faked
-/// until phase 3 reads GitHub's expiry header; `LIBRI_SYNC` picks one.
+/// What is gone on GitHub when the library is not found there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Missing {
+    File,
+    Branch,
+    Repo,
+}
+
+/// The sync row's state, the banner over the content and the token
+/// warning (docs/DESIGN.md 4.6 and 10). Faked until phase 3 syncs for
+/// real; `LIBRI_SYNC` picks one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SyncState {
     #[default]
     Synced,
+    /// A commit in flight with this many queued changes.
+    Saving {
+        changes: u32,
+    },
+    /// No connection; the changes wait on this computer.
+    Offline {
+        kept: u32,
+    },
+    /// GitHub did not answer a save; Libri retries by itself.
+    Failed {
+        kept: u32,
+    },
+    /// A 404: the file, the branch or the repo is gone.
+    NotFound(Missing),
+    /// Changed here and on GitHub since they last matched; nothing syncs
+    /// until one copy is picked.
+    Conflict {
+        local_changes: u32,
+        remote_commit: &'static str,
+    },
     /// The token expires in this many days; from 7 days before, the
     /// warning dialog shows.
     ExpiresIn(u32),
@@ -184,24 +213,87 @@ pub enum SyncState {
 }
 
 impl SyncState {
-    /// `LIBRI_SYNC`: "expired", or "expires-in-6" for a warning.
+    /// `LIBRI_SYNC`: "saving", "offline", "error", "not-found" (or
+    /// "not-found-branch", "not-found-repo"), "conflict", "expired", or
+    /// "expires-in-6" for a warning.
     pub fn from_env(value: &str) -> Option<SyncState> {
-        if value == "expired" {
-            return Some(SyncState::TokenExpired);
-        }
-        let days = value.strip_prefix("expires-in-")?.parse().ok()?;
-        Some(SyncState::ExpiresIn(days))
+        Some(match value {
+            "synced" => SyncState::Synced,
+            "saving" => SyncState::Saving { changes: 2 },
+            "offline" => SyncState::Offline { kept: 3 },
+            "error" | "failed" => SyncState::Failed { kept: 3 },
+            "not-found" => SyncState::NotFound(Missing::File),
+            "not-found-branch" => SyncState::NotFound(Missing::Branch),
+            "not-found-repo" => SyncState::NotFound(Missing::Repo),
+            "conflict" => SyncState::Conflict {
+                local_changes: 3,
+                remote_commit: "Oct 13, 20:12",
+            },
+            "expired" => SyncState::TokenExpired,
+            _ => {
+                let days = value.strip_prefix("expires-in-")?.parse().ok()?;
+                SyncState::ExpiresIn(days)
+            }
+        })
     }
 
     /// Whether the warning dialog shows when Libri opens.
     pub fn warns(self) -> bool {
         matches!(self, SyncState::ExpiresIn(days) if days <= 7)
     }
+
+    /// Whether the state needs the owner to act, so a banner shows over
+    /// the content on Library and Plans besides the sidebar row.
+    pub fn needs_action(self) -> bool {
+        matches!(
+            self,
+            SyncState::Failed { .. } | SyncState::NotFound(_) | SyncState::Conflict { .. }
+        )
+    }
+
+    /// Whether the connection is in trouble, for the red dot.
+    pub fn is_error(self) -> bool {
+        self.needs_action() || self == SyncState::TokenExpired
+    }
+
+    /// "library.json is gone from ekmanch/library (main).", for the
+    /// not-found states.
+    pub fn missing_text(missing: Missing, source: Option<&Source>) -> String {
+        let (repo, branch, file) = match source {
+            Some(s) => (s.repo.as_str(), s.branch.as_str(), s.file.as_str()),
+            None => ("the repository", "main", "library.json"),
+        };
+        match missing {
+            Missing::File => format!("{file} is gone from {repo} ({branch})."),
+            Missing::Branch => format!("The branch {branch} is gone from {repo}."),
+            Missing::Repo => format!("{repo} is gone, or the token no longer sees it."),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sync_switch_names_every_state() {
+        assert_eq!(
+            SyncState::from_env("offline"),
+            Some(SyncState::Offline { kept: 3 })
+        );
+        assert_eq!(
+            SyncState::from_env("not-found-repo"),
+            Some(SyncState::NotFound(Missing::Repo))
+        );
+        assert!(SyncState::from_env("conflict").unwrap().needs_action());
+        assert!(!SyncState::from_env("saving").unwrap().needs_action());
+        assert!(SyncState::from_env("expired").unwrap().is_error());
+        assert_eq!(SyncState::from_env("nope"), None);
+        assert_eq!(
+            SyncState::missing_text(Missing::File, Some(&Source::fixture())),
+            "library.json is gone from ekmanch/library (main)."
+        );
+    }
 
     #[test]
     fn system_follows_plasma_and_a_fixed_theme_does_not() {
@@ -227,7 +319,7 @@ mod tests {
             Some(SyncState::ExpiresIn(6))
         );
         assert_eq!(SyncState::from_env("expires-in-x"), None);
-        assert_eq!(SyncState::from_env("synced"), None);
+        assert_eq!(SyncState::from_env("synced"), Some(SyncState::Synced));
         assert!(SyncState::ExpiresIn(1).warns());
         assert!(!SyncState::ExpiresIn(12).warns());
         assert!(!SyncState::TokenExpired.warns());

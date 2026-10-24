@@ -6,10 +6,10 @@ use iced::widget::{Column, button, column, container, progress_bar, row, space, 
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
 use super::{Screen, library, plans, setup};
-use crate::app::{App, Message};
+use crate::app::{App, Message, SyncMessage};
 use crate::model::MediaType;
 use crate::plans as rules;
-use crate::settings::SyncState;
+use crate::settings::{Missing, SyncState};
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, FocusExt, Icon, Placement, Popover};
 
@@ -23,6 +23,15 @@ pub fn content_width(app: &App, side: f32) -> f32 {
 
 pub fn shell<'a>(app: &'a App, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     let tokens = app.tokens();
+    // A sync state that needs the owner gets a banner over the content on
+    // Library and Plans; Offline and Saving fix themselves and stay in the
+    // row.
+    let content: Element<'a, Message> = match banner(app, &tokens) {
+        Some(banner) if matches!(app.screen, Screen::Library | Screen::Plans) => {
+            column![banner, container(content).height(Fill)].into()
+        }
+        _ => content.into(),
+    };
     let pane = container(content).width(Fill).height(Fill).style(move |_| {
         container::background(tokens.content).border(Border {
             radius: Radius::default().top_left(12),
@@ -283,37 +292,272 @@ fn more_row<'a>(
         .focusable(8.0, tokens)
 }
 
+/// The sync row's parts for a state: the dot, the text, the line under
+/// it, and the action's label and message.
+fn sync_parts(
+    app: &App,
+    tokens: &Tokens,
+) -> (iced::Color, String, String, Option<(&'static str, Message)>) {
+    let changes = |n: u32| {
+        format!(
+            "{n} {} kept on this computer",
+            if n == 1 { "change" } else { "changes" }
+        )
+    };
+    match app.sync {
+        _ if app.kept_locally => (
+            tokens.sub,
+            "Not connected".into(),
+            "Library kept on this computer".into(),
+            None,
+        ),
+        SyncState::Synced | SyncState::ExpiresIn(_) => (
+            theme::SYNC_OK,
+            "Synced 2 min ago".into(),
+            String::new(),
+            None,
+        ),
+        SyncState::Saving { changes } => (
+            tokens.accent,
+            format!(
+                "Saving {changes} {}…",
+                if changes == 1 { "change" } else { "changes" }
+            ),
+            String::new(),
+            None,
+        ),
+        SyncState::Offline { kept } => (tokens.sub, "Offline".into(), changes(kept), None),
+        SyncState::Failed { kept } => (
+            theme::SYNC_ERROR,
+            "Could not save".into(),
+            changes(kept),
+            Some(("Retry", Message::Sync(SyncMessage::Retry))),
+        ),
+        SyncState::NotFound(missing) => (
+            theme::SYNC_ERROR,
+            "Library not found".into(),
+            match missing {
+                Missing::File => "library.json is gone on GitHub".into(),
+                Missing::Branch => "The branch is gone on GitHub".into(),
+                Missing::Repo => "The repo is gone, or unseen".into(),
+            },
+            Some(("Fix", Message::Sync(SyncMessage::Fix))),
+        ),
+        SyncState::Conflict { .. } => (
+            theme::SYNC_ERROR,
+            "Sync conflict".into(),
+            "Changed here and on GitHub".into(),
+            Some(("Choose", Message::Sync(SyncMessage::OpenConflict))),
+        ),
+        SyncState::TokenExpired => (
+            theme::SYNC_ERROR,
+            "Token expired".into(),
+            String::new(),
+            Some((
+                "Replace token",
+                Message::Setup(setup::Message::ReplaceToken),
+            )),
+        ),
+    }
+}
+
+/// The banner over the content for a state that needs the owner: its
+/// title, text and action.
+fn banner<'a>(app: &App, tokens: &Tokens) -> Option<Element<'a, Message>> {
+    if app.kept_locally {
+        return None;
+    }
+    let repo = app
+        .source
+        .as_ref()
+        .map_or("the repository", |s| s.repo.as_str());
+    let (title, body, action, message) = match app.sync {
+        SyncState::Failed { kept } => (
+            "Could not save",
+            format!(
+                "GitHub didn't answer. Your {kept} {} kept here and Libri tries again by itself.",
+                if kept == 1 {
+                    "change is"
+                } else {
+                    "changes are"
+                }
+            ),
+            "Retry",
+            Message::Sync(SyncMessage::Retry),
+        ),
+        SyncState::NotFound(missing) => (
+            "Library not found on GitHub",
+            format!(
+                "{} Your edits stay here; pick the file again or restore it.",
+                SyncState::missing_text(missing, app.source.as_ref())
+            ),
+            "Fix",
+            Message::Sync(SyncMessage::Fix),
+        ),
+        SyncState::Conflict { .. } => (
+            "Changed here and on GitHub",
+            format!("Syncing with {repo} has stopped until you pick which copy to keep."),
+            "Choose",
+            Message::Sync(SyncMessage::OpenConflict),
+        ),
+        _ => return None,
+    };
+    let (fill, line, danger) = (
+        tokens.danger_fill,
+        tokens.danger.scale_alpha(0.35),
+        tokens.danger,
+    );
+    let content = row![
+        ui::dot(danger, 9.0, 4.5),
+        column![
+            text(title).size(14).font(font::SEMIBOLD),
+            text(body).size(12.5).color(tokens.sub),
+        ]
+        .spacing(1)
+        .width(Fill),
+        ui::sized_button(
+            action,
+            ui::ButtonKind::Outline,
+            32.0,
+            *tokens,
+            Some(message)
+        ),
+    ]
+    .spacing(12)
+    .align_y(Center);
+    Some(
+        container(
+            container(content)
+                .width(Fill)
+                .padding([10, 14])
+                .style(move |_| {
+                    container::background(fill)
+                        .border(Border::default().rounded(10).width(1).color(line))
+                }),
+        )
+        .padding(Padding::new(0.0).top(14).left(24).right(24))
+        .into(),
+    )
+}
+
+/// "Keep which copy?", over everything while a conflict is being decided.
+pub fn conflict_overlay<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, Message> {
+    let tokens = app.tokens();
+    let dialog = app.conflict_open.then(|| conflict_dialog(app, &tokens));
+    ui::modal(
+        base,
+        dialog,
+        Message::Sync(SyncMessage::CloseConflict),
+        &tokens,
+    )
+}
+
+fn conflict_dialog<'a>(app: &App, tokens: &Tokens) -> Element<'a, Message> {
+    let (local, remote) = match app.sync {
+        SyncState::Conflict {
+            local_changes,
+            remote_commit,
+        } => (local_changes, remote_commit),
+        _ => (0, ""),
+    };
+    let sides = row![
+        text(format!(
+            "This computer: {local} {}",
+            if local == 1 { "change" } else { "changes" }
+        ))
+        .size(13)
+        .color(tokens.sub)
+        .width(Fill),
+        text(format!("GitHub: last commit {remote}"))
+            .size(13)
+            .color(tokens.sub),
+    ];
+    let warning = row![
+        ui::dot(tokens.danger, 9.0, 4.5),
+        text("Whichever you keep, the other copy's changes are gone. Earlier versions stay in the repo's history.")
+            .size(13)
+            .color(tokens.text)
+            .width(Fill),
+    ]
+    .spacing(10)
+    .align_y(Center);
+    let body = column![
+        text("The library changed on GitHub and on this computer since they last matched.")
+            .size(14),
+        sides,
+        warning,
+    ]
+    .spacing(12);
+    let footer = row![
+        ui::labeled_button(
+            "Decide later",
+            ui::ButtonKind::Text,
+            *tokens,
+            Some(Message::Sync(SyncMessage::CloseConflict))
+        ),
+        space::horizontal(),
+        ui::labeled_button(
+            "Keep GitHub's",
+            ui::ButtonKind::Destructive,
+            *tokens,
+            Some(Message::Sync(SyncMessage::KeepTheirs))
+        ),
+        ui::labeled_button(
+            "Keep mine",
+            ui::ButtonKind::Neutral,
+            *tokens,
+            Some(Message::Sync(SyncMessage::KeepMine))
+        ),
+    ]
+    .spacing(8)
+    .align_y(Center);
+    ui::dialog(
+        "Keep which copy?",
+        body,
+        footer,
+        520,
+        tokens,
+        Message::Sync(SyncMessage::CloseConflict),
+    )
+}
+
 /// The sync state and the Settings gear, pinned to the bottom. The gear
 /// is marked while Settings is open.
 fn sync_row<'a>(app: &App, tokens: &Tokens) -> Element<'a, Message> {
-    let sync = app.sync;
-    let (dot, label, color) = match sync {
-        SyncState::Synced | SyncState::ExpiresIn(_) => {
-            (theme::SYNC_OK, "Synced 2 min ago", tokens.sub)
-        }
-        SyncState::TokenExpired => (theme::SYNC_ERROR, "Token expired", tokens.text),
-    };
-    let mut content = row![
+    let (dot, label, sub, action) = sync_parts(app, tokens);
+    let quiet = matches!(
+        app.sync,
+        SyncState::Synced | SyncState::ExpiresIn(_) | SyncState::Saving { .. }
+    ) || app.kept_locally;
+    let color = if quiet { tokens.sub } else { tokens.text };
+    // The state, the action and the gear on one line; the line under it
+    // runs the sidebar's full width, as in the mockup, so a long sub never
+    // runs into the action.
+    let mut line = row![
         ui::dot(dot, 8.0, 4.0),
-        text(label)
-            .size(12)
-            .color(color)
-            .wrapping(text::Wrapping::None)
-            .width(Fill)
+        container(
+            text(label)
+                .size(12)
+                .color(color)
+                .wrapping(text::Wrapping::None)
+        )
+        .width(Fill)
+        .clip(true),
     ]
-    .spacing(5)
-    .align_y(Center);
-    if sync == SyncState::TokenExpired {
+    .spacing(8)
+    .align_y(Center)
+    .height(30);
+    if let Some((action, message)) = action {
         let ink = tokens.ink;
-        content = content.push(
+        line = line.push(
             button(
-                text("Replace token")
+                text(action)
                     .size(12)
                     .font(font::SEMIBOLD)
                     .wrapping(text::Wrapping::None),
             )
             .padding(0)
-            .on_press(Message::Setup(setup::Message::ReplaceToken))
+            .on_press(message)
             .style(move |_, _| button::Style {
                 text_color: ink,
                 ..button::Style::default()
@@ -322,7 +566,7 @@ fn sync_row<'a>(app: &App, tokens: &Tokens) -> Element<'a, Message> {
         );
     }
     let on_settings = app.screen == Screen::Settings;
-    content = content.push(
+    line = line.push(
         button(container(ui::icon(Icon::Settings, 18.0, tokens.sub)).center(Fill))
             .width(26)
             .height(26)
@@ -331,9 +575,21 @@ fn sync_row<'a>(app: &App, tokens: &Tokens) -> Element<'a, Message> {
             .style(ui::row_style(tokens, on_settings, 8.0))
             .focusable(8.0, tokens),
     );
+    let mut content = column![line];
+    if !sub.is_empty() {
+        content = content.push(
+            container(
+                text(sub)
+                    .size(11)
+                    .color(tokens.sub)
+                    .wrapping(text::Wrapping::None),
+            )
+            .padding(Padding::new(0.0).left(16).bottom(4))
+            .width(Fill)
+            .clip(true),
+        );
+    }
     container(content)
-        .height(40)
-        .padding(Padding::new(0.0).left(6).right(2))
-        .align_y(Center)
+        .padding(Padding::new(0.0).left(6).right(2).top(2))
         .into()
 }

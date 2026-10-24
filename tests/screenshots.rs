@@ -14,9 +14,9 @@ use libri::lookup::LookupState;
 use libri::model::{Date, EntryStatus, MediaType, Released, Season, TagCategory};
 use libri::repo::Operation;
 use libri::screens::library::{self, Page, SeasonMenu, View};
-use libri::screens::setup::{self, Step};
+use libri::screens::setup::{self, Step, Which};
 use libri::screens::{Screen, entry, plans};
-use libri::settings::{SyncState, ThemeChoice};
+use libri::settings::{Missing, SyncState, ThemeChoice};
 use libri::tags::PickerMessage;
 use libri::theme::Theme;
 
@@ -167,6 +167,15 @@ fn capture_every_screen() {
             Screen::Setup,
             ("setup-done", |app| setup_at(Step::Done)(app)),
         ),
+        (
+            Screen::Setup,
+            ("setup-which-library", |app| {
+                app.kept_locally = true;
+                setup_at(Step::Existing)(app);
+                app.setup.choice = setup::Choice::Existing;
+                app.setup.which = Some(Which::Here);
+            }),
+        ),
         (Screen::Library, ("library", nothing)),
         (
             Screen::Library,
@@ -179,6 +188,104 @@ fn capture_every_screen() {
             Screen::Library,
             ("library-token-expired", |app| {
                 app.sync = SyncState::TokenExpired;
+            }),
+        ),
+        // Phase 1k: the sync states, the conflict, local mode, Disconnect
+        // and About.
+        (
+            Screen::Library,
+            ("library-sync-saving", |app| {
+                app.sync = SyncState::Saving { changes: 2 }
+            }),
+        ),
+        (
+            Screen::Library,
+            ("library-sync-offline", |app| {
+                app.sync = SyncState::Offline { kept: 3 }
+            }),
+        ),
+        (
+            Screen::Library,
+            ("library-sync-failed", |app| {
+                app.sync = SyncState::Failed { kept: 3 }
+            }),
+        ),
+        (
+            Screen::Library,
+            ("library-sync-not-found", |app| {
+                app.sync = SyncState::NotFound(Missing::File);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("library-sync-conflict", |app| {
+                app.sync = SyncState::from_env("conflict").unwrap();
+            }),
+        ),
+        (
+            Screen::Library,
+            ("library-conflict-dialog", |app| {
+                app.sync = SyncState::from_env("conflict").unwrap();
+                app.conflict_open = true;
+            }),
+        ),
+        (
+            Screen::Plans,
+            ("plans-sync-conflict", |app| {
+                app.sync = SyncState::from_env("conflict").unwrap();
+            }),
+        ),
+        (
+            Screen::Library,
+            ("library-local", |app| {
+                app.source = None;
+                app.kept_locally = true;
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-source-conflict", |app| {
+                app.sync = SyncState::from_env("conflict").unwrap();
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-source-not-found", |app| {
+                app.sync = SyncState::NotFound(Missing::File);
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-source-local", |app| {
+                app.source = None;
+                app.kept_locally = true;
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-disconnect-confirm", |app| {
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::Disconnect,
+                ));
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-disconnect-keep-or-delete", |app| {
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::Disconnect,
+                ));
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::ConfirmDisconnect,
+                ));
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-licenses", |app| {
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::OpenLicenses,
+                ));
             }),
         ),
         (
@@ -674,7 +781,15 @@ fn capture_every_screen() {
         ),
     ];
 
+    // `LIBRI_SHOT=settings` renders only the variants whose name contains it.
+    let only = std::env::var("LIBRI_SHOT").ok();
     for (screen, (name, change)) in variants {
+        if only
+            .as_ref()
+            .is_some_and(|only| !name.contains(only.as_str()))
+        {
+            continue;
+        }
         for theme in [Theme::Graphite, Theme::Light] {
             let mut app = App::new(screen);
             app.settings.theme = ThemeChoice::Fixed(theme);
@@ -688,7 +803,15 @@ fn capture_every_screen() {
                 app::WINDOW_SIZE
             };
             let mut ui = iced_test::Simulator::with_size(app::settings(), size, app.view());
-            let snapshot = ui.snapshot(&app.tokens().iced_theme()).unwrap();
+            let iced_theme = app.tokens().iced_theme();
+            if screen == Screen::Settings {
+                // iced decodes PNGs (the About logos) on a worker thread and
+                // asks for a redraw when they are ready, which the headless
+                // shell ignores: render once, wait, then take the capture.
+                let _ = ui.snapshot(&iced_theme).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            let snapshot = ui.snapshot(&iced_theme).unwrap();
 
             // `matches_image` writes the file when it is missing and adds the
             // renderer to the name ("library-light-wgpu.png").

@@ -145,13 +145,13 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [x] Tests and captures of the new states
 
 ### 1k. Sync and settings
-- [ ] Canvas revision: sync states beyond "Synced" and "Token expired": offline, saving, "Could not save" with Retry, "Library not found on GitHub" with what is gone and Fix (to Settings → Library source). Decide where they show on desktop: the sidebar sync row alone, or a banner over the content as on the phone
-- [ ] Canvas revision: the conflict (where it is announced, and the "Keep mine / Keep GitHub's / Decide later" dialog, also reachable from Library source)
-- [ ] Canvas revision: Disconnect in two steps (confirm, then keep the library on this computer or delete it) and Library source in local mode ("Connect to GitHub"); reconnecting a kept library to another file ("Which library?")
-- [ ] Canvas revision: About Libri (icon, name, version and build, open-source licenses, Data sources with TMDB's logo and required sentence, Deezer's logo in its light and dark variant, AniList, Apple Books, Open Library, IGDB, Wikidata; each row opens the site). The logos are in `assets/logos/`
+- [x] Canvas revision: sync states beyond "Synced" and "Token expired": offline, saving, "Could not save" with Retry, "Library not found on GitHub" with what is gone and Fix (to Settings → Library source). Decided 2026-10-24: the sidebar row always tells; the states that need the owner (Could not save, Library not found, Sync conflict) also get a banner over the content on Library and Plans
+- [x] Canvas revision: the conflict (where it is announced, and the "Keep mine / Keep GitHub's / Decide later" dialog, also reachable from Library source)
+- [x] Canvas revision: Disconnect in two steps (confirm, then keep the library on this computer or delete it) and Library source in local mode ("Connect to GitHub"); reconnecting a kept library to another file ("Which library?")
+- [x] Canvas revision: About Libri (icon, name, version and build, open-source licenses, Data sources with TMDB's logo and required sentence, Deezer's logo in its light and dark variant, AniList, Apple Books, Open Library, IGDB, Wikidata; each row opens the site). The logos are in `assets/logos/`
 - [ ] Decide with the phone: the Apple Books badge near book covers from the iTunes Search API (open on the phone too)
-- [ ] Build: every state above on fake sync states (`LIBRI_SYNC=offline`, `error`, `not-found`, `conflict`), so phase 3 only wires them up
-- [ ] Captures of every new state in Graphite and Light
+- [x] Build: every state above on fake sync states (`LIBRI_SYNC=saving`, `offline`, `error`, `not-found`, `conflict`; `LIBRI_LOCAL=1` for the kept library), so phase 3 only wires them up. The licenses dialog lists the crates and fonts with their licenses; phase 5 generates the full texts at build time
+- [x] Captures of every new state in Graphite and Light
 
 ## Phase 2: Local data
 
