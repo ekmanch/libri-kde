@@ -497,7 +497,7 @@ button{font:inherit}
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM16.5 16.5L21 21"></path></svg>
 <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Search</span>
 <input placeholder="{{searchHint}}" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: {{t.text}}; font: 14px 'Figtree', sans-serif">
-<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; border: 1px solid {{t.line}}; border-radius: 5px; padding: 1px 6px">Ctrl K</span>
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; border: 1px solid {{t.line}}; border-radius: 5px; padding: 1px 6px; white-space: nowrap">Ctrl K</span>
 </label>
 <div style="position: relative">
 <button onClick="{{toggleFilter}}" aria-expanded="{{filterOpen}}" style="height: 36px; padding: 0 10px 0 12px; border-radius: 8px; border: 1px solid {{t.line}}; background: {{filterBtnBg}}; color: {{t.text}}; display: flex; align-items: center; gap: 6px; cursor: pointer"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"></path></svg>Filter<sc-if value="{{hasFilters}}" hint-placeholder-val="{{false}}"><span style="min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: {{accent}}; color: {{onAccent}}; font-size: 11.5px; font-weight: 700; display: flex; align-items: center; justify-content: center">{{filterCount}}</span></sc-if><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
@@ -788,7 +788,7 @@ button{font:inherit}
 <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: {{t.sub}}">Tags</span>
 <div style="display: flex; flex-wrap: wrap; gap: 6px">
 <sc-for list="{{d.tags}}" as="g" hint-placeholder-count="3">
-<span style="height: 26px; padding: 0 10px; border-radius: 13px; background: {{t.raised}}; font-size: 13px; display: flex; align-items: center">{{g}}</span>
+<span style="height: 26px; padding: 0 10px; border-radius: 13px; background: {{t.raised}}; font-size: 13px; display: flex; align-items: center; gap: 5px">{{g.label}}<span style="color: {{t.sub}}">{{g.role}}</span></span>
 </sc-for>
 <button style="height: 26px; padding: 0 10px; border-radius: 13px; border: 1px dashed {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px; cursor: pointer">+ Tag</button>
 </div>
@@ -815,7 +815,7 @@ button{font:inherit}
 </div>
 
 <div style="margin-top: auto; display: flex; gap: 8px; padding-top: 6px">
-<button style="flex-grow: 1; height: 36px; border-radius: 8px; border: 0; background: {{t.raised}}; color: {{t.text}}; font-weight: 600; cursor: pointer">Edit<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{t.sub}}; margin-left: 8px">E</span></button>
+<button onClick="{{openEdit}}" style="flex-grow: 1; height: 36px; border-radius: 8px; border: 0; background: {{t.raised}}; color: {{t.text}}; font-weight: 600; cursor: pointer">Edit<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{t.sub}}; margin-left: 8px">E</span></button>
 <button style="height: 36px; padding: 0 16px; border-radius: 8px; border: 1px solid {{t.line}}; background: transparent; color: {{t.danger}}; font-weight: 600; cursor: pointer">Delete</button>
 </div>
 </div>
@@ -824,38 +824,6 @@ button{font:inherit}
 </sc-if>
 
 </div>
-
-<!-- Tag picker (from Filter) -->
-<sc-if value="{{pickerOpen}}" hint-placeholder-val="{{false}}">
-<div style="position: absolute; inset: 38px 0 0 0; z-index: 30; background: {{scrim}}; display: flex; align-items: center; justify-content: center">
-<div role="dialog" aria-label="Filter by tags" style="width: 560px; height: 600px; box-sizing: border-box; border-radius: 14px; background: {{t.pop}}; border: 1px solid {{t.line}}; box-shadow: {{t.popShadow}}; display: flex; flex-direction: column; padding: 18px 18px 14px; gap: 12px">
-<div style="display: flex; align-items: center; gap: 10px">
-<h3 style="margin: 0; font-family: 'Figtree', sans-serif; font-size: 19px; font-weight: 800; letter-spacing: -0.03em">Filter by tags</h3>
-<span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: {{t.sub}}">{{tagTotal}}</span>
-<button onClick="{{closePicker}}" aria-label="Close" style="margin-left: auto; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: {{t.sub}}; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
-</div>
-<label style="height: 36px; flex-shrink: 0; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: {{t.sub}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM16.5 16.5L21 21"></path></svg><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Search tags</span><input onInput="{{onPickerQuery}}" placeholder="Search tags" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: {{t.text}}; font: 14px 'Figtree', sans-serif"></label>
-<div class="scroll" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 4px">
-<sc-for list="{{pickerGroups}}" as="grp" hint-placeholder-count="4">
-<div style="display: flex; flex-direction: column; gap: 4px">
-<button onClick="{{grp.toggle}}" aria-expanded="{{grp.open}}" style="height: 36px; border: 0; border-radius: 8px; background: transparent; display: flex; align-items: center; gap: 8px; padding: 0 4px; cursor: pointer; text-align: left; color: {{t.sub}}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" style="transform: rotate({{grp.rot}}); transition: transform 0.15s"><path d="M9 6l6 6-6 6"></path></svg><span style="font-size: {{hdr.size}}; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{grp.color}}">{{grp.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{t.sub}}">{{grp.count}}</span><span style="margin-left: auto; font-size: 12px; color: {{t.text}}">{{grp.picked}}</span></button>
-<sc-if value="{{grp.open}}" hint-placeholder-val="{{false}}">
-<div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 0 4px 12px 26px">
-<sc-for list="{{grp.tags}}" as="o" hint-placeholder-count="4"><button onClick="{{o.pick}}" aria-pressed="{{o.on}}" style="height: 30px; padding: 0 11px; border-radius: 15px; border: 1px solid {{o.border}}; background: {{o.bg}}; color: {{o.fg}}; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px">{{o.label}}<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{t.sub}}">{{o.count}}</span></button></sc-for>
-</div>
-</sc-if>
-</div>
-</sc-for>
-<sc-if value="{{noPickerMatch}}" hint-placeholder-val="{{false}}"><span style="padding: 18px 4px; font-size: 13.5px; color: {{t.sub}}">No tags match.</span></sc-if>
-</div>
-<div style="display: flex; align-items: center; gap: 10px; padding-top: 4px">
-<button onClick="{{clearTagsOnly}}" style="height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px; cursor: pointer">Clear tags</button>
-<span style="flex-grow: 1; font-size: 13px; color: {{t.sub}}">{{pickerSummary}}</span>
-<button onClick="{{closePicker}}" style="height: 34px; padding: 0 16px; border-radius: 8px; border: 0; background: {{accent}}; color: {{onAccent}}; font-size: 13.5px; font-weight: 600; cursor: pointer">{{pickerBtn}}</button>
-</div>
-</div>
-</div>
-</sc-if>
 
 <!-- All tags popover -->
 <sc-if value="{{tagsOpen}}" hint-placeholder-val="{{false}}">
@@ -888,23 +856,19 @@ button{font:inherit}
 <!-- Add entry dialog -->
 <sc-if value="{{ae.open}}" hint-placeholder-val="{{false}}">
 <div style="position: absolute; left: 0; right: 0; top: 38px; bottom: 0; z-index: 29; background: {{t.scrim}}"></div>
-<div role="dialog" aria-label="Add to library" style="position: absolute; left: 260px; top: 68px; z-index: 30; width: 1080px; height: 800px; box-sizing: border-box; border-radius: 14px; background: {{t.content}}; border: 1px solid {{t.line}}; box-shadow: {{t.popShadow}}; display: flex; flex-direction: column; overflow: hidden">
+<div role="dialog" aria-label="{{ae.heading}}" style="position: absolute; left: 260px; top: 68px; z-index: 30; width: 1080px; height: 800px; box-sizing: border-box; border-radius: 14px; background: {{t.content}}; border: 1px solid {{t.line}}; box-shadow: {{t.popShadow}}; display: flex; flex-direction: column; overflow: hidden">
 
 <div style="flex-shrink: 0; height: 60px; display: flex; align-items: center; gap: 14px; padding: 0 20px 0 24px; border-bottom: 1px solid {{t.divider}}">
-<h2 style="margin: 0; font-family: 'Figtree', sans-serif; font-size: 21px; font-weight: 800; letter-spacing: -0.03em">Add to library</h2>
+<h2 style="margin: 0; font-family: 'Figtree', sans-serif; font-size: 21px; font-weight: 800; letter-spacing: -0.03em">{{ae.heading}}</h2>
 <div role="group" aria-label="Type" style="display: flex; gap: 6px; margin-left: 12px">
-<button style="height: 28px; padding: 0 11px; border-radius: 14px; border: 1px solid {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px; display: flex; align-items: center; gap: 6px"><span style="width: 7px; height: 7px; border-radius: 3px; background: {{ae.p.Movies}}"></span>Movie</button>
-<button style="height: 28px; padding: 0 11px; border-radius: 14px; border: 1px solid {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px; display: flex; align-items: center; gap: 6px"><span style="width: 7px; height: 7px; border-radius: 3px; background: {{ae.p.Shows}}"></span>Show</button>
-<button style="height: 28px; padding: 0 11px; border-radius: 14px; border: 1px solid {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px; display: flex; align-items: center; gap: 6px"><span style="width: 7px; height: 7px; border-radius: 3px; background: {{ae.p.Books}}"></span>Book</button>
-<button aria-pressed="true" style="height: 28px; padding: 0 11px; border-radius: 14px; border: 1px solid {{ae.gameBorder}}; background: {{ae.gameSoft}}; color: {{ae.gameText}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px"><span style="width: 7px; height: 7px; border-radius: 3px; background: {{ae.p.Games}}"></span>Game</button>
-<button style="height: 28px; padding: 0 11px; border-radius: 14px; border: 1px solid {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px; display: flex; align-items: center; gap: 6px"><span style="width: 7px; height: 7px; border-radius: 3px; background: {{ae.p.Anime}}"></span>Anime</button>
-<button style="height: 28px; padding: 0 11px; border-radius: 14px; border: 1px solid {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px; display: flex; align-items: center; gap: 6px"><span style="width: 7px; height: 7px; border-radius: 3px; background: {{ae.p.Music}}"></span>Music</button>
+<sc-for list="{{ae.typeChips}}" as="y" hint-placeholder-count="6"><button aria-pressed="{{y.on}}" style="height: 28px; padding: 0 11px; border-radius: 14px; border: 1px solid {{y.border}}; background: {{y.bg}}; color: {{y.fg}}; font-size: 13px; font-weight: {{y.weight}}; display: flex; align-items: center; gap: 6px"><span style="width: 7px; height: 7px; border-radius: 3px; background: {{y.color}}"></span>{{y.label}}</button></sc-for>
 </div>
 <button onClick="{{ae.close}}" aria-label="Close" style="background: transparent; border: 0; cursor: pointer; margin-left: auto; width: 32px; height: 32px; border-radius: 8px; color: {{t.sub}}; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
 </div>
 
 <div style="flex-grow: 1; min-height: 0; display: flex">
 <!-- Results -->
+<sc-if value="{{ae.showLookup}}" hint-placeholder-val="{{true}}">
 <div style="width: 380px; flex-shrink: 0; box-sizing: border-box; border-right: 1px solid {{t.divider}}; padding: 18px; display: flex; flex-direction: column; gap: 12px; background: {{t.chrome}}">
 <label style="height: 40px; box-sizing: border-box; border-radius: 8px; border: 1px solid {{accent}}; background: {{t.field}}; display: flex; align-items: center; gap: 8px; padding: 0 12px; color: {{t.sub}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM16.5 16.5L21 21"></path></svg><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Search online</span><input value="castlevania" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: {{t.text}}; font: 15px 'Figtree', sans-serif"></label>
 <span style="font-size: 12px; color: {{t.sub}}">4 matches found online · ↑ ↓ to move, Enter to pick</span>
@@ -928,18 +892,19 @@ button{font:inherit}
 </div>
 <button style="margin-top: auto; height: 36px; border-radius: 8px; border: 1px dashed {{t.line}}; background: transparent; color: {{t.sub}}; cursor: pointer">Enter manually instead</button>
 </div>
+</sc-if>
 
 <!-- Form -->
 <div class="scroll" style="flex-grow: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 22px 26px; display: flex; gap: 24px; align-items: flex-start">
 <div style="width: 150px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px">
-<div style="width: 150px; height: 225px; box-sizing: border-box; border-radius: 8px; background: {{ae.gameTint}}; padding: 14px; display: flex; flex-direction: column; justify-content: flex-end; font-family: 'Figtree', sans-serif; font-size: 18px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; color: #FFFFFF">Castlevania: Belmont's Curse</div>
-<span style="font-size: 12px; color: {{t.sub}}; text-align: center">Cover fetched online</span>
+<div style="width: 150px; height: 225px; box-sizing: border-box; border-radius: 8px; background: {{ae.tint}}; padding: 14px; display: flex; flex-direction: column; justify-content: flex-end; font-family: 'Figtree', sans-serif; font-size: 18px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; color: #FFFFFF">{{ae.title}}</div>
+<span style="font-size: 12px; color: {{t.sub}}; text-align: center">{{ae.coverNote}}</span>
 </div>
 <div style="flex-grow: 1; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 18px; align-content: start">
-<label style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Title</span><input value="Castlevania: Belmont's Curse" style="height: 38px; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.text}}; padding: 0 12px; font: 15px 'Figtree', sans-serif"></label>
-<label style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Studio</span><input value="Evil Empire" style="height: 38px; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.text}}; padding: 0 12px; font: 15px 'Figtree', sans-serif"></label>
-<label style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Released</span><input value="2026-10-15" style="height: 38px; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.text}}; padding: 0 12px; font: 14px 'JetBrains Mono', monospace"></label>
-
+<label style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Title</span><input value="{{ae.title}}" style="height: 38px; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.text}}; padding: 0 12px; font: 15px 'Figtree', sans-serif"></label>
+<label style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">{{ae.creatorLabel}}</span><input value="{{ae.creator}}" style="height: 38px; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.text}}; padding: 0 12px; font: 15px 'Figtree', sans-serif"></label>
+<label style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Released</span><input value="{{ae.released}}" style="height: 38px; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.text}}; padding: 0 12px; font: 14px 'JetBrains Mono', monospace"></label>
+<sc-if value="{{ae.isGame}}" hint-placeholder-val="{{true}}">
 <div style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Platform</span>
 <div style="display: flex; flex-wrap: wrap; gap: 6px">
 <button aria-pressed="true" style="height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid {{accentBorder}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600">PC</button>
@@ -948,72 +913,151 @@ button{font:inherit}
 <button style="height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px">Switch</button>
 <button style="height: 30px; padding: 0 12px; border-radius: 15px; border: 1px dashed {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px">+ Other</button>
 </div></div>
+</sc-if>
 
 <div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Status</span>
 <div role="group" aria-label="Status" style="display: flex; border: 1px solid {{t.line}}; border-radius: 8px; overflow: hidden">
-<button aria-pressed="true" style="flex: 1 1 0; height: 34px; border: 0; border-right: 1px solid {{t.line}}; background: {{accentSoft}}; color: {{accentText}}; font-size: 13px; font-weight: 600">Want</button>
-<button style="flex: 1 1 0; height: 34px; border: 0; border-right: 1px solid {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px; font-weight: 600">Playing</button>
-<button style="flex: 1 1 0; height: 34px; border: 0; border-right: 1px solid {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px; font-weight: 600">Done</button>
-<button style="flex: 1 1 0; height: 34px; border: 0; background: transparent; color: {{t.sub}}; font-size: 13px; font-weight: 600">DNF</button>
+<sc-for list="{{ae.statusOpts}}" as="o" hint-placeholder-count="4"><button onClick="{{o.pick}}" aria-pressed="{{o.on}}" style="flex: 1 1 0; height: 34px; border: 0; border-right: {{o.sep}}; background: {{o.bg}}; color: {{o.fg}}; font-size: 13px; font-weight: 600; cursor: pointer">{{o.label}}</button></sc-for>
 </div></div>
 <div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Rating</span>
-<button style="height: 36px; align-self: flex-start; padding: 0 14px; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.sub}}; font-size: 13.5px">Not rated</button></div>
+<button style="height: 36px; align-self: flex-start; padding: 0 14px; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{ae.ratingFg}}; font-size: 13.5px">{{ae.ratingText}}</button></div>
 
 <div style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Tags</span>
 <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
-<sc-for list="{{ae.chosen}}" as="c" hint-placeholder-count="1"><button onClick="{{c.remove}}" aria-label="{{c.aria}}" style="height: 30px; padding: 0 8px 0 11px; border-radius: 15px; border: 1px solid {{ae.selBg}}; background: {{ae.selBg}}; color: {{t.text}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">{{c.label}}<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-for>
+<sc-for list="{{ae.chosen}}" as="c" hint-placeholder-count="1"><button onClick="{{c.remove}}" aria-label="{{c.aria}}" style="height: 30px; padding: 0 8px 0 11px; border-radius: 15px; border: 1px solid {{ae.selBg}}; background: {{ae.selBg}}; color: {{t.text}}; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; cursor: pointer">{{c.label}}<span style="color: {{t.sub}}; font-weight: 400; margin-left: -1px">{{c.role}}</span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></sc-for>
 <button onClick="{{ae.openPicker}}" style="height: 30px; padding: 0 8px 0 11px; border-radius: 15px; border: 1px dashed {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 4px">{{ae.tagBtn}}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
 </div>
-<sc-if value="{{ae.hasSuggested}}" hint-placeholder-val="{{true}}"><div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center"><span style="font-size: 12px; color: {{t.sub}}; margin-right: 2px">Suggested from IGDB</span>
+<sc-if value="{{ae.hasSuggested}}" hint-placeholder-val="{{true}}"><div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center"><span style="font-size: 12px; color: {{t.sub}}; margin-right: 2px">{{ae.sugLabel}}</span>
 <sc-for list="{{ae.suggested}}" as="g" hint-placeholder-count="3"><button onClick="{{g.add}}" style="height: 28px; padding: 0 10px; border-radius: 14px; border: 1px dashed {{t.line}}; background: transparent; color: {{t.text}}; font-size: 12.5px; cursor: pointer">+ {{g.label}}<span style="margin-left: 6px; font-size: 11.5px; color: {{t.sub}}">{{g.note}}</span></button></sc-for>
 </div></sc-if>
 </div>
 
-<label style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Description</span><textarea style="height: 64px; box-sizing: border-box; resize: none; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.text}}; padding: 9px 12px; font: 14px/1.5 'Figtree', sans-serif">A new Castlevania from the team behind Dead Cells, with Motion Twin advising.</textarea></label>
-<label style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Note</span><input placeholder="Your own note (optional)" style="height: 38px; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.text}}; padding: 0 12px; font: italic 14px 'Figtree', sans-serif"></label>
+<label style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Description</span><textarea style="height: 64px; box-sizing: border-box; resize: none; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.text}}; padding: 9px 12px; font: 14px/1.5 'Figtree', sans-serif">{{ae.desc}}</textarea></label>
+<label style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12.5px; font-weight: 600; color: {{t.sub}}">Note</span><input value="{{ae.note}}" placeholder="{{ae.notePh}}" style="height: 38px; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.text}}; padding: 0 12px; font: italic 14px 'Figtree', sans-serif"></label>
 </div>
 </div>
 </div>
 
 <div style="flex-shrink: 0; height: 62px; display: flex; align-items: center; gap: 10px; padding: 0 20px 0 24px; border-top: 1px solid {{t.divider}}">
-<span style="font-size: 12.5px; color: {{t.sub}}">Fetched online. Every field can be edited.</span>
-<label style="margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: {{t.sub}}">Also add to plan<select style="height: 34px; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.text}}; padding: 0 8px; font: 13.5px 'Figtree', sans-serif"><option>None</option><option>Halloween 2026</option><option>Winter break</option></select></label>
+<span style="font-size: 12.5px; color: {{t.sub}}; margin-right: auto">{{ae.footNote}}</span>
+<sc-if value="{{ae.isAdd}}" hint-placeholder-val="{{true}}"><label style=" display: flex; align-items: center; gap: 8px; font-size: 13px; color: {{t.sub}}">Also add to plan<select style="height: 34px; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; color: {{t.text}}; padding: 0 8px; font: 13.5px 'Figtree', sans-serif"><option>None</option><option>Halloween 2026</option><option>Winter break</option></select></label></sc-if>
 <button onClick="{{ae.close}}" style="background: transparent; cursor: pointer; height: 36px; padding: 0 16px; border-radius: 8px; border: 1px solid {{t.line}}; color: {{t.text}}; text-decoration: none; display: flex; align-items: center; gap: 8px">Cancel<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{t.sub}}">Esc</span></button>
-<button onClick="{{ae.close}}" style="border: 0; cursor: pointer; height: 36px; padding: 0 16px; border-radius: 8px; background: {{accent}}; color: {{onAccent}}; font-weight: 600; text-decoration: none; display: flex; align-items: center; gap: 8px">Add to library<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; opacity: 0.7">Ctrl ↵</span></button>
+<button onClick="{{ae.close}}" style="border: 0; cursor: pointer; height: 36px; padding: 0 16px; border-radius: 8px; background: {{accent}}; color: {{onAccent}}; font-weight: 600; text-decoration: none; display: flex; align-items: center; gap: 8px">{{ae.primary}}<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; opacity: 0.7">Ctrl ↵</span></button>
 </div>
 
-<!-- Tag picker -->
-<sc-if value="{{ae.pickerOpen}}" hint-placeholder-val="{{false}}">
-<div style="position: absolute; inset: 0; z-index: 20; background: {{ae.scrim}}; display: flex; align-items: center; justify-content: center">
-<div role="dialog" aria-label="Tags" style="width: 560px; height: 600px; box-sizing: border-box; border-radius: 14px; background: {{t.pop}}; border: 1px solid {{t.line}}; box-shadow: {{t.popShadow}}; display: flex; flex-direction: column; padding: 18px 18px 14px; gap: 12px">
-<div style="display: flex; align-items: center; gap: 10px">
-<h3 style="margin: 0; font-family: 'Figtree', sans-serif; font-size: 19px; font-weight: 800; letter-spacing: -0.03em">Tags</h3>
-<span style="font-size: 13px; color: {{t.sub}}">Pick existing tags or create a new one</span>
-<button onClick="{{ae.closePicker}}" aria-label="Close" style="margin-left: auto; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: {{t.sub}}; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
 </div>
-<label style="height: 36px; flex-shrink: 0; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: {{t.sub}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM16.5 16.5L21 21"></path></svg><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Search or create a tag</span><input onInput="{{ae.onQuery}}" placeholder="Search or create a tag" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: {{t.text}}; font: 14px 'Figtree', sans-serif"></label>
-<sc-if value="{{ae.canCreate}}" hint-placeholder-val="{{false}}">
-<div style="border-radius: 10px; border: 1px solid {{t.line}}; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px">
+</sc-if>
+
+<!-- Tag dialog: Filter's "All tags…" and the entry form's Tags share it -->
+<sc-if value="{{pk.open}}" hint-placeholder-val="{{false}}">
+<div style="position: absolute; inset: 38px 0 0 0; z-index: 35; background: {{scrim}}; display: flex; align-items: center; justify-content: center">
+<div role="dialog" aria-label="{{pk.title}}" data-tagdlg="1" style="position: relative; width: 600px; height: 660px; box-sizing: border-box; border-radius: 14px; background: {{t.pop}}; border: 1px solid {{t.line}}; box-shadow: {{t.popShadow}}; display: flex; flex-direction: column; padding: 18px 18px 14px; gap: 12px">
+<sc-if value="{{pk.isList}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; align-items: center; gap: 10px">
+<h3 style="margin: 0; font-family: 'Figtree', sans-serif; font-size: 19px; font-weight: 800; letter-spacing: -0.03em">{{pk.title}}</h3>
+<span style="font-size: 12.5px; color: {{t.sub}}">{{pk.subtitle}}</span>
+<button onClick="{{pk.close}}" aria-label="Close" style="margin-left: auto; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: {{t.sub}}; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+</div>
+<label style="height: 36px; flex-shrink: 0; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: {{t.sub}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM16.5 16.5L21 21"></path></svg><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">{{pk.ph}}</span><input value="{{pk.q}}" onInput="{{pk.onQ}}" placeholder="{{pk.ph}}" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: {{t.text}}; font: 14px 'Figtree', sans-serif"></label>
+<sc-if value="{{pk.canCreate}}" hint-placeholder-val="{{false}}">
+<div style="flex-shrink: 0; border-radius: 10px; border: 1px solid {{t.line}}; padding: 10px 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
 <sc-if value="{{ae.hasSimilar}}" hint-placeholder-val="{{false}}"><span style="font-size: 13px; color: {{t.text}}">Did you mean <sc-for list="{{ae.similar}}" as="g" hint-placeholder-count="1"><button onClick="{{g.pick}}" style="height: 26px; margin: 0 4px; padding: 0 10px; border-radius: 13px; border: 1px solid {{t.line}}; background: transparent; color: {{t.text}}; font-size: 13px; cursor: pointer">{{g.label}}</button></sc-for>?</span></sc-if>
-<div style="display: flex; align-items: center; gap: 10px"><span style="flex-grow: 1; font-size: 13px; color: {{t.sub}}">{{ae.createHint}}</span><button onClick="{{ae.createTag}}" style="height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid {{t.line}}; background: transparent; color: {{t.text}}; font-size: 13px; font-weight: 600; cursor: pointer">Create {{ae.newTag}}</button></div>
+<span style="flex-grow: 1; font-size: 13px; color: {{t.sub}}">{{ae.createHint}}</span><button onClick="{{ae.createTag}}" style="height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid {{t.line}}; background: transparent; color: {{t.text}}; font-size: 13px; font-weight: 600; cursor: pointer">Create {{ae.newTag}}…</button>
 </div>
 </sc-if>
 <div class="scroll" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 4px">
-<sc-for list="{{ae.groups}}" as="grp" hint-placeholder-count="4">
+<sc-for list="{{pk.groups}}" as="grp" hint-placeholder-count="4">
 <div style="display: flex; flex-direction: column; gap: 4px">
-<button onClick="{{grp.toggle}}" aria-expanded="{{grp.open}}" style="height: 36px; border: 0; border-radius: 8px; background: transparent; display: flex; align-items: center; gap: 8px; padding: 0 4px; cursor: pointer; text-align: left; color: {{t.sub}}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" style="transform: rotate({{grp.rot}}); transition: transform 0.15s"><path d="M9 6l6 6-6 6"></path></svg><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase">{{grp.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px">{{grp.count}}</span><span style="margin-left: auto; font-size: 12px; color: {{t.text}}">{{grp.picked}}</span></button>
-<sc-if value="{{grp.open}}" hint-placeholder-val="{{false}}"><div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 0 4px 12px 26px"><sc-for list="{{grp.tags}}" as="o" hint-placeholder-count="4"><button onClick="{{o.pick}}" aria-pressed="{{o.on}}" style="height: 30px; padding: 0 11px; border-radius: 15px; border: 1px solid {{o.border}}; background: {{o.bg}}; color: {{t.text}}; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px">{{o.label}}<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{t.sub}}">{{o.count}}</span></button></sc-for></div></sc-if>
+<sc-if value="{{grp.isFold}}" hint-placeholder-val="{{true}}">
+<button onClick="{{grp.toggle}}" aria-expanded="{{grp.open}}" style="height: 36px; flex-shrink: 0; border: 0; border-radius: 8px; background: transparent; display: flex; align-items: center; gap: 8px; padding: 0 4px; cursor: pointer; text-align: left; color: {{t.sub}}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" style="transform: rotate({{grp.rot}}); transition: transform 0.15s"><path d="M9 6l6 6-6 6"></path></svg><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{hdr.color}}">{{grp.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{t.sub}}">{{grp.count}}</span><span style="margin-left: auto; font-size: 12px; color: {{t.text}}">{{grp.picked}}</span></button>
+<sc-if value="{{grp.open}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 0 4px 12px 26px">
+<sc-for list="{{grp.tags}}" as="o" hint-placeholder-count="4"><button onClick="{{o.pick}}" onContextMenu="{{o.menu}}" aria-pressed="{{o.on}}" style="height: 30px; padding: 0 11px; border-radius: 15px; border: 1px solid {{o.border}}; background: {{o.bg}}; color: {{t.text}}; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px"><sc-if value="{{o.on}}" hint-placeholder-val="{{false}}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></sc-if>{{o.label}}<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{t.sub}}">{{o.count}}</span></button></sc-for>
+</div>
+<sc-for list="{{grp.addRows}}" as="r" hint-placeholder-count="0"><div style="display: flex; align-items: center; gap: 12px; padding: 0 4px 12px 26px"><span style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><span style="font-size: 13.5px; font-weight: 600">{{r.label}}</span><span style="font-size: 12px; color: {{t.sub}}">{{r.sub}}</span></span><button onClick="{{r.add}}" style="margin-left: auto; height: 30px; padding: 0 12px; border-radius: 15px; border: 1px dashed {{t.line}}; background: transparent; color: {{t.text}}; font-size: 13px; font-weight: 600; cursor: pointer">{{r.addLabel}}</button></div></sc-for>
+</sc-if>
+</sc-if>
+<sc-if value="{{grp.isLong}}" hint-placeholder-val="{{false}}">
+<button onClick="{{grp.drill}}" style="height: 40px; flex-shrink: 0; border: 0; border-radius: 8px; background: transparent; display: flex; align-items: center; gap: 8px; padding: 0 4px; cursor: pointer; text-align: left; color: {{t.sub}}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9"></path></svg><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{hdr.color}}">{{grp.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{t.sub}}">{{grp.count}}</span><span style="margin-left: auto; font-size: 12px; color: {{t.text}}">{{grp.picked}}</span><span style="font-size: 12.5px; color: {{t.sub}}; margin-left: 10px">Show all</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
+</sc-if>
 </div>
 </sc-for>
+<sc-if value="{{pk.none}}" hint-placeholder-val="{{false}}"><span style="padding: 18px 4px; font-size: 13.5px; color: {{t.sub}}">No tags match.</span></sc-if>
 </div>
+</sc-if>
+<sc-if value="{{pk.isDrill}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; align-items: center; gap: 8px">
+<button onClick="{{pk.drill.back}}" aria-label="Back to all tags" style="width: 30px; height: 30px; margin-left: -4px; border: 0; border-radius: 8px; background: transparent; color: {{t.text}}; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg></button>
+<h3 style="margin: 0; font-family: 'Figtree', sans-serif; font-size: 19px; font-weight: 800; letter-spacing: -0.03em">{{pk.drill.name}}</h3>
+<span style="font-size: 12.5px; color: {{t.sub}}">{{pk.drill.line}}</span>
+<button onClick="{{pk.close}}" aria-label="Close" style="margin-left: auto; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; color: {{t.sub}}; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+</div>
+<label style="height: 36px; flex-shrink: 0; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: {{t.sub}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM16.5 16.5L21 21"></path></svg><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">{{pk.drill.ph}}</span><input value="{{pk.drill.q}}" onInput="{{pk.drill.onQ}}" placeholder="{{pk.drill.ph}}" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: {{t.text}}; font: 14px 'Figtree', sans-serif"></label>
+<div data-drill="1" style="flex: 1 1 auto; min-height: 0; position: relative; display: flex">
+<div class="scroll" style="position: relative; flex-grow: 1; min-width: 0; overflow-y: auto; padding-right: 30px">
+<sc-for list="{{pk.drill.sections}}" as="sec" hint-placeholder-count="2">
+<div data-letter="{{sec.letter}}" style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.sub}}; padding: 12px 8px 4px">{{sec.letter}}</div>
+<sc-for list="{{sec.rows}}" as="r" hint-placeholder-count="3"><button onClick="{{r.pick}}" aria-pressed="{{r.on}}" style="width: 100%; height: 48px; border: 0; border-radius: 8px; background: {{r.bg}}; color: {{t.text}}; display: flex; align-items: center; gap: 12px; padding: 0 8px; cursor: pointer; text-align: left"><span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14.5px; font-weight: 600">{{r.name}}</span><span style="font-size: 12.5px; color: {{t.sub}}">{{r.sub}}</span></span><span aria-hidden="true" style="width: 20px; height: 20px; box-sizing: border-box; border-radius: 10px; border: 2px solid {{r.ring}}; background: {{r.fill}}; color: {{onAccent}}; display: flex; align-items: center; justify-content: center; flex-shrink: 0"><span style="display: {{r.checkDisp}}; line-height: 0"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span></span></button></sc-for>
+</sc-for>
+<sc-if value="{{pk.drill.none}}" hint-placeholder-val="{{false}}"><span style="display: block; padding: 18px 8px; font-size: 13.5px; color: {{t.sub}}">No match.</span></sc-if>
+</div>
+<div aria-label="Jump to letter" style="position: absolute; right: 0; top: 4px; bottom: 4px; width: 20px; display: flex; flex-direction: column; justify-content: space-between; align-items: center">
+<sc-for list="{{pk.drill.rail}}" as="rl" hint-placeholder-count="26"><button onClick="{{rl.jump}}" style="width: 20px; height: 16px; padding: 0; border: 0; background: transparent; color: {{rl.color}}; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 500; cursor: pointer">{{rl.l}}</button></sc-for>
+</div>
+</div>
+</sc-if>
 <div style="display: flex; align-items: center; gap: 10px; padding-top: 4px">
-<button onClick="{{ae.clearTags}}" style="height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px; cursor: pointer">Clear</button>
-<span style="flex-grow: 1; font-size: 13px; color: {{t.sub}}">{{ae.summary}}</span>
-<button onClick="{{ae.closePicker}}" style="height: 34px; padding: 0 16px; border-radius: 8px; border: 0; background: {{accent}}; color: {{onAccent}}; font-size: 13.5px; font-weight: 600; cursor: pointer">Done</button>
+<button onClick="{{pk.clear}}" style="height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13px; cursor: pointer">{{pk.clearLabel}}</button>
+<span style="flex-grow: 1; font-size: 13px; color: {{t.sub}}">{{pk.summary}}</span>
+<button onClick="{{pk.btnRun}}" style="height: 34px; padding: 0 16px; border-radius: 8px; border: 0; background: {{accent}}; color: {{onAccent}}; font-size: 13.5px; font-weight: 600; cursor: pointer">{{pk.btn}}</button>
+</div>
+<sc-if value="{{menu.open}}" hint-placeholder-val="{{false}}">
+<button onClick="{{menu.close}}" aria-label="Close menu" style="position: absolute; inset: 0; z-index: 9; border: 0; padding: 0; background: transparent; cursor: default"></button>
+<div role="menu" aria-label="{{menu.tag}}" style="position: absolute; left: {{menu.x}}; top: {{menu.y}}; z-index: 10; width: 250px; box-sizing: border-box; padding: 6px; border-radius: 10px; background: {{t.pop}}; border: 1px solid {{t.line}}; box-shadow: {{t.popShadow}}; display: flex; flex-direction: column">
+<span style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: {{t.sub}}; padding: 6px 10px 4px">{{menu.tag}}</span>
+<sc-for list="{{menu.items}}" as="m" hint-placeholder-count="2"><button role="menuitem" onClick="{{m.run}}" style="height: 34px; border: 0; border-radius: 7px; background: transparent; color: {{t.text}}; display: flex; align-items: center; gap: 10px; padding: 0 10px; cursor: pointer; font-size: 13.5px; text-align: left"><span style="flex-grow: 1">{{m.label}}</span><span style="font-size: 12px; color: {{t.sub}}">{{m.hint}}</span></button></sc-for>
+</div>
+</sc-if>
+</div>
+</div>
+</sc-if>
+
+<!-- A tag's categories (right-click › Categories… or Move to another group…) -->
+<sc-if value="{{cd.open}}" hint-placeholder-val="{{false}}">
+<div style="position: absolute; inset: 38px 0 0 0; z-index: 45; background: {{scrim}}; display: flex; align-items: center; justify-content: center">
+<div role="dialog" aria-label="Categories of {{cd.tag}}" style="width: 460px; box-sizing: border-box; border-radius: 14px; background: {{t.pop}}; border: 1px solid {{t.line}}; box-shadow: {{t.popShadow}}; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-family: 'Figtree', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.03em">{{cd.tag}}</h2>
+<p style="margin: 0; font-size: 13.5px; color: {{t.sub}}">{{cd.used}}</p>
+<span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.sub}}; padding-top: 4px">{{cd.head}}</span>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{cd.chips}}" as="c" hint-placeholder-count="3"><button onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="height: 32px; padding: 0 13px; border-radius: 16px; border: 1px solid {{c.border}}; background: {{c.bg}}; color: {{t.text}}; font-size: 13.5px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px"><span style="display: {{c.checkDisp}}; line-height: 0"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>{{c.label}}</button></sc-for>
+</div>
+<p style="margin: 0; font-size: 12.5px; line-height: 1.5; color: {{t.sub}}">{{cd.hint}}</p>
+<div style="display: flex; justify-content: flex-end; gap: 10px; padding-top: 6px">
+<button onClick="{{cd.cancel}}" style="height: 36px; padding: 0 16px; border-radius: 8px; border: 1px solid {{t.line}}; background: transparent; color: {{t.text}}; font-size: 13.5px; cursor: pointer">Cancel</button>
+<button onClick="{{cd.save}}" style="height: 36px; padding: 0 18px; border-radius: 8px; border: 0; background: {{accent}}; color: {{onAccent}}; font-size: 13.5px; font-weight: 600; cursor: pointer">{{cd.saveLabel}}</button>
 </div>
 </div>
 </div>
 </sc-if>
+
+<!-- New tag: confirm and pick one or more categories -->
+<sc-if value="{{nt.open}}" hint-placeholder-val="{{false}}">
+<div style="position: absolute; inset: 38px 0 0 0; z-index: 45; background: {{scrim}}; display: flex; align-items: center; justify-content: center">
+<div role="dialog" aria-label="Create a new tag" style="width: 500px; box-sizing: border-box; border-radius: 14px; background: {{t.pop}}; border: 1px solid {{t.line}}; box-shadow: {{t.popShadow}}; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-family: 'Figtree', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.03em">Create a new tag?</h2>
+<p style="margin: 0; font-size: 14px"><span style="font-weight: 700">{{nt.tag}}</span> is not in your tag list yet.</p>
+<span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{t.sub}}; padding-top: 4px">Categories</span>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{nt.cats}}" as="c" hint-placeholder-count="13"><button onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="height: 32px; padding: 0 13px; border-radius: 16px; border: 1px solid {{c.border}}; background: {{c.bg}}; color: {{t.text}}; font-size: 13.5px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px"><span style="display: {{c.checkDisp}}; line-height: 0"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>{{c.label}}</button></sc-for>
+</div>
+<p style="margin: 0; font-size: 13px; color: {{t.text}}">{{nt.sentence}}</p>
+<p style="margin: 0; font-size: 12.5px; line-height: 1.5; color: {{t.sub}}">People can be in more than one people category (Authors, Directors, Actors), genres in more than one genre category. Picking a category of another kind starts over with it.</p>
+<div style="display: flex; justify-content: flex-end; gap: 10px; padding-top: 6px">
+<button onClick="{{nt.cancel}}" style="height: 36px; padding: 0 16px; border-radius: 8px; border: 1px solid {{t.line}}; background: transparent; color: {{t.text}}; font-size: 13.5px; cursor: pointer">Cancel</button>
+<button onClick="{{nt.create}}" style="height: 36px; padding: 0 18px; border-radius: 8px; border: 0; background: {{accent}}; color: {{onAccent}}; font-size: 13.5px; font-weight: 600; cursor: pointer">Create tag</button>
+</div>
+</div>
 </div>
 </sc-if>
 
@@ -1040,7 +1084,7 @@ button{font:inherit}
 
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;bg&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;graphite&quot;,&quot;charcoal&quot;,&quot;mocha&quot;,&quot;light&quot;],&quot;default&quot;:&quot;graphite&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#F8B289&quot;,&quot;#FF7AB6&quot;,&quot;#A78BFA&quot;,&quot;#5AA9FF&quot;],&quot;default&quot;:&quot;#F8B289&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;flat&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;section&quot;:&quot;Theme&quot;},&quot;typeBoxes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;section&quot;:&quot;Settings&quot;},&quot;tokenWarning&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;off&quot;,&quot;6 days&quot;,&quot;1 day&quot;,&quot;expired&quot;],&quot;default&quot;:&quot;off&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;sidebarTags&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;pinned&quot;,&quot;mostUsed&quot;],&quot;default&quot;:&quot;mostUsed&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;$preview&quot;:{&quot;width&quot;:1600,&quot;height&quot;:900}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;bg&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;graphite&quot;,&quot;charcoal&quot;,&quot;mocha&quot;,&quot;light&quot;],&quot;default&quot;:&quot;graphite&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#F8B289&quot;,&quot;#FF7AB6&quot;,&quot;#A78BFA&quot;,&quot;#5AA9FF&quot;],&quot;default&quot;:&quot;#F8B289&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;flat&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;section&quot;:&quot;Theme&quot;},&quot;typeBoxes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;section&quot;:&quot;Settings&quot;},&quot;tokenWarning&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;off&quot;,&quot;6 days&quot;,&quot;1 day&quot;,&quot;expired&quot;],&quot;default&quot;:&quot;off&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;sidebarTags&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;pinned&quot;,&quot;mostUsed&quot;],&quot;default&quot;:&quot;mostUsed&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;start&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Library&quot;,&quot;Entry details: tag in two categories&quot;,&quot;Filter: Clint Eastwood as director&quot;,&quot;Filter: tag dialog with a long group&quot;,&quot;Filter: all Authors&quot;,&quot;Edit: tags in two categories&quot;,&quot;Edit: tag picker, ticks per group&quot;,&quot;Edit: right-click a tag&quot;,&quot;Edit: tag categories dialog&quot;,&quot;Edit: search offers Add to Directors&quot;,&quot;Edit: move a tag to Languages&quot;,&quot;Edit: new tag in two categories&quot;],&quot;default&quot;:&quot;Library&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;$preview&quot;:{&quot;width&quot;:1600,&quot;height&quot;:900}}">
 const THEMES = {
   graphite: { chrome: "#131416", content: "#1D1F22", raised: "#2A2D31", field: "#1D1F22", line: "#3A3E44", text: "#EEF0F2", sub: "#A3A8AE" },
   charcoal: { chrome: "#151515", content: "#1C1C1C", raised: "#272727", field: "#202020", line: "#2E2E2E", text: "#EDEDED", sub: "#A3A3A3" },
@@ -1062,11 +1106,11 @@ const ENTRIES = [
   { id: "m1", type: "Movies", title: "The Mummy", creator: "Stephen Sommers", released: "1999", status: "done", rating: 8, tags: ["#adventure", "#halloween", "#lighthearted"], note: "Comfort rewatch every October.", desc: "An adventurer and a librarian accidentally wake a cursed high priest during a 1920s dig in Egypt.", plans: ["Halloween 2026"] },
   { id: "m2", type: "Movies", title: "The Shining", creator: "Stanley Kubrick", released: "1980", status: "done", rating: 9, tags: ["#horror", "#stephen-king", "#scary"], note: "", desc: "A writer takes a winter caretaker job at an isolated mountain hotel, and the hotel slowly gets to him.", plans: ["Halloween 2026"] },
   { id: "m3", type: "Movies", title: "Doctor Sleep", creator: "Mike Flanagan", released: "2019", status: "done", rating: 8, tags: ["#horror", "#stephen-king", "#mike-flanagan", "#scary"], note: "Director's cut next time.", desc: "Decades after the Overlook, a grown-up Danny Torrance protects a girl with the same gift from a cult that feeds on it.", plans: ["Halloween 2026"] },
-  { id: "m4", type: "Movies", title: "Inception", creator: "Christopher Nolan", released: "2010", status: "done", rating: 9, tags: ["#sci-fi", "#leonardo-dicaprio"], note: "", desc: "A thief who steals secrets from dreams is hired to plant an idea instead.", plans: [] },
-  { id: "m5", type: "Movies", title: "Interstellar", creator: "Christopher Nolan", released: "2014", status: "done", rating: 10, tags: ["#sci-fi", "#favorite"], note: "", desc: "A former pilot leaves his family to search for a new home for humanity through a wormhole.", plans: [] },
+  { id: "m4", type: "Movies", title: "Inception", creator: "Christopher Nolan", released: "2010", status: "done", rating: 9, tags: ["#sci-fi", "#leonardo-dicaprio", "#christopher-nolan"], note: "", desc: "A thief who steals secrets from dreams is hired to plant an idea instead.", plans: [] },
+  { id: "m5", type: "Movies", title: "Interstellar", creator: "Christopher Nolan", released: "2014", status: "done", rating: 10, tags: ["#sci-fi", "#favorite", "#christopher-nolan"], note: "", desc: "A former pilot leaves his family to search for a new home for humanity through a wormhole.", plans: [] },
   { id: "m6", type: "Movies", title: "Dune: Part Three", creator: "Denis Villeneuve", released: "2026-12-18", status: "want", rating: null, tags: ["#sci-fi"], note: "Early IMAX 70mm show on Dec 14?", desc: "The final chapter of Villeneuve's Dune adaptation.", plans: ["Christmas 2026"] },
   { id: "m7", type: "Movies", title: "The Exorcist: Martyrs", creator: "Mike Flanagan", released: "2027-03-12", status: "want", rating: null, tags: ["#horror", "#mike-flanagan"], note: "", desc: "Flanagan's take on The Exorcist, with Scarlett Johansson and Chiwetel Ejiofor.", plans: [] },
-  { id: "m8", type: "Movies", title: "Werwulf", creator: "Robert Eggers", released: "2026-12-25", status: "want", rating: null, tags: ["#horror", "#scary"], note: "", desc: "Robert Eggers' werewolf film set in 13th-century England.", plans: ["Christmas 2026"] },
+  { id: "m8", type: "Movies", title: "Werwulf", creator: "Robert Eggers", released: "2026-12-25", status: "want", rating: null, tags: ["#horror", "#scary", "#robert-eggers"], note: "", desc: "Robert Eggers' werewolf film set in 13th-century England.", plans: ["Christmas 2026"] },
   { id: "m9", type: "Movies", title: "It", creator: "Andy Muschietti", released: "2017", status: "done", rating: 7, tags: ["#horror", "#stephen-king", "#scary"], note: "", desc: "A group of kids in Derry, Maine face a shape-shifting creature that hunts children.", plans: ["Halloween 2026"] },
   { id: "m10", type: "Movies", title: "Jurassic Park", creator: "Steven Spielberg", released: "1993", status: "done", rating: 9, tags: ["#adventure", "#favorite"], note: "", desc: "A theme park of cloned dinosaurs breaks down during its preview tour.", plans: [] },
   { id: "m11", type: "Movies", title: "Shutter Island", creator: "Martin Scorsese", released: "2010", status: "dnf", rating: null, tags: ["#thriller", "#leonardo-dicaprio"], note: "Stopped halfway, try again.", desc: "A U.S. Marshal investigates a disappearance at a hospital for the criminally insane.", plans: [] },
@@ -1074,17 +1118,20 @@ const ENTRIES = [
   { id: "m13", type: "Movies", title: "Avengers: Doomsday", creator: "Russo brothers", released: "2026-12-18", status: "want", rating: null, tags: ["#action", "#sci-fi"], note: "", desc: "The Avengers face Doctor Doom.", plans: [] },
   { id: "m14", type: "Movies", title: "Shrek 5", creator: "Walt Dohrn", released: "2027-06-30", status: "want", rating: null, tags: ["#lighthearted"], note: "", desc: "The fifth Shrek film.", plans: [] },
   { id: "m15", type: "Movies", title: "The Batman Part II", creator: "Matt Reeves", released: "2027-10-01", status: "want", rating: null, tags: ["#thriller"], note: "", desc: "The sequel to The Batman.", plans: [] },
+  { id: "m16", type: "Movies", title: "Million Dollar Baby", creator: "Clint Eastwood", released: "2004-12-15", status: "done", rating: 9, tags: ["#drama", "#sports", "#clint-eastwood", "#hilary-swank", "#morgan-freeman"], tagCats: { "#clint-eastwood": ["Directors", "Actors"], "#sports": ["Genres"] }, note: "Rewatch with the commentary on.", desc: "A hardened boxing trainer reluctantly takes on a determined young fighter.", plans: [] },
+  { id: "m17", type: "Movies", title: "The Good, the Bad and the Ugly", creator: "Sergio Leone", released: "1966-12-23", status: "done", rating: 10, tags: ["#western", "#clint-eastwood", "#sergio-leone"], tagCats: { "#clint-eastwood": ["Actors"] }, note: "", desc: "Three gunslingers race to find a fortune in buried Confederate gold.", plans: [] },
   { id: "s1", type: "Shows", title: "Carrie", creator: "Mike Flanagan", released: "2026-10-07", status: "prog", rating: null, tags: ["#horror", "#stephen-king", "#mike-flanagan"], note: "3 of 8 episodes.", desc: "Flanagan's eight-episode series based on Stephen King's first novel.", plans: ["Halloween 2026"] },
   { id: "s2", type: "Shows", title: "Shōgun", creator: "Rachel Kondo & Justin Marks", released: "2024", status: "done", rating: 9, tags: ["#historical"], note: "S2 has wrapped filming.", desc: "An English navigator shipwrecked in feudal Japan is drawn into a lord's fight for power.", plans: [] },
-  { id: "s3", type: "Shows", title: "Pluribus", creator: "Vince Gilligan", released: "2025", status: "done", rating: 9, tags: ["#sci-fi"], note: "", desc: "One of the few people unaffected by a strange global change tries to save humanity from happiness.", plans: [] },
-  { id: "s4", type: "Shows", title: "The Haunting of Hill House", creator: "Mike Flanagan", released: "2018", status: "done", rating: 10, tags: ["#horror", "#mike-flanagan", "#favorite", "#scary"], note: "", desc: "Siblings who grew up in a haunted house are pulled back together by tragedy.", plans: [] },
-  { id: "s5", type: "Shows", title: "Midnight Mass", creator: "Mike Flanagan", released: "2021", status: "done", rating: 9, tags: ["#horror", "#mike-flanagan", "#scary", "#dark"], note: "", desc: "A charismatic priest's arrival on a dying island brings miracles, and something else.", plans: [] },
-  { id: "s6", type: "Shows", title: "Severance", creator: "Dan Erickson", released: "2022", status: "prog", rating: null, tags: ["#sci-fi", "#thriller"], note: "Season 2, episode 6.", desc: "Office workers whose work and home memories have been surgically split start to question their jobs.", plans: [] },
+  { id: "s3", type: "Shows", title: "Pluribus", creator: "Vince Gilligan", released: "2025", status: "done", rating: 9, tags: ["#sci-fi", "#apple-tv"], note: "", desc: "One of the few people unaffected by a strange global change tries to save humanity from happiness.", plans: [] },
+  { id: "s4", type: "Shows", title: "The Haunting of Hill House", creator: "Mike Flanagan", released: "2018", status: "done", rating: 10, tags: ["#horror", "#mike-flanagan", "#favorite", "#scary", "#netflix"], note: "", desc: "Siblings who grew up in a haunted house are pulled back together by tragedy.", plans: [] },
+  { id: "s5", type: "Shows", title: "Midnight Mass", creator: "Mike Flanagan", released: "2021", status: "done", rating: 9, tags: ["#horror", "#mike-flanagan", "#scary", "#dark", "#netflix", "#kate-siegel"], note: "", desc: "A charismatic priest's arrival on a dying island brings miracles, and something else.", plans: [] },
+  { id: "s6", type: "Shows", title: "Severance", creator: "Dan Erickson", released: "2022", status: "prog", rating: null, tags: ["#sci-fi", "#thriller", "#apple-tv"], note: "Season 2, episode 6.", desc: "Office workers whose work and home memories have been surgically split start to question their jobs.", plans: [] },
   { id: "b1", type: "Books", title: "Other Worlds Than These", creator: "Stephen King & Peter Straub", released: "2026-10-06", status: "want", rating: null, tags: ["#stephen-king", "#dark-tower"], note: "", desc: "The final Talisman book, tying into the Dark Tower.", plans: ["Halloween 2026"] },
   { id: "b2", type: "Books", title: "The Gunslinger", creator: "Stephen King", released: "1982", status: "done", rating: 8, tags: ["#stephen-king", "#dark-tower"], note: "", desc: "Roland, the last gunslinger, follows the man in black across a dying desert.", plans: [] },
   { id: "b3", type: "Books", title: "Pet Sematary", creator: "Stephen King", released: "1983", status: "prog", rating: null, tags: ["#horror", "#stephen-king", "#scary"], note: "", desc: "A family discovers the burial ground behind their new home brings things back.", plans: ["Halloween 2026"] },
   { id: "b4", type: "Books", title: "The Weight of Angels", creator: "John Boyne", released: "2026-10-01", status: "want", rating: null, tags: ["#john-boyne"], note: "", desc: "An alternate-life novel about Oscar Wilde.", plans: [] },
   { id: "b5", type: "Books", title: "The Boy in the Striped Pajamas", creator: "John Boyne", released: "2006", status: "done", rating: 9, tags: ["#john-boyne"], note: "", desc: "A commandant's son befriends a boy on the other side of a fence.", plans: [] },
+  { id: "b6", type: "Books", title: "The Girl with the Dragon Tattoo", creator: "Stieg Larsson", released: "2005", status: "done", rating: 8, tags: ["#thriller", "#swedish", "#stieg-larsson"], note: "", desc: "A disgraced journalist and a hacker look into a forty-year-old disappearance.", plans: [] },
   { id: "g1", type: "Games", title: "Castlevania: Belmont's Curse", creator: "Evil Empire", released: "2026-10-15", status: "want", rating: null, tags: ["#metroidvania"], note: "Out today.", desc: "A new Castlevania from the Dead Cells team.", plans: [] },
   { id: "g2", type: "Games", title: "Hollow Knight: Silksong", creator: "Team Cherry", released: "2025", status: "prog", rating: null, tags: ["#metroidvania"], note: "", desc: "Hornet is captured and taken to a new kingdom she has to climb out of.", plans: [] },
   { id: "g3", type: "Games", title: "Ori and the Will of the Wisps", creator: "Moon Studios", released: "2020", status: "done", rating: 10, tags: ["#metroidvania", "#favorite"], note: "", desc: "Ori searches for a lost friend in a decaying forest.", plans: [] },
@@ -1092,8 +1139,8 @@ const ENTRIES = [
   { id: "g5", type: "Games", title: "Alan Wake 2", creator: "Remedy", released: "2023", status: "done", rating: 9, tags: ["#horror", "#remedy", "#dark"], note: "", desc: "An FBI agent and a trapped writer try to escape a story that is rewriting reality.", plans: ["Halloween 2026"] },
   { id: "g6", type: "Games", title: "Grand Theft Auto VI", creator: "Rockstar Games", released: "2026-11-19", status: "want", rating: null, tags: ["#action"], note: "", desc: "A return to Vice City, following Lucia and Jason.", plans: [] },
   { id: "a1", type: "Anime", title: "One Punch Man", creator: "ONE", released: "2015", status: "prog", rating: null, tags: ["#action"], note: "S3 Part 2 arrives January 2027.", desc: "A hero who beats every enemy with a single punch is bored out of his mind.", plans: [] },
-  { id: "a2", type: "Anime", title: "Frieren", creator: "Kanehito Yamada", released: "2023", status: "done", rating: 10, tags: ["#fantasy", "#favorite", "#cozy"], note: "", desc: "An elf mage revisits the journey she made with her party decades earlier.", plans: [] },
-  { id: "a3", type: "Anime", title: "Berserk", creator: "Kentaro Miura", released: "1997", status: "done", rating: 9, tags: ["#dark-fantasy", "#dark"], note: "", desc: "A mercenary's bond with a charismatic commander ends in betrayal.", plans: [] },
+  { id: "a2", type: "Anime", title: "Frieren", creator: "Kanehito Yamada", released: "2023", status: "done", rating: 10, tags: ["#fantasy", "#favorite", "#cozy", "#japanese", "#madhouse"], note: "", desc: "An elf mage revisits the journey she made with her party decades earlier.", plans: [] },
+  { id: "a3", type: "Anime", title: "Berserk", creator: "Kentaro Miura", released: "1997", status: "done", rating: 9, tags: ["#dark-fantasy", "#dark", "#japanese"], note: "", desc: "A mercenary's bond with a charismatic commander ends in betrayal.", plans: [] },
   { id: "a4", type: "Anime", title: "Cyberpunk: Edgerunners", creator: "Studio Trigger", released: "2022", status: "done", rating: 9, tags: ["#sci-fi"], note: "S2 on Netflix Oct 20.", desc: "A street kid in Night City tries to survive as an edgerunner.", plans: [] },
   { id: "u1", type: "Music", title: "Random Access Memories", creator: "Daft Punk", released: "2013", status: "done", rating: 9, tags: ["#electronic"], note: "", desc: "Album.", plans: [] },
   { id: "u2", type: "Music", title: "Mezzanine", creator: "Massive Attack", released: "1998", status: "done", rating: 8, tags: ["#trip-hop", "#dark"], note: "", desc: "Album.", plans: [] },
@@ -1154,40 +1201,62 @@ const SORTS = {
   "Rating, highest first": (a, b) => (b.rating || 0) - (a.rating || 0) || a.title.localeCompare(b.title)
 };
 const SORT_SHORT = { "Newest added": "Newest added", "Title, A to Z": "Title A–Z", "Year, newest first": "Year ↓", "Year, oldest first": "Year ↑", "Rating, highest first": "Rating ↓" };
-const TAG_CATS = [
-  ["Genres", ["#horror", "#sci-fi", "#thriller", "#fantasy", "#dark-fantasy", "#adventure", "#action", "#historical"]],
-  ["Game genres", ["#metroidvania"]],
+// Tag categories (phone DESIGN.md): every tag is in at least one; people and genre tags can be in several of their kind.
+const CAT_ORDER = ["Genres", "Game genres", "Music genres", "Mood", "Season", "Languages", "Authors", "Directors", "Actors", "Studios", "Streaming", "Animation style", "Other"];
+const KIND = { Authors: "people", Directors: "people", Actors: "people", Genres: "genres", "Game genres": "genres", "Music genres": "genres" };
+const ROLE = { Authors: "Author", Directors: "Director", Actors: "Actor", Genres: "Genre", "Game genres": "Game genre", "Music genres": "Music genre" };
+const CAT_TYPES = { "Game genres": ["Games"], "Music genres": ["Music"], Actors: ["Movies", "Shows"], Streaming: ["Movies", "Shows"] };
+const LONG_GROUP = 24;
+const AUTHOR_NAMES = ["Agatha Christie", "Aldous Huxley", "Andy Weir", "Anne Rice", "Arthur Conan Doyle", "Astrid Lindgren", "Bill Bryson", "Blake Crouch", "Bram Stoker", "Brandon Sanderson", "Carlos Ruiz Zafon", "Clive Barker", "Cormac McCarthy", "Dan Simmons", "Daphne du Maurier", "Douglas Adams", "Edgar Allan Poe", "Emily St John Mandel", "Frank Herbert", "George Orwell", "Gillian Flynn", "Grady Hendrix", "H P Lovecraft", "Haruki Murakami", "Isaac Asimov", "James Clavell", "Jane Austen", "Joe Hill", "John Boyne", "John Wyndham", "Jules Verne", "Kazuo Ishiguro", "Ken Follett", "Kentaro Miura", "Leigh Bardugo", "Mary Shelley", "Michael Crichton", "Neil Gaiman", "Patrick Rothfuss", "Paul Tremblay", "Peter Straub", "Philip K Dick", "Ray Bradbury", "Richard Matheson", "Robert Harris", "Robin Hobb", "Shirley Jackson", "Stephen Graham Jones", "Stephen King", "Stieg Larsson", "Susanna Clarke", "Terry Pratchett", "The Brothers Grimm", "Thomas Harris", "Tolkien", "Ursula K Le Guin", "V E Schwab", "Victor Hugo", "Virginia Woolf", "William Gibson", "Yoko Ogawa", "Yuval Noah Harari", "Zadie Smith", "Ann Leckie"];
+const toTag = (n) => "#" + n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const LIB_BASE = [
+  ["Genres", ["#horror", "#sci-fi", "#thriller", "#fantasy", "#dark-fantasy", "#adventure", "#action", "#historical", "#drama", "#sports", "#western", "#comedy"]],
+  ["Game genres", ["#metroidvania", "#soulslike", "#platformer", "#sports"]],
   ["Music genres", ["#rock", "#electronic", "#trip-hop", "#score"]],
   ["Mood", ["#scary", "#dark", "#cozy", "#lighthearted"]],
   ["Season", ["#halloween", "#christmas"]],
-  ["Authors", ["#stephen-king", "#john-boyne"]],
-  ["Directors", ["#mike-flanagan"]],
-  ["Actors", ["#leonardo-dicaprio"]],
-  ["Studios", ["#remedy"]]
+  ["Languages", ["#japanese", "#french"]],
+  ["Authors", AUTHOR_NAMES.map(toTag)],
+  ["Directors", ["#mike-flanagan", "#clint-eastwood", "#christopher-nolan", "#robert-eggers", "#sergio-leone"]],
+  ["Actors", ["#leonardo-dicaprio", "#clint-eastwood", "#hilary-swank", "#morgan-freeman", "#kate-siegel"]],
+  ["Studios", ["#remedy", "#team-cherry", "#madhouse"]],
+  ["Streaming", ["#netflix", "#apple-tv"]],
+  ["Animation style", ["#hand-drawn", "#2.5d"]],
+  ["Other", ["#dark-tower", "#favorite", "#swedish"]]
 ];
+// tag -> its categories, in category order
+const CATMAP0 = {};
+LIB_BASE.forEach((c) => c[1].forEach((g) => { (CATMAP0[g] = CATMAP0[g] || []).push(c[0]); }));
+const tagSortKey = (g) => g.slice(1).replace(/^the-/, "");
+const nameOfTag = (g) => g.slice(1).split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+// Fake usage counts for tags that no mock entry carries (the long Authors list).
+const fakeCount = (g) => { let n = 0; for (let i = 0; i < g.length; i++) n += g.charCodeAt(i); return 1 + (n % 9); };
+// An entry's tags as keys: "#tag" for a one-category tag, "#tag@Category" per ticked category for a tag in several.
+function keysOf(e, cm) { const out = []; e.tags.forEach((g) => { const cs = cm[g] || []; if (cs.length > 1) (e.tagCats && e.tagCats[g] ? e.tagCats[g] : [(CATMAP0[g] || cs)[0]]).forEach((c) => out.push(g + "@" + c)); else out.push(g); }); return out; }
+const keyTag = (k) => k.split("@")[0], keyCat = (k) => k.split("@")[1] || null;
+const keyLabel = (k) => keyCat(k) ? keyTag(k) + " · " + ROLE[keyCat(k)] : k;
+function rolesOf(e, cm) { const out = []; e.tags.forEach((g) => { const cs = cm[g] || []; const on = cs.length > 1 ? (e.tagCats && e.tagCats[g] ? e.tagCats[g] : [(CATMAP0[g] || cs)[0]]) : []; out.push({ label: g, role: on.length ? "· " + on.map((c) => ROLE[c]).join(", ") : "" }); }); return out; }
 const CAT_DARK = { "Genres": "#F38BA8", "Game genres": "#FAB387", "Music genres": "#CBA6F7", "Mood": "#94E2D5", "Season": "#F9E2AF", "Creators": "#89B4FA", "Studios": "#A6E3A1", "Series": "#F5C2E7", "Personal": "#B4BEFE" };
 const CAT_LIGHT = { "Genres": "#D20F39", "Game genres": "#D9530A", "Music genres": "#8839EF", "Mood": "#137F84", "Season": "#A86A0E", "Creators": "#1E66F5", "Studios": "#2F7D1F", "Series": "#C2459E", "Personal": "#5463E8" };
-const CAT_OF = {};
-TAG_CATS.forEach((c) => c[1].forEach((g) => { CAT_OF[g] = c[0]; }));
-
 // ---- Add entry dialog (was its own board)
-const AE_CATS = [
-  ["Genres", ["#horror", "#sci-fi", "#thriller", "#fantasy", "#dark-fantasy", "#adventure", "#action", "#historical"]],
-  ["Game genres", ["#metroidvania", "#soulslike", "#platformer"]],
-  ["Music genres", ["#rock", "#electronic", "#trip-hop", "#score"]],
-  ["Mood", ["#scary", "#dark", "#cozy", "#lighthearted"]],
-  ["Season", ["#halloween", "#christmas"]],
-  ["Authors", ["#stephen-king", "#john-boyne"]],
-  ["Directors", ["#mike-flanagan"]],
-  ["Actors", ["#leonardo-dicaprio"]],
-  ["Studios", ["#remedy", "#team-cherry"]],
-  ["Other", ["#dark-tower", "#favorite"]]
-];
-const AE_COUNT = { "#horror": 10, "#scary": 7, "#stephen-king": 7, "#favorite": 6, "#sci-fi": 5, "#mike-flanagan": 5, "#dark": 4, "#metroidvania": 3, "#remedy": 2, "#leonardo-dicaprio": 2, "#john-boyne": 2, "#dark-tower": 2, "#adventure": 2, "#cozy": 2, "#lighthearted": 2, "#trip-hop": 1, "#thriller": 1, "#score": 1, "#rock": 1, "#historical": 1, "#halloween": 1, "#fantasy": 1, "#electronic": 1, "#dark-fantasy": 1, "#christmas": 1, "#action": 1, "#soulslike": 0, "#platformer": 0, "#team-cherry": 0 };
-const AE_ALL = [].concat.apply([], AE_CATS.map((c) => c[1]));
 const aeNorm = (g) => g.replace(/^#/, "").replace(/[^a-z0-9]/g, "");
 function aeLev(a, b) { const d = []; for (let i = 0; i <= a.length; i++) { d[i] = [i]; } for (let j = 0; j <= b.length; j++) d[0][j] = j; for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[a.length][b.length]; }
 
+const ED = { types: ["Movies"], views: { Movies: "list" }, sel: "m16", aeOpen: true, aeMode: "edit", aeId: "m16" };
+const START = {
+  "Library": {},
+  "Entry details: tag in two categories": { types: ["Movies"], views: { Movies: "list" }, sel: "m16" },
+  "Filter: Clint Eastwood as director": { types: ["Movies"], views: { Movies: "list" }, tagSel: ["#clint-eastwood@Directors"] },
+  "Filter: tag dialog with a long group": { pickerOpen: true, pickOpen: { Directors: true, Languages: true } },
+  "Filter: all Authors": { pickerOpen: true, pickDrill: "Authors", tagSel: ["#stephen-king"] },
+  "Edit: tags in two categories": ED,
+  "Edit: tag picker, ticks per group": Object.assign({}, ED, { aePick: true }),
+  "Edit: right-click a tag": Object.assign({}, ED, { aePick: true, aeMenu: { tag: "#clint-eastwood", cat: "Directors", x: 236, y: 494 } }),
+  "Edit: tag categories dialog": Object.assign({}, ED, { aePick: true, aeCat: { tag: "#clint-eastwood" } }),
+  "Edit: search offers Add to Directors": Object.assign({}, ED, { aePick: true, aeQ: "freeman" }),
+  "Edit: move a tag to Languages": Object.assign({}, ED, { aePick: true, aeOpenCats: { Other: true }, aeCat: { tag: "#swedish", draft: ["Languages"] } }),
+  "Edit: new tag in two categories": Object.assign({}, ED, { aePick: true, aeQ: "gothic", aeNew: { tag: "#gothic", sel: ["Genres", "Music genres"] } })
+};
 class Component extends DCLogic {
   renderVals() {
     const L = lightKit(this.props);
@@ -1201,7 +1270,8 @@ class Component extends DCLogic {
     const selBg = L.light ? "#E9EBEE" : mixWhite(t.content, 0.14), selBorder = selBg, selRow = L.light ? "#F1F2F4" : mixWhite(t.content, 0.07);
     const appCovers = true;
     const coverFor = (e) => appCovers ? coverOf(e.id) : BRIGHT[e.type];
-    const st = this.state || {};
+    const startKey = this.props.start ?? "Library";
+    const st = this.state && this.state._start === startKey ? this.state : Object.assign({ _start: startKey }, START[startKey] || {});
     const types = st.types ?? [];
     const type = types.length === 1 ? types[0] : "All";
     const viewKey = types.length === 1 ? types[0] : (types.length ? "multi" : "All");
@@ -1216,12 +1286,13 @@ class Component extends DCLogic {
     const upcoming = !!st.upcoming, recentF = !!st.recentF;
     const sinceIso = monthAgo(TODAY);
     const tagSel = st.tagSel || [];
+    const cm = st.catMap || CATMAP0;
     const tagF = tagSel[0] || null;
     const rMin = st.rMin ?? null, rMax = st.rMax ?? null;
     const sortBy = st.sortBy ?? "Newest added";
     const decades = st.decades ?? [];
     const decOf = (e) => { const y = parseInt(String(e.released).slice(0, 4), 10); return y < 1960 ? "older" : String(Math.floor(y / 10) * 10); };
-    const visibleBase = inType.filter((e) => (seasonal || !e.seasonal) && (!tagSel.length || tagSel.every((g) => e.tags.indexOf(g) >= 0)) && (!decades.length || decades.indexOf(decOf(e)) >= 0) && (rMin === null || (e.rating && e.rating >= rMin && e.rating <= rMax)) && (!upcoming || (/^\d{4}-\d{2}-\d{2}$/.test(e.released) && e.released > TODAY && e.status === "want")) && (!recentF || ADDED_AT[e.id] >= sinceIso));
+    const visibleBase = inType.filter((e) => (seasonal || !e.seasonal) && (!tagSel.length || tagSel.every((k) => e.tags.indexOf(keyTag(k)) >= 0 && (!keyCat(k) || keysOf(e, cm).indexOf(k) >= 0))) && (!decades.length || decades.indexOf(decOf(e)) >= 0) && (rMin === null || (e.rating && e.rating >= rMin && e.rating <= rMax)) && (!upcoming || (/^\d{4}-\d{2}-\d{2}$/.test(e.released) && e.released > TODAY && e.status === "want")) && (!recentF || ADDED_AT[e.id] >= sinceIso));
     const shown = visibleBase.filter((e) => statusF === "all" || e.status === statusF).sort(SORTS[sortBy] || SORTS["Newest added"]);
     const filterCount0 = (types.length >= 2 ? types.length : 0) + decades.length + tagSel.length + (seasonal ? 1 : 0) + (rMin !== null ? 1 : 0) + (upcoming ? 1 : 0) + (recentF ? 1 : 0);
     const overview = !types.length && filterCount0 === 0 && statusF === "all";
@@ -1278,7 +1349,7 @@ class Component extends DCLogic {
     const d = {
       coverText: "#FFFFFF",
       title: sel.title, creator: sel.creator, released: sel.released, color: sc, tint: coverFor(sel), typeLabel: SINGULAR[sel.type],
-      tags: sel.tags, note: sel.note || "Add a personal note…", noteColor: sel.note ? t.text : t.sub, desc: sel.desc,
+      tags: rolesOf(sel, cm), note: sel.note || "Add a personal note…", noteColor: sel.note ? t.text : t.sub, desc: sel.desc,
       plans: sel.plans, hasPlans: sel.plans.length > 0, noPlans: sel.plans.length === 0,
       ratingBig: sel.rating ? String(sel.rating) : "Not rated", ratingSmall: sel.rating ? "/ 10" : "",
       statusOpts: statusOptions(sel.type).map((s) => ({
@@ -1322,23 +1393,56 @@ class Component extends DCLogic {
     });
     const hdrMode = "grey";
     const hdr = { size: "12.5px", dots: hdrMode === "colors", color: hdrMode === "grey" ? t.sub : (L.light ? "#2A2D31" : "#DADDE1") };
-    const groupsOf = (items) => TAG_CATS.concat([["Other", []]]).map((c) => {
-      const tags = items.filter((it) => (c[0] === "Other" ? !CAT_OF[it.label] : CAT_OF[it.label] === c[0]));
-      return { name: c[0], count: String(tags.length), tags, color: hdrMode === "colors" ? ((L.light ? CAT_LIGHT : CAT_DARK)[c[0]] || t.sub) : hdr.color };
+    const catList = (c) => Object.keys(cm).filter((g) => cm[g].indexOf(c) >= 0).sort((a, b) => tagSortKey(a).localeCompare(tagSortKey(b)));
+    const countOf = (g) => tc[g] || fakeCount(g);
+    const groupsOf = (items) => CAT_ORDER.map((c) => {
+      const tags = items.filter((it) => (cm[it.label] || ["Other"]).indexOf(c) >= 0);
+      return { name: c, count: String(tags.length), tags, color: hdr.color };
     }).filter((g) => g.tags.length);
     const tagGroups = groupsOf(allTags);
-    const pq = String(st.pickQ || "").toLowerCase().replace(/^#/, "");
-    const pOpen = st.pickOpen || { Genres: true };
-    const pickerGroups = groupsOf(tagList.filter((g) => g.slice(1).indexOf(pq) >= 0).map((g) => {
-      const on = tagSel.indexOf(g) >= 0;
-      return { label: g, count: String(tc[g]), on, bg: on ? selBg : "transparent", border: on ? selBg : t.line, fg: t.text, pick: () => toggleTag(g) };
-    }));
-    pickerGroups.forEach((grp) => {
-      const picked = grp.tags.filter((o) => o.on).length;
-      const open = pq ? true : (pOpen[grp.name] !== undefined ? pOpen[grp.name] : picked > 0);
-      Object.assign(grp, { open, rot: open ? "90deg" : "0deg", picked: picked ? picked + " selected" : "",
-        toggle: () => set({ pickOpen: Object.assign({}, pOpen, { [grp.name]: !open }) }) });
-    });
+    // ---- Shared tag dialog (Filter's "All tags…" and the entry form's Tags). Groups over 24 tags are a row that drills in.
+    const byOrder = (a, b) => CAT_ORDER.indexOf(a) - CAT_ORDER.indexOf(b);
+    const buildPicker = (o) => {
+      const qq = String(o.q || "").trim().toLowerCase().replace(/^#/, "").replace(/\s+/g, "-");
+      const isOn = (k) => o.picked.indexOf(k) >= 0;
+      const keyFor = (g, c) => ((cm[g] || []).length > 1 ? g + "@" + c : g);
+      const visible = (c) => qq || !o.typesFor || !CAT_TYPES[c] || CAT_TYPES[c].some((x) => o.typesFor.indexOf(x) >= 0);
+      const chip = (g, c) => { const k = keyFor(g, c), on = isOn(k); return { label: g, count: String(countOf(g)), on, bg: on ? selBg : "transparent", border: on ? selBg : t.line, pick: () => o.toggle(k), menu: (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); if (o.menu) o.menu(g, c, ev); } }; };
+      const groups = CAT_ORDER.filter(visible).map((c) => {
+        const all = catList(c);
+        const list = qq ? all.filter((g) => g.slice(1).indexOf(qq) >= 0) : all;
+        const pickedN = all.filter((g) => isOn(keyFor(g, c))).length;
+        const addRows = [];
+        if (qq && o.addTo && KIND[c] && !list.length) {
+          const seen = {};
+          CAT_ORDER.filter((x) => x !== c && KIND[x] === KIND[c] && visible(x)).forEach((x) => catList(x).forEach((g) => {
+            if (g.slice(1).indexOf(qq) < 0 || seen[g] || cm[g].indexOf(c) >= 0) return;
+            seen[g] = true;
+            addRows.push({ label: g, sub: "Not " + (/^[AEIOU]/.test(ROLE[c]) ? "an " : "a ") + ROLE[c].toLowerCase() + " tag yet", addLabel: "+ Add to " + c, add: () => o.addTo(g, c) });
+          }));
+        }
+        const long = !qq && all.length > LONG_GROUP;
+        const open = qq ? true : (o.open[c] !== undefined ? o.open[c] : pickedN > 0);
+        return { name: c, count: String(all.length), isLong: long, isFold: !long && (list.length > 0 || addRows.length > 0), addRows, hasAdd: addRows.length > 0,
+          longNote: all.length + " " + c.toLowerCase(), open, rot: open ? "90deg" : "0deg", picked: pickedN ? pickedN + " selected" : "",
+          toggle: () => o.setOpen(Object.assign({}, o.open, { [c]: !open })), drill: () => o.setDrill(c),
+          tags: list.map((g) => chip(g, c)) };
+      }).filter((g) => g.isLong || g.isFold);
+      let drill = { name: "", line: "", q: "", sections: [], rail: [], none: false, back: () => {}, onQ: () => {} };
+      if (o.drill) {
+        const c = o.drill, dq = String(o.dq || "").trim().toLowerCase();
+        const full = catList(c);
+        const list = full.filter((g) => !dq || nameOfTag(g).toLowerCase().indexOf(dq) >= 0 || g.indexOf(dq.replace(/\s+/g, "-")) >= 0);
+        const secs = {};
+        list.forEach((g) => { const L0 = tagSortKey(g).charAt(0).toUpperCase(); (secs[L0] = secs[L0] || []).push(g); });
+        const pickedN = full.filter((g) => isOn(keyFor(g, c))).length;
+        drill = { name: c, line: full.length + " " + c.toLowerCase() + (pickedN ? " · " + pickedN + " selected" : ""), q: o.dq || "", none: list.length === 0,
+          back: () => o.setDrill(null), onQ: (e) => o.setDQ(e && e.target ? e.target.value : ""), ph: "Search " + c.toLowerCase(),
+          sections: Object.keys(secs).sort().map((L0) => ({ letter: L0, rows: secs[L0].map((g) => { const k = keyFor(g, c), on = isOn(k), n = countOf(g); return { name: nameOfTag(g), sub: g + " · " + n + (n === 1 ? " entry" : " entries"), on, ring: on ? accent : t.sub, fill: on ? accent : "transparent", checkDisp: on ? "block" : "none", bg: on ? selRow : "transparent", pick: () => o.toggle(k) }; }) })),
+          rail: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((L0) => ({ l: L0, color: secs[L0] ? t.text : t.line, jump: (ev) => { const box = ev && ev.currentTarget && ev.currentTarget.closest ? ev.currentTarget.closest("[data-drill]") : null; const sc = box && box.querySelector(".scroll"); const el = sc && sc.querySelector('[data-letter="' + L0 + '"]'); if (el) sc.scrollTo({ top: el.offsetTop }); } })) };
+      }
+      return { groups, none: groups.length === 0, isDrill: !!o.drill, isList: !o.drill, drill, q: o.q || "" };
+    };
     const chipStyle = (on) => ({ bg: on ? selBg : "transparent", border: on ? selBg : t.line, fg: t.text });
     // Decade chips are built from the library (as on the phone): Older for anything before 1960, then every decade from the earliest to the latest, gaps filled.
     const years = all.map((e) => parseInt(String(e.released).slice(0, 4), 10)).filter((y) => !isNaN(y));
@@ -1365,45 +1469,114 @@ class Component extends DCLogic {
     const clearAllPatch = { decades: [], tagSel: [], seasonal: false, rMin: null, rMax: null, statusF: "all", sel: null, upcoming: false, recentF: false, types: types.length >= 2 ? [] : types };
     const hidden = inType.filter((e) => e.seasonal && !seasonal).length;
     const noun = type === "All" ? "entries" : type.toLowerCase();
+    // ---- Add / Edit entry dialog. Add shows the online lookup on the left; Edit is the form alone.
+    const aeEntry = st.aeMode === "edit" ? all.find((e) => e.id === st.aeId) : null;
+    const isEdit = !!aeEntry;
+    const fType = isEdit ? aeEntry.type : "Games";
+    const aeTags = st.aeTags || (isEdit ? keysOf(aeEntry, cm) : ["#metroidvania"]);
+    const aeHas = (k) => aeTags.indexOf(k) >= 0;
+    const aeToggle = (k) => set({ aeTags: aeHas(k) ? aeTags.filter((x) => x !== k) : aeTags.concat([k]) });
+    // Re-key this entry's tags after a tag's categories change: one category = plain tag, several = one key per ticked category.
+    const rekey = (tags, g, before, after) => {
+      let out = tags.filter((k) => keyTag(k) !== g), mine = tags.filter((k) => keyTag(k) === g).map((k) => keyCat(k) || before[0]);
+      mine = mine.filter((c) => after.indexOf(c) >= 0);
+      if (!mine.length && tags.some((k) => keyTag(k) === g) && after.length === 1) mine = [after[0]];
+      if (after.length > 1) out = out.concat(mine.map((c) => g + "@" + c)); else if (mine.length) out = out.concat([g]);
+      return out;
+    };
+    const aeOpen = st.aeOpenCats || {};
+    const entryPk = buildPicker({ picked: aeTags, q: st.aeQ, open: aeOpen, drill: st.aeDrill, dq: st.aeDQ, typesFor: [fType],
+      toggle: aeToggle, setOpen: (m) => set({ aeOpenCats: m }), setDrill: (c) => set({ aeDrill: c, aeDQ: "" }), setDQ: (v) => set({ aeDQ: v }),
+      addTo: (g, c) => { const before = cm[g], after = before.concat([c]).sort(byOrder); set({ catMap: Object.assign({}, cm, { [g]: after }), aeTags: rekey(aeTags, g, before, after).concat([g + "@" + c]) }); },
+      menu: (g, c, ev) => {
+        const box = ev && ev.currentTarget && ev.currentTarget.closest ? ev.currentTarget.closest("[data-tagdlg]") : null;
+        const r = box ? box.getBoundingClientRect() : { left: 0, top: 0, width: 1 }; const k = box ? r.width / box.offsetWidth : 1;
+        set({ aeMenu: { tag: g, cat: c, x: Math.round((ev.clientX - r.left) / k), y: Math.round((ev.clientY - r.top) / k) } });
+      } });
+    const filterPk = buildPicker({ picked: tagSel, q: st.pickQ, open: st.pickOpen || {}, drill: st.pickDrill, dq: st.pickDQ, typesFor: types.length ? types : null,
+      toggle: toggleTag, setOpen: (m) => set({ pickOpen: m }), setDrill: (c) => set({ pickDrill: c, pickDQ: "" }), setDQ: (v) => set({ pickDQ: v }), addTo: null, menu: null });
+    // Usage line for the categories dialog
+    const usage = (g) => {
+      const on = all.filter((e) => e.tags.indexOf(g) >= 0);
+      if (!on.length) return "Not used on any entry yet.";
+      const head = "Used on " + on.length + (on.length === 1 ? " entry" : " entries");
+      if ((cm[g] || []).length < 2) return head + ".";
+      const per = cm[g].map((c) => [c, on.filter((e) => keysOf(e, cm).indexOf(g + "@" + c) >= 0).length]).filter((x) => x[1]);
+      return head + ": " + per.map((x) => "as " + (/^[AEIOU]/.test(ROLE[x[0]]) ? "an " : "a ") + ROLE[x[0]].toLowerCase() + " on " + x[1]).join(", ") + ".";
+    };
+    const mn = st.aeMenu;
+    const menuKind = mn ? KIND[(cm[mn.tag] || ["Other"])[0]] : null;
+    const menu = { open: !!mn, x: mn ? mn.x + "px" : "0", y: mn ? mn.y + "px" : "0", tag: mn ? mn.tag : "", close: () => set({ aeMenu: null }),
+      items: !mn ? [] : [
+        menuKind ? { label: "Categories…", hint: cm[mn.tag].join(", "), run: () => set({ aeMenu: null, aeCat: { tag: mn.tag } }) }
+                 : { label: "Move to another group…", hint: "Now in " + cm[mn.tag][0], run: () => set({ aeMenu: null, aeCat: { tag: mn.tag } }) },
+        { label: aeHas((cm[mn.tag] || []).length > 1 ? mn.tag + "@" + mn.cat : mn.tag) ? "Remove from this entry" : "Add to this entry", hint: "", run: () => { aeToggle((cm[mn.tag] || []).length > 1 ? mn.tag + "@" + mn.cat : mn.tag); } }
+      ].map((it) => Object.assign(it, { run: ((r) => () => { r(); })(it.run) })) };
+    if (mn) menu.items[1].run = () => { const k = (cm[mn.tag] || []).length > 1 ? mn.tag + "@" + mn.cat : mn.tag; set({ aeMenu: null, aeTags: aeHas(k) ? aeTags.filter((x) => x !== k) : aeTags.concat([k]) }); };
+    const ac = st.aeCat;
+    const cd = (() => {
+      if (!ac) return { open: false, chips: [] };
+      const base = cm[ac.tag] || ["Other"], kind = KIND[base[0]];
+      const fam = kind ? CAT_ORDER.filter((c) => KIND[c] === kind) : CAT_ORDER.filter((c) => !KIND[c]);
+      const draft = ac.draft || base;
+      return { open: true, tag: ac.tag, used: usage(ac.tag), head: kind ? "Categories" : "Group",
+        hint: kind ? (kind === "people" ? "A person can be in Authors, Directors and Actors. At least one stays; unticking one takes that role off every entry." : "A genre can be in Genres, Game genres and Music genres. At least one stays.")
+                   : "Moves the tag to another group. It stays on all its entries.",
+        saveLabel: kind ? "Save" : "Move", cancel: () => set({ aeCat: null }),
+        chips: fam.map((c) => { const on = draft.indexOf(c) >= 0; return { label: c, on, bg: on ? selBg : "transparent", border: on ? selBg : t.line, checkDisp: on ? "block" : "none",
+          pick: () => { let nd = kind ? (on ? draft.filter((x) => x !== c) : draft.concat([c])) : [c]; if (!nd.length) return; set({ aeCat: { tag: ac.tag, draft: nd.sort(byOrder) } }); } }; }),
+        save: () => set({ catMap: Object.assign({}, cm, { [ac.tag]: draft }), aeTags: rekey(aeTags, ac.tag, base, draft), aeCat: null, aeOpenCats: Object.assign({}, aeOpen, { [draft[0]]: true }) }) };
+    })();
+    const an = st.aeNew;
+    const nt = (() => {
+      if (!an) return { open: false, cats: [] };
+      const sel0 = an.sel || [];
+      const kind = sel0.length ? (KIND[sel0[0]] || null) : null;
+      const list = (a) => a.length <= 1 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1];
+      return { open: true, tag: an.tag, cancel: () => set({ aeNew: null }),
+        sentence: sel0.length ? "It will be added to your tag list under " + list(sel0) + "." : "Pick at least one category.",
+        cats: CAT_ORDER.map((c) => { const on = sel0.indexOf(c) >= 0; return { label: c, on, bg: on ? selBg : "transparent", border: on ? selBg : t.line, checkDisp: on ? "block" : "none",
+          pick: () => { const k = KIND[c]; let nd; if (on) nd = sel0.filter((x) => x !== c); else if (k && kind === k) nd = sel0.concat([c]); else nd = [c]; set({ aeNew: { tag: an.tag, sel: nd.sort(byOrder) } }); } }; }),
+        canCreate: sel0.length > 0,
+        create: () => { if (!sel0.length) return; const o2 = Object.assign({}, aeOpen); sel0.forEach((c) => { o2[c] = true; }); set({ catMap: Object.assign({}, cm, { [an.tag]: sel0 }), aeTags: aeTags.concat(sel0.length > 1 ? sel0.map((c) => an.tag + "@" + c) : [an.tag]), aeNew: null, aeQ: "", aeOpenCats: o2 }); } };
+    })();
     const ae = (() => {
-      const aeSel = selBg;
-        const tags = st.aeTags || ["#metroidvania"];
-    const extra = st.aeExtra || [];
-    const has = (g) => tags.indexOf(g) >= 0;
-    const toggle = (g) => set({ aeTags: has(g) ? tags.filter((x) => x !== g) : tags.concat([g]) });
-    const q = String(st.aeQ || "").trim().toLowerCase().replace(/\s+/g, "-");
-    const qq = q.replace(/^#/, "");
-    const openCats = st.aeOpenCats || { "Game genres": true };
-    const cats = AE_CATS.map((c) => c[0] === "Other" ? [c[0], c[1].concat(extra)] : c);
-    const groups = cats.map((c) => {
-      const list = c[1].filter((g) => g.slice(1).indexOf(qq) >= 0);
-      const picked = c[1].filter(has).length;
-      const open = qq ? list.length > 0 : (openCats[c[0]] !== undefined ? openCats[c[0]] : picked > 0);
-      return { name: c[0], count: String(list.length), open, rot: open ? "90deg" : "0deg", picked: picked ? picked + " picked" : "",
-        toggle: () => set({ aeOpenCats: Object.assign({}, openCats, { [c[0]]: !open }) }),
-        tags: list.map((g) => ({ label: g, count: String(AE_COUNT[g] || 0), on: has(g), bg: has(g) ? aeSel : "transparent", border: has(g) ? aeSel : t.line, pick: () => toggle(g) })) };
-    }).filter((g) => g.tags.length);
-    const known = AE_ALL.concat(extra);
-    const newTag = qq ? "#" + qq : "";
-    const exact = known.indexOf(newTag) >= 0;
-    const similar = qq && !exact ? known.filter((g) => { const a = aeNorm(g), b = aeNorm(newTag); return a === b || (Math.abs(a.length - b.length) <= 2 && aeLev(a, b) <= 2); }).slice(0, 3) : [];
-    const SUG = [["#action", "new"], ["#platformer", "new"], ["#soulslike", "new"], ["#team-cherry", "studio"]];
-    const suggested = SUG.filter((x) => !has(x[0])).map((x) => ({ label: x[0], note: x[1] === "new" ? "" : x[1], add: () => toggle(x[0]) }));
+      const qq = String(st.aeQ || "").trim().toLowerCase().replace(/^#/, "").replace(/\s+/g, "-");
+      const known = Object.keys(cm);
+      const newTag = qq ? "#" + qq : "";
+      const exact = known.indexOf(newTag) >= 0;
+      const similar = qq && !exact ? known.filter((g) => { const a = aeNorm(g), b = aeNorm(newTag); return a === b || (Math.abs(a.length - b.length) <= 2 && aeLev(a, b) <= 2); }).slice(0, 3) : [];
+      const SUG = isEdit ? [] : [["#action", ""], ["#platformer", ""], ["#soulslike", ""], ["#team-cherry", "studio"]];
+      const suggested = SUG.filter((x) => !aeHas(x[0])).map((x) => ({ label: x[0], note: x[1], add: () => aeToggle(x[0]) }));
+      const ent = aeEntry || { title: "Castlevania: Belmont's Curse", creator: "Evil Empire", released: "2026-10-15", status: "want", rating: null, desc: "A new Castlevania from the team behind Dead Cells, with Motion Twin advising.", note: "", id: "g1" };
+      const fStatus = st.aeStatus || ent.status;
       return {
-        open: !!st.aeOpen, close: () => set({ aeOpen: false, aePick: false }),
-        selBg: aeSel, scrim: t.scrim, p: P, gameText: t.text, gameTint: "#8A553F", gameSoft: aeSel, gameBorder: aeSel,
-      sel: aeSel, scrim: L.light ? "rgba(20,22,28,0.32)" : "rgba(8,9,10,0.62)",
-      chosen: tags.map((g) => ({ label: g, aria: "Remove " + g, remove: () => toggle(g) })),
-      tagBtn: tags.length ? "Add more tags" : "Add tags", suggested, hasSuggested: suggested.length > 0,
-      pickerOpen: !!st.aePick, openPicker: () => set({ aePick: true, aeQ: "" }), closePicker: () => set({ aePick: false, aeQ: "" }),
-      onQuery: (e) => set({ aeQ: e && e.target ? e.target.value : "" }), clearTags: () => set({ aeTags: [] }),
-      groups, canCreate: !!qq && !exact, newTag, hasSimilar: similar.length > 0,
-      similar: similar.map((g) => ({ label: g, pick: () => set({ aeTags: has(g) ? tags : tags.concat([g]), aeQ: "" }) })),
-      createHint: similar.length ? "Or create a new tag anyway. It goes under Other until you file it." : "No tag called " + newTag + " yet. It goes under Other until you file it.",
-      createTag: () => set({ aeExtra: extra.concat([newTag]), aeTags: tags.concat([newTag]), aeQ: "", aeOpenCats: Object.assign({}, openCats, { Other: true }) }),
-      summary: tags.length ? tags.length + " selected: " + tags.join(", ") : "No tags selected",
+        open: !!st.aeOpen, close: () => set({ aeOpen: false, aePick: false, aeTags: undefined, aeStatus: undefined, aeMenu: null, aeCat: null, aeNew: null, aeQ: "", aeDrill: null }),
+        isAdd: !isEdit, isEdit, showLookup: !isEdit, heading: isEdit ? "Edit entry" : "Add to library",
+        typeChips: TYPES.map((k) => { const on = k === fType; return { label: k === "Music" ? "Music" : SINGULAR[k], color: P[k], on, bg: on ? selBg : "transparent", border: on ? selBg : t.line, fg: on ? t.text : t.sub, weight: on ? 600 : 400 }; }),
+        title: ent.title, creatorLabel: CREATOR[fType], creator: ent.creator, released: ent.released, tint: isEdit ? coverFor(ent) : "#8A553F",
+        coverNote: isEdit ? "Cover" : "Cover fetched online", isGame: fType === "Games", desc: ent.desc, note: ent.note || "", notePh: "Your own note (optional)",
+        statusOpts: statusOptions(fType).map((x, i, arr) => { const on = x === fStatus; return { label: statusLabel(fType, x), on, bg: on ? selBg : "transparent", fg: on ? t.text : t.sub, sep: i < arr.length - 1 ? "1px solid " + t.line : "0", pick: () => set({ aeStatus: x }) }; }),
+        ratingText: ent.rating ? ent.rating + " / 10" : "Not rated", ratingFg: ent.rating ? t.text : t.sub,
+        primary: isEdit ? "Save" : "Add to library", footNote: isEdit ? "Saved to your library in the background." : "Fetched online. Every field can be edited.",
+        p: P, gameTint: "#8A553F", selBg,
+        chosen: aeTags.map((k) => ({ label: keyTag(k), role: keyCat(k) ? "· " + ROLE[keyCat(k)] : "", aria: "Remove " + keyLabel(k), remove: () => aeToggle(k) })),
+        tagBtn: aeTags.length ? "Add more tags" : "Add tags", suggested, hasSuggested: suggested.length > 0, sugLabel: "Suggested",
+        pickerOpen: !!st.aePick, openPicker: () => set({ aePick: true, aeQ: "", aeDrill: null }), closePicker: () => set({ aePick: false, aeQ: "", aeMenu: null, aeDrill: null }),
+        onQuery: (e) => set({ aeQ: e && e.target ? e.target.value : "", aeMenu: null }), clearTags: () => set({ aeTags: [] }),
+        canCreate: !!qq && !exact, newTag, hasSimilar: similar.length > 0,
+        similar: similar.map((g) => ({ label: g, pick: () => set({ aeTags: aeHas(g) ? aeTags : aeTags.concat([g]), aeQ: "" }) })),
+        createHint: similar.length ? "Or create it anyway:" : "No tag called " + newTag + " yet.",
+        createTag: () => set({ aeNew: { tag: newTag, sel: ["Genres"] } }),
+        summary: aeTags.length ? aeTags.length + " selected" : "No tags selected"
       };
     })();
+    // The one tag dialog on screen: the entry form's (over the Add/Edit dialog) or Filter's.
+    const pk = ae.open && ae.pickerOpen ? Object.assign({}, entryPk, { open: true, isEntry: true, isFilter: false, title: "Tags", subtitle: "Right-click a tag for its categories", q: st.aeQ || "", onQ: ae.onQuery, ph: "Search or create a tag",
+        canCreate: ae.canCreate && !st.aeDrill, close: ae.closePicker, clear: ae.clearTags, clearLabel: "Clear", summary: ae.summary, btn: "Done", btnRun: ae.closePicker })
+      : Object.assign({}, filterPk, { open: !!st.pickerOpen, isEntry: false, isFilter: true, title: "Filter by tags", subtitle: "", q: st.pickQ || "", onQ: (e) => set({ pickQ: e && e.target ? e.target.value : "" }), ph: "Search tags",
+        canCreate: false, close: () => set({ pickerOpen: false, pickQ: "", pickDrill: null }), clear: () => set({ tagSel: [] }), clearLabel: "Clear tags",
+        summary: tagSel.length ? tagSel.length + " selected · " + shown.length + " shown" : "Shows entries that have all selected tags", btn: tagSel.length ? "Show " + shown.length : "Done", btnRun: () => set({ pickerOpen: false, pickQ: "", pickDrill: null }) });
     const tokMode = this.props.tokenWarning ?? "off";
     const tokSoon = tokMode === "6 days" || tokMode === "1 day";
     const tok = {
@@ -1475,7 +1648,7 @@ class Component extends DCLogic {
     return {
       rail, onScroll, scrollCls: railOn ? "typed" : "", stickTop: view === "table" ? "30px" : "-4px",
       ov, groups, typeOpts, typeChips, specialChips, checkStroke: L.light ? "#FFFFFF" : "#131416",
-      t, accent, onAccent, ink, ae, tok, openAdd: () => set({ aeOpen: true, sel: st.sel, filterOpen: false, sortOpen: false }), accentText, side, statusChips, cards, d, ratingOpts,
+      t, accent, onAccent, ink, ae, tok, openAdd: () => set({ aeOpen: true, aeMode: "add", aeId: null, aeTags: undefined, filterOpen: false, sortOpen: false }), openEdit: () => set({ aeOpen: true, aeMode: "edit", aeId: sel.id, aeTags: undefined, aePick: false, ratingOpen: false }), accentText, side, statusChips, cards, d, ratingOpts,
       sideTags, allTags, tagTotal: String(tagList.length), noTagMatch: allTags.length === 0,
       tagHeader: "Tags", tagHeaderNote: "", noPins: usingPins && pins.length === 0,
       showInspector: hasSel,
@@ -1484,12 +1657,8 @@ class Component extends DCLogic {
       openTags: () => set({ tagsOpen: !st.tagsOpen, ratingOpen: false, filterOpen: false }), closeTags: () => set({ tagsOpen: false, tagQ: "" }),
       onTagQuery: (e) => set({ tagQ: e && e.target ? e.target.value : "" }),
       unpinAll: () => set({ pins: [] }),
-      tagChips: tagSel.map((g) => ({ label: g, aria: "Clear tag filter " + g, clear: () => set({ tagSel: tagSel.filter((x) => x !== g) }) })),
-      hdr, tagGroups, pickerGroups, noPickerMatch: pickerGroups.length === 0,
-      pickerOpen: !!st.pickerOpen, openPicker: () => set({ pickerOpen: true, filterOpen: false, pickQ: "" }), closePicker: () => set({ pickerOpen: false, pickQ: "" }),
-      onPickerQuery: (e) => set({ pickQ: e && e.target ? e.target.value : "" }), clearTagsOnly: () => set({ tagSel: [] }),
-      pickerSummary: tagSel.length ? tagSel.length + " selected · " + shown.length + " shown" : "Shows entries that have all selected tags",
-      pickerBtn: tagSel.length ? "Show " + shown.length : "Done",
+      tagChips: tagSel.map((g) => ({ label: keyLabel(g), aria: "Clear tag filter " + keyLabel(g), clear: () => set({ tagSel: tagSel.filter((x) => x !== g) }) })),
+      hdr, tagGroups, pk, menu, cd, nt, openPicker: () => set({ pickerOpen: true, filterOpen: false, pickQ: "", pickDrill: null }),
       scrim: L.light ? "rgba(20,22,28,0.32)" : "rgba(8,9,10,0.62)",
       rateOpts, hasRating: rMin !== null, ratingChip, clearRatingF: () => set({ rMin: null, rMax: null }),
       ratingHint: rMin === null ? "Tap one, or two for a range" : ratingChip,
@@ -1880,6 +2049,7 @@ button{font:inherit}
 </div>
 </sc-if>
 <sc-if value="{{dlg.tagOpen}}" hint-placeholder-val="{{false}}">
+<sc-if value="{{dlg.listView}}" hint-placeholder-val="{{true}}">
 <div style="display: flex; align-items: center; gap: 8px; padding: 14px 14px 8px 12px">
 <button onClick="{{dTagToggle}}" aria-label="Back to {{dlg.title}}" style="width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: {{t.text}}; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg></button>
 <h2 style="margin: 0; font-family: 'Figtree', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.03em">Linked hashtags</h2>
@@ -1890,11 +2060,36 @@ button{font:inherit}
 <div style="padding: 0 16px"><label style="height: 34px; flex-shrink: 0; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: {{t.sub}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM16.5 16.5L21 21"></path></svg><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Search tags</span><input onInput="{{dTagQuery}}" placeholder="Search tags" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: {{t.text}}; font: 13.5px 'Figtree', sans-serif"></label></div>
 <div class="scroll" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 4px 16px 8px 16px">
 <sc-for list="{{dlg.groups}}" as="grp" hint-placeholder-count="4">
-<button onClick="{{grp.toggle}}" aria-expanded="{{grp.open}}" style="height: 34px; flex-shrink: 0; border: 0; border-radius: 7px; background: transparent; color: {{t.sub}}; display: flex; align-items: center; gap: 6px; padding: 0 4px; cursor: pointer; text-align: left"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" style="transform: rotate({{grp.rot}}); transition: transform 0.15s"><path d="M9 6l6 6-6 6"></path></svg><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase">{{grp.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px">{{grp.count}}</span><span style="margin-left: auto; font-size: 12px; color: {{t.text}}">{{grp.picked}}</span></button>
+<sc-if value="{{grp.isLong}}" hint-placeholder-val="{{false}}"><button onClick="{{grp.drill}}" style="height: 38px; flex-shrink: 0; border: 0; border-radius: 7px; background: transparent; color: {{t.sub}}; display: flex; align-items: center; gap: 6px; padding: 0 4px; cursor: pointer; text-align: left"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9"></path></svg><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase">{{grp.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px">{{grp.count}}</span><span style="margin-left: auto; font-size: 12px; color: {{t.text}}">{{grp.picked}}</span><span style="font-size: 12.5px; margin-left: 10px">Show all</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button></sc-if>
+<sc-if value="{{grp.isFold}}" hint-placeholder-val="{{true}}"><button onClick="{{grp.toggle}}" aria-expanded="{{grp.open}}" style="height: 34px; flex-shrink: 0; border: 0; border-radius: 7px; background: transparent; color: {{t.sub}}; display: flex; align-items: center; gap: 6px; padding: 0 4px; cursor: pointer; text-align: left"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" style="transform: rotate({{grp.rot}}); transition: transform 0.15s"><path d="M9 6l6 6-6 6"></path></svg><span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase">{{grp.name}}</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px">{{grp.count}}</span><span style="margin-left: auto; font-size: 12px; color: {{t.text}}">{{grp.picked}}</span></button>
+</sc-if>
 <sc-if value="{{grp.open}}" hint-placeholder-val="{{false}}"><div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 4px 10px 24px"><sc-for list="{{grp.tags}}" as="o" hint-placeholder-count="3"><button onClick="{{o.pick}}" aria-pressed="{{o.on}}" style="height: 30px; padding: 0 11px; border-radius: 15px; border: 1px solid {{o.border}}; background: {{o.bg}}; color: {{t.text}}; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px">{{o.label}}<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: {{t.sub}}">{{o.count}}</span></button></sc-for></div></sc-if>
 </sc-for>
 <sc-if value="{{dlg.noMatch}}" hint-placeholder-val="{{false}}"><span style="padding: 12px 4px; font-size: 13px; color: {{t.sub}}">No tags match.</span></sc-if>
 </div>
+</div>
+</sc-if>
+<sc-if value="{{dlg.drillView}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; align-items: center; gap: 8px; padding: 14px 14px 8px 12px">
+<button onClick="{{dlg.drill.back}}" aria-label="Back to Linked hashtags" style="width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: {{t.text}}; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg></button>
+<h2 style="margin: 0; font-family: 'Figtree', sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.03em">{{dlg.drill.name}}</h2>
+<span style="font-size: 13px; color: {{t.sub}}">{{dlg.drill.line}}</span>
+</div>
+<div style="height: 520px; display: flex; flex-direction: column; gap: 8px; min-height: 0">
+<div style="padding: 0 16px"><label style="height: 34px; flex-shrink: 0; box-sizing: border-box; border-radius: 8px; border: 1px solid {{t.line}}; background: {{t.field}}; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: {{t.sub}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM16.5 16.5L21 21"></path></svg><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">{{dlg.drill.ph}}</span><input value="{{dlg.drill.q}}" onInput="{{dlg.drill.onQ}}" placeholder="{{dlg.drill.ph}}" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: {{t.text}}; font: 13.5px 'Figtree', sans-serif"></label></div>
+<div data-drill="1" style="flex: 1 1 auto; min-height: 0; position: relative; display: flex; padding: 0 16px">
+<div class="scroll" style="position: relative; flex-grow: 1; min-width: 0; overflow-y: auto; padding-right: 30px">
+<sc-for list="{{dlg.drill.sections}}" as="sec" hint-placeholder-count="2">
+<div data-letter="{{sec.letter}}" style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.08em; color: {{t.sub}}; padding: 12px 8px 4px">{{sec.letter}}</div>
+<sc-for list="{{sec.rows}}" as="r" hint-placeholder-count="3"><button onClick="{{r.pick}}" aria-pressed="{{r.on}}" style="width: 100%; height: 48px; border: 0; border-radius: 8px; background: {{r.bg}}; color: {{t.text}}; display: flex; align-items: center; gap: 12px; padding: 0 8px; cursor: pointer; text-align: left"><span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14.5px; font-weight: 600">{{r.name}}</span><span style="font-size: 12.5px; color: {{t.sub}}">{{r.sub}}</span></span><span aria-hidden="true" style="width: 20px; height: 20px; box-sizing: border-box; border-radius: 10px; border: 2px solid {{r.ring}}; background: {{r.fill}}; color: {{onAccent}}; display: flex; align-items: center; justify-content: center; flex-shrink: 0"><span style="display: {{r.checkDisp}}; line-height: 0"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span></span></button></sc-for>
+</sc-for>
+</div>
+<div aria-label="Jump to letter" style="position: absolute; right: 16px; top: 4px; bottom: 4px; width: 20px; display: flex; flex-direction: column; justify-content: space-between; align-items: center">
+<sc-for list="{{dlg.drill.rail}}" as="rl" hint-placeholder-count="26"><button onClick="{{rl.jump}}" style="width: 20px; height: 16px; padding: 0; border: 0; background: transparent; color: {{rl.color}}; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 500; cursor: pointer">{{rl.l}}</button></sc-for>
+</div>
+</div>
+</div>
+</sc-if>
 <div style="display: flex; align-items: center; gap: 10px; padding: 12px 20px 18px; border-top: 1px solid {{t.line}}">
 <button onClick="{{dClearTags}}" style="height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid {{t.line}}; background: transparent; color: {{t.sub}}; font-size: 13.5px; cursor: pointer">Clear</button>
 <span style="flex-grow: 1; font-size: 13px; color: {{t.sub}}">{{dlg.pickedSummary}}</span>
@@ -1979,17 +2174,26 @@ const POOLS = {
   winter: { help: "This plan has no tag, so here are titles you marked Want.", items: [["Dune: Part Three", "Movies", "Dec 2026 · first watch"], ["Shōgun", "Shows", "2024 · rewatch"], ["Castlevania: Belmont's Curse", "Games", "2026 · first play"], ["Control Resonant", "Games", "2026 · first play"]] }
 };
 
+const AUTHOR_NAMES = ["Agatha Christie", "Aldous Huxley", "Andy Weir", "Anne Rice", "Arthur Conan Doyle", "Astrid Lindgren", "Bill Bryson", "Blake Crouch", "Bram Stoker", "Brandon Sanderson", "Carlos Ruiz Zafon", "Clive Barker", "Cormac McCarthy", "Dan Simmons", "Daphne du Maurier", "Douglas Adams", "Edgar Allan Poe", "Emily St John Mandel", "Frank Herbert", "George Orwell", "Gillian Flynn", "Grady Hendrix", "H P Lovecraft", "Haruki Murakami", "Isaac Asimov", "James Clavell", "Jane Austen", "Joe Hill", "John Boyne", "John Wyndham", "Jules Verne", "Kazuo Ishiguro", "Ken Follett", "Kentaro Miura", "Leigh Bardugo", "Mary Shelley", "Michael Crichton", "Neil Gaiman", "Patrick Rothfuss", "Paul Tremblay", "Peter Straub", "Philip K Dick", "Ray Bradbury", "Richard Matheson", "Robert Harris", "Robin Hobb", "Shirley Jackson", "Stephen Graham Jones", "Stephen King", "Stieg Larsson", "Susanna Clarke", "Terry Pratchett", "The Brothers Grimm", "Thomas Harris", "Tolkien", "Ursula K Le Guin", "V E Schwab", "Victor Hugo", "Virginia Woolf", "William Gibson", "Yoko Ogawa", "Yuval Noah Harari", "Zadie Smith", "Ann Leckie"];
+const toTag = (n) => "#" + n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const tagSortKey = (g) => g.slice(1).replace(/^the-/, "");
+const nameOfTag = (g) => g.slice(1).split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+const fakeCount = (g) => { let n = 0; for (let i = 0; i < g.length; i++) n += g.charCodeAt(i); return 1 + (n % 9); };
+// Plans list every category, with Season first (it is what plans are usually linked to). A group over 24 tags is a row that drills in.
 const TAG_CATS = [
   ["Season", ["#halloween", "#christmas"]],
-  ["Genres", ["#horror", "#sci-fi", "#thriller", "#fantasy", "#dark-fantasy", "#adventure", "#action", "#historical"]],
-  ["Game genres", ["#metroidvania"]],
+  ["Genres", ["#horror", "#sci-fi", "#thriller", "#fantasy", "#dark-fantasy", "#adventure", "#action", "#historical", "#drama", "#sports", "#western", "#comedy"]],
+  ["Game genres", ["#metroidvania", "#soulslike", "#platformer", "#sports"]],
   ["Music genres", ["#rock", "#electronic", "#trip-hop", "#score"]],
   ["Mood", ["#scary", "#dark", "#cozy", "#lighthearted"]],
-  ["Authors", ["#stephen-king", "#john-boyne"]],
-  ["Directors", ["#mike-flanagan"]],
-  ["Actors", ["#leonardo-dicaprio"]],
-  ["Studios", ["#remedy"]],
-  ["Other", ["#dark-tower", "#favorite"]]
+  ["Languages", ["#japanese", "#french"]],
+  ["Authors", AUTHOR_NAMES.map(toTag).sort((a, b) => tagSortKey(a).localeCompare(tagSortKey(b)))],
+  ["Directors", ["#christopher-nolan", "#clint-eastwood", "#mike-flanagan", "#robert-eggers", "#sergio-leone"]],
+  ["Actors", ["#clint-eastwood", "#hilary-swank", "#kate-siegel", "#leonardo-dicaprio", "#morgan-freeman"]],
+  ["Studios", ["#madhouse", "#remedy", "#team-cherry"]],
+  ["Streaming", ["#apple-tv", "#netflix"]],
+  ["Animation style", ["#2.5d", "#hand-drawn"]],
+  ["Other", ["#dark-tower", "#favorite", "#swedish"]]
 ];
 const TAG_COUNT = { "#scary": 7, "#dark": 4, "#cozy": 2, "#lighthearted": 2, "#horror": 10, "#stephen-king": 7, "#favorite": 6, "#sci-fi": 5, "#mike-flanagan": 5, "#metroidvania": 3, "#remedy": 2, "#leonardo-dicaprio": 2, "#john-boyne": 2, "#dark-tower": 2, "#adventure": 2, "#trip-hop": 1, "#thriller": 1, "#score": 1, "#rock": 1, "#historical": 1, "#halloween": 1, "#fantasy": 1, "#electronic": 1, "#dark-fantasy": 1, "#christmas": 1, "#action": 1 };
 function mixWhite(h, f) { const n = parseInt(String(h).slice(1), 16); const c = (v) => Math.round(v + (255 - v) * f).toString(16).padStart(2, "0"); return "#" + c((n >> 16) & 255) + c((n >> 8) & 255) + c(n & 255); }
@@ -2132,6 +2336,7 @@ class Component extends DCLogic {
     const toggleD = (g) => { const n = Object.assign({}, dTags); n[g] = !n[g]; set({ dTags: n }); };
     const openCats = st.dOpenCats || { Season: true };
     const dq = String(st.dQ || "").toLowerCase().replace(/^#/, "");
+    const selRow = light ? "#F1F2F4" : mixWhite(t.content, 0.07);
     const S1 = sw(dStarted), S2 = sw(dSea), S3 = sw(dTl);
     const dlg = {
       isEdit, isNew: !isEdit, title: isEdit ? "Edit plan" : "New plan", cta: isEdit ? "Save" : "Create",
@@ -2144,11 +2349,12 @@ class Component extends DCLogic {
       pickedSummary: chosen.length ? chosen.length + " selected: " + chosen.join(", ") : "No tags selected",
       groups: TAG_CATS.map((c) => {
         const tags = c[1].filter((g) => g.slice(1).indexOf(dq) >= 0);
+        const long = !dq && c[1].length > 24;
         const open = dq ? tags.length > 0 : !!openCats[c[0]];
         const picked = c[1].filter((g) => dTags[g]).length;
-        return { name: c[0], count: String(tags.length), open, rot: open ? "90deg" : "0deg", picked: picked ? picked + " picked" : "",
+        return { name: c[0], count: String(tags.length), isLong: long, isFold: !long, drill: () => set({ dDrill: c[0], dDQ: "" }), open, rot: open ? "90deg" : "0deg", picked: picked ? picked + " selected" : "",
           toggle: () => set({ dOpenCats: Object.assign({}, openCats, { [c[0]]: !openCats[c[0]] }) }),
-          tags: tags.map((g) => ({ label: g, count: String(TAG_COUNT[g] || 0), on: !!dTags[g], bg: dTags[g] ? selBg : "transparent", border: dTags[g] ? selBg : t.line, pick: () => toggleD(g) })) };
+          tags: tags.map((g) => ({ label: g, count: String(TAG_COUNT[g] || fakeCount(g)), on: !!dTags[g], bg: dTags[g] ? selBg : "transparent", border: dTags[g] ? selBg : t.line, pick: () => toggleD(g) })) };
       }).filter((g) => g.tags.length),
       seasonal: !!dSeason, seaOn: dSea, seaTrack: S2.track, seaKnob: S2.knob, seaLeft: S2.left,
       seaHelp: dSea ? (dSeason === "Christmas" ? "Christmas artwork and a green accent inside this plan." : "Halloween artwork and an orange accent inside this plan.") : "This plan looks like any other plan.",
@@ -2157,6 +2363,17 @@ class Component extends DCLogic {
       sources: [["Halloween 2026", "Active"], ["Halloween 2025", "Finished"], ["Christmas 2025", "Finished"], ["Winter break", "Not started"]].map((p) => ({ name: p[0], sub: p[1], on: p[0] === dSource, bg: p[0] === dSource ? selBg : "transparent", ring: p[0] === dSource ? accent : t.sub, dot: p[0] === dSource ? accent : "transparent", pick: () => set({ dSource: p[0] }) })),
       startHelp: dStart === "Empty" ? "You add entries yourself afterwards." : "Entries you had not finished in that plan are copied in.",
       noMatch: TAG_CATS.every((c) => c[1].every((g) => g.slice(1).indexOf(dq) < 0)),
+      listView: !st.dDrill, drillView: !!st.dDrill, drill: (() => {
+        const c = TAG_CATS.find((x) => x[0] === st.dDrill); if (!c) return { sections: [], rail: [] };
+        const q2 = String(st.dDQ || "").trim().toLowerCase();
+        const list = c[1].filter((g) => !q2 || nameOfTag(g).toLowerCase().indexOf(q2) >= 0);
+        const secs = {}; list.forEach((g) => { const L0 = tagSortKey(g).charAt(0).toUpperCase(); (secs[L0] = secs[L0] || []).push(g); });
+        const picked = c[1].filter((g) => dTags[g]).length;
+        return { name: c[0], line: c[1].length + " " + c[0].toLowerCase() + (picked ? " · " + picked + " selected" : ""), ph: "Search " + c[0].toLowerCase(), q: st.dDQ || "",
+          back: () => set({ dDrill: null }), onQ: (e) => set({ dDQ: e && e.target ? e.target.value : "" }),
+          sections: Object.keys(secs).sort().map((L0) => ({ letter: L0, rows: secs[L0].map((g) => { const on = !!dTags[g], n = TAG_COUNT[g] || fakeCount(g); return { name: nameOfTag(g), sub: g + " · " + n + (n === 1 ? " entry" : " entries"), on, ring: on ? accent : t.sub, fill: on ? accent : "transparent", checkDisp: on ? "block" : "none", bg: on ? selRow : "transparent", pick: () => toggleD(g) }; }) })),
+          rail: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((L0) => ({ l: L0, color: secs[L0] ? t.text : t.line, jump: (ev) => { const box = ev && ev.currentTarget && ev.currentTarget.closest ? ev.currentTarget.closest("[data-drill]") : null; const sc = box && box.querySelector(".scroll"); const el = sc && sc.querySelector('[data-letter="' + L0 + '"]'); if (el) sc.scrollTo({ top: el.offsetTop }); } })) };
+      })(),
       tlOn: dTl, tlTrack: S3.track, tlKnob: S3.knob, tlLeft: S3.left,
       tlHelp: dTl ? "Entries sit on a timeline, each with a day or a period." : (isEdit ? "A plain checklist without dates." : "A plain checklist without dates. Starts off, as set in Settings.")
     };
@@ -2556,7 +2773,7 @@ class Component extends DCLogic {
 <script src="https://cdn.jsdelivr.net/npm/preact@10.19.3/dist/preact.umd.js"></script>
 <script>
 (function () {
-  var META = {"sections": [{"name": "Start", "files": ["Splash.dc.html", "Setup.dc.html"]}, {"name": "Library", "files": ["Main.dc.html"]}, {"name": "Plans and settings", "files": ["Plans.dc.html", "Settings.dc.html"]}], "screens": {"Splash.dc.html": {"title": "D0 · Splash", "notes": ["Shown while Libri starts. Returning users see which repo, branch and file are loading; first run shows the version instead.", "Logo, wordmark and an indeterminate bar in the accent color. No buttons."]}, "Setup.dc.html": {"title": "D1 · First-time setup", "notes": ["First run only. The whole window is the setup: steps in the sidebar column, the form in the content pane, Back and the main action pinned at the bottom.", "Four steps: Connect GitHub (repo + fine-grained token, stored in KDE Wallet), branch, library file (create new or pick an existing Libri JSON), then create or pick.", "Files that aren't in Libri's format are listed but can't be picked. Creating never overwrites an existing file. Everything can be changed later in Settings → Library source.", "Use the startStep setting to jump to any step. Replace token (from the token warning) lands on the Connect GitHub step with the repo kept."]}, "Main.dc.html": {"title": "D2 · Library", "notes": ["Libri opens on All, which is an overview (\"now and next\"), not a list of everything: In progress, the active plan, Coming soon, Recently added (the past month) and Top rated. Each list has See all N ›; in the grid view the cover shelves use their header as the link. Any filter, status or type turns All into the full grouped list.", "View (grid, list with covers, text) is remembered per type, and All has its own. In the text and list views the overview is two columns; in grid it is cover shelves plus a rail with the plan and Recently added. The active plan always uses the regular accent, never the seasonal look.", "Several types: Filter has a Type section; Ctrl+click in the sidebar adds or removes a type. Picked types show as removable chips, and results are grouped by type, each group in the current sort. The typeBoxes setting (Settings → Type checkboxes) adds a checkbox per type in the sidebar.", "Three panes: sidebar (Library types, Plans, Tags), content, and an inspector that only shows while an entry is selected.", "Toolbar: search, Filter popover (decade, tags, rating range, seasonal-only), Sort (same five options as the phone app), view mode (grid, list with covers, text) remembered per type, Add.", "Add opens the Add entry dialog over the library: online lookup on the left (TMDB, IGDB, Steam, Wikipedia) with several matches, every fetched field editable, the form scrolls between a fixed header and bottom bar.", "Tags (in Add entry and Filter) use the shared picker: search, folding categories, counts. A new tag is created only after confirming, and near-misses (scifi → #sci-fi, jorror → #horror) are suggested first.", "Active filters show as removable chips after the status chips, with Clear all right after the last chip.", "Tag categories match the phone app: Genres, Game genres, Music genres, Mood, Season, Authors, Directors, Actors, Studios, Other. Headers are small gray caps, tags are white.", "Token expiry: GitHub sends a GitHub-Authentication-Token-Expiration header on API responses made with a token that has an expiry date. Libri saves it from normal sync calls. From 7 days before, the warning shows once a day, the first time Libri opens that day. Later closes it until the next day; Replace token opens the Connect GitHub step of setup with the repo kept; Open GitHub opens the token settings page in the browser. A token without expiry never sends the header, so nothing shows. Once expired, GitHub answers 401 and the sidebar sync row says Token expired with Replace token. Use the tokenWarning setting to preview.", "Selection is a gray fill with no border; in the grid, unselected covers dim to 60%. Rating is always tap → picker, never a slider."]}, "Plans.dc.html": {"title": "D3 · Plans", "notes": ["All plans is the Plans home (Active, Upcoming, Finished, plus Seasonal collections). Plans have a name and an optional year; the year shows next to the name everywhere and switches from the title.", "Halloween and Christmas plans get an illustrated banner above the header (nothing overlaps it), a seasonal title icon, progress marker and accent. Seasonal touches can be turned off in Settings.", "New / Edit plan dialog: name, year, date range, linked hashtags (opens a full tag screen inside the dialog, Season open first), seasonal theme, start with empty or a copy, timeline. Delete uses neutral fill with red text.", "View popover per plan: checklist or timeline, plain or card sections, text or covers."]}, "Settings.dc.html": {"title": "D4 · Settings", "notes": ["Appearance: one Theme list: System (the default: Graphite when Plasma is dark, Light when it is light, switching live), Graphite, Charcoal, Catppuccin Mocha (brings Catppuccin type colors) and Light. Then background style (two-tone, the default, or flat), sidebar tags (pinned or most used), accent (vivid set incl. Peach, the default, and Catppuccin).", "Use the startTheme and plasma settings to preview each theme and what System does in a dark or light Plasma.", "Library source shows repo, branch and file. Plans: timeline by default, seasonal touches. Games: default platform."]}}};
+  var META = {"sections": [{"name": "Start", "files": ["Splash.dc.html", "Setup.dc.html"]}, {"name": "Library", "files": ["Main.dc.html"]}, {"name": "Plans and settings", "files": ["Plans.dc.html", "Settings.dc.html"]}], "screens": {"Splash.dc.html": {"title": "D0 · Splash", "notes": ["Shown while Libri starts. Returning users see which repo, branch and file are loading; first run shows the version instead.", "Logo, wordmark and an indeterminate bar in the accent color. No buttons."]}, "Setup.dc.html": {"title": "D1 · First-time setup", "notes": ["First run only. The whole window is the setup: steps in the sidebar column, the form in the content pane, Back and the main action pinned at the bottom.", "Four steps: Connect GitHub (repo + fine-grained token, stored in KDE Wallet), branch, library file (create new or pick an existing Libri JSON), then create or pick.", "Files that aren't in Libri's format are listed but can't be picked. Creating never overwrites an existing file. Everything can be changed later in Settings → Library source.", "Use the startStep setting to jump to any step. Replace token (from the token warning) lands on the Connect GitHub step with the repo kept."]}, "Main.dc.html": {"title": "D2 · Library", "notes": ["Libri opens on All, which is an overview (\"now and next\"), not a list of everything: In progress, the active plan, Coming soon, Recently added (the past month) and Top rated. Each list has See all N ›; in the grid view the cover shelves use their header as the link. Any filter, status or type turns All into the full grouped list.", "View (grid, list with covers, text) is remembered per type, and All has its own. In the text and list views the overview is two columns; in grid it is cover shelves plus a rail with the plan and Recently added. The active plan always uses the regular accent, never the seasonal look.", "Several types: Filter has a Type section; Ctrl+click in the sidebar adds or removes a type. Picked types show as removable chips, and results are grouped by type, each group in the current sort. The typeBoxes setting (Settings → Type checkboxes) adds a checkbox per type in the sidebar.", "Three panes: sidebar (Library types, Plans, Tags), content, and an inspector that only shows while an entry is selected.", "Toolbar: search, Filter popover (decade, tags, rating range, seasonal-only), Sort (same five options as the phone app), view mode (grid, list with covers, text) remembered per type, Add.", "Add opens the Add entry dialog over the library: online lookup on the left (TMDB, IGDB, Steam, Wikipedia) with several matches, every fetched field editable, the form scrolls between a fixed header and bottom bar.", "Tags (in Add entry and Filter) use the shared picker: search, folding categories, counts. A new tag is created only after confirming, and near-misses (scifi → #sci-fi, jorror → #horror) are suggested first.", "Active filters show as removable chips after the status chips, with Clear all right after the last chip.", "Use the start setting (Demo) to open any state directly: tags in two categories, the long Authors list, the right-click menu and dialogs.", "Tag categories match the phone app: Genres, Game genres, Music genres, Mood, Season, Languages, Authors, Directors, Actors, Studios, Streaming, Animation style, Other. Game genres only for games, Music genres only for music, Actors and Streaming only for movies and shows, unless you search. Tags are A to Z in every group, a leading \"the\" ignored. Headers are small gray caps, tags are white.", "Tags in more than one category: a people tag can be in Authors, Directors and Actors, a genre tag in Genres, Game genres and Music genres (never across kinds). On each entry the tag is ticked per category, so #clint-eastwood is ticked under Directors and Actors on Million Dollar Baby and only under Actors on The Good, the Bad and the Ugly. Where such a tag shows as text, its role follows the name: \"#clint-eastwood · Director, Actor\" in details (merged), one chip per role in the form's Tags, \"#clint-eastwood · Director\" as a filter chip. Filters match per role. Under a group heading no label is needed.", "One tag dialog for Filter (All tags…) and the entry form: search, folding groups, and a group with more than 24 tags is a row (\"Authors 64 · 1 selected · Show all ›\") that drills into a full list inside the dialog: back arrow, search, letter headers, a letter rail on the right and a check per row. Groups start folded except the ones holding a tag on this entry. Plans' Linked hashtags use the same long-group drill-in.", "Right-click a tag in the entry form's tag dialog (the desktop's long-press): Categories… for people and genre tags (tick one or more of its kind, at least one stays, with a usage line), Move to another group… for one-category tags (Other to Languages or Streaming; it stays on all its entries), and Add to / Remove from this entry. Searching for a person or genre that exists in another category of the same kind offers \"+ Add to Directors\" under the group that lacks it.", "New tag: Create #tag… opens Create a new tag? with all 13 categories; pick one, or several of the same kind (Genres + Music genres). Picking another kind starts over with it.", "Token expiry: GitHub sends a GitHub-Authentication-Token-Expiration header on API responses made with a token that has an expiry date. Libri saves it from normal sync calls. From 7 days before, the warning shows once a day, the first time Libri opens that day. Later closes it until the next day; Replace token opens the Connect GitHub step of setup with the repo kept; Open GitHub opens the token settings page in the browser. A token without expiry never sends the header, so nothing shows. Once expired, GitHub answers 401 and the sidebar sync row says Token expired with Replace token. Use the tokenWarning setting to preview.", "Selection is a gray fill with no border; in the grid, unselected covers dim to 60%. Rating is always tap → picker, never a slider."]}, "Plans.dc.html": {"title": "D3 · Plans", "notes": ["All plans is the Plans home (Active, Upcoming, Finished, plus Seasonal collections). Plans have a name and an optional year; the year shows next to the name everywhere and switches from the title.", "Halloween and Christmas plans get an illustrated banner above the header (nothing overlaps it), a seasonal title icon, progress marker and accent. Seasonal touches can be turned off in Settings.", "New / Edit plan dialog: name, year, date range, linked hashtags (opens a full tag screen inside the dialog, Season open first), seasonal theme, start with empty or a copy, timeline. Delete uses neutral fill with red text.", "View popover per plan: checklist or timeline, plain or card sections, text or covers."]}, "Settings.dc.html": {"title": "D4 · Settings", "notes": ["Appearance: one Theme list: System (the default: Graphite when Plasma is dark, Light when it is light, switching live), Graphite, Charcoal, Catppuccin Mocha (brings Catppuccin type colors) and Light. Then background style (two-tone, the default, or flat), sidebar tags (pinned or most used), accent (vivid set incl. Peach, the default, and Catppuccin).", "Use the startTheme and plasma settings to preview each theme and what System does in a dark or light Plasma.", "Library source shows repo, branch and file. Plans: timeline by default, seasonal touches. Games: default platform."]}}};
   if (!window.preact) {
     document.getElementById('screen').innerHTML = '<p class="boot-error">The viewer library did not load. Check the connection and reload.</p>';
     return;
