@@ -122,17 +122,17 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [x] Tests for the file form, filtering per category, searching and the picker; captures of the new states
 
 ### 1i. Shows, anime and series
-- [ ] Canvas revision: seasons for shows (row subtitle "2022–2026 · 3 seasons" and the "New season" badge, shortening to "New" when tight; the inspector's Seasons section with a status pill per season and the derived Status row; one-season shows; announced seasons as "Coming 2027"; the catch-up dialog; "Announced season dropped")
-- [ ] Canvas revision: all seasons and a season's episodes (number, title, air date, runtime; "4 of 6 episodes out", "Airs Oct 22", "Title TBA"). Decide where they open on desktop: a drill-in inside the 352 px inspector, or the content pane with the inspector kept
-- [ ] Canvas revision: anime kind (series or movie): the "Series or movie" control in the form; an anime series uses the show screens in the anime color
-- [ ] Canvas revision: series (the inspector's Series section with up to five parts, else three around this one and "All N volumes"; "+ Add" for missing parts; Series and Number fields in the form; a series as one row in long lists with a stack icon and "2 of 4 done"; the series page; the cover sheet that picks which part's cover stands for the series)
-- [ ] Design note (no board needed): page count for books, "160 pages" under the author in the inspector and a Pages field in the form
+- [x] Canvas revision: seasons for shows (row subtitle "2022–2026 · 3 seasons" and the "New season" badge, shortening to "New" when tight; the inspector's Seasons section with a status pill per season and the derived Status row; one-season shows; announced seasons as "Coming 2027"; the catch-up dialog; "Announced season dropped")
+- [x] Canvas revision: all seasons and a season's episodes (number, title, air date, runtime; "4 of 6 episodes out", "Airs Oct 22", "Title TBA"). Decided 2026-10-24: the content pane with the inspector kept, not a drill-in inside it
+- [x] Canvas revision: anime kind (series or movie): the "Series or movie" control in the form; an anime series uses the show screens in the anime color
+- [x] Canvas revision: series (the inspector's Series section with up to five parts, else three around this one and "All N volumes"; "+ Add" for missing parts; Series and Number fields in the form; a series as one row in long lists with a stack icon and "2 of 4 done"; the series page; the cover sheet that picks which part's cover stands for the series)
+- [x] Design note (no board needed): page count for books, "160 pages" under the author in the inspector and a Pages field in the form (DESIGN.md section 10, "Seasons and series")
 - [x] Build: `pages`, `series` (with `cover`) and the anime `kind` in the model and codec, matching the phone's key order (`seasons` is already read). Done in phase 1h, when the fixture became the phone's copy again; a season's `manual` flag too
-- [ ] Build: seasons in rows, the inspector, the form's season editor and plan ticks through the seasons; derived show status
-- [ ] Build: all seasons and episodes from the boards, on fixture episode lists until phase 4
-- [ ] Build: series in the inspector, series rows in long lists (`isLongList` rule, status All, Done or DNF, two parts or more), the series page and its cover sheet, on fixture part lists until phase 4
-- [ ] Fixture: the phone's Haunted Hotel, Carrie, South Park, Frieren, The Lord of the Rings and Berserk entries are in `assets/fixtures/library.json` once the phone's copy has them (keep it byte-identical)
-- [ ] Tests for derived status, series grouping and the new fields; captures of every new state in Graphite and Light
+- [x] Build: seasons in rows, the inspector, the form's season editor and plan ticks through the seasons; derived show status. The dropped-season dialog is built too, opened by `LIBRI_DROPPED=<id>:<n>` until the daily check of phase 4
+- [x] Build: all seasons and episodes from the boards, on fixture episode lists until phase 4 (`lookup::episodes`)
+- [x] Build: series in the inspector, series rows in long lists (`isLongList` rule, status All, Done or DNF, two parts or more), the series page and its cover sheet, on fixture part lists until phase 4 (`lookup::series_parts`: The Lord of the Rings and Berserk)
+- [ ] Fixture: the phone's Haunted Hotel, Carrie, South Park, Frieren, The Lord of the Rings and Berserk entries are in `assets/fixtures/library.json` once the phone's copy has them (keep it byte-identical). Frieren, The Lord of the Rings and Berserk are in since phase 1h; Haunted Hotel, Carrie and South Park are not in the phone's copy yet, so the captures build those states with `SetSeasons` on Stranger Things
+- [x] Tests for derived status, series grouping and the new fields; captures of every new state in Graphite and Light
 
 ### 1j. Add and Edit dialog
 - [ ] Canvas revision: the cover in the form with "From the match · tap to change" or "From another match · Use the match's cover", and the Pick a cover picker (the match's cover, then the other matches with year and edition)

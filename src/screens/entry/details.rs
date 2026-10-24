@@ -7,13 +7,15 @@
 use iced::widget::{Column, button, column, container, row, text};
 use iced::{Background, Border, Color, Element, Fill, Padding};
 
-use super::Message;
+use super::{Message, seasons};
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
 use crate::lookup;
-use crate::model::{Entry, EntryStatus, MediaType, Plan};
+use crate::model::{Entry, EntryStatus, MediaType, Plan, Series};
 use crate::music;
+use crate::screens::library::{self, Page};
 use crate::screens::plans;
+use crate::series;
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, Align, ButtonKind, FocusExt, Icon, Popover};
 
@@ -41,35 +43,69 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
     .padding(10)
     .align_y(iced::alignment::Vertical::Bottom)
     .style(move |_| container::background(tint).border(Border::default().rounded(8)));
+    let seasons = entry.season_list();
+    let today = app.today;
+    // A show's kicker carries the years it ran: "SHOW · 2025–2026".
+    let mut kicker = browse::kind_label(entry).to_uppercase();
+    if !seasons.is_empty()
+        && let Some(years) = entry.years(today)
+    {
+        kicker = format!("{kicker} · {years}");
+    }
     let mut facts = Column::new()
         .spacing(6)
         .padding(Padding::new(0.0).top(2))
-        .push(ui::mono(
-            browse::kind_label(entry).to_uppercase(),
-            11.0,
-            color,
-        ))
+        .push(ui::mono(kicker, 11.0, color))
         .push(text(&entry.title).size(24).font(font::EXTRABOLD));
     if let Some(creator) = &entry.creator {
         facts = facts.push(text(creator).size(14).color(tokens.sub));
     }
+    if let Some(pages) = entry.pages {
+        facts = facts.push(text(format!("{pages} pages")).size(14).color(tokens.sub));
+    }
     if let Some(album) = &entry.album {
         facts = facts.push(text(album).size(14).font(font::ITALIC).color(tokens.sub));
     }
-    if let Some(released) = entry.first_released() {
-        facts = facts.push(ui::mono(released.to_string(), 12.5, tokens.sub));
+    if seasons.is_empty() {
+        if let Some(released) = entry.first_released() {
+            facts = facts.push(ui::mono(released.to_string(), 12.5, tokens.sub));
+        }
+    } else {
+        let mut line = entry.years(today).unwrap_or_default();
+        if seasons.len() > 1 {
+            line = format!("{line} · {}", entry.season_count_label());
+        }
+        facts = facts.push(ui::mono(line, 12.5, tokens.sub));
+    }
+    if entry.has_new_season(today) {
+        facts = facts.push(ui::new_season_badge(&tokens));
     }
     let header = row![cover, facts.width(Fill)].spacing(16);
 
-    let statuses = EntryStatus::options_for(entry.media).iter().map(|&status| {
-        let label = browse::status_label(Some(entry.media), status);
-        (
-            label,
-            entry.status == status,
-            msg(Message::SetStatus(id(), status)),
-        )
-    });
-    let status = ui::segmented(statuses, 32.0, &tokens);
+    // A show with several seasons has its status set by them; with one,
+    // the pill sets Season 1, which is the show's.
+    let status: Element<'a, AppMessage> = match seasons {
+        [] => {
+            let statuses = EntryStatus::options_for(entry.media).iter().map(|&status| {
+                let label = browse::status_label(Some(entry.media), status);
+                (
+                    label,
+                    entry.status == status,
+                    msg(Message::SetStatus(id(), status)),
+                )
+            });
+            ui::segmented(statuses, 32.0, &tokens)
+        }
+        [only] => seasons::pill(app, entry, only, false, &tokens),
+        _ => row![
+            text(browse::status_label(Some(entry.media), entry.status))
+                .size(14.5)
+                .font(font::SEMIBOLD),
+            text("· from seasons").size(14.5).color(tokens.sub),
+        ]
+        .spacing(5)
+        .into(),
+    };
 
     let rating = ui::rating(
         entry.rating,
@@ -151,6 +187,14 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
     sections = sections
         .push(section("Status", status, &tokens))
         .push(section("Rating", rating, &tokens));
+    if !seasons.is_empty() {
+        sections = sections.push(seasons_section(app, entry, &tokens));
+    }
+    if let Some(part_of) = &entry.series
+        && entry.can_have_series()
+    {
+        sections = sections.push(series_section(app, entry, part_of, &tokens));
+    }
     if entry.media == MediaType::Music && !music::is_song(entry) {
         sections = sections.push(tracks(app, entry, &tokens));
     }
@@ -194,6 +238,79 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
     .height(Fill)
     .style(move |_| container::background(content_bg))
     .into()
+}
+
+/// Seasons: the heading with the count, one row per season (every one up
+/// to five, else the latest three and "All N seasons").
+fn seasons_section<'a>(app: &'a App, entry: &'a Entry, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let seasons = entry.season_list();
+    let shown = if seasons.len() <= 5 {
+        seasons
+    } else {
+        &seasons[seasons.len() - 3..]
+    };
+    let mut rows = Column::new().spacing(2);
+    for season in shown {
+        rows = rows.push(seasons::season_row(app, entry, season, false, tokens));
+    }
+    if seasons.len() > 5 {
+        rows = rows.push(seasons::all_row(
+            format!("All {}", entry.season_count_label()),
+            AppMessage::Library(library::Message::OpenPage(Page::Seasons {
+                id: entry.id.clone(),
+            })),
+            tokens,
+        ));
+    }
+    let header = row![
+        ui::section_header("Seasons", tokens),
+        iced::widget::space::horizontal(),
+        text(entry.season_count_label())
+            .size(12.5)
+            .color(tokens.sub),
+    ];
+    column![header, rows].spacing(8).into()
+}
+
+/// Series: the heading with "2 of 3 in your library", the series name,
+/// the parts (every one up to five, else three around this one and "All
+/// N volumes").
+fn series_section<'a>(
+    app: &'a App,
+    entry: &'a Entry,
+    part_of: &'a Series,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let library = app.repo.library();
+    let all = series::rows(library, entry.media, &part_of.name, Some(&entry.id));
+    let owned = all.iter().filter(|r| r.owned()).count();
+    let mut rows = Column::new().spacing(2).push(
+        text(Series::display_name(&part_of.name))
+            .size(13)
+            .color(tokens.sub),
+    );
+    for part in series::window(&all) {
+        rows = rows.push(seasons::series_row(app, &part, entry.media, tokens));
+    }
+    if all.len() > 5 {
+        rows = rows.push(seasons::all_row(
+            format!("All {} {}", all.len(), Series::nouns(entry.media).1),
+            AppMessage::Library(library::Message::OpenPage(Page::Series {
+                media: entry.media,
+                name: part_of.name.clone(),
+                highlight: Some(entry.id.clone()),
+            })),
+            tokens,
+        ));
+    }
+    let header = row![
+        ui::section_header("Series", tokens),
+        iced::widget::space::horizontal(),
+        text(format!("{owned} of {} in your library", all.len()))
+            .size(12.5)
+            .color(tokens.sub),
+    ];
+    column![header, rows].spacing(8).into()
 }
 
 /// The entry in the open plan: its When (a day or a period, on a

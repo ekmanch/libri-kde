@@ -48,6 +48,7 @@ LIBRI_PLASMA=light cargo run       # a light Plasma, for the System theme
 LIBRI_FIRST_RUN=1 cargo run        # no repository yet (the splash's first-run line, Settings not connected)
 LIBRI_SETUP=branch cargo run       # with LIBRI_SCREEN=setup: welcome, connect, branch, file, create, existing, done
 LIBRI_LONG_LISTS=1 cargo run       # section headers and the jump rail on every list, and tag groups of four or more as long groups, since the fixture is short
+LIBRI_DROPPED=shows/stranger-things-2016:1 cargo run  # the "season no longer listed" dialog for a show's season
 ICED_BACKEND=tiny-skia cargo run   # software renderer
 WGPU_BACKEND=gl cargo run          # OpenGL instead of Vulkan (the freeze A/B test, TODO.md 1g)
 ICED_PRESENT_MODE=mailbox cargo run # Vulkan without FIFO waits (the freeze A/B test, TODO.md 1g)

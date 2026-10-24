@@ -8,7 +8,9 @@ use std::fmt;
 
 pub use fixture::FixtureLibraryRepository;
 
-use crate::model::{Entry, EntryStatus, Library, Plan, PlanItem, TagCategory, Track};
+use crate::model::{
+    Date, Entry, EntryStatus, Library, MediaType, Plan, PlanItem, Season, TagCategory, Track,
+};
 
 pub trait LibraryRepository {
     /// The current library.
@@ -81,6 +83,44 @@ pub enum Operation {
         album: String,
         title: String,
         rating: Option<u8>,
+    },
+    /// Sets one season's status (`None` clears it); the show's status
+    /// follows. A season given a status is no longer "new".
+    SetSeasonStatus {
+        id: String,
+        season: u32,
+        status: Option<EntryStatus>,
+        today: Date,
+    },
+    /// Catching up: marks every season before `before` Done.
+    MarkSeasonsDone {
+        id: String,
+        before: u32,
+        today: Date,
+    },
+    /// Replaces a show's seasons (the form, or a plan's untick putting
+    /// them back); the show's status follows.
+    SetSeasons {
+        id: String,
+        seasons: Vec<Season>,
+        today: Date,
+    },
+    /// Removes a season the lookup dropped.
+    RemoveSeason {
+        id: String,
+        season: u32,
+        today: Date,
+    },
+    /// Keeps a season the lookup dropped: marks it manual, so it is never
+    /// asked about again.
+    KeepSeason {
+        id: String,
+        season: u32,
+    },
+    /// The part whose cover stands for its series in the library list:
+    /// `cover` set on `id`, cleared on the series' other parts.
+    SetSeriesCover {
+        id: String,
     },
 }
 
@@ -215,6 +255,80 @@ impl Operation {
                     (None, None) => {}
                 }
             }
+            Operation::SetSeasonStatus {
+                id,
+                season,
+                status,
+                today,
+            } => {
+                let show = entry_mut(library, &id)?;
+                let found = show
+                    .seasons
+                    .as_mut()
+                    .and_then(|seasons| seasons.iter_mut().find(|s| s.season == season))
+                    .ok_or(RepoError::MissingSeason(season))?;
+                found.status = status;
+                if status.is_some() {
+                    found.fresh = None;
+                }
+                show.refresh_status(today);
+            }
+            Operation::MarkSeasonsDone { id, before, today } => {
+                let show = entry_mut(library, &id)?;
+                for season in show.seasons.iter_mut().flatten() {
+                    if season.season < before {
+                        season.status = Some(EntryStatus::Done);
+                        season.fresh = None;
+                    }
+                }
+                show.refresh_status(today);
+            }
+            Operation::SetSeasons { id, seasons, today } => {
+                let show = entry_mut(library, &id)?;
+                let mut seasons = seasons;
+                seasons.sort_by_key(|s| s.season);
+                show.seasons = (!seasons.is_empty()).then_some(seasons);
+                show.refresh_status(today);
+            }
+            Operation::RemoveSeason { id, season, today } => {
+                let show = entry_mut(library, &id)?;
+                let seasons = show.seasons.get_or_insert_with(Vec::new);
+                let before = seasons.len();
+                seasons.retain(|s| s.season != season);
+                if seasons.len() == before {
+                    return Err(RepoError::MissingSeason(season));
+                }
+                if seasons.is_empty() {
+                    show.seasons = None;
+                }
+                show.refresh_status(today);
+            }
+            Operation::KeepSeason { id, season } => {
+                let show = entry_mut(library, &id)?;
+                let found = show
+                    .seasons
+                    .as_mut()
+                    .and_then(|seasons| seasons.iter_mut().find(|s| s.season == season))
+                    .ok_or(RepoError::MissingSeason(season))?;
+                found.manual = Some(true);
+            }
+            Operation::SetSeriesCover { id } => {
+                let part = entry_mut(library, &id)?;
+                let Some(series) = &part.series else {
+                    return Err(RepoError::NotInSeries(id));
+                };
+                let (media, name): (MediaType, String) = (part.media, series.name.clone());
+                for entry in &mut library.entries {
+                    if entry.media != media {
+                        continue;
+                    }
+                    if let Some(series) = &mut entry.series
+                        && crate::model::Series::same(&series.name, &name)
+                    {
+                        series.cover = (entry.id == id).then_some(true);
+                    }
+                }
+            }
             Operation::RemovePlanItem { plan, entry } => {
                 let plan = plan_mut(library, &plan)?;
                 let before = plan.items.len();
@@ -280,6 +394,8 @@ pub enum RepoError {
     NoCategory(String),
     DuplicatePlan(String),
     InvalidRating(u8),
+    MissingSeason(u32),
+    NotInSeries(String),
 }
 
 impl fmt::Display for RepoError {
@@ -293,6 +409,8 @@ impl fmt::Display for RepoError {
             RepoError::NoCategory(name) => write!(f, "#{name} needs at least one category"),
             RepoError::DuplicatePlan(id) => write!(f, "a plan {id} already exists"),
             RepoError::InvalidRating(rating) => write!(f, "rating {rating} is not 1 to 10"),
+            RepoError::MissingSeason(n) => write!(f, "no season {n}"),
+            RepoError::NotInSeries(id) => write!(f, "{id} is in no series"),
         }
     }
 }

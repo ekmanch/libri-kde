@@ -342,4 +342,120 @@ mod tests {
             Err(RepoError::MissingTag("nobody".into()))
         );
     }
+
+    fn today() -> crate::model::Date {
+        crate::model::Date::parse("2026-10-19").unwrap()
+    }
+
+    #[test]
+    fn a_seasons_status_sets_the_shows() {
+        let mut repo = repo();
+        let id = "anime/frieren-beyond-journeys-end-2023";
+        assert_eq!(
+            repo.library().entry(id).unwrap().status,
+            EntryStatus::InProgress
+        );
+        let library = repo
+            .apply(Operation::SetSeasonStatus {
+                id: id.into(),
+                season: 2,
+                status: Some(EntryStatus::Done),
+                today: today(),
+            })
+            .unwrap();
+        assert_eq!(library.entry(id).unwrap().status, EntryStatus::Done);
+        let library = repo
+            .apply(Operation::SetSeasonStatus {
+                id: id.into(),
+                season: 1,
+                status: None,
+                today: today(),
+            })
+            .unwrap();
+        assert_eq!(
+            library.entry(id).unwrap().status,
+            EntryStatus::Done,
+            "an unset season does not count"
+        );
+        assert_eq!(
+            repo.apply(Operation::SetSeasonStatus {
+                id: id.into(),
+                season: 9,
+                status: None,
+                today: today(),
+            }),
+            Err(RepoError::MissingSeason(9))
+        );
+    }
+
+    #[test]
+    fn catching_up_marks_the_earlier_seasons_done_and_a_dropped_season_can_go_or_stay() {
+        let mut repo = repo();
+        let id = "anime/frieren-beyond-journeys-end-2023";
+        repo.apply(Operation::SetSeasonStatus {
+            id: id.into(),
+            season: 1,
+            status: None,
+            today: today(),
+        })
+        .unwrap();
+        let library = repo
+            .apply(Operation::MarkSeasonsDone {
+                id: id.into(),
+                before: 2,
+                today: today(),
+            })
+            .unwrap();
+        let seasons = library.entry(id).unwrap().season_list();
+        assert_eq!(seasons[0].status, Some(EntryStatus::Done));
+        assert_eq!(
+            seasons[1].status,
+            Some(EntryStatus::InProgress),
+            "later seasons are left alone"
+        );
+
+        let library = repo
+            .apply(Operation::KeepSeason {
+                id: id.into(),
+                season: 2,
+            })
+            .unwrap();
+        assert_eq!(
+            library.entry(id).unwrap().season_list()[1].manual,
+            Some(true)
+        );
+        let library = repo
+            .apply(Operation::RemoveSeason {
+                id: id.into(),
+                season: 2,
+                today: today(),
+            })
+            .unwrap();
+        let show = library.entry(id).unwrap();
+        assert_eq!(show.season_list().len(), 1);
+        assert_eq!(show.status, EntryStatus::Done, "one season: its status");
+    }
+
+    #[test]
+    fn the_series_cover_moves_between_parts() {
+        let mut repo = repo();
+        let first = "movies/the-lord-of-the-rings-the-fellowship-of-the-ring-2001";
+        let second = "movies/the-lord-of-the-rings-the-two-towers-2002";
+        let library = repo
+            .apply(Operation::SetSeriesCover { id: second.into() })
+            .unwrap();
+        let cover = |id: &str| library.entry(id).unwrap().series.as_ref().unwrap().cover;
+        assert_eq!((cover(first), cover(second)), (None, Some(true)));
+        let library = repo
+            .apply(Operation::SetSeriesCover { id: first.into() })
+            .unwrap();
+        let cover = |id: &str| library.entry(id).unwrap().series.as_ref().unwrap().cover;
+        assert_eq!((cover(first), cover(second)), (Some(true), None));
+        assert_eq!(
+            repo.apply(Operation::SetSeriesCover {
+                id: "movies/the-mummy-1999".into()
+            }),
+            Err(RepoError::NotInSeries("movies/the-mummy-1999".into()))
+        );
+    }
 }

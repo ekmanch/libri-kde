@@ -1,7 +1,7 @@
 //! Online lookup, faked for phase 1: a small fixed catalog the Add entry
 //! dialog searches. Phase 4 asks the real providers instead.
 
-use crate::model::{EntryKind, MediaType};
+use crate::model::{Date, Entry, EntryKind, MediaType, Season, Series};
 
 /// One match a lookup returns.
 #[derive(Debug, Clone, PartialEq)]
@@ -288,6 +288,125 @@ pub fn track_list(artist: &str, album: &str) -> Option<&'static [&'static str]> 
         .map(|(_, _, tracks)| *tracks)
 }
 
+/// One part of a series as the lookup lists it: TMDB's collection, IGDB's
+/// collection or Wikidata's series.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeriesPart {
+    pub number: Option<u32>,
+    pub title: String,
+    pub year: Option<u16>,
+    /// The lookup id, when the source has one.
+    pub source: Option<String>,
+}
+
+/// The parts of a series of `media`, in series order, when the lookup
+/// knows it. Phase 4 fetches and keeps them; until then two series are
+/// fixed here.
+pub fn series_parts(media: MediaType, name: &str) -> Option<Vec<SeriesPart>> {
+    let part = |number: u32, title: &str, year: u16, source: Option<&str>| SeriesPart {
+        number: Some(number),
+        title: title.to_owned(),
+        year: Some(year),
+        source: source.map(str::to_owned),
+    };
+    match (media, Series::display_name(name).to_lowercase().as_str()) {
+        (MediaType::Movies, "the lord of the rings") => Some(vec![
+            part(
+                1,
+                "The Lord of the Rings: The Fellowship of the Ring",
+                2001,
+                Some("tmdb:movie:120"),
+            ),
+            part(
+                2,
+                "The Lord of the Rings: The Two Towers",
+                2002,
+                Some("tmdb:movie:121"),
+            ),
+            part(
+                3,
+                "The Lord of the Rings: The Return of the King",
+                2003,
+                Some("tmdb:movie:122"),
+            ),
+        ]),
+        (MediaType::Books, "berserk") => {
+            const YEARS: [u16; 43] = [
+                1990, 1991, 1991, 1992, 1993, 1993, 1994, 1994, 1995, 1995, 1996, 1996, 1997, 1997,
+                1998, 1998, 1999, 1999, 2000, 2000, 2001, 2001, 2002, 2002, 2003, 2003, 2004, 2005,
+                2005, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2013, 2016, 2017, 2018, 2021, 2021,
+                2025,
+            ];
+            Some(
+                YEARS
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &year)| {
+                        let n = i as u32 + 1;
+                        part(n, &format!("Berserk, Vol. {n}"), year, None)
+                    })
+                    .collect(),
+            )
+        }
+        _ => None,
+    }
+}
+
+/// One episode of a season, as TMDB lists it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Episode {
+    pub number: u32,
+    /// None until TMDB has a title (its placeholder "Episode 5" counts as
+    /// none).
+    pub title: Option<String>,
+    pub aired: Option<Date>,
+    /// In minutes.
+    pub runtime: Option<u32>,
+}
+
+/// The episodes of `season`, made up for the fixture: a weekly season
+/// when the season's date is a full day and it is not the first, every
+/// episode on the season's day otherwise. Phase 4 fetches them.
+pub fn episodes(entry: &Entry, season: &Season) -> Vec<Episode> {
+    const FILLER: [&str; 10] = [
+        "Pilot",
+        "Arrival",
+        "The Long Night",
+        "Small Hours",
+        "Undertow",
+        "Homecoming",
+        "Static",
+        "Open House",
+        "Fault Lines",
+        "The Last One",
+    ];
+    let full_date = season
+        .released
+        .is_some_and(|r| r.month.is_some() && r.day.is_some());
+    let (count, weekly, runtime) = match (entry.media, season.season) {
+        (MediaType::Anime, _) => (10, full_date, 24),
+        (_, n) => (8, full_date && n > 1, 50),
+    };
+    let start = season.released.map(|r| r.available_from());
+    (0..count)
+        .map(|i| {
+            let aired = start.map(|day| {
+                if weekly {
+                    day.add_days(i64::from(i) * 7)
+                } else {
+                    day
+                }
+            });
+            Episode {
+                number: i + 1,
+                title: Some(FILLER[i as usize % FILLER.len()].to_owned()),
+                aired,
+                runtime: Some(runtime),
+            }
+        })
+        .collect()
+}
+
 /// The matches for `query` among `media`: titles that contain it, case
 /// ignored. Nothing for an empty query.
 pub fn search(media: MediaType, query: &str) -> Vec<&'static Match> {
@@ -312,6 +431,15 @@ mod tests {
         assert_eq!(games.len(), 4);
         assert!(search(MediaType::Movies, "castlevania").is_empty());
         assert!(search(MediaType::Games, "  ").is_empty());
+    }
+
+    #[test]
+    fn the_fixture_series_and_episodes_are_listed() {
+        let berserk = series_parts(MediaType::Books, "Berserk").unwrap();
+        assert_eq!(berserk.len(), 43);
+        assert_eq!(berserk[42].year, Some(2025));
+        assert!(series_parts(MediaType::Movies, "The Lord of the Rings Collection").is_some());
+        assert!(series_parts(MediaType::Games, "Berserk").is_none());
     }
 
     #[test]

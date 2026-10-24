@@ -133,6 +133,8 @@ impl Message {
                     | L::SeeAll(_)
                     | L::PickTag(_)
                     | L::PickFromAllTags(..)
+                    | L::OpenPage(_)
+                    | L::ClosePage
                     | L::MusicTab(_)
                     | L::OpenArtist(_)
                     | L::CloseArtist
@@ -198,6 +200,14 @@ impl App {
             app.setup = setup::State::at(step, app.source.as_ref());
         }
         app.library.force_long = var("LIBRI_LONG_LISTS").is_some();
+        // The dropped-season dialog, until the daily check of phase 4 opens
+        // it: "shows/stranger-things-2016:2".
+        if let Some((id, season)) = var("LIBRI_DROPPED").and_then(|spec| {
+            let (id, n) = spec.rsplit_once(':')?;
+            Some((id.to_owned(), n.parse::<u32>().ok()?))
+        }) {
+            app.dialog = Some(entry::Dialog::SeasonDropped { id, season });
+        }
         (app, TitleBar::take().map(Message::TitleBar))
     }
 
@@ -393,6 +403,9 @@ impl App {
             }
             Message::Library(library::Message::Picker(tags::PickerMessage::Jump(offset))) => {
                 return tags::jump(offset);
+            }
+            Message::Library(library::Message::PickSeriesCover(id)) => {
+                self.apply(Operation::SetSeriesCover { id });
             }
             Message::Library(message) => {
                 // Ctrl+click on a sidebar type adds or removes it.

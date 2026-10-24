@@ -12,6 +12,7 @@ pub mod music;
 pub mod plans;
 pub mod repo;
 pub mod screens;
+pub mod series;
 pub mod settings;
 pub mod tags;
 pub mod theme;

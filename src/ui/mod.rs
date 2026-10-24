@@ -15,6 +15,7 @@ pub mod music;
 pub mod popover;
 pub mod rating;
 pub mod search;
+pub mod season;
 pub mod seasonal;
 pub mod segmented;
 pub mod switch;
@@ -31,7 +32,10 @@ use crate::theme::{Tokens, font, size};
 pub use chip::{add_chip, filter_chip, removable_chip, status_chip, tag_chip};
 pub use dialog::{dialog, modal, panel};
 pub use empty::empty_state;
-pub use entry::{EntryLook, entry_card, entry_list_row, entry_table_header, entry_table_row, rule};
+pub use entry::{
+    EntryLook, entry_card, entry_list_row, entry_table_header, entry_table_row, new_season_badge,
+    rule,
+};
 pub use field::{labeled, text_field};
 pub use focus::{Barrier, FocusExt, Focusable};
 pub use groups::{Groups, Measure};
@@ -40,6 +44,7 @@ pub use menu::radio_menu;
 pub use popover::{Align, Placement, Popover};
 pub use rating::{rating, track_rating};
 pub use search::search_field;
+pub use season::season_pill;
 pub use segmented::segmented;
 pub use switch::{setting_switch, switch};
 pub use tag_group::tag_group;

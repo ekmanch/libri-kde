@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::model::{
-    Date, Entry, EntryKind, EntryStatus, Library, MediaType, Plan, TagCategory, tag_label,
+    Date, Entry, EntryKind, EntryStatus, Library, MediaType, Plan, Series, TagCategory, tag_label,
 };
 
 /// A release decade in the filter: "Older" for everything before 1960,
@@ -381,6 +381,163 @@ impl Sort {
     }
 }
 
+/// The parts of one series that are in the library, shown as one row in
+/// a long list: the series name, the part the row sits where (the first
+/// in the list's sort) and every part in series order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeriesGroup<'a> {
+    pub name: String,
+    pub media: MediaType,
+    pub lead: &'a Entry,
+    pub parts: Vec<&'a Entry>,
+}
+
+impl<'a> SeriesGroup<'a> {
+    /// The series name as shown, "Collection" dropped.
+    pub fn title(&self) -> String {
+        Series::display_name(&self.name)
+    }
+
+    pub fn done_count(&self) -> usize {
+        self.parts
+            .iter()
+            .filter(|p| p.status == EntryStatus::Done)
+            .count()
+    }
+
+    pub fn all_done(&self) -> bool {
+        self.done_count() == self.parts.len()
+    }
+
+    /// "2008–2024", or "2008".
+    pub fn year_span(&self) -> Option<String> {
+        let mut years: Vec<u16> = self.parts.iter().filter_map(|p| p.year()).collect();
+        years.sort_unstable();
+        match (years.first(), years.last()) {
+            (Some(first), Some(last)) if first == last => Some(first.to_string()),
+            (Some(first), Some(last)) => Some(format!("{first}–{last}")),
+            _ => None,
+        }
+    }
+
+    /// "4 movies".
+    pub fn count_label(&self) -> String {
+        format!("{} {}", self.parts.len(), Series::nouns(self.media).1)
+    }
+
+    /// "4 movies · 2008–2024".
+    pub fn subtitle(&self) -> String {
+        match self.year_span() {
+            Some(span) => format!("{} · {span}", self.count_label()),
+            None => self.count_label(),
+        }
+    }
+
+    /// "2 of 4 done", or "All done".
+    pub fn done_label(&self) -> String {
+        if self.all_done() {
+            "All done".into()
+        } else {
+            format!("{} of {} done", self.done_count(), self.parts.len())
+        }
+    }
+
+    /// The part whose cover stands for the series: the one marked, else
+    /// the first in series order.
+    pub fn cover_entry(&self) -> &'a Entry {
+        self.parts
+            .iter()
+            .copied()
+            .find(|p| p.series.as_ref().is_some_and(|s| s.cover == Some(true)))
+            .unwrap_or(self.parts[0])
+    }
+}
+
+/// One row of the library list: an entry, or a series as one row.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Row<'a> {
+    Entry(&'a Entry),
+    Series(SeriesGroup<'a>),
+}
+
+impl<'a> Row<'a> {
+    /// The entry the row sorts and files by.
+    pub fn lead(&self) -> &'a Entry {
+        match self {
+            Row::Entry(entry) => entry,
+            Row::Series(group) => group.lead,
+        }
+    }
+}
+
+/// Whether a status segment groups series: All, Done and DNF do; Want and
+/// In progress show the single entries, since there you are picking what
+/// to watch next.
+pub fn groups_series_for(status: Option<EntryStatus>) -> bool {
+    matches!(
+        status,
+        None | Some(EntryStatus::Done) | Some(EntryStatus::Dnf)
+    )
+}
+
+/// `sorted` with the parts of a series that are in the library (two or
+/// more) folded into one row, sitting where its first-sorting part would.
+pub fn group_series<'a>(sorted: &[&'a Entry]) -> Vec<Row<'a>> {
+    let key_of = |entry: &Entry| {
+        entry
+            .series
+            .as_ref()
+            .filter(|_| entry.can_have_series())
+            .map(|s| (entry.media, Series::display_name(&s.name).to_lowercase()))
+    };
+    let mut rows = Vec::new();
+    let mut done: Vec<(MediaType, String)> = Vec::new();
+    for &entry in sorted {
+        let Some(key) = key_of(entry) else {
+            rows.push(Row::Entry(entry));
+            continue;
+        };
+        let parts: Vec<&Entry> = sorted
+            .iter()
+            .copied()
+            .filter(|e| key_of(e).as_ref() == Some(&key))
+            .collect();
+        if parts.len() < 2 {
+            rows.push(Row::Entry(entry));
+            continue;
+        }
+        if done.contains(&key) {
+            continue;
+        }
+        done.push(key);
+        rows.push(Row::Series(SeriesGroup {
+            name: entry.series.as_ref().expect("keyed").name.clone(),
+            media: entry.media,
+            lead: entry,
+            parts: in_series_order(parts),
+        }));
+    }
+    rows
+}
+
+/// `parts` by their number in the series, unnumbered ones last, ties by
+/// year and title.
+pub fn in_series_order(mut parts: Vec<&Entry>) -> Vec<&Entry> {
+    parts.sort_by(|a, b| {
+        let number = |e: &Entry| e.series.as_ref().and_then(|s| s.number);
+        match (number(a), number(b)) {
+            (Some(x), Some(y)) if x != y => x.cmp(&y),
+            (None, Some(_)) => Ordering::Greater,
+            (Some(_), None) => Ordering::Less,
+            _ => a
+                .year()
+                .cmp(&b.year())
+                .then(a.title.to_lowercase().cmp(&b.title.to_lowercase())),
+        }
+    });
+    parts
+}
+
 /// A section of a long list: its header, the rail's short label and its
 /// entries, in the list's order.
 #[derive(Debug, Clone, PartialEq)]
@@ -388,6 +545,31 @@ pub struct ListSection<'a> {
     pub label: String,
     pub short: String,
     pub entries: Vec<&'a Entry>,
+}
+
+/// A section of a long list of rows (series folded), by each row's lead.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RowSection<'a> {
+    pub label: String,
+    pub short: String,
+    pub rows: Vec<Row<'a>>,
+}
+
+/// [`sections`] over rows: a series row files where its lead does.
+pub fn row_sections<'a>(sort: Sort, rows: &[Row<'a>], today: Date) -> Vec<RowSection<'a>> {
+    let mut sections: Vec<RowSection<'a>> = Vec::new();
+    for row in rows {
+        let (label, short) = section_key(sort, row.lead(), today);
+        match sections.last_mut() {
+            Some(last) if last.label == label => last.rows.push(row.clone()),
+            _ => sections.push(RowSection {
+                label,
+                short,
+                rows: vec![row.clone()],
+            }),
+        }
+    }
+    sections
 }
 
 /// The phone's long-list sections of `entries`, already in `sort` order:
@@ -619,6 +801,7 @@ pub fn kind_label(entry: &Entry) -> &'static str {
         MediaType::Games => "Game",
         MediaType::Music if entry.kind == Some(EntryKind::Song) => "Song",
         MediaType::Music => "Album",
+        MediaType::Anime if entry.kind == Some(EntryKind::Movie) => "Anime movie",
         MediaType::Anime => "Anime",
     }
 }
@@ -1011,5 +1194,39 @@ mod tests {
             [("clint-eastwood".to_owned(), Some(TagCategory::Actors))],
             "a tag chosen by name keeps only the role toggled"
         );
+    }
+
+    #[test]
+    fn a_series_in_the_library_folds_into_one_row_where_its_first_part_sorts() {
+        let library = library();
+        let mut movies: Vec<&Entry> = library.entries_of(MediaType::Movies).collect();
+        Sort::TitleAz.apply(&mut movies);
+        let rows = group_series(&movies);
+        assert_eq!(rows.len(), movies.len() - 1, "two parts became one row");
+        let at = rows
+            .iter()
+            .position(|r| matches!(r, Row::Series(_)))
+            .unwrap();
+        let Row::Series(group) = &rows[at] else {
+            unreachable!()
+        };
+        assert_eq!(group.title(), "The Lord of the Rings");
+        assert_eq!(group.subtitle(), "2 movies · 2001–2002");
+        assert_eq!(group.done_label(), "1 of 2 done");
+        assert_eq!(group.parts[0].series.as_ref().unwrap().number, Some(1));
+        // Where "The Lord of the Rings: The Fellowship…" sorts by title.
+        assert_eq!(group.lead.id, movies[at].id);
+
+        let mut books: Vec<&Entry> = library.entries_of(MediaType::Books).collect();
+        Sort::YearNewest.apply(&mut books);
+        let rows = group_series(&books);
+        let Row::Series(berserk) = rows.iter().find(|r| matches!(r, Row::Series(_))).unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(berserk.count_label(), "3 volumes");
+        assert_eq!(berserk.lead.id, "books/berserk-vol-43-2025", "newest first");
+        assert!(groups_series_for(None) && groups_series_for(Some(EntryStatus::Dnf)));
+        assert!(!groups_series_for(Some(EntryStatus::Want)));
     }
 }

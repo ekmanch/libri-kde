@@ -26,13 +26,14 @@ pub enum Icon {
     Search,
     Settings,
     Sliders,
+    Stack,
     ViewGrid,
     ViewList,
     ViewTable,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 22] = [
+    pub const ALL: [Icon; 23] = [
         Icon::Calendar,
         Icon::Check,
         Icon::ChevronDown,
@@ -52,6 +53,7 @@ impl Icon {
         Icon::Search,
         Icon::Settings,
         Icon::Sliders,
+        Icon::Stack,
         Icon::ViewGrid,
         Icon::ViewList,
         Icon::ViewTable,
@@ -83,6 +85,7 @@ impl Icon {
             Icon::Search => file!("search"),
             Icon::Settings => file!("settings"),
             Icon::Sliders => file!("sliders"),
+            Icon::Stack => file!("stack"),
             Icon::ViewGrid => file!("view-grid"),
             Icon::ViewList => file!("view-list"),
             Icon::ViewTable => file!("view-table"),

@@ -4,6 +4,7 @@
 mod entries;
 mod music;
 mod overview;
+mod page;
 mod tags;
 mod toolbar;
 
@@ -17,7 +18,7 @@ pub use tags::{all_tags_popover, long_group};
 use super::entry;
 use super::shell::shell;
 use crate::app::{App, Message as AppMessage};
-use crate::browse::{self, Decade, Filter, Section, Sort};
+use crate::browse::{self, Decade, Filter, Row, Section, Sort};
 use crate::model::{Date, Entry, EntryStatus, Library, MediaType, TagCategory};
 use crate::settings::Source;
 use crate::tags::{PickerMessage, PickerState};
@@ -67,6 +68,35 @@ pub enum Popup {
     AllTags,
 }
 
+/// A page in the content pane, in place of the list: all of a show's
+/// seasons, a season's episodes, or a series (decided 2026-10-24: the
+/// content pane, with the inspector kept, not a drill-in inside it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Page {
+    Seasons {
+        id: String,
+    },
+    Season {
+        id: String,
+        number: u32,
+    },
+    Series {
+        media: MediaType,
+        name: String,
+        /// The part the page was opened from ("All 43 volumes"), marked
+        /// "This one".
+        highlight: Option<String>,
+    },
+}
+
+/// Which season's status menu is open: in the inspector, or on a page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeasonMenu {
+    pub id: String,
+    pub season: u32,
+    pub in_page: bool,
+}
+
 /// What the sidebar's TAGS section lists (a Settings choice in 1f).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SidebarTags {
@@ -95,6 +125,7 @@ pub struct Place {
     pub query: String,
     pub music_tab: MusicTab,
     pub artist: Option<String>,
+    pub page: Option<Page>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -123,6 +154,11 @@ pub struct State {
     pub music_tab: MusicTab,
     /// The artist whose page is open, within Music.
     pub artist: Option<String>,
+    /// A page in the content pane, over the list.
+    pub page: Option<Page>,
+    pub season_menu: Option<SeasonMenu>,
+    /// The Series cover dialog, for a series of a type.
+    pub cover_dialog: Option<(MediaType, String)>,
     pub scroll: Scroll,
     /// Where each group or section starts in the list, from its top, and
     /// how tall the list's visible part is.
@@ -184,6 +220,13 @@ pub enum Message {
     GroupsMeasured(ui::Measure),
     /// A click on the type rail: the app scrolls the list there.
     JumpToGroup(usize),
+    OpenPage(Page),
+    ClosePage,
+    SeasonMenu(Option<SeasonMenu>),
+    OpenSeriesCover(MediaType, String),
+    CloseSeriesCover,
+    /// A part in the Series cover dialog: its cover stands for the series.
+    PickSeriesCover(String),
 }
 
 impl Message {
@@ -211,6 +254,7 @@ impl State {
             query: self.query.clone(),
             music_tab: self.music_tab,
             artist: self.artist.clone(),
+            page: self.page.clone(),
         }
     }
 
@@ -224,9 +268,12 @@ impl State {
         self.query = place.query;
         self.music_tab = place.music_tab;
         self.artist = place.artist;
+        self.page = place.page;
         self.selected = None;
         self.popup = None;
         self.picker = None;
+        self.season_menu = None;
+        self.cover_dialog = None;
     }
 
     pub fn update(&mut self, message: Message) {
@@ -237,16 +284,19 @@ impl State {
                 self.status = None;
                 self.selected = None;
                 self.popup = None;
+                self.page = None;
             }
             Message::ToggleType(media) => {
                 if !self.types.remove(&media) {
                     self.types.insert(media);
                 }
                 self.selected = None;
+                self.page = None;
             }
             Message::SeeAll(section) => {
                 self.types.clear();
                 self.selected = None;
+                self.page = None;
                 match section {
                     Section::InProgress => self.status = Some(EntryStatus::InProgress),
                     Section::ComingSoon => {
@@ -264,6 +314,7 @@ impl State {
                 }
             }
             Message::PickTag(tag) => {
+                self.page = None;
                 self.filter.tag_categories.clear();
                 self.filter.tags = if self.filter.tags == [tag.as_str()] {
                     Vec::new()
@@ -283,6 +334,7 @@ impl State {
             Message::Select(id) => {
                 self.details_rating_open = false;
                 self.track_rating_open = None;
+                self.season_menu = None;
                 self.selected = if self.selected.as_deref() == Some(id.as_str()) {
                     None
                 } else {
@@ -351,7 +403,30 @@ impl State {
                 None => {}
             },
             Message::UnpinAll => self.pins.clear(),
-            Message::Add | Message::JumpToGroup(_) => {}
+            Message::Add | Message::JumpToGroup(_) | Message::PickSeriesCover(_) => {}
+            Message::OpenPage(page) => {
+                self.close_popovers();
+                // A page opened from a row keeps the row's entry selected;
+                // a series page from a series row has nothing selected.
+                if matches!(
+                    page,
+                    Page::Series {
+                        highlight: None,
+                        ..
+                    }
+                ) {
+                    self.selected = None;
+                }
+                self.page = Some(page);
+            }
+            Message::ClosePage => {
+                self.page = None;
+                self.season_menu = None;
+                self.cover_dialog = None;
+            }
+            Message::SeasonMenu(menu) => self.season_menu = menu,
+            Message::OpenSeriesCover(media, name) => self.cover_dialog = Some((media, name)),
+            Message::CloseSeriesCover => self.cover_dialog = None,
             Message::Scrolled(scroll) => self.scroll = scroll,
             Message::MusicTab(tab) => {
                 self.music_tab = tab;
@@ -372,6 +447,9 @@ impl State {
     /// Esc: the tag picker first, then a popover. False when nothing was
     /// open.
     pub fn dismiss_top(&mut self) -> bool {
+        if self.season_menu.take().is_some() || self.cover_dialog.take().is_some() {
+            return true;
+        }
         if let Some(picker) = &mut self.picker {
             if !picker.dismiss_inner() {
                 self.picker = None;
@@ -387,6 +465,7 @@ impl State {
         self.popup = None;
         self.details_rating_open = false;
         self.track_rating_open = None;
+        self.season_menu = None;
     }
 
     /// Enter: the tag picker's Done.
@@ -485,6 +564,24 @@ impl State {
         self.force_long || (self.viewport > 0.0 && rows as f32 * row_height >= 3.0 * self.viewport)
     }
 
+    /// Whether the list folds the parts of a series into one row: one
+    /// type, the status segment All, Done or DNF, no search, and a list at
+    /// least three screens tall measured on the single entries (a grid
+    /// counts a row of cards as four entries).
+    pub fn groups_series(&self, rows: usize, view: View) -> bool {
+        let long = match view {
+            View::Grid => {
+                self.force_long
+                    || (self.viewport > 0.0 && rows as f32 * 75.0 >= 3.0 * self.viewport)
+            }
+            _ => self.is_long(rows, view),
+        };
+        self.single().is_some_and(|m| m != MediaType::Music)
+            && browse::groups_series_for(self.status)
+            && self.query.trim().is_empty()
+            && long
+    }
+
     /// The ids in the order the list shows them, for the arrow keys: one
     /// type in its sort, All and several types by type first. Music
     /// follows its tab; the artist lists have no selection.
@@ -566,9 +663,15 @@ impl State {
             .collect();
         self.sort.apply(&mut shown);
         let in_type = library.entries.iter().filter(of_type).count();
+        let rows = if self.groups_series(shown.len(), self.view_mode()) {
+            browse::group_series(&shown)
+        } else {
+            shown.iter().map(|&e| Row::Entry(e)).collect()
+        };
         Listing {
             base,
             shown,
+            rows,
             in_type,
         }
     }
@@ -577,6 +680,9 @@ impl State {
 pub struct Listing<'a> {
     pub base: Vec<&'a Entry>,
     pub shown: Vec<&'a Entry>,
+    /// `shown` as the list lays it out: a series as one row in a long
+    /// list.
+    pub rows: Vec<Row<'a>>,
     /// Every entry of the type, whatever the filters.
     pub in_type: usize,
 }
@@ -587,7 +693,9 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
     let library = app.repo.library();
     let listing = state.listing(library, app.today);
 
-    let content = if state.is_overview() {
+    let content = if let Some(page) = &state.page {
+        column![page::view(app, page), footer(app)]
+    } else if state.is_overview() {
         column![
             toolbar::toolbar(app, &listing),
             overview::body(app),
@@ -601,11 +709,16 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
             footer(app),
         ]
     };
-    let picker = state
-        .picker
-        .as_ref()
-        .map(|picker| tags::picker(app, picker, &listing));
-    let close = AppMessage::Library(Message::ClosePicker);
+    let picker = match (&state.picker, &state.cover_dialog) {
+        (_, Some((media, name))) => Some(page::cover_dialog(app, *media, name)),
+        (Some(picker), None) => Some(tags::picker(app, picker, &listing)),
+        (None, None) => None,
+    };
+    let close = if state.cover_dialog.is_some() {
+        AppMessage::Library(Message::CloseSeriesCover)
+    } else {
+        AppMessage::Library(Message::ClosePicker)
+    };
     // The details pane shows beside the list while an entry is selected.
     let selected = state.selected.as_deref().and_then(|id| library.entry(id));
     let main: Element<'_, AppMessage> = match selected {
@@ -841,5 +954,56 @@ mod tests {
         );
         state.update(Message::ClearTags);
         assert!(state.filter.tag_categories.is_empty());
+    }
+
+    #[test]
+    fn a_long_movie_list_groups_series_unless_picking_what_to_watch() {
+        let library = library();
+        let mut state = State {
+            force_long: true,
+            ..State::default()
+        };
+        state.update(Message::ShowType(Some(MediaType::Movies)));
+        let listing = state.listing(&library, today());
+        assert!(listing.rows.iter().any(|r| matches!(r, Row::Series(_))));
+        assert_eq!(listing.shown.len(), listing.rows.len() + 1);
+
+        state.update(Message::Status(Some(EntryStatus::Want)));
+        let listing = state.listing(&library, today());
+        assert!(listing.rows.iter().all(|r| matches!(r, Row::Entry(_))));
+
+        state.update(Message::Status(None));
+        state.update(Message::Search("lord".into()));
+        let listing = state.listing(&library, today());
+        assert!(listing.rows.iter().all(|r| matches!(r, Row::Entry(_))));
+
+        state.force_long = false;
+        state.update(Message::Search(String::new()));
+        let listing = state.listing(&library, today());
+        assert!(
+            listing.rows.iter().all(|r| matches!(r, Row::Entry(_))),
+            "a short list never groups"
+        );
+    }
+
+    #[test]
+    fn a_page_is_a_place_and_closes_with_the_list_changes() {
+        let mut state = State::default();
+        state.update(Message::ShowType(Some(MediaType::Shows)));
+        let page = Page::Seasons {
+            id: "shows/x".into(),
+        };
+        state.update(Message::OpenPage(page.clone()));
+        assert_eq!(state.page, Some(page.clone()));
+        assert_eq!(state.place().page, Some(page));
+        state.update(Message::SeasonMenu(Some(SeasonMenu {
+            id: "shows/x".into(),
+            season: 1,
+            in_page: true,
+        })));
+        assert!(state.dismiss_top(), "Esc closes the menu first");
+        assert!(state.page.is_some());
+        state.update(Message::ShowType(Some(MediaType::Movies)));
+        assert!(state.page.is_none());
     }
 }

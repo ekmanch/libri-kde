@@ -11,9 +11,9 @@ use crate::theme::{self, Tokens, font};
 
 /// What a view shows of an entry, worked out by the screen.
 #[derive(Debug, Clone)]
-pub struct EntryLook<'a> {
-    pub title: &'a str,
-    pub creator: &'a str,
+pub struct EntryLook {
+    pub title: String,
+    pub creator: String,
     /// "1999", or empty.
     pub year: String,
     /// The full release text: "2026-12-25".
@@ -23,8 +23,8 @@ pub struct EntryLook<'a> {
     pub type_color: Color,
     pub cover: Color,
     pub status: EntryStatus,
-    /// "Watching", "Done".
-    pub status_label: &'static str,
+    /// "Watching", "Done"; a series' "2 of 4 done".
+    pub status_label: String,
     /// "8/10" or "—".
     pub rating: String,
     /// "#horror  #dark".
@@ -32,32 +32,55 @@ pub struct EntryLook<'a> {
     pub selected: bool,
     /// Another entry is selected, so the grid dims this one.
     pub dimmed: bool,
+    /// A series as one row: how many parts are in the library.
+    pub stack: Option<usize>,
+    /// A show whose daily check added a season that is out and unset.
+    pub new_season: bool,
 }
 
 /// A grid card: the 2:3 cover with the type, a status badge, the title and
 /// creator on it, then the title and year under it. Fills its grid cell.
 pub fn entry_card<'a, Message: Clone + 'a>(
-    look: EntryLook<'a>,
+    look: EntryLook,
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
     let white = Color::WHITE;
-    let mut top = row![
+    let corner: Element<'a, Message> = if look.new_season {
+        new_season_badge(tokens)
+    } else if let Some(count) = look.stack {
+        row![
+            icon(Icon::Stack, 13.0, white),
+            mono(count.to_string(), 11.0, white)
+        ]
+        .spacing(4)
+        .align_y(Center)
+        .into()
+    } else {
         text(look.kind.to_uppercase())
             .size(10.5)
             .font(font::MONO)
             .color(white)
-    ]
-    .height(24)
-    .align_y(Center);
-    if let Some(badge) = status_badge(look.status) {
+            .into()
+    };
+    let mut top = row![corner].height(24).align_y(Center);
+    // A series shows the check only when every part is done.
+    let badge = if look.stack.is_some() && look.status != EntryStatus::Done {
+        None
+    } else {
+        status_badge(look.status)
+    };
+    if let Some(badge) = badge {
         top = top.push(Space::new().width(Fill)).push(badge);
     }
     let on_cover = column![
         top,
         Space::new().height(Fill),
-        text(look.title).size(19).font(font::EXTRABOLD).color(white),
-        text(look.creator)
+        text(look.title.clone())
+            .size(19)
+            .font(font::EXTRABOLD)
+            .color(white),
+        text(look.creator.clone())
             .size(12)
             .color(Color { a: 0.78, ..white }),
     ]
@@ -137,7 +160,7 @@ fn status_badge<'a, Message: 'a>(status: EntryStatus) -> Option<Element<'a, Mess
 /// A list row: a small cover, title and creator, then tags, status, rating
 /// and year in fixed columns.
 pub fn entry_list_row<'a, Message: Clone + 'a>(
-    look: EntryLook<'a>,
+    look: EntryLook,
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
@@ -149,10 +172,7 @@ pub fn entry_list_row<'a, Message: Clone + 'a>(
     let content = row![
         cover,
         column![
-            text(look.title)
-                .size(15)
-                .font(font::SEMIBOLD)
-                .wrapping(text::Wrapping::None),
+            title_line(&look, 15.0, tokens),
             text(look.creator)
                 .size(13)
                 .color(tokens.sub)
@@ -169,9 +189,9 @@ pub fn entry_list_row<'a, Message: Clone + 'a>(
         ),
         cell(text(look.status_label).size(13).color(tokens.sub), 90.0),
         cell(mono(look.rating, 13.0, tokens.text), 56.0),
-        container(mono(look.year, 12.5, tokens.sub))
-            .width(44)
-            .align_right(44),
+        container(mono(look.year, 12.5, tokens.sub).wrapping(text::Wrapping::None))
+            .width(72)
+            .align_right(72),
     ]
     .spacing(16)
     .align_y(Center);
@@ -220,7 +240,7 @@ pub fn entry_table_header<'a, Message: 'a>(
 
 /// A text view row, 42 px: a type dot and the title, then the columns.
 pub fn entry_table_row<'a, Message: Clone + 'a>(
-    look: EntryLook<'a>,
+    look: EntryLook,
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
@@ -228,10 +248,7 @@ pub fn entry_table_row<'a, Message: Clone + 'a>(
     let content = row![
         row![
             super::dot(look.type_color, 8.0, 3.0),
-            text(look.title)
-                .size(14)
-                .font(font::SEMIBOLD)
-                .wrapping(text::Wrapping::None)
+            title_line(&look, 14.0, tokens)
         ]
         .spacing(10)
         .align_y(Center)
@@ -261,6 +278,45 @@ pub fn entry_table_row<'a, Message: Clone + 'a>(
         .on_press(on_press)
         .style(row_style(tokens, look.selected, 0.0))
         .focusable(0.0, tokens)
+}
+
+/// The title of a list or table row, with a series' stack icon in front
+/// and a "New season" badge after it.
+fn title_line<'a, Message: 'a>(
+    look: &EntryLook,
+    size: f32,
+    tokens: &Tokens,
+) -> Element<'a, Message> {
+    let mut line = row![].spacing(8).align_y(Center);
+    if look.stack.is_some() {
+        line = line.push(icon(Icon::Stack, 13.0, tokens.sub));
+    }
+    line = line.push(
+        text(look.title.clone())
+            .size(size)
+            .font(font::SEMIBOLD)
+            .wrapping(text::Wrapping::None),
+    );
+    if look.new_season {
+        line = line.push(new_season_badge(tokens));
+    }
+    line.into()
+}
+
+/// "New season", a small pill in the accent ink.
+pub fn new_season_badge<'a, Message: 'a>(tokens: &Tokens) -> Element<'a, Message> {
+    let tokens = *tokens;
+    container(
+        text("New season")
+            .size(11)
+            .font(font::SEMIBOLD)
+            .color(tokens.ink),
+    )
+    .height(20)
+    .padding([0, 8])
+    .align_y(Center)
+    .style(move |_| container::background(tokens.selection).border(Border::default().rounded(10)))
+    .into()
 }
 
 /// A one-pixel horizontal line.

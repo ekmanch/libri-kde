@@ -6,7 +6,7 @@ use iced::{Background, Border, Element, Fill, FillPortion, Padding, Shadow, Vect
 
 use super::{Listing, Message, View};
 use crate::app::{App, Message as AppMessage};
-use crate::browse;
+use crate::browse::{self, Row};
 use crate::model::{Entry, MediaType};
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, EntryLook, FocusExt, Icon};
@@ -35,47 +35,60 @@ pub fn body<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> 
     // rail; All or several types get one group per type, in type order,
     // each in the current sort.
     let sections = (state.single().is_some() && state.is_long(listing.shown.len(), view))
-        .then(|| browse::sections(state.sort, &listing.shown, app.today))
+        .then(|| browse::row_sections(state.sort, &listing.rows, app.today))
         .filter(|sections| sections.len() >= 2);
     let list: Element<'a, AppMessage> = if let Some(sections) = sections {
         let labels: Vec<String> = sections.iter().map(|s| s.short.clone()).collect();
         let children = sections.iter().map(|section| {
+            // The count line counts entries, not rows.
+            let entries: usize = section
+                .rows
+                .iter()
+                .map(|row| match row {
+                    Row::Entry(_) => 1,
+                    Row::Series(group) => group.parts.len(),
+                })
+                .sum();
             column![
-                section_header(&section.label, section.entries.len(), &tokens),
-                block(app, &section.entries, view, &tokens)
+                section_header(&section.label, entries, &tokens),
+                block(app, &section.rows, view, &tokens)
             ]
             .into()
         });
         sectioned_list(app, children, &labels, &tokens)
     } else {
-        let groups: Vec<(Option<MediaType>, Vec<&Entry>)> = match state.single() {
-            Some(_) => vec![(None, listing.shown.clone())],
+        let groups: Vec<(Option<MediaType>, Vec<Row<'a>>)> = match state.single() {
+            Some(_) => vec![(None, listing.rows.clone())],
             None => MediaType::ALL
                 .into_iter()
                 .map(|media| {
-                    let entries = listing
-                        .shown
+                    let rows = listing
+                        .rows
                         .iter()
-                        .copied()
-                        .filter(|e| e.media == media)
+                        .filter(|row| row.lead().media == media)
+                        .cloned()
                         .collect();
-                    (Some(media), entries)
+                    (Some(media), rows)
                 })
-                .filter(|(_, entries): &(_, Vec<&Entry>)| !entries.is_empty())
+                .filter(|(_, rows): &(_, Vec<Row<'a>>)| !rows.is_empty())
                 .collect(),
         };
-        let children = groups.iter().map(|(media, entries)| {
+        let children = groups.iter().map(|(media, rows)| {
             let mut group = Column::new();
             if let Some(media) = media {
-                group = group.push(group_header(*media, entries.len(), &tokens));
+                group = group.push(group_header(*media, rows.len(), &tokens));
             }
-            group.push(block(app, entries, view, &tokens)).into()
+            group.push(block(app, rows, view, &tokens)).into()
         });
         // The type-colored rail replaces the scrollbar.
         let mut overlays = Vec::new();
         if groups.len() > 1 {
-            overlays.extend(pinned_header(state, &groups, &tokens));
-            overlays.push(rail(state, &groups, &tokens));
+            let counted: Vec<(Option<MediaType>, Vec<&Entry>)> = groups
+                .iter()
+                .map(|(media, rows)| (*media, rows.iter().map(Row::lead).collect()))
+                .collect();
+            overlays.extend(pinned_header(state, &counted, &tokens));
+            overlays.push(rail(state, &counted, &tokens));
         }
         scrolling(children, overlays, 24.0)
     };
@@ -312,35 +325,38 @@ fn rail<'a>(
         .into()
 }
 
-pub(super) fn block<'a>(
+/// `block` for plain entries (the music lists).
+pub(super) fn block_entries<'a>(
     app: &'a App,
     entries: &[&'a Entry],
     view: View,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
-    let state = &app.library;
-    let looks = entries.iter().map(|entry| {
-        (
-            look(entry, state.selected.as_deref(), view, tokens),
-            entry.id.clone(),
-        )
-    });
+    let rows: Vec<Row<'a>> = entries.iter().map(|&e| Row::Entry(e)).collect();
+    block(app, &rows, view, tokens)
+}
+
+pub(super) fn block<'a>(
+    app: &'a App,
+    rows: &[Row<'a>],
+    view: View,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let looks = rows.iter().map(|row| look(app, row, view, tokens));
     match view {
-        View::Grid => {
-            grid(looks.map(|(look, id)| ui::entry_card(look, tokens, msg(Message::Select(id)))))
-                .fluid(CARD_MAX_WIDTH)
-                .spacing(20)
-                .height(grid::aspect_ratio(CARD_WIDTH, CARD_HEIGHT))
-                .into()
-        }
+        View::Grid => grid(looks.map(|(look, on_press)| ui::entry_card(look, tokens, on_press)))
+            .fluid(CARD_MAX_WIDTH)
+            .spacing(20)
+            .height(grid::aspect_ratio(CARD_WIDTH, CARD_HEIGHT))
+            .into(),
         View::List => Column::with_children(
-            looks.map(|(look, id)| ui::entry_list_row(look, tokens, msg(Message::Select(id)))),
+            looks.map(|(look, on_press)| ui::entry_list_row(look, tokens, on_press)),
         )
         .spacing(2)
         .into(),
-        View::Text => Column::with_children(looks.map(|(look, id)| {
+        View::Text => Column::with_children(looks.map(|(look, on_press)| {
             column![
-                ui::entry_table_row(look, tokens, msg(Message::Select(id))),
+                ui::entry_table_row(look, tokens, on_press),
                 ui::rule(tokens.line.scale_alpha(0.5)),
             ]
             .into()
@@ -349,29 +365,78 @@ pub(super) fn block<'a>(
     }
 }
 
-/// What the views show of an entry.
-fn look<'a>(
-    entry: &'a Entry,
-    selected: Option<&str>,
-    view: View,
-    tokens: &Tokens,
-) -> EntryLook<'a> {
-    let is_selected = selected == Some(entry.id.as_str());
-    let tags: Vec<String> = entry.tags.iter().map(|t| format!("#{t}")).collect();
-    EntryLook {
-        title: &entry.title,
-        creator: entry.creator.as_deref().unwrap_or(""),
-        year: entry.year().map(|y| y.to_string()).unwrap_or_default(),
-        released: entry.released.map(|r| r.to_string()).unwrap_or_default(),
-        kind: browse::kind_label(entry),
-        type_color: tokens.type_color(entry.media),
-        cover: theme::cover_color(&entry.id),
-        status: entry.status,
-        status_label: browse::status_label(Some(entry.media), entry.status),
-        rating: entry.rating.map_or("—".into(), |r| format!("{r}/10")),
-        tags: tags.join("  "),
-        selected: is_selected,
-        dimmed: view == View::Grid && selected.is_some() && !is_selected,
+/// What the views show of a row, and what a click does: an entry is
+/// selected; a series opens its page. A show's creator gets its season
+/// count, and its year is the years it ran.
+fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryLook, AppMessage) {
+    let state = &app.library;
+    let selected = state.selected.as_deref();
+    let today = app.today;
+    match row {
+        Row::Entry(entry) => {
+            let is_selected = selected == Some(entry.id.as_str());
+            let tags: Vec<String> = entry.tags.iter().map(|t| format!("#{t}")).collect();
+            let seasons = entry.season_list().len();
+            let creator = entry.creator.as_deref().unwrap_or("");
+            let creator = if seasons > 1 {
+                format!("{creator} · {}", entry.season_count_label())
+            } else {
+                creator.to_owned()
+            };
+            let years = entry.years(today).unwrap_or_default();
+            let released = if seasons > 0 {
+                years.clone()
+            } else {
+                entry.released.map(|r| r.to_string()).unwrap_or_default()
+            };
+            let look = EntryLook {
+                title: entry.title.clone(),
+                creator,
+                year: years,
+                released,
+                kind: browse::kind_label(entry),
+                type_color: tokens.type_color(entry.media),
+                cover: theme::cover_color(&entry.id),
+                status: entry.status,
+                status_label: browse::status_label(Some(entry.media), entry.status).to_owned(),
+                rating: entry.rating.map_or("—".into(), |r| format!("{r}/10")),
+                tags: tags.join("  "),
+                selected: is_selected,
+                dimmed: view == View::Grid && selected.is_some() && !is_selected,
+                stack: None,
+                new_season: entry.has_new_season(today),
+            };
+            (look, msg(Message::Select(entry.id.clone())))
+        }
+        Row::Series(group) => {
+            let look = EntryLook {
+                title: group.title(),
+                creator: group.subtitle(),
+                year: group.year_span().unwrap_or_default(),
+                released: group.year_span().unwrap_or_default(),
+                kind: "Series",
+                type_color: tokens.type_color(group.media),
+                cover: theme::cover_color(&group.cover_entry().id),
+                status: if group.all_done() {
+                    crate::model::EntryStatus::Done
+                } else {
+                    crate::model::EntryStatus::Want
+                },
+                status_label: group.done_label(),
+                rating: String::new(),
+                tags: String::new(),
+                selected: false,
+                dimmed: view == View::Grid && selected.is_some(),
+                stack: Some(group.parts.len()),
+                new_season: false,
+            };
+            let page = super::Page::Series {
+                media: group.media,
+                name: group.name.clone(),
+                highlight: None,
+            };
+            (look, msg(Message::OpenPage(page)))
+        }
     }
 }
 

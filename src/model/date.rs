@@ -57,23 +57,26 @@ impl Date {
 
     /// "October".
     pub fn month_name(self) -> &'static str {
-        const MONTHS: [&str; 12] = [
-            "January",
-            "February",
-            "March",
-            "April",
-            "May",
-            "June",
-            "July",
-            "August",
-            "September",
-            "October",
-            "November",
-            "December",
-        ];
         MONTHS[usize::from(self.month) - 1]
     }
+}
 
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+impl Date {
     /// "October 24", for the token warning.
     pub fn month_day(self) -> String {
         format!("{} {}", self.month_name(), self.day)
@@ -213,6 +216,29 @@ impl Released {
 
     pub fn is_released_on(self, today: Date) -> bool {
         today >= self.available_from()
+    }
+}
+
+impl Released {
+    /// "Oct 9, 2026", "Oct 2026" or "2026", as the rows and the inspector
+    /// show a season's date.
+    pub fn long(self) -> String {
+        let month = self.month.map(|m| &MONTHS[usize::from(m) - 1][..3]);
+        match (month, self.day) {
+            (Some(month), Some(day)) => format!("{month} {day}, {}", self.year),
+            (Some(month), None) => format!("{month} {}", self.year),
+            _ => self.year.to_string(),
+        }
+    }
+
+    /// "Oct 9", or "Oct 9, 2025" when the year is not `year`.
+    pub fn short(self, year: u16) -> String {
+        match (self.month, self.day) {
+            (Some(month), Some(day)) if self.year == year => {
+                format!("{} {day}", &MONTHS[usize::from(month) - 1][..3])
+            }
+            _ => self.long(),
+        }
     }
 }
 

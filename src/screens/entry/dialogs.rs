@@ -123,6 +123,70 @@ pub fn add_to_plan<'a>(app: &'a App, id: &'a str) -> Element<'a, AppMessage> {
     )
 }
 
+/// "Season 2 of Carrie is no longer listed": the lookup dropped a season
+/// the owner had set. Keep it marks the season manual; Remove drops it.
+pub fn season_dropped<'a>(app: &'a App, id: &str, season: u32) -> Element<'a, AppMessage> {
+    let tokens = app.tokens();
+    let library = app.repo.library();
+    let Some(entry) = library.entry(id) else {
+        return space().into();
+    };
+    let status = entry
+        .season_list()
+        .iter()
+        .find(|s| s.season == season)
+        .and_then(|s| s.status)
+        .map(|s| crate::browse::status_label(Some(entry.media), s));
+    let had = match status {
+        Some(status) => format!(" You had it as {status}."),
+        None => String::new(),
+    };
+    let others = if entry.season_list().len() > 2 {
+        "The other seasons and the show stay as they are.".to_owned()
+    } else {
+        format!(
+            "Season {} and the show stay as they are.",
+            entry
+                .season_list()
+                .iter()
+                .find(|s| s.season != season)
+                .map_or(1, |s| s.season)
+        )
+    };
+    let body = column![
+        text(format!(
+            "TMDB has dropped it, so it was probably canceled.{had}"
+        ))
+        .size(14),
+        text(others).size(13).color(tokens.sub),
+    ]
+    .spacing(10);
+    let footer = row![
+        space::horizontal(),
+        ui::labeled_button(
+            "Keep it",
+            ButtonKind::Outline,
+            tokens,
+            Some(msg(Message::KeepSeason))
+        ),
+        ui::labeled_button(
+            "Remove",
+            ButtonKind::Destructive,
+            tokens,
+            Some(msg(Message::RemoveSeason))
+        ),
+    ]
+    .spacing(8);
+    ui::dialog(
+        format!("Season {season} of {} is no longer listed", entry.title),
+        body,
+        footer,
+        480,
+        &tokens,
+        msg(Message::Close),
+    )
+}
+
 /// An 18 px check box in the accent.
 fn check<'a>(on: bool, tokens: &Tokens) -> Element<'a, AppMessage> {
     let tokens = *tokens;

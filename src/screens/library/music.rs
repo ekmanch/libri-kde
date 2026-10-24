@@ -62,7 +62,7 @@ pub fn body<'a>(
                 if albums.is_empty() {
                     return empty("No albums here", tokens);
                 }
-                super::entries::block(app, &albums, view, tokens)
+                super::entries::block_entries(app, &albums, view, tokens)
             }
             MusicTab::Songs => {
                 let songs = music::songs(&listing.shown);
@@ -227,7 +227,12 @@ fn artist_page<'a>(
     if !artist.albums.is_empty() {
         page = page
             .push(section("Albums", artist.albums.len(), tokens))
-            .push(super::entries::block(app, &artist.albums, view, tokens));
+            .push(super::entries::block_entries(
+                app,
+                &artist.albums,
+                view,
+                tokens,
+            ));
     }
     if !artist.songs.is_empty() {
         let songs: Vec<Song<'a>> = artist.songs.iter().map(|&e| Song::Entry(e)).collect();

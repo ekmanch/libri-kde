@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use iced::{Element, Task};
 
 use crate::app::{App, Message as AppMessage};
-use crate::model::{Date, EntryStatus, MediaType, Plan, PlanItem};
+use crate::model::{Date, EntryStatus, MediaType, Plan, PlanItem, Season};
 use crate::plans::{self as rules, PlanState};
 use crate::repo::Operation;
 use crate::tags::{self, PickerMessage, PickerState};
@@ -56,7 +56,14 @@ pub struct State {
     pub when_open: bool,
     pub month: Option<Date>,
     pub anchor: Option<Date>,
+    /// What a tick changed on an entry, by plan and entry, so the untick
+    /// can put it back: the status, and a show's seasons. App memory, as
+    /// on the phone; never saved.
+    pub before_done: HashMap<(String, String), BeforeDone>,
 }
+
+/// An entry's status and seasons before a plan tick marked it Done.
+pub type BeforeDone = (EntryStatus, Option<Vec<Season>>);
 
 impl State {
     /// The plan open, on its page or its collection.
@@ -290,7 +297,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             if let Some(plan) = current_plan(app) {
                 let done = plan.item_for(&entry).is_some_and(|i| !i.done);
                 let plan = plan.id.clone();
-                app.apply(Operation::SetPlanItemDone { plan, entry, done });
+                toggle_done(app, plan, entry, done);
             }
         }
         Message::AddItem(entry) => {
@@ -522,6 +529,67 @@ fn update_selected_item(app: &mut App, change: impl FnOnce(&mut PlanItem)) {
     };
     change(&mut item);
     app.apply(Operation::SetPlanItem { plan, item });
+}
+
+/// Ticks or unticks an entry in a plan, as the phone does: a tick marks
+/// the entry Done (a show: every season that is out), remembering what it
+/// was; an untick puts that back while the entry is still Done.
+fn toggle_done(app: &mut App, plan: String, entry: String, done: bool) {
+    let today = app.today;
+    let Some(found) = app.repo.library().entry(&entry).cloned() else {
+        return;
+    };
+    app.apply(Operation::SetPlanItemDone {
+        plan: plan.clone(),
+        entry: entry.clone(),
+        done,
+    });
+    let key = (plan, entry.clone());
+    if done {
+        if found.status == EntryStatus::Done {
+            app.plans.before_done.remove(&key);
+            return;
+        }
+        let seasons = (found.uses_seasons() && !found.season_list().is_empty())
+            .then(|| found.season_list().to_vec());
+        app.plans
+            .before_done
+            .insert(key, (found.status, seasons.clone()));
+        match seasons {
+            Some(seasons) => {
+                let seasons = seasons
+                    .into_iter()
+                    .map(|mut season| {
+                        if season.is_released_on(today) {
+                            season.status = Some(EntryStatus::Done);
+                            season.fresh = None;
+                        }
+                        season
+                    })
+                    .collect();
+                app.apply(Operation::SetSeasons {
+                    id: entry,
+                    seasons,
+                    today,
+                });
+            }
+            None => app.apply(Operation::SetStatus {
+                id: entry,
+                status: EntryStatus::Done,
+            }),
+        }
+    } else if let Some((status, seasons)) = app.plans.before_done.remove(&key)
+        && found.status == EntryStatus::Done
+    {
+        match seasons {
+            Some(seasons) => app.apply(Operation::SetSeasons {
+                id: entry,
+                seasons,
+                today,
+            }),
+            None => app.apply(Operation::SetStatus { id: entry, status }),
+        }
+    }
 }
 
 /// Esc: the innermost layer first. False when nothing was open.
@@ -776,5 +844,40 @@ mod tests {
         send(&mut app, Message::ConfirmDeletePlan);
         assert!(app.repo.library().plan("halloween-2025").is_none());
         assert_eq!(app.plans.page, Page::Overview);
+    }
+
+    #[test]
+    fn ticking_a_show_marks_its_seasons_out_done_and_unticking_puts_them_back() {
+        let mut app = App::new(crate::screens::Screen::Plans);
+        app.today = Date::parse("2026-10-19").unwrap();
+        let id = "anime/frieren-beyond-journeys-end-2023";
+        let plan = "halloween-2026";
+        app.apply(Operation::SetPlanItem {
+            plan: plan.into(),
+            item: PlanItem {
+                entry: id.into(),
+                done: false,
+                repeat: false,
+                note: String::new(),
+                when: None,
+            },
+        });
+        let _ = update(&mut app, Message::ShowPlan(plan.into()));
+        let before = app.repo.library().entry(id).unwrap().season_list().to_vec();
+        assert_eq!(before[1].status, Some(EntryStatus::InProgress));
+
+        let _ = update(&mut app, Message::ToggleDone(id.into()));
+        let show = app.repo.library().entry(id).unwrap();
+        assert_eq!(show.status, EntryStatus::Done);
+        assert!(
+            show.season_list()
+                .iter()
+                .all(|s| s.status == Some(EntryStatus::Done))
+        );
+
+        let _ = update(&mut app, Message::ToggleDone(id.into()));
+        let show = app.repo.library().entry(id).unwrap();
+        assert_eq!(show.season_list(), before.as_slice());
+        assert_eq!(show.status, EntryStatus::InProgress);
     }
 }

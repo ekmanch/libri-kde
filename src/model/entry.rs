@@ -265,6 +265,62 @@ impl Entry {
             || (self.media == MediaType::Anime && self.kind == Some(EntryKind::Series))
     }
 
+    /// Whether the entry can be part of a series: movies, books, games and
+    /// anime that are not a series of seasons.
+    pub fn can_have_series(&self) -> bool {
+        match self.media {
+            MediaType::Movies | MediaType::Books | MediaType::Games => true,
+            MediaType::Anime => self.kind != Some(EntryKind::Series),
+            MediaType::Shows | MediaType::Music => false,
+        }
+    }
+
+    /// The seasons, when there are any.
+    pub fn season_list(&self) -> &[Season] {
+        self.seasons.as_deref().unwrap_or_default()
+    }
+
+    /// Whether a season the daily check added is out and still unset, so
+    /// the row and the inspector show "New season".
+    pub fn has_new_season(&self, today: Date) -> bool {
+        self.season_list()
+            .iter()
+            .any(|s| s.is_new() && s.is_released_on(today))
+    }
+
+    /// The years a show ran, first to last season out ("2022–2026", or
+    /// "2022"); the first season's year while none is out; an entry
+    /// without seasons gives its own year.
+    pub fn years(&self, today: Date) -> Option<String> {
+        let seasons = self.season_list();
+        if seasons.is_empty() {
+            return self.year().map(|y| y.to_string());
+        }
+        let out: Vec<u16> = seasons
+            .iter()
+            .filter(|s| s.is_released_on(today))
+            .filter_map(|s| s.released.map(|r| r.year))
+            .collect();
+        match (out.first(), out.last()) {
+            (Some(first), Some(last)) if first == last => Some(first.to_string()),
+            (Some(first), Some(last)) => Some(format!("{first}–{last}")),
+            _ => seasons[0].released.map(|r| r.year.to_string()),
+        }
+    }
+
+    /// "3 seasons".
+    pub fn season_count_label(&self) -> String {
+        let n = self.season_list().len();
+        format!("{n} {}", if n == 1 { "season" } else { "seasons" })
+    }
+
+    /// The entry with its status set by its seasons, when it has any.
+    pub fn refresh_status(&mut self, today: Date) {
+        if self.uses_seasons() && !self.season_list().is_empty() {
+            self.status = Season::show_status(self.season_list(), today);
+        }
+    }
+
     /// The categories `tag` is picked in here, for a tag in more than one
     /// category: the entry's own pick, else `all`, the tag's categories,
     /// which is also the answer for a tag in one category.
@@ -343,6 +399,104 @@ impl Season {
     pub fn is_new(&self) -> bool {
         self.fresh == Some(true) && self.status.is_none()
     }
+
+    /// False only when a release date is known and still in the future.
+    pub fn is_released_on(&self, today: Date) -> bool {
+        self.released.is_none_or(|r| r.is_released_on(today))
+    }
+
+    /// "Season 2".
+    pub fn name(&self) -> String {
+        format!("Season {}", self.season)
+    }
+
+    /// The date as the rows show it: "Oct 9, 2026", "Coming 2027" while it
+    /// is not out, or "Release date not set".
+    pub fn date_label(&self, today: Date) -> String {
+        match self.released {
+            Some(released) if released.is_released_on(today) => released.long(),
+            Some(released) => format!("Coming {}", released.long()),
+            None => "Release date not set".into(),
+        }
+    }
+
+    /// A show's status from its seasons. One season: that season's status,
+    /// Want while not set. More: only seasons that are out and have a
+    /// status count; any In progress is In progress; else any DNF is DNF;
+    /// all Done is Done; Done and Want together are In progress; all Want,
+    /// or nothing set, is Want.
+    pub fn show_status(seasons: &[Season], today: Date) -> EntryStatus {
+        if let [only] = seasons {
+            return only.status.unwrap_or(EntryStatus::Want);
+        }
+        let set: Vec<EntryStatus> = seasons
+            .iter()
+            .filter(|s| s.is_released_on(today))
+            .filter_map(|s| s.status)
+            .collect();
+        if set.is_empty() {
+            return EntryStatus::Want;
+        }
+        if set.contains(&EntryStatus::InProgress) {
+            return EntryStatus::InProgress;
+        }
+        if set.contains(&EntryStatus::Dnf) {
+            return EntryStatus::Dnf;
+        }
+        if set.iter().all(|s| *s == set[0]) {
+            return set[0];
+        }
+        EntryStatus::InProgress
+    }
+}
+
+impl Series {
+    /// The series name as shown: TMDB's "Collection" suffix dropped.
+    pub fn display_name(name: &str) -> String {
+        let name = name.trim();
+        let lower = name.to_lowercase();
+        match lower.strip_suffix("collection") {
+            Some(rest) if rest.ends_with(' ') => name[..rest.len()].trim_end().to_owned(),
+            _ => name.to_owned(),
+        }
+    }
+
+    /// A part's title without the series name in front: "The Fellowship
+    /// of the Ring" for "The Lord of the Rings: The Fellowship of the
+    /// Ring", "Vol. 43" for "Berserk, Vol. 43".
+    pub fn part_title(title: &str, series: &str) -> String {
+        let lower = title.to_lowercase();
+        let series = series.trim().to_lowercase();
+        if let Some(rest) = lower.strip_prefix(&series) {
+            let trimmed = rest.trim_start();
+            let after = trimmed
+                .strip_prefix([':', ',', '–', '—', '-'])
+                .map(str::trim_start);
+            if let Some(after) = after
+                && !after.is_empty()
+            {
+                return title[title.len() - after.len()..].to_owned();
+            }
+        }
+        title.to_owned()
+    }
+
+    /// What the parts of a series of `media` are called: "volumes" for
+    /// books, "games", "movies" for movies and anime, "parts" otherwise.
+    pub fn nouns(media: MediaType) -> (&'static str, &'static str) {
+        match media {
+            MediaType::Books => ("volume", "volumes"),
+            MediaType::Games => ("game", "games"),
+            MediaType::Movies | MediaType::Anime => ("movie", "movies"),
+            MediaType::Shows | MediaType::Music => ("part", "parts"),
+        }
+    }
+
+    /// Whether two series names are the same series, case and the
+    /// "Collection" suffix aside.
+    pub fn same(a: &str, b: &str) -> bool {
+        Series::display_name(a).to_lowercase() == Series::display_name(b).to_lowercase()
+    }
 }
 
 #[cfg(test)]
@@ -401,6 +555,96 @@ mod tests {
             unpicked.categories_of("horror", &[TagCategory::Genres]),
             [TagCategory::Genres]
         );
+    }
+
+    fn season(n: u32, released: &str, status: Option<EntryStatus>) -> Season {
+        Season {
+            season: n,
+            released: Released::parse(released),
+            status,
+            fresh: None,
+            manual: None,
+        }
+    }
+
+    #[test]
+    fn a_shows_status_follows_its_seasons() {
+        let today = Date::parse("2026-10-19").unwrap();
+        let status = |seasons: &[Season]| Season::show_status(seasons, today);
+        assert_eq!(status(&[season(1, "2024", None)]), EntryStatus::Want);
+        assert_eq!(
+            status(&[season(1, "2024", Some(EntryStatus::Dnf))]),
+            EntryStatus::Dnf
+        );
+        let done = Some(EntryStatus::Done);
+        let want = Some(EntryStatus::Want);
+        assert_eq!(
+            status(&[season(1, "2024", done), season(2, "2025", done)]),
+            EntryStatus::Done
+        );
+        assert_eq!(
+            status(&[season(1, "2024", done), season(2, "2025", want)]),
+            EntryStatus::InProgress,
+            "Done and Want together"
+        );
+        assert_eq!(
+            status(&[season(1, "2024", done), season(2, "2027", want)]),
+            EntryStatus::Done,
+            "a season not out does not count"
+        );
+        assert_eq!(
+            status(&[
+                season(1, "2024", done),
+                season(2, "2025", Some(EntryStatus::Dnf)),
+                season(3, "2026", want)
+            ]),
+            EntryStatus::Dnf
+        );
+        assert_eq!(
+            status(&[season(1, "2024", None), season(2, "2025", None)]),
+            EntryStatus::Want
+        );
+    }
+
+    #[test]
+    fn the_years_run_from_the_first_to_the_last_season_out() {
+        let today = Date::parse("2026-10-19").unwrap();
+        let mut show = entry(&[], None);
+        show.media = MediaType::Shows;
+        show.seasons = Some(vec![
+            season(1, "2022-09-01", Some(EntryStatus::Done)),
+            season(2, "2026-01-16", None),
+            season(3, "2027", None),
+        ]);
+        assert_eq!(show.years(today).as_deref(), Some("2022–2026"));
+        assert_eq!(show.season_count_label(), "3 seasons");
+        show.seasons = Some(vec![season(1, "2027", None)]);
+        assert_eq!(show.years(today).as_deref(), Some("2027"));
+        assert_eq!(show.season_count_label(), "1 season");
+        assert_eq!(show.season_list()[0].date_label(today), "Coming 2027");
+    }
+
+    #[test]
+    fn series_names_and_part_titles_are_cleaned() {
+        assert_eq!(
+            Series::display_name("Kung Fu Panda Collection"),
+            "Kung Fu Panda"
+        );
+        assert_eq!(Series::display_name("Berserk"), "Berserk");
+        assert_eq!(
+            Series::part_title(
+                "The Lord of the Rings: The Fellowship of the Ring",
+                "The Lord of the Rings"
+            ),
+            "The Fellowship of the Ring"
+        );
+        assert_eq!(Series::part_title("Berserk, Vol. 43", "Berserk"), "Vol. 43");
+        assert_eq!(
+            Series::part_title("Kung Fu Panda 2", "Kung Fu Panda"),
+            "Kung Fu Panda 2"
+        );
+        assert!(Series::same("Kung Fu Panda Collection", "kung fu panda"));
+        assert_eq!(Series::nouns(MediaType::Books).1, "volumes");
     }
 
     #[test]

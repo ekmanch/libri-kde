@@ -5,6 +5,7 @@
 pub mod details;
 mod dialogs;
 mod form;
+pub mod seasons;
 
 pub use form::LOOKUP_ID;
 
@@ -16,8 +17,8 @@ use iced::{Element, Task};
 use crate::app::{App, Message as AppMessage};
 use crate::lookup::{self, Match};
 use crate::model::{
-    BookFormat, Entry, EntryKind, EntryStatus, Library, MediaType, PlanItem, Released, TagCategory,
-    TagPicks, text,
+    BookFormat, Date, Entry, EntryKind, EntryStatus, Library, MediaType, PlanItem, Released,
+    Season, Series, TagCategory, TagPicks, text,
 };
 use crate::music;
 use crate::repo::Operation;
@@ -28,8 +29,18 @@ use crate::ui;
 #[derive(Debug)]
 pub enum Dialog {
     Form(Box<Form>),
-    Delete { id: String },
-    AddToPlan { id: String },
+    Delete {
+        id: String,
+    },
+    AddToPlan {
+        id: String,
+    },
+    /// "Season 2 of Carrie is no longer listed": the lookup dropped a
+    /// season the owner had set.
+    SeasonDropped {
+        id: String,
+        season: u32,
+    },
 }
 
 /// The Add and Edit dialog's fields. Nothing reaches the library until
@@ -54,6 +65,17 @@ pub struct Form {
     pub formats: BTreeSet<BookFormat>,
     pub kind: EntryKind,
     pub album: String,
+    /// A show's seasons (and an anime series'), edited in place.
+    pub seasons: Vec<SeasonDraft>,
+    /// The season whose status menu is open.
+    pub season_menu: Option<u32>,
+    /// An anime's "Series or movie"; `None` for an anime from before kinds
+    /// until the owner picks one.
+    pub anime_kind: Option<EntryKind>,
+    /// A book's page count, digits only.
+    pub pages: String,
+    pub series_name: String,
+    pub series_number: String,
     pub status: EntryStatus,
     pub rating: Option<u8>,
     pub rating_open: bool,
@@ -97,6 +119,65 @@ pub enum Replace {
     },
 }
 
+/// One season in the form: its number, the date as typed, and its
+/// status. A season added here, or whose date was changed here, is saved
+/// as manual.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeasonDraft {
+    pub number: u32,
+    pub released: String,
+    pub status: Option<EntryStatus>,
+    pub fresh: Option<bool>,
+    pub manual: Option<bool>,
+    /// The date as loaded, to tell a change.
+    pub loaded: String,
+}
+
+impl SeasonDraft {
+    fn from_season(season: &Season) -> SeasonDraft {
+        let released = season.released.map(|r| r.to_string()).unwrap_or_default();
+        SeasonDraft {
+            number: season.season,
+            released: released.clone(),
+            status: season.status,
+            fresh: season.fresh,
+            manual: season.manual,
+            loaded: released,
+        }
+    }
+
+    /// A season added in the form: the next number, Not set, no date.
+    fn new(number: u32) -> SeasonDraft {
+        SeasonDraft {
+            number,
+            released: String::new(),
+            status: None,
+            fresh: None,
+            manual: Some(true),
+            loaded: String::new(),
+        }
+    }
+
+    pub fn released(&self) -> Option<Released> {
+        Released::parse(self.released.trim())
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.released.trim().is_empty() || self.released().is_some()
+    }
+
+    fn to_season(&self) -> Season {
+        let changed = self.released.trim() != self.loaded;
+        Season {
+            season: self.number,
+            released: self.released(),
+            status: self.status,
+            fresh: self.fresh,
+            manual: (self.manual == Some(true) || changed).then_some(true),
+        }
+    }
+}
+
 /// Confirming a new tag and picking its categories: one, or several of
 /// one kind.
 #[derive(Debug, Clone)]
@@ -129,6 +210,8 @@ pub enum Message {
         rating: Option<u8>,
     },
     Add,
+    /// Add with the type and the title typed: a series' "+ Add".
+    AddWithTitle(MediaType, String),
     Edit(String),
     /// Edit with the tag picker open: the details' "+ Tag".
     EditTags(String),
@@ -179,6 +262,17 @@ pub enum Message {
     CategoryDraft(TagCategory),
     SaveCategories,
     CancelCategories,
+    // The season editor, the anime kind, pages and series.
+    SeasonDate(u32, String),
+    SeasonStatus(u32, Option<EntryStatus>),
+    SeasonCatchUp(u32),
+    FormSeasonMenu(Option<u32>),
+    RemoveSeasonDraft(u32),
+    AddSeason,
+    AnimeKind(EntryKind),
+    Pages(String),
+    SeriesName(String),
+    SeriesNumber(String),
     /// The replace question's answers.
     ReplaceKeepBoth,
     ReplaceConfirm,
@@ -186,6 +280,19 @@ pub enum Message {
     // The other dialogs.
     ConfirmDelete,
     TogglePlan(String),
+    // Seasons, from the inspector and the pages.
+    SetSeasonStatus {
+        id: String,
+        season: u32,
+        status: Option<EntryStatus>,
+    },
+    CatchUp {
+        id: String,
+        season: u32,
+    },
+    /// The dropped-season dialog's answers.
+    KeepSeason,
+    RemoveSeason,
 }
 
 impl Form {
@@ -206,6 +313,17 @@ impl Form {
             formats: BTreeSet::new(),
             kind: EntryKind::Album,
             album: String::new(),
+            // A show filled in by hand starts with Season 1.
+            seasons: if media == MediaType::Shows {
+                vec![SeasonDraft::new(1)]
+            } else {
+                Vec::new()
+            },
+            season_menu: None,
+            anime_kind: None,
+            pages: String::new(),
+            series_name: String::new(),
+            series_number: String::new(),
             status: EntryStatus::Want,
             rating: None,
             rating_open: false,
@@ -239,6 +357,26 @@ impl Form {
             formats: entry.formats.iter().flatten().copied().collect(),
             kind: entry.kind.unwrap_or(EntryKind::Album),
             album: entry.album.clone().unwrap_or_default(),
+            seasons: entry
+                .season_list()
+                .iter()
+                .map(SeasonDraft::from_season)
+                .collect(),
+            anime_kind: entry
+                .kind
+                .filter(|k| matches!(k, EntryKind::Series | EntryKind::Movie)),
+            pages: entry.pages.map(|p| p.to_string()).unwrap_or_default(),
+            series_name: entry
+                .series
+                .as_ref()
+                .map(|s| s.name.clone())
+                .unwrap_or_default(),
+            series_number: entry
+                .series
+                .as_ref()
+                .and_then(|s| s.number)
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
             status: entry.status,
             rating: entry.rating,
             tags: entry.tags.clone(),
@@ -258,6 +396,40 @@ impl Form {
         lookup::search(self.media, &self.query)
     }
 
+    /// Whether the entry keeps its dates and statuses in seasons: a show,
+    /// or an anime series.
+    pub fn uses_seasons(&self) -> bool {
+        self.media == MediaType::Shows
+            || (self.media == MediaType::Anime && self.anime_kind == Some(EntryKind::Series))
+    }
+
+    /// Whether the entry can be in a series: movies, books, games and
+    /// anime movies (an anime without a kind too).
+    pub fn can_have_series(&self) -> bool {
+        match self.media {
+            MediaType::Movies | MediaType::Books | MediaType::Games => true,
+            MediaType::Anime => self.anime_kind != Some(EntryKind::Series),
+            MediaType::Shows | MediaType::Music => false,
+        }
+    }
+
+    /// The seasons as they would be saved.
+    pub fn season_list(&self) -> Vec<Season> {
+        self.seasons.iter().map(SeasonDraft::to_season).collect()
+    }
+
+    /// The status the seasons give the show, for the read-only row.
+    pub fn status_from_seasons(&self, today: Date) -> EntryStatus {
+        Season::show_status(&self.season_list(), today)
+    }
+
+    /// Season 1 added when the type turns into one with seasons.
+    fn ensure_season(&mut self) {
+        if self.uses_seasons() && self.seasons.is_empty() {
+            self.seasons.push(SeasonDraft::new(1));
+        }
+    }
+
     /// Fills the form from a match. Every field stays editable. A game
     /// starts with the default platform picked when it came out on it,
     /// and with every platform otherwise.
@@ -268,6 +440,15 @@ impl Form {
         self.released = found.released.to_owned();
         self.description = text_editor::Content::with_text(found.description);
         self.kind = found.kind.unwrap_or(EntryKind::Album);
+        // A show from the lookup starts with Season 1 on the match's date
+        // (phase 4 lists its TMDB seasons here).
+        if self.media == MediaType::Shows {
+            self.seasons = vec![SeasonDraft {
+                released: found.released.to_owned(),
+                manual: None,
+                ..SeasonDraft::new(1)
+            }];
+        }
         self.platforms = found
             .platforms
             .iter()
@@ -487,7 +668,15 @@ impl Form {
     }
 
     pub fn can_save(&self) -> bool {
-        !self.title.trim().is_empty() && self.released_is_valid()
+        !self.title.trim().is_empty()
+            && self.released_is_valid()
+            && self.seasons.iter().all(SeasonDraft::is_valid)
+            && self.pages.trim().bytes().all(|b| b.is_ascii_digit())
+            && self
+                .series_number
+                .trim()
+                .bytes()
+                .all(|b| b.is_ascii_digit())
     }
 
     /// Platform chips: the form's own, then any the library uses.
@@ -506,13 +695,23 @@ impl Form {
     /// The entry the form describes, on top of `base` when editing.
     fn entry(&self, base: Option<&Entry>, library: &Library, today: crate::model::Date) -> Entry {
         let released = self.released();
+        // A new show's id takes Season 1's year, since it has no date of
+        // its own.
+        let id_year = if self.uses_seasons() {
+            self.seasons
+                .first()
+                .and_then(|s| s.released())
+                .map(|r| r.year)
+        } else {
+            released.map(|r| r.year)
+        };
         let creator = Some(self.creator.trim().to_owned()).filter(|c| !c.is_empty());
         let id = match base {
             Some(entry) => entry.id.clone(),
             None => text::entry_id(
                 self.media,
                 self.title.trim(),
-                released.map(|r| r.year),
+                id_year,
                 creator.as_deref(),
                 library.entries.iter().map(|e| e.id.as_str()),
             ),
@@ -559,7 +758,8 @@ impl Form {
         entry.media = self.media;
         entry.title = self.title.trim().to_owned();
         entry.creator = creator;
-        entry.released = released;
+        // A show has no date of its own: its seasons carry the dates.
+        entry.released = if self.uses_seasons() { None } else { released };
         entry.status = self.status;
         entry.rating = self.rating;
         entry.tags = self.tags.clone();
@@ -587,26 +787,43 @@ impl Form {
             (is(MediaType::Games) && !platform.is_empty()).then(|| platform.join(", "));
         entry.formats = (is(MediaType::Books) && !self.formats.is_empty())
             .then(|| self.formats.iter().copied().collect());
-        // An anime keeps its series-or-movie kind (edited in phase 1i); any
-        // other type but music has none.
+        // Music is an album or a song; an anime a series or a movie, once
+        // picked; any other type has no kind.
         entry.kind = match self.media {
             MediaType::Music => Some(self.kind),
-            MediaType::Anime => base
-                .and_then(|b| b.kind)
-                .filter(|k| matches!(k, EntryKind::Series | EntryKind::Movie)),
+            MediaType::Anime => self.anime_kind,
             _ => None,
         };
+        entry.pages = (is(MediaType::Books))
+            .then(|| self.pages.trim().parse::<u32>().ok())
+            .flatten()
+            .filter(|p| *p > 0);
+        let series_name = self.series_name.trim();
+        entry.series = (self.can_have_series() && !series_name.is_empty()).then(|| {
+            // The cover flag stays while the series does.
+            let cover = base
+                .and_then(|b| b.series.as_ref())
+                .filter(|s| Series::same(&s.name, series_name))
+                .and_then(|s| s.cover);
+            Series {
+                name: series_name.to_owned(),
+                number: self.series_number.trim().parse().ok(),
+                cover,
+            }
+        });
         let album = self.album.trim();
         entry.album = (is(MediaType::Music) && self.kind == EntryKind::Song && !album.is_empty())
             .then(|| album.to_owned());
         if !is(MediaType::Music) || self.kind == EntryKind::Song {
             entry.tracks = None;
         }
-        if !entry.uses_seasons() {
+        if entry.uses_seasons() {
+            let mut seasons = self.season_list();
+            seasons.sort_by_key(|s| s.season);
+            entry.seasons = (!seasons.is_empty()).then_some(seasons);
+            entry.refresh_status(today);
+        } else {
             entry.seasons = None;
-        }
-        if !is(MediaType::Books) {
-            entry.pages = None;
         }
         entry
     }
@@ -650,6 +867,43 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::Add => {
             let media = app.library.single().unwrap_or(MediaType::Movies);
             app.dialog = Some(Dialog::Form(Box::new(Form::add(media))));
+        }
+        Message::AddWithTitle(media, title) => {
+            let mut form = Form::add(media);
+            form.query = title.clone();
+            form.title = title;
+            app.dialog = Some(Dialog::Form(Box::new(form)));
+        }
+        Message::SetSeasonStatus { id, season, status } => {
+            app.library.season_menu = None;
+            app.apply(Operation::SetSeasonStatus {
+                id,
+                season,
+                status,
+                today: app.today,
+            });
+        }
+        Message::CatchUp { id, season } => {
+            app.library.season_menu = None;
+            app.apply(Operation::MarkSeasonsDone {
+                id,
+                before: season,
+                today: app.today,
+            });
+        }
+        Message::KeepSeason => {
+            if let Some(Dialog::SeasonDropped { id, season }) = app.dialog.take() {
+                app.apply(Operation::KeepSeason { id, season });
+            }
+        }
+        Message::RemoveSeason => {
+            if let Some(Dialog::SeasonDropped { id, season }) = app.dialog.take() {
+                app.apply(Operation::RemoveSeason {
+                    id,
+                    season,
+                    today: app.today,
+                });
+            }
         }
         Message::Edit(id) | Message::EditTags(id) if app.repo.library().entry(&id).is_none() => {}
         Message::Edit(id) => {
@@ -750,6 +1004,7 @@ fn update_form(
         Message::Type(media) => {
             form.media = media;
             form.picked = None;
+            form.ensure_season();
         }
         Message::Query(query) => {
             form.query = query;
@@ -808,7 +1063,60 @@ fn update_form(
         }
         Message::Kind(kind) => form.kind = kind,
         Message::Album(album) => form.album = album,
-        Message::Status(status) => form.status = status,
+        Message::Status(status) => {
+            form.status = status;
+            // A one-season show's status is Season 1's.
+            if form.uses_seasons()
+                && let [only] = form.seasons.as_mut_slice()
+            {
+                only.status = Some(status);
+                only.fresh = None;
+            }
+        }
+        Message::SeasonDate(number, date) => {
+            if let Some(season) = form.seasons.iter_mut().find(|s| s.number == number) {
+                season.released = date;
+            }
+        }
+        Message::SeasonStatus(number, status) => {
+            form.season_menu = None;
+            if let Some(season) = form.seasons.iter_mut().find(|s| s.number == number) {
+                season.status = status;
+                if status.is_some() {
+                    season.fresh = None;
+                }
+            }
+            if form.seasons.len() == 1 {
+                form.status = status.unwrap_or(EntryStatus::Want);
+            }
+        }
+        Message::SeasonCatchUp(number) => {
+            form.season_menu = None;
+            for season in &mut form.seasons {
+                if season.number < number
+                    && season.released().is_none_or(|r| r.is_released_on(today))
+                {
+                    season.status = Some(EntryStatus::Done);
+                    season.fresh = None;
+                }
+            }
+        }
+        Message::FormSeasonMenu(menu) => form.season_menu = menu,
+        Message::RemoveSeasonDraft(number) => {
+            form.seasons.retain(|s| s.number != number);
+            form.season_menu = None;
+        }
+        Message::AddSeason => {
+            let next = form.seasons.iter().map(|s| s.number).max().unwrap_or(0) + 1;
+            form.seasons.push(SeasonDraft::new(next));
+        }
+        Message::AnimeKind(kind) => {
+            form.anime_kind = Some(kind);
+            form.ensure_season();
+        }
+        Message::Pages(pages) => form.pages = pages,
+        Message::SeriesName(name) => form.series_name = name,
+        Message::SeriesNumber(number) => form.series_number = number,
         Message::ToggleRating => form.rating_open = !form.rating_open,
         Message::Rate(rating) => {
             form.rating = rating;
@@ -1057,6 +1365,7 @@ pub fn dismiss_top(app: &mut App) -> bool {
             if form.replace.take().is_none()
                 && form.new_tag.take().is_none()
                 && form.categories.take().is_none()
+                && form.season_menu.take().is_none()
                 && !form.picker.as_mut().is_some_and(PickerState::dismiss_inner)
                 && form.picker.take().is_none()
                 && !std::mem::take(&mut form.rating_open)
@@ -1085,6 +1394,7 @@ pub fn confirm(app: &mut App) -> Task<AppMessage> {
         }
         Some(Dialog::Delete { .. }) => Message::ConfirmDelete,
         Some(Dialog::AddToPlan { .. }) => Message::Close,
+        Some(Dialog::SeasonDropped { .. }) => Message::KeepSeason,
         _ => return Task::none(),
     };
     update(app, message)
@@ -1097,6 +1407,7 @@ pub fn overlay<'a>(app: &'a App, base: Element<'a, AppMessage>) -> Element<'a, A
         Dialog::Form(form) => form::view(app, form),
         Dialog::Delete { id } => dialogs::delete(app, id),
         Dialog::AddToPlan { id } => dialogs::add_to_plan(app, id),
+        Dialog::SeasonDropped { id, season } => dialogs::season_dropped(app, id, *season),
     });
     ui::modal(base, dialog, AppMessage::Entry(Message::Close), &tokens)
 }
@@ -1594,5 +1905,106 @@ mod tests {
             app.view(),
         );
         assert!(ui.find("· Director, Actor").is_ok());
+    }
+
+    #[test]
+    fn a_shows_seasons_are_edited_in_the_form_and_set_its_status() {
+        let mut app = app();
+        let id = "anime/frieren-beyond-journeys-end-2023";
+        send(&mut app, Message::Edit(id.into()));
+        assert_eq!(form(&app).seasons.len(), 2);
+        assert!(form(&app).uses_seasons());
+        send(&mut app, Message::SeasonStatus(2, Some(EntryStatus::Done)));
+        send(&mut app, Message::AddSeason);
+        send(&mut app, Message::SeasonDate(3, "2027".into()));
+        send(&mut app, Message::Save);
+        let show = app.repo.library().entry(id).unwrap();
+        let seasons = show.season_list();
+        assert_eq!(seasons.len(), 3);
+        assert_eq!(seasons[1].status, Some(EntryStatus::Done));
+        assert_eq!(seasons[1].manual, None, "a date left alone is not manual");
+        assert_eq!(seasons[2].manual, Some(true), "a season added here is");
+        assert_eq!(show.status, EntryStatus::Done, "set by the seasons out");
+        assert_eq!(show.released, None);
+    }
+
+    #[test]
+    fn a_new_show_starts_with_season_one_whose_status_is_the_shows() {
+        let mut app = app();
+        send(&mut app, Message::Add);
+        send(&mut app, Message::Type(MediaType::Shows));
+        send(&mut app, Message::Title("Adolescence".into()));
+        send(&mut app, Message::SeasonDate(1, "2025-03-13".into()));
+        send(&mut app, Message::Status(EntryStatus::Done));
+        assert_eq!(form(&app).seasons[0].status, Some(EntryStatus::Done));
+        send(&mut app, Message::Save);
+        let show = app.repo.library().entry("shows/adolescence-2025").unwrap();
+        assert_eq!(show.season_list()[0].manual, Some(true));
+        assert_eq!(show.status, EntryStatus::Done);
+        assert_eq!(show.year(), Some(2025), "from Season 1");
+    }
+
+    #[test]
+    fn pages_series_and_the_anime_kind_are_saved() {
+        let mut app = app();
+        let book = "books/berserk-vol-43-2025";
+        send(&mut app, Message::Edit(book.into()));
+        assert_eq!(form(&app).series_name, "Berserk");
+        send(&mut app, Message::Pages("256".into()));
+        send(&mut app, Message::SeriesNumber("44".into()));
+        send(&mut app, Message::Save);
+        let saved = app.repo.library().entry(book).unwrap();
+        assert_eq!(saved.pages, Some(256));
+        assert_eq!(saved.series.as_ref().unwrap().number, Some(44));
+
+        let anime = "anime/spirited-away-2001";
+        send(&mut app, Message::Edit(anime.into()));
+        assert_eq!(form(&app).anime_kind, None, "from before kinds");
+        send(&mut app, Message::AnimeKind(EntryKind::Series));
+        assert_eq!(form(&app).seasons.len(), 1, "Season 1 appears");
+        send(&mut app, Message::AnimeKind(EntryKind::Movie));
+        send(&mut app, Message::SeriesName("Ghibli".into()));
+        send(&mut app, Message::Save);
+        let saved = app.repo.library().entry(anime).unwrap();
+        assert_eq!(saved.kind, Some(EntryKind::Movie));
+        assert!(saved.seasons.is_none());
+        assert_eq!(saved.series.as_ref().unwrap().name, "Ghibli");
+    }
+
+    #[test]
+    fn the_inspector_and_the_pages_show_seasons_and_series() {
+        let mut app = app();
+        let _ = app.update(AppMessage::Library(
+            crate::screens::library::Message::ShowType(Some(MediaType::Anime)),
+        ));
+        let _ = app.update(AppMessage::Library(
+            crate::screens::library::Message::Select(
+                "anime/frieren-beyond-journeys-end-2023".into(),
+            ),
+        ));
+        {
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            assert!(ui.find("· from seasons").is_ok());
+            assert!(ui.find("2 seasons").is_ok());
+        }
+
+        let _ = app.update(AppMessage::Library(
+            crate::screens::library::Message::OpenPage(crate::screens::library::Page::Series {
+                media: MediaType::Movies,
+                name: "The Lord of the Rings".into(),
+                highlight: None,
+            }),
+        ));
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        assert!(ui.find("3 movies · 2 in your library").is_ok());
+        assert!(ui.find("+ Add").is_ok());
     }
 }

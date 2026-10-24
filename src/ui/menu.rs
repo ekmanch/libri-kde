@@ -46,7 +46,7 @@ pub fn radio_menu<'a, Message: Clone + 'a>(
 }
 
 /// A 16 px radio ring, with the accent dot when on.
-fn radio<'a, Message: 'a>(on: bool, tokens: &Tokens) -> Element<'a, Message> {
+pub fn radio<'a, Message: 'a>(on: bool, tokens: &Tokens) -> Element<'a, Message> {
     let (ring, dot) = if on {
         (tokens.accent, Some(tokens.accent))
     } else {

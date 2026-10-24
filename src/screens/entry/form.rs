@@ -14,6 +14,7 @@ use super::{CategoriesDialog, Form, Message, NewTag, Replace};
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
 use crate::model::{BookFormat, EntryKind, EntryStatus, MediaType, TagCategory, text as rules};
+use crate::screens::entry::SeasonDraft;
 use crate::tags::PickerState;
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, ButtonKind, FocusExt, Icon, Picker};
@@ -342,42 +343,105 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         );
     }
 
-    let mut grid = Column::new()
-        .spacing(16)
-        .width(Fill)
-        .push(ui::labeled(
+    let creator = ui::labeled(
+        creator_label,
+        ui::text_field(
+            creator_label,
+            &form.creator,
+            |c| msg(Message::Creator(c)),
+            font::REGULAR,
+            tokens,
+        ),
+        tokens,
+    );
+    let mut grid = Column::new().spacing(16).width(Fill).push(ui::labeled(
+        "Title",
+        ui::text_field(
             "Title",
+            &form.title,
+            |t| msg(Message::Title(t)),
+            font::REGULAR,
+            tokens,
+        ),
+        tokens,
+    ));
+    // A show has no Released field: its seasons carry the dates.
+    if form.uses_seasons() {
+        grid = grid.push(creator);
+    } else {
+        grid = grid.push(pair(creator, ui::labeled("Released", released, tokens)));
+    }
+    if form.media == MediaType::Anime {
+        grid = grid.push(anime_kind(form, tokens));
+    }
+    if form.media == MediaType::Books {
+        let pages = ui::labeled(
+            "Pages",
             ui::text_field(
-                "Title",
-                &form.title,
-                |t| msg(Message::Title(t)),
-                font::REGULAR,
+                "Optional",
+                &form.pages,
+                |p| msg(Message::Pages(p)),
+                font::MONO,
                 tokens,
             ),
             tokens,
-        ))
-        .push(pair(
+        );
+        grid = grid.push(pair(pages, space().into()));
+    }
+    if form.can_have_series() {
+        grid = grid.push(pair(
             ui::labeled(
-                creator_label,
+                "Series",
                 ui::text_field(
-                    creator_label,
-                    &form.creator,
-                    |c| msg(Message::Creator(c)),
+                    "Optional",
+                    &form.series_name,
+                    |s| msg(Message::SeriesName(s)),
                     font::REGULAR,
                     tokens,
                 ),
                 tokens,
             ),
-            ui::labeled("Released", released, tokens),
+            ui::labeled(
+                "Number",
+                ui::text_field(
+                    "#",
+                    &form.series_number,
+                    |n| msg(Message::SeriesNumber(n)),
+                    font::MONO,
+                    tokens,
+                ),
+                tokens,
+            ),
         ));
+    }
     if let Some(extra) = type_fields(form, library, tokens) {
         grid = grid.push(extra);
     }
+    if form.uses_seasons() {
+        grid = grid.push(season_editor(app, form, tokens));
+    }
 
-    let statuses = EntryStatus::options_for(form.media).iter().map(|&status| {
-        let label = browse::status_label(Some(form.media), status);
-        (label, form.status == status, msg(Message::Status(status)))
-    });
+    // A show with several seasons has its status set by them.
+    let status: Element<'a, AppMessage> = if form.uses_seasons() && form.seasons.len() > 1 {
+        let label = browse::status_label(Some(form.media), form.status_from_seasons(app.today));
+        container(
+            row![
+                text(label).size(14).font(font::SEMIBOLD),
+                text("· Set by the seasons").size(14).color(tokens.sub),
+            ]
+            .spacing(5)
+            .align_y(Center),
+        )
+        .height(34)
+        .align_y(Center)
+        .into()
+    } else {
+        let statuses = EntryStatus::options_for(form.media).iter().map(|&status| {
+            let label = browse::status_label(Some(form.media), status);
+            (label, form.status == status, msg(Message::Status(status)))
+        });
+        ui::segmented(statuses, 34.0, tokens)
+    };
     let rating = ui::rating(
         form.rating,
         form.rating_open,
@@ -387,7 +451,7 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
     );
     grid = grid
         .push(pair(
-            ui::labeled("Status", ui::segmented(statuses, 34.0, tokens), tokens),
+            ui::labeled("Status", status, tokens),
             ui::labeled("Rating", rating, tokens),
         ))
         .push(ui::labeled("Tags", tags(form, library, tokens), tokens));
@@ -427,6 +491,127 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
     container(row![cover, grid].spacing(24))
         .padding([22, 26])
         .into()
+}
+
+/// An anime's "Series or movie" control, with what each means. Unpicked
+/// for an anime from before kinds, until the owner says.
+fn anime_kind<'a>(form: &'a Form, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let kinds =
+        [("Series", EntryKind::Series), ("Movie", EntryKind::Movie)].map(|(label, kind)| {
+            (
+                label,
+                form.anime_kind == Some(kind),
+                msg(Message::AnimeKind(kind)),
+            )
+        });
+    let help = match form.anime_kind {
+        Some(EntryKind::Series) => "Works like a show: seasons, episodes, status from the seasons.",
+        Some(_) => "Works like a movie: one released date, can be part of a series.",
+        None => "Not decided yet: pick one.",
+    };
+    ui::labeled(
+        "Series or movie",
+        column![
+            container(ui::segmented(kinds, 34.0, tokens)).width(200),
+            text(help).size(12.5).color(tokens.sub),
+        ]
+        .spacing(6),
+        tokens,
+    )
+}
+
+/// The season editor: one line per season (the name, the date, the
+/// status pill and a remove cross), "+ Add season", and the note that a
+/// date changed here is the owner's.
+fn season_editor<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let today = app.today;
+    let several = form.seasons.len() > 1;
+    let mut lines = Column::new().spacing(8);
+    for season in &form.seasons {
+        lines = lines.push(season_line(form, season, several, today, tokens));
+    }
+    let add = ui::add_chip("+ Add season", tokens, msg(Message::AddSeason));
+    ui::labeled(
+        "Seasons",
+        column![
+            lines,
+            add,
+            text("A date you change here is yours: the daily check never overwrites it.")
+                .size(12.5)
+                .color(tokens.sub),
+        ]
+        .spacing(10),
+        tokens,
+    )
+}
+
+fn season_line<'a>(
+    form: &'a Form,
+    season: &'a SeasonDraft,
+    several: bool,
+    today: crate::model::Date,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let number = season.number;
+    let date = ui::text_field(
+        "Not set",
+        &season.released,
+        move |d| msg(Message::SeasonDate(number, d)),
+        font::MONO,
+        tokens,
+    )
+    .width(170);
+    let mut line = row![
+        container(
+            text(format!("Season {number}"))
+                .size(14)
+                .font(font::SEMIBOLD)
+        )
+        .width(90),
+        date,
+    ]
+    .spacing(12)
+    .align_y(Center);
+    if !season.is_valid() {
+        line = line.push(
+            text("Use 2026, 2026-12 or 2026-12-25.")
+                .size(12.5)
+                .color(tokens.danger),
+        );
+    }
+    if several {
+        let earlier = form.seasons.iter().any(|s| {
+            s.number < number
+                && s.released().is_none_or(|r| r.is_released_on(today))
+                && s.status != Some(EntryStatus::Done)
+        });
+        let catch_up = earlier.then(|| {
+            let done = browse::status_label(Some(form.media), EntryStatus::Done);
+            let label = if number == 2 {
+                format!("Mark season 1 {done}")
+            } else {
+                format!("Mark seasons 1–{} {done}", number - 1)
+            };
+            (label, msg(Message::SeasonCatchUp(number)))
+        });
+        let open = form.season_menu == Some(number);
+        line = line.push(ui::season_pill(
+            form.media,
+            season.status,
+            open,
+            msg(Message::FormSeasonMenu((!open).then_some(number))),
+            move |status| msg(Message::SeasonStatus(number, status)),
+            catch_up,
+            tokens,
+        ));
+    }
+    line = line.push(space::horizontal()).push(ui::icon_button(
+        Icon::Close,
+        12.0,
+        tokens,
+        msg(Message::RemoveSeasonDraft(number)),
+    ));
+    line.into()
 }
 
 /// Two fields side by side, sharing the width.

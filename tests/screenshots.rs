@@ -10,8 +10,9 @@ use std::path::PathBuf;
 
 use libri::app::{self, App, Message};
 use libri::browse::Sort;
-use libri::model::{Date, MediaType, TagCategory};
-use libri::screens::library::{self, View};
+use libri::model::{Date, EntryStatus, MediaType, Released, Season, TagCategory};
+use libri::repo::Operation;
+use libri::screens::library::{self, Page, SeasonMenu, View};
 use libri::screens::setup::{self, Step};
 use libri::screens::{Screen, entry, plans};
 use libri::settings::{SyncState, ThemeChoice};
@@ -46,6 +47,65 @@ fn edit_baby_tags(app: &mut App) {
 
 fn picker(app: &mut App, message: PickerMessage) {
     let _ = app.update(Message::Entry(entry::Message::Picker(message)));
+}
+
+const FRIEREN: &str = "anime/frieren-beyond-journeys-end-2023";
+const STRANGER: &str = "shows/stranger-things-2016";
+const BERSERK_43: &str = "books/berserk-vol-43-2025";
+const FELLOWSHIP: &str = "movies/the-lord-of-the-rings-the-fellowship-of-the-ring-2001";
+
+fn show_type(app: &mut App, media: MediaType) {
+    let _ = app.update(Message::Library(library::Message::ShowType(Some(media))));
+    let _ = app.update(Message::Library(library::Message::SetView(View::List)));
+}
+
+fn select(app: &mut App, id: &str) {
+    let _ = app.update(Message::Library(library::Message::Select(id.into())));
+}
+
+fn open_page(app: &mut App, page: Page) {
+    let _ = app.update(Message::Library(library::Message::OpenPage(page)));
+}
+
+fn season(n: u32, released: &str, status: Option<EntryStatus>) -> Season {
+    Season {
+        season: n,
+        released: Released::parse(released),
+        status,
+        fresh: None,
+        manual: None,
+    }
+}
+
+/// Replaces a show's seasons, for states the fixture lacks.
+fn set_seasons(app: &mut App, id: &str, seasons: Vec<Season>) {
+    app.apply(Operation::SetSeasons {
+        id: id.into(),
+        seasons,
+        today: app.today,
+    });
+}
+
+/// Stranger Things with 29 seasons, the latest airing, like the mockup's
+/// South Park.
+fn many_seasons(app: &mut App) {
+    let mut seasons: Vec<Season> = (1..=28)
+        .map(|n| season(n, &format!("{}-10-07", 1997 + n), Some(EntryStatus::Done)))
+        .collect();
+    seasons.push(season(29, "2026-10-07", Some(EntryStatus::InProgress)));
+    set_seasons(app, STRANGER, seasons);
+}
+
+/// Stranger Things with a second season announced for 2027.
+fn announced(app: &mut App, status: Option<EntryStatus>) {
+    set_seasons(
+        app,
+        STRANGER,
+        vec![
+            season(1, "2016-07-15", Some(EntryStatus::Done)),
+            season(2, "2027", status),
+        ],
+    );
 }
 
 #[test]
@@ -236,6 +296,216 @@ fn capture_every_screen() {
                 let _ = app.update(Message::Entry(entry::Message::EditTags(
                     "shows/stranger-things-2016".into(),
                 )));
+            }),
+        ),
+        // Phase 1i: seasons, series and the pages in the content pane.
+        (
+            Screen::Library,
+            ("shows-list", |app| show_type(app, MediaType::Shows)),
+        ),
+        (
+            Screen::Library,
+            ("anime-seasons", |app| {
+                show_type(app, MediaType::Anime);
+                select(app, FRIEREN);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("anime-season-menu", |app| {
+                show_type(app, MediaType::Anime);
+                select(app, FRIEREN);
+                let _ = app.update(Message::Library(library::Message::SeasonMenu(Some(
+                    SeasonMenu {
+                        id: FRIEREN.into(),
+                        season: 2,
+                        in_page: false,
+                    },
+                ))));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("show-many-seasons", |app| {
+                many_seasons(app);
+                show_type(app, MediaType::Shows);
+                select(app, STRANGER);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("page-all-seasons", |app| {
+                many_seasons(app);
+                show_type(app, MediaType::Shows);
+                select(app, STRANGER);
+                open_page(
+                    app,
+                    Page::Seasons {
+                        id: STRANGER.into(),
+                    },
+                );
+            }),
+        ),
+        (
+            Screen::Library,
+            ("page-season-weekly", |app| {
+                set_seasons(
+                    app,
+                    FRIEREN,
+                    vec![
+                        season(1, "2023-09-29", Some(EntryStatus::Done)),
+                        season(2, "2026-09-24", Some(EntryStatus::InProgress)),
+                    ],
+                );
+                show_type(app, MediaType::Anime);
+                select(app, FRIEREN);
+                open_page(
+                    app,
+                    Page::Season {
+                        id: FRIEREN.into(),
+                        number: 2,
+                    },
+                );
+            }),
+        ),
+        (
+            Screen::Library,
+            ("page-season-all-out", |app| {
+                show_type(app, MediaType::Anime);
+                select(app, FRIEREN);
+                open_page(
+                    app,
+                    Page::Season {
+                        id: FRIEREN.into(),
+                        number: 1,
+                    },
+                );
+            }),
+        ),
+        (
+            Screen::Library,
+            ("show-one-season", |app| {
+                show_type(app, MediaType::Shows);
+                select(app, STRANGER);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("show-season-announced", |app| {
+                announced(app, None);
+                show_type(app, MediaType::Shows);
+                select(app, STRANGER);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("season-dropped", |app| {
+                announced(app, Some(EntryStatus::Want));
+                show_type(app, MediaType::Shows);
+                select(app, STRANGER);
+                app.dialog = Some(entry::Dialog::SeasonDropped {
+                    id: STRANGER.into(),
+                    season: 2,
+                });
+            }),
+        ),
+        (
+            Screen::Library,
+            ("movies-series-row", |app| {
+                app.library.force_long = true;
+                show_type(app, MediaType::Movies);
+                let _ = app.update(Message::Library(library::Message::Sort(Sort::YearOldest)));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("movies-series-grid", |app| {
+                app.library.force_long = true;
+                show_type(app, MediaType::Movies);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("movie-in-series", |app| {
+                show_type(app, MediaType::Movies);
+                select(app, FELLOWSHIP);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("page-series", |app| {
+                show_type(app, MediaType::Movies);
+                open_page(
+                    app,
+                    Page::Series {
+                        media: MediaType::Movies,
+                        name: "The Lord of the Rings".into(),
+                        highlight: None,
+                    },
+                );
+            }),
+        ),
+        (
+            Screen::Library,
+            ("series-cover", |app| {
+                show_type(app, MediaType::Movies);
+                open_page(
+                    app,
+                    Page::Series {
+                        media: MediaType::Movies,
+                        name: "The Lord of the Rings".into(),
+                        highlight: None,
+                    },
+                );
+                let _ = app.update(Message::Library(library::Message::OpenSeriesCover(
+                    MediaType::Movies,
+                    "The Lord of the Rings".into(),
+                )));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("book-long-series", |app| {
+                show_type(app, MediaType::Books);
+                select(app, BERSERK_43);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("page-all-volumes", |app| {
+                show_type(app, MediaType::Books);
+                select(app, BERSERK_43);
+                open_page(
+                    app,
+                    Page::Series {
+                        media: MediaType::Books,
+                        name: "Berserk".into(),
+                        highlight: Some(BERSERK_43.into()),
+                    },
+                );
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-book-series", |app| {
+                show_type(app, MediaType::Books);
+                let _ = app.update(Message::Entry(entry::Message::Edit(BERSERK_43.into())));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-anime-seasons", |app| {
+                show_type(app, MediaType::Anime);
+                let _ = app.update(Message::Entry(entry::Message::Edit(FRIEREN.into())));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-anime-season-menu", |app| {
+                show_type(app, MediaType::Anime);
+                let _ = app.update(Message::Entry(entry::Message::Edit(FRIEREN.into())));
+                let _ = app.update(Message::Entry(entry::Message::FormSeasonMenu(Some(2))));
             }),
         ),
         (Screen::Plans, ("plans", nothing)),
