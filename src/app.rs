@@ -25,6 +25,7 @@ pub const WINDOW_SIZE: Size = Size::new(1600.0, 900.0);
 pub const MIN_WINDOW_SIZE: Size = Size::new(1280.0, 720.0);
 
 pub fn run() -> iced::Result {
+    present_with_mailbox();
     let window = window::Settings {
         size: WINDOW_SIZE,
         min_size: Some(MIN_WINDOW_SIZE),
@@ -35,7 +36,7 @@ pub fn run() -> iced::Result {
         },
         ..window::Settings::default()
     };
-    let monitor = freeze_log();
+    freeze_log();
     let result = iced::application(App::boot, App::update, App::view)
         .title(App::title)
         .theme(App::iced_theme)
@@ -44,35 +45,58 @@ pub fn run() -> iced::Result {
         .window(window)
         .run();
     crate::trace::line("exit");
-    if let Some(mut monitor) = monitor {
-        let _ = monitor.kill();
-        let _ = monitor.wait();
-    }
     result
+}
+
+/// Mailbox presentation instead of iced's FIFO default, unless the
+/// environment says otherwise (docs/DESIGN.md, "Presentation mode").
+/// With FIFO, NVIDIA's Vulkan driver attaches a commit-timing target to
+/// every frame, and after the window has been hidden it extrapolates a
+/// target as far in the future as the window was hidden; KWin 6.8 holds
+/// the frame until then and the whole desktop stands still for that long.
+/// With mailbox the driver sends no timestamps at all. iced reads the
+/// variable when it builds the renderer, so it is set before the runtime
+/// starts, while this is still the only thread.
+fn present_with_mailbox() {
+    if std::env::var_os("ICED_PRESENT_MODE").is_some() || std::env::var_os("WGPU_BACKEND").is_some()
+    {
+        return;
+    }
+    // SAFETY: `run` is called first thing from `main`, before any other
+    // thread exists, so nothing can read the environment concurrently.
+    unsafe { std::env::set_var("ICED_PRESENT_MODE", "mailbox") };
 }
 
 /// The freeze log of this run (TODO.md 1g, the desktop freeze):
 /// `~/.cache/libri/freeze-<date>.log`, which the trace (`crate::trace`)
 /// and `scripts/freeze-monitor.sh` write together, so every session is
 /// logged without anyone having to remember to. The monitor follows this
-/// process and stops when it exits. `LIBRI_NO_MONITOR=1` skips both; an
-/// installed binary has no script to start and only writes the trace.
-fn freeze_log() -> Option<std::process::Child> {
+/// process and keeps sampling KWin for 90 s after it exits, in its own
+/// process group so that a Ctrl+C in the terminal does not end it with
+/// Libri: the 2026-10-24 21:42 freeze began the moment Libri's window
+/// was closed. `LIBRI_NO_MONITOR=1` skips both; an installed binary has
+/// no script to start and only writes the trace.
+fn freeze_log() {
+    use std::os::unix::process::CommandExt;
+
     if std::env::var_os("LIBRI_NO_MONITOR").is_some() {
-        return None;
+        return;
     }
-    let dir = std::env::var_os("XDG_CACHE_HOME")
+    let Some(dir) = std::env::var_os("XDG_CACHE_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| {
             std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".cache"))
-        })?
-        .join("libri");
+        })
+        .map(|cache| cache.join("libri"))
+    else {
+        return;
+    };
     if let Err(error) = std::fs::create_dir_all(&dir) {
         eprintln!(
             "libri: no freeze log, could not create {}: {error}",
             dir.display()
         );
-        return None;
+        return;
     }
     let log = dir.join(format!("freeze-{}.log", date_stamp()));
     if let Err(error) = crate::trace::start(&log) {
@@ -80,7 +104,7 @@ fn freeze_log() -> Option<std::process::Child> {
             "libri: no freeze log, could not open {}: {error}",
             log.display()
         );
-        return None;
+        return;
     }
     eprintln!("libri: freeze log {}", log.display());
     crate::trace::line(format_args!(
@@ -90,20 +114,17 @@ fn freeze_log() -> Option<std::process::Child> {
     ));
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/freeze-monitor.sh");
     if !script.is_file() {
-        return None;
+        return;
     }
-    match std::process::Command::new(&script)
+    if let Err(error) = std::process::Command::new(&script)
         .arg(&log)
         .arg(std::process::id().to_string())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
+        .process_group(0)
         .spawn()
     {
-        Ok(child) => Some(child),
-        Err(error) => {
-            eprintln!("libri: could not start the freeze monitor: {error}");
-            None
-        }
+        eprintln!("libri: could not start the freeze monitor: {error}");
     }
 }
 

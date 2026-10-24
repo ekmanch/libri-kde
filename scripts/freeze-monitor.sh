@@ -7,20 +7,25 @@
 # in. A gap between timestamps longer than a few seconds marks a stall of
 # the whole system.
 #
-# Libri starts this itself (`app::run`) and the monitor stops when Libri
-# is gone, so it is running whenever Libri is. The log is under
-# ~/.cache/libri/, which survives a reboot (/tmp does not). Run it by hand
-# to watch the desktop without Libri, for example to see whether the
-# freeze happens without it:
+# Libri starts this itself (`app::run`) in its own process group, so a
+# Ctrl+C in the terminal does not take it down with Libri, and the monitor
+# keeps sampling for a while after Libri is gone: the 2026-10-24 21:42
+# freeze began the moment Libri's window was closed, so the minutes after
+# exit are the ones to record. The log is under ~/.cache/libri/, which
+# survives a reboot (/tmp does not). Run it by hand to watch the desktop
+# without Libri, for example to see whether the freeze happens without it:
 #
 #   scripts/freeze-monitor.sh                 # ~/.cache/libri/freeze-<date>.log, until Ctrl+C
 #   scripts/freeze-monitor.sh my.log          # to a file of your choosing
-#   scripts/freeze-monitor.sh my.log <pid>    # until that process exits (Libri passes its own)
+#   scripts/freeze-monitor.sh my.log <pid>    # until 90 s after that process exits (Libri passes its own)
+#   scripts/freeze-monitor.sh my.log <pid> 10 # until 10 s after it exits
 set -u
 dir="${XDG_CACHE_HOME:-$HOME/.cache}/libri"
 mkdir -p "$dir"
 log="${1:-$dir/freeze-$(date +%Y%m%d-%H%M%S).log}"
 follow="${2:-}"
+after="${3:-90}"
+gone_at=""
 kwin=$(pgrep -x kwin_wayland | head -1)
 echo "monitoring kwin $kwin${follow:+, libri $follow}, log $log"
 echo "# $(date -Is) start; kwin=$kwin; libri=${follow:-any}; kernel $(uname -r); nvidia $(cat /proc/driver/nvidia/version 2>/dev/null | head -1 | cut -c1-60)" >>"$log"
@@ -38,8 +43,12 @@ threads() {
 }
 prev_kwin=0
 while true; do
-    if [ -n "$follow" ] && ! kill -0 "$follow" 2>/dev/null; then
-        echo "# $(date -Is) libri $follow exited; stop" >>"$log"
+    if [ -n "$follow" ] && [ -z "$gone_at" ] && ! kill -0 "$follow" 2>/dev/null; then
+        gone_at=$(date +%s)
+        echo "# $(date -Is) libri $follow exited; watching KWin for $after s more" >>"$log"
+    fi
+    if [ -n "$gone_at" ] && [ $(($(date +%s) - gone_at)) -ge "$after" ]; then
+        echo "# $(date -Is) stop" >>"$log"
         exit 0
     fi
     now=$(date -Is)
@@ -59,6 +68,7 @@ while true; do
         echo "  kwin threads:"
         threads "$kwin"
         for pid in ${follow:-$(pgrep -f 'target/(debug|release)/libri')}; do
+            [ -d /proc/"$pid" ] || continue
             echo "  libri $pid threads:"
             threads "$pid"
         done

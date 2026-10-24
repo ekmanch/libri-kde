@@ -53,11 +53,11 @@ LIBRI_LONG_LISTS=1 cargo run       # section headers and the jump rail on every 
 LIBRI_DROPPED=shows/stranger-things-2016:1 cargo run  # the "season no longer listed" dialog for a show's season
 LIBRI_LOOKUP=offline cargo run     # the Add dialog's lookup state: loading, offline, not-set-up, partial, partial-none
 ICED_BACKEND=tiny-skia cargo run   # software renderer
-WGPU_BACKEND=gl cargo run          # OpenGL instead of Vulkan (the freeze A/B test, TODO.md 1g)
-ICED_PRESENT_MODE=mailbox cargo run # Vulkan without FIFO waits (the freeze A/B test, TODO.md 1g)
-__NV_DISABLE_EXPLICIT_SYNC=1 cargo run # frames without explicit-sync fences (the freeze A/B test, TODO.md 1g)
-LIBRI_NO_MONITOR=1 cargo run       # without the freeze log; by default every run writes ~/.cache/libri/freeze-<date>.log: Libri's window events, redraw rate and gaps, and iced/winit/wgpu warnings (src/trace.rs), and scripts/freeze-monitor.sh adds KWin, VRAM and thread states every 2 s until Libri exits
+ICED_PRESENT_MODE=fifo cargo run   # iced's FIFO default instead of the app's mailbox; reproduces the 2026-10-24 desktop freeze on KWin 6.8 with NVIDIA (DESIGN.md "Presentation mode")
+WGPU_BACKEND=gl cargo run          # OpenGL through EGL instead of Vulkan
+LIBRI_NO_MONITOR=1 cargo run       # without the freeze log; by default every run writes ~/.cache/libri/freeze-<date>.log: Libri's window events, redraw rate and gaps, and iced/winit/wgpu warnings (src/trace.rs), and scripts/freeze-monitor.sh adds KWin, VRAM and thread states every 2 s until 90 s after Libri exits (the 21:42 freeze began at the close)
 scripts/freeze-monitor.sh          # the monitor on its own, to watch the desktop without Libri (Ctrl+C stops it)
+qdbus6 org.kde.KWin /Compositor org.kde.kwin.Compositing.reinitialize  # during a freeze, from SSH or a Claude Code session driven from the phone: restarts KWin's render path without ending the session (untried; TODO.md 1g)
 ```
 
 Before saying a task is done, run all three and tell me if any fail:
