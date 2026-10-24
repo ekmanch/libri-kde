@@ -211,6 +211,10 @@ pub struct Entry {
     /// The lookup id the entry was found by, "tmdb:movie:694", or null.
     #[serde(default)]
     pub source: Option<String>,
+    /// The lookup id of another match whose cover the entry shows (an
+    /// edition, an ebook), left out while the cover is the match's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover_from: Option<String>,
     // Games.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,
@@ -519,6 +523,7 @@ mod tests {
             seasonal_only: false,
             added: Date::parse("2026-10-01").unwrap(),
             source: None,
+            cover_from: None,
             platform: None,
             formats: None,
             pages: None,

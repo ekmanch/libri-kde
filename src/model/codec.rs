@@ -74,11 +74,31 @@ mod tests {
         for key in ["released", "creator", "rating", "source"] {
             assert!(encoded.contains(&format!("\"{key}\": null")), "{key}");
         }
-        for key in ["platform", "formats", "kind", "album", "tracks", "seasons"] {
+        for key in [
+            "cover_from",
+            "platform",
+            "formats",
+            "kind",
+            "album",
+            "tracks",
+            "seasons",
+        ] {
             assert!(!encoded.contains(&format!("\"{key}\"")), "{key}");
         }
         assert!(encoded.contains("\"tags\": {},\n"));
         assert!(encoded.contains("\"plans\": []\n"));
+    }
+
+    #[test]
+    fn cover_from_is_written_right_after_source() {
+        let text = r#"{"version": 2, "entries": [{"id": "books/x-1975", "type": "books",
+            "title": "X", "status": "want", "added": "2026-10-01", "source": "openlibrary:OL1W",
+            "cover_from": "itunes:2019", "formats": ["physical"]}]}"#;
+        let encoded = encode(&decode(text).unwrap());
+        let source_at = encoded.find("\"source\":").unwrap();
+        let cover_at = encoded.find("\"cover_from\": \"itunes:2019\"").unwrap();
+        let formats_at = encoded.find("\"formats\":").unwrap();
+        assert!(source_at < cover_at && cover_at < formats_at);
     }
 
     #[test]

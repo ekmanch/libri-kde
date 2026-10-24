@@ -1,7 +1,7 @@
 //! Online lookup, faked for phase 1: a small fixed catalog the Add entry
 //! dialog searches. Phase 4 asks the real providers instead.
 
-use crate::model::{Date, Entry, EntryKind, MediaType, Season, Series};
+use crate::model::{Date, Entry, EntryKind, MediaType, Season, Series, text};
 
 /// One match a lookup returns.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,7 +17,41 @@ pub struct Match {
     pub kind: Option<EntryKind>,
     /// The lookup id, "igdb:1234".
     pub source: &'static str,
+    /// A book's edition, for the cover picker: "Hardcover", "Ebook".
+    pub edition: Option<&'static str>,
+    /// A book dated only by its ebook edition, so the year may be a
+    /// reprint's.
+    pub ebook_dated: bool,
+    /// The top billed cast of a movie or show, for actor tag suggestions.
+    pub cast: &'static [&'static str],
+    /// The work's language as a tag name ("japanese"), when the lookup
+    /// says and it is not English.
+    pub language: Option<&'static str>,
+    /// A show's first network or a movie's platform as a tag name
+    /// ("netflix"), for the Streaming suggestion.
+    pub network: Option<&'static str>,
 }
+
+/// The game platforms the lookup knows, A to Z: the name and its other
+/// names (the abbreviation, alternative and own names), which a search
+/// matches too.
+pub const PLATFORMS: &[(&str, &str)] = &[
+    ("Arcade", ""),
+    ("Game Boy", "GB"),
+    ("Game Boy Advance", "GBA"),
+    ("Mega Drive", "Genesis"),
+    ("Nintendo 64", "N64"),
+    ("Nintendo Switch", "Switch"),
+    ("PC", "Windows · Steam"),
+    ("PlayStation", "PS1 · PSX"),
+    ("PlayStation 2", "PS2"),
+    ("PlayStation 5", "PS5"),
+    (
+        "Super Nintendo",
+        "SNES · Super Famicom · Super Nintendo Entertainment System",
+    ),
+    ("Xbox Series X|S", "Xbox"),
+];
 
 const fn game(
     title: &'static str,
@@ -38,6 +72,11 @@ const fn game(
         platforms,
         kind: None,
         source,
+        edition: None,
+        ebook_dated: false,
+        cast: &[],
+        language: None,
+        network: None,
     }
 }
 
@@ -64,10 +103,170 @@ const fn other(
             None
         },
         source,
+        edition: None,
+        ebook_dated: false,
+        cast: &[],
+        language: None,
+        network: None,
     }
 }
 
 pub const CATALOG: &[Match] = &[
+    game(
+        "Street Fighter II: The World Warrior",
+        "Capcom",
+        "1992-06-10",
+        "Eight world warriors fight their way to M. Bison. The arcade hit comes home.",
+        &["fighting", "arcade"],
+        &["Super Nintendo", "Arcade", "Game Boy", "Mega Drive", "PC"],
+        "igdb:1098",
+    ),
+    game(
+        "Street Fighter II Turbo",
+        "Capcom",
+        "1993-07-11",
+        "The faster Street Fighter II, with the four bosses playable.",
+        &["fighting"],
+        &["Super Nintendo"],
+        "igdb:3185",
+    ),
+    game(
+        "Super Street Fighter II",
+        "Capcom",
+        "1994-06-25",
+        "Four new world warriors join the fight.",
+        &["fighting", "arcade"],
+        &["Super Nintendo", "Mega Drive", "Arcade"],
+        "igdb:3186",
+    ),
+    Match {
+        cast: &["Julia Garner", "Josh Brolin", "Alden Ehrenreich"],
+        ..other(
+            MediaType::Movies,
+            "Weapons",
+            "Zach Cregger",
+            "2025-08-08",
+            "When all but one child from the same class vanish on the same night, a town tries to find out why.",
+            &["horror", "mystery"],
+            "tmdb:movie:1078605",
+        )
+    },
+    other(
+        MediaType::Movies,
+        "Weapons of Mass Distraction",
+        "Stephen Surjik",
+        "1997-05-18",
+        "Two media moguls fight over a football team.",
+        &["comedy"],
+        "tmdb:movie:74436",
+    ),
+    Match {
+        cast: &["Song Kang-ho", "Lee Sun-kyun", "Cho Yeo-jeong"],
+        language: Some("korean"),
+        ..other(
+            MediaType::Movies,
+            "Parasite",
+            "Bong Joon-ho",
+            "2019-05-30",
+            "A poor family schemes its way into the household of a wealthy one.",
+            &["thriller", "dark"],
+            "tmdb:movie:496243",
+        )
+    },
+    Match {
+        cast: &["Stephen Graham", "Owen Cooper", "Ashley Walters"],
+        network: Some("netflix"),
+        ..other(
+            MediaType::Shows,
+            "Adolescence",
+            "Jack Thorne, Stephen Graham",
+            "2025-03-13",
+            "A 13-year-old is arrested for the murder of a classmate, and his family tries to understand why.",
+            &["drama", "crime"],
+            "tmdb:tv:249042",
+        )
+    },
+    other(
+        MediaType::Shows,
+        "Adolescence of Utena",
+        "Kunihiko Ikuhara",
+        "1999-08-14",
+        "Utena's story retold as a film.",
+        &["fantasy"],
+        "tmdb:tv:40891",
+    ),
+    Match {
+        edition: Some("Ebook"),
+        ebook_dated: true,
+        ..other(
+            MediaType::Books,
+            "A Christmas Carol",
+            "Charles Dickens",
+            "2012-10-10",
+            "A miser is visited by three spirits on Christmas Eve.",
+            &["christmas", "classic", "ghosts"],
+            "itunes:570254606",
+        )
+    },
+    other(
+        MediaType::Books,
+        "A Christmas Carol and Other Christmas Writings",
+        "Charles Dickens",
+        "2003-11-04",
+        "The Carol with Dickens's other Christmas stories.",
+        &["christmas", "classic"],
+        "openlibrary:OL8193416W",
+    ),
+    Match {
+        edition: Some("Ebook"),
+        ebook_dated: true,
+        ..other(
+            MediaType::Books,
+            "A Christmas Carol (Illustrated)",
+            "Charles Dickens",
+            "2017-12-01",
+            "The Carol with the original illustrations.",
+            &["christmas", "classic"],
+            "itunes:1319049962",
+        )
+    },
+    Match {
+        edition: Some("Hardcover"),
+        ..other(
+            MediaType::Books,
+            "Dracula",
+            "Bram Stoker",
+            "1897-05-26",
+            "Jonathan Harker travels to Transylvania to meet a client who is not what he seems.",
+            &["horror", "classic", "gothic"],
+            "openlibrary:OL17405W",
+        )
+    },
+    Match {
+        edition: Some("Paperback"),
+        ..other(
+            MediaType::Books,
+            "Dracula",
+            "Bram Stoker",
+            "2003-02-25",
+            "The Penguin Classics edition.",
+            &["horror", "classic"],
+            "openlibrary:OL24241M",
+        )
+    },
+    Match {
+        edition: Some("Ebook"),
+        ebook_dated: true,
+        ..other(
+            MediaType::Books,
+            "Dracula",
+            "Bram Stoker",
+            "2012-03-13",
+            "The ebook edition.",
+            &["horror", "classic"],
+            "itunes:498187584",
+        )
+    },
     game(
         "Castlevania: Belmont's Curse",
         "Evil Empire",
@@ -288,6 +487,41 @@ pub fn track_list(artist: &str, album: &str) -> Option<&'static [&'static str]> 
         .map(|(_, _, tracks)| *tracks)
 }
 
+/// What the lookup is doing, for the Add dialog's left pane. Phase 4 sets
+/// it from the real providers; until then `LIBRI_LOOKUP` fakes it:
+/// "loading", "offline", "not-set-up", "partial", "partial-none".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LookupState {
+    #[default]
+    Results,
+    Loading,
+    Offline,
+    NotSetUp,
+    /// Some sources failed; the rows are what the others found.
+    Partial,
+    /// Some sources failed and the others found nothing.
+    PartialNone,
+}
+
+impl LookupState {
+    pub fn from_env(value: &str) -> Option<LookupState> {
+        Some(match value {
+            "results" => LookupState::Results,
+            "loading" => LookupState::Loading,
+            "offline" => LookupState::Offline,
+            "not-set-up" => LookupState::NotSetUp,
+            "partial" => LookupState::Partial,
+            "partial-none" => LookupState::PartialNone,
+            _ => return None,
+        })
+    }
+
+    /// Whether the pane shows rows in this state.
+    pub fn shows_rows(self) -> bool {
+        matches!(self, LookupState::Results | LookupState::Partial)
+    }
+}
+
 /// One part of a series as the lookup lists it: TMDB's collection, IGDB's
 /// collection or Wikidata's series.
 #[derive(Debug, Clone, PartialEq)]
@@ -410,6 +644,11 @@ pub fn episodes(entry: &Entry, season: &Season) -> Vec<Episode> {
 /// The matches for `query` among `media`: titles that contain it, case
 /// ignored. Nothing for an empty query.
 pub fn search(media: MediaType, query: &str) -> Vec<&'static Match> {
+    search_on(media, query, None)
+}
+
+/// [`search`] narrowed to the games that came out on `platform`.
+pub fn search_on(media: MediaType, query: &str, platform: Option<&str>) -> Vec<&'static Match> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
         return Vec::new();
@@ -417,6 +656,34 @@ pub fn search(media: MediaType, query: &str) -> Vec<&'static Match> {
     CATALOG
         .iter()
         .filter(|m| m.media == media && m.title.to_lowercase().contains(&query))
+        .filter(|m| {
+            platform.is_none_or(|platform| {
+                m.platforms
+                    .iter()
+                    .any(|p| text::normalize_platform(p).eq_ignore_ascii_case(platform))
+            })
+        })
+        .collect()
+}
+
+/// The other matches for an entry's title, whose covers Pick a cover
+/// offers: one of each lookup id, the entry's own match left out.
+pub fn cover_choices(media: MediaType, title: &str, own: Option<&str>) -> Vec<&'static Match> {
+    search(media, title)
+        .into_iter()
+        .filter(|m| own != Some(m.source))
+        .collect()
+}
+
+/// The platforms whose name or other names contain `query`, case aside.
+pub fn platforms_matching(query: &str) -> Vec<(&'static str, &'static str)> {
+    let query = query.trim().to_lowercase();
+    PLATFORMS
+        .iter()
+        .copied()
+        .filter(|(name, others)| {
+            query.is_empty() || format!("{name} {others}").to_lowercase().contains(&query)
+        })
         .collect()
 }
 
@@ -440,6 +707,21 @@ mod tests {
         assert_eq!(berserk[42].year, Some(2025));
         assert!(series_parts(MediaType::Movies, "The Lord of the Rings Collection").is_some());
         assert!(series_parts(MediaType::Games, "Berserk").is_none());
+    }
+
+    #[test]
+    fn a_platform_narrows_the_games_and_the_cover_choices_leave_out_the_own_match() {
+        assert_eq!(search(MediaType::Games, "street fighter").len(), 3);
+        assert_eq!(
+            search_on(MediaType::Games, "street fighter", Some("Mega Drive")).len(),
+            2
+        );
+        assert!(search_on(MediaType::Games, "street fighter", Some("Nintendo 64")).is_empty());
+        let choices = cover_choices(MediaType::Books, "Dracula", Some("openlibrary:OL17405W"));
+        assert_eq!(choices.len(), 2);
+        assert!(choices.iter().all(|m| m.edition.is_some()));
+        assert_eq!(platforms_matching("snes").len(), 1);
+        assert_eq!(platforms_matching("genesis")[0].0, "Mega Drive");
     }
 
     #[test]

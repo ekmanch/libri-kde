@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use libri::app::{self, App, Message};
 use libri::browse::Sort;
+use libri::lookup::LookupState;
 use libri::model::{Date, EntryStatus, MediaType, Released, Season, TagCategory};
 use libri::repo::Operation;
 use libri::screens::library::{self, Page, SeasonMenu, View};
@@ -65,6 +66,24 @@ fn select(app: &mut App, id: &str) {
 
 fn open_page(app: &mut App, page: Page) {
     let _ = app.update(Message::Library(library::Message::OpenPage(page)));
+}
+
+/// The Add dialog on `media` with `query` typed and its first match picked.
+fn add_from(app: &mut App, media: MediaType, query: &str) {
+    show_type(app, media);
+    let _ = app.update(Message::Entry(entry::Message::Add));
+    let _ = app.update(Message::Entry(entry::Message::Type(media)));
+    let _ = app.update(Message::Entry(entry::Message::Query(query.into())));
+    let _ = app.update(Message::Entry(entry::Message::Pick(0)));
+}
+
+/// The Add dialog with a lookup state faked and nothing picked.
+fn add_in_state(app: &mut App, state: LookupState) {
+    show_type(app, MediaType::Games);
+    app.lookup = state;
+    let _ = app.update(Message::Entry(entry::Message::Add));
+    let _ = app.update(Message::Entry(entry::Message::Type(MediaType::Games)));
+    let _ = app.update(Message::Entry(entry::Message::Query("castlevania".into())));
 }
 
 fn season(n: u32, released: &str, status: Option<EntryStatus>) -> Season {
@@ -506,6 +525,145 @@ fn capture_every_screen() {
                 show_type(app, MediaType::Anime);
                 let _ = app.update(Message::Entry(entry::Message::Edit(FRIEREN.into())));
                 let _ = app.update(Message::Entry(entry::Message::FormSeasonMenu(Some(2))));
+            }),
+        ),
+        // Phase 1j: the Add and Edit dialog's lookup pane, cover and platform.
+        (
+            Screen::Library,
+            ("add-game-from-match", |app| {
+                add_from(app, MediaType::Games, "castlevania")
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-game-on-platform", |app| {
+                show_type(app, MediaType::Games);
+                let _ = app.update(Message::Entry(entry::Message::Add));
+                let _ = app.update(Message::Entry(entry::Message::Type(MediaType::Games)));
+                let _ = app.update(Message::Entry(entry::Message::PickPlatform(Some(
+                    "Super Nintendo".into(),
+                ))));
+                let _ = app.update(Message::Entry(entry::Message::Query(
+                    "street fighter".into(),
+                )));
+                let _ = app.update(Message::Entry(entry::Message::Pick(0)));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-platform-picker", |app| {
+                show_type(app, MediaType::Games);
+                let _ = app.update(Message::Entry(entry::Message::Add));
+                let _ = app.update(Message::Entry(entry::Message::Type(MediaType::Games)));
+                let _ = app.update(Message::Entry(entry::Message::Query(
+                    "street fighter".into(),
+                )));
+                let _ = app.update(Message::Entry(entry::Message::TogglePlatformPicker));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-platform-picker-searching", |app| {
+                show_type(app, MediaType::Games);
+                let _ = app.update(Message::Entry(entry::Message::Add));
+                let _ = app.update(Message::Entry(entry::Message::Type(MediaType::Games)));
+                let _ = app.update(Message::Entry(entry::Message::Query(
+                    "street fighter".into(),
+                )));
+                let _ = app.update(Message::Entry(entry::Message::TogglePlatformPicker));
+                let _ = app.update(Message::Entry(entry::Message::PlatformQuery("snes".into())));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-movie-actors", |app| {
+                add_from(app, MediaType::Movies, "weapons")
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-show-streaming", |app| {
+                add_from(app, MediaType::Shows, "adolescence")
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-book-ebook-year", |app| {
+                add_from(app, MediaType::Books, "a christmas carol")
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-looking-up", |app| {
+                add_in_state(app, LookupState::Loading)
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-offline", |app| add_in_state(app, LookupState::Offline)),
+        ),
+        (
+            Screen::Library,
+            ("add-not-set-up", |app| {
+                add_in_state(app, LookupState::NotSetUp)
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-partial", |app| add_in_state(app, LookupState::Partial)),
+        ),
+        (
+            Screen::Library,
+            ("add-partial-none", |app| {
+                add_in_state(app, LookupState::PartialNone)
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-no-matches", |app| {
+                show_type(app, MediaType::Games);
+                let _ = app.update(Message::Entry(entry::Message::Add));
+                let _ = app.update(Message::Entry(entry::Message::Type(MediaType::Games)));
+                let _ = app.update(Message::Entry(entry::Message::Query("zork".into())));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-look-up-again", |app| {
+                show_type(app, MediaType::Books);
+                let _ = app.update(Message::Entry(entry::Message::Edit(
+                    "books/dracula-1897".into(),
+                )));
+                let _ = app.update(Message::Entry(entry::Message::LookAgain));
+                let _ = app.update(Message::Entry(entry::Message::Pick(0)));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-cover-from-other", |app| {
+                show_type(app, MediaType::Books);
+                let _ = app.update(Message::Entry(entry::Message::Edit(
+                    "books/dracula-1897".into(),
+                )));
+                let _ = app.update(Message::Entry(entry::Message::LookAgain));
+                let _ = app.update(Message::Entry(entry::Message::Pick(0)));
+                let _ = app.update(Message::Entry(entry::Message::CancelLookAgain));
+                let _ = app.update(Message::Entry(entry::Message::PickCover(Some(
+                    "itunes:498187584".into(),
+                ))));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-pick-cover", |app| {
+                show_type(app, MediaType::Books);
+                let _ = app.update(Message::Entry(entry::Message::Edit(
+                    "books/dracula-1897".into(),
+                )));
+                let _ = app.update(Message::Entry(entry::Message::LookAgain));
+                let _ = app.update(Message::Entry(entry::Message::Pick(0)));
+                let _ = app.update(Message::Entry(entry::Message::CancelLookAgain));
+                let _ = app.update(Message::Entry(entry::Message::OpenCover));
             }),
         ),
         (Screen::Plans, ("plans", nothing)),

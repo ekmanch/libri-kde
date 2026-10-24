@@ -90,7 +90,22 @@ pub struct Form {
     /// ("+ Add to Actors", the categories dialog).
     pub recategorized: BTreeMap<String, Vec<TagCategory>>,
     /// The match's tag suggestions not taken yet.
-    pub suggested: Vec<String>,
+    pub suggested: Vec<Suggestion>,
+    /// The lookup id of another match whose cover the entry shows.
+    pub cover_from: Option<String>,
+    /// Pick a cover, open over the form.
+    pub cover_dialog: bool,
+    /// A game lookup narrowed to one platform, and its picker.
+    pub platform_filter: Option<String>,
+    pub platform_open: bool,
+    pub platform_query: String,
+    /// "Look up again": the lookup pane open in Edit.
+    pub again: bool,
+    /// A pick in Edit replaced the lookup's fields ("Details fetched
+    /// online").
+    pub fetched: bool,
+    /// The year came from the ebook edition, so it may be a reprint's.
+    pub ebook_note: bool,
     pub description: text_editor::Content,
     pub note: String,
     /// "Also add to plan", a plan id.
@@ -117,6 +132,14 @@ pub enum Replace {
         song: String,
         adding: bool,
     },
+}
+
+/// A tag the lookup suggests: the tag, and the category it would go in
+/// when it is a person, a language or a platform (`None` for a genre).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Suggestion {
+    pub tag: String,
+    pub category: Option<TagCategory>,
 }
 
 /// One season in the form: its number, the date as typed, and its
@@ -212,6 +235,18 @@ pub enum Message {
     Add,
     /// Add with the type and the title typed: a series' "+ Add".
     AddWithTitle(MediaType, String),
+    // The lookup pane: Look up again, the platform filter, the cover.
+    LookAgain,
+    CancelLookAgain,
+    OpenCover,
+    CloseCover,
+    /// The cover of another match, or `None` for the match's own.
+    PickCover(Option<String>),
+    TogglePlatformPicker,
+    PlatformQuery(String),
+    PickPlatform(Option<String>),
+    /// "Try again" in the lookup pane.
+    RetryLookup,
     Edit(String),
     /// Edit with the tag picker open: the details' "+ Tag".
     EditTags(String),
@@ -332,6 +367,14 @@ impl Form {
             new_tags: Vec::new(),
             recategorized: BTreeMap::new(),
             suggested: Vec::new(),
+            cover_from: None,
+            cover_dialog: false,
+            platform_filter: None,
+            platform_open: false,
+            platform_query: String::new(),
+            again: false,
+            fetched: false,
+            ebook_note: false,
             description: text_editor::Content::new(),
             note: String::new(),
             also_plan: None,
@@ -349,6 +392,7 @@ impl Form {
         Form {
             editing: Some(entry.id.clone()),
             source: entry.source.clone(),
+            cover_from: entry.cover_from.clone(),
             title: entry.title.clone(),
             creator: entry.creator.clone().unwrap_or_default(),
             released: entry.released.map(|r| r.to_string()).unwrap_or_default(),
@@ -393,7 +437,124 @@ impl Form {
 
     /// The lookup's results for the current query and type.
     pub fn matches(&self) -> Vec<&'static Match> {
-        lookup::search(self.media, &self.query)
+        lookup::search_on(self.media, &self.query, self.platform_filter.as_deref())
+    }
+
+    /// The matches whose covers Pick a cover offers: the match's own
+    /// first, then the other matches for the title.
+    pub fn cover_choices(&self) -> Vec<&'static Match> {
+        let own = self
+            .source
+            .as_deref()
+            .and_then(|source| lookup::CATALOG.iter().find(|m| m.source == source));
+        own.into_iter()
+            .chain(lookup::cover_choices(
+                self.media,
+                self.title.trim(),
+                self.source.as_deref(),
+            ))
+            .collect()
+    }
+
+    /// The platforms "Your platforms" lists: the default from Settings,
+    /// then the library's games' platforms, the most used first.
+    pub fn your_platforms(library: &Library, default: Option<&str>) -> Vec<String> {
+        let mut counts: Vec<(String, usize)> = Vec::new();
+        for entry in library.entries_of(MediaType::Games) {
+            for platform in text::split_platforms(entry.platform.as_deref()) {
+                match counts.iter_mut().find(|(p, _)| *p == platform) {
+                    Some((_, n)) => *n += 1,
+                    None => counts.push((platform, 1)),
+                }
+            }
+        }
+        counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        let mut yours: Vec<String> = default.map(str::to_owned).into_iter().collect();
+        for (platform, _) in counts {
+            if !yours.contains(&platform) {
+                yours.push(platform);
+            }
+        }
+        yours
+    }
+
+    /// Replaces the lookup's fields with a match's ("Look up again"): the
+    /// creator, the date, the description, the kind and the platforms;
+    /// the title, note, status, tags and formats stay. New tags are
+    /// offered, and a show whose seasons are all manual gets the match's.
+    fn refill(&mut self, found: &Match, library: &Library) {
+        self.source = Some(found.source.to_owned());
+        self.creator = found.creator.to_owned();
+        self.released = found.released.to_owned();
+        self.description = text_editor::Content::with_text(found.description);
+        if self.media == MediaType::Music {
+            self.kind = found.kind.unwrap_or(EntryKind::Album);
+        }
+        for platform in found.platforms {
+            let platform = text::normalize_platform(platform);
+            if !self.platforms.contains(&platform) {
+                self.platforms.push(platform);
+            }
+        }
+        if self.media == MediaType::Shows && self.seasons.iter().all(|s| s.manual == Some(true)) {
+            self.seasons = vec![SeasonDraft {
+                released: found.released.to_owned(),
+                manual: None,
+                ..SeasonDraft::new(1)
+            }];
+        }
+        self.suggest(found, library);
+        self.fetched = true;
+    }
+
+    /// Ticks the match's tags the library has and offers the rest: the
+    /// genres, the top billed cast as actors (a person the library has
+    /// under another people category is offered with the new role), the
+    /// language (never English, never Japanese on an anime) and the
+    /// streaming platform (movies and shows; a show's network only when
+    /// the library has its tag).
+    fn suggest(&mut self, found: &Match, library: &Library) {
+        self.suggested.clear();
+        let offer = |form: &mut Form, tag: String, category: Option<TagCategory>| {
+            if form.tags.contains(&tag) || form.suggested.iter().any(|s| s.tag == tag) {
+                return;
+            }
+            let categories = library.categories_of(&tag);
+            match category {
+                Some(category) if categories.contains(&category) => {
+                    form.tick(&tag, Some(category), library);
+                }
+                Some(_) if !categories.is_empty() => {
+                    form.suggested.push(Suggestion { tag, category });
+                }
+                None if !categories.is_empty() => form.tick(&tag, None, library),
+                _ => form.suggested.push(Suggestion { tag, category }),
+            }
+        };
+        for tag in found.tags {
+            offer(self, (*tag).to_owned(), None);
+        }
+        for name in found.cast {
+            offer(self, text::slugify(name), Some(TagCategory::Actors));
+        }
+        if let Some(language) = found.language
+            && language != "english"
+            && !(self.media == MediaType::Anime && language == "japanese")
+        {
+            offer(self, language.to_owned(), Some(TagCategory::Languages));
+        }
+        if let Some(network) = found.network
+            && TagCategory::Streaming.used_for(self.media)
+        {
+            let known = library
+                .categories_of(network)
+                .contains(&TagCategory::Streaming);
+            if known {
+                self.tick(network, Some(TagCategory::Streaming), library);
+            } else if self.media == MediaType::Movies {
+                offer(self, network.to_owned(), Some(TagCategory::Streaming));
+            }
+        }
     }
 
     /// Whether the entry keeps its dates and statuses in seasons: a show,
@@ -454,23 +615,25 @@ impl Form {
             .iter()
             .map(|p| text::normalize_platform(p))
             .collect();
-        self.platforms_on = match default_platform {
-            Some(default) if self.platforms.iter().any(|p| p == default) => {
+        // The platform the lookup was narrowed to is picked; else the
+        // default from Settings when the game came out on it; else all.
+        let searched = self
+            .platform_filter
+            .clone()
+            .filter(|p| self.platforms.contains(p));
+        self.platforms_on = match (searched, default_platform) {
+            (Some(platform), _) => BTreeSet::from([platform]),
+            (None, Some(default)) if self.platforms.iter().any(|p| p == default) => {
                 BTreeSet::from([default.to_owned()])
             }
             _ => self.platforms.iter().cloned().collect(),
         };
+        self.cover_from = None;
+        self.ebook_note = found.ebook_dated;
         // Tags the library has go on at once; new ones are offered.
         self.tags.clear();
         self.tag_categories.clear();
-        self.suggested.clear();
-        for tag in found.tags {
-            if library.all_tags().any(|t| t == *tag) {
-                self.tick(tag, None, library);
-            } else {
-                self.suggested.push((*tag).to_owned());
-            }
-        }
+        self.suggest(found, library);
     }
 
     /// The categories of `tag` as they will be once the entry is saved.
@@ -739,6 +902,7 @@ impl Form {
             seasonal_only: false,
             added: today,
             source: None,
+            cover_from: None,
             platform: None,
             formats: None,
             pages: None,
@@ -752,9 +916,11 @@ impl Form {
         // changes the id.
         if base.is_some_and(|b| b.media != self.media) {
             entry.source = None;
-        } else if base.is_none() {
+        } else {
+            // The form's: the entry's own, or a "Look up again" pick.
             entry.source = self.source.clone();
         }
+        entry.cover_from = self.cover_from.clone();
         entry.media = self.media;
         entry.title = self.title.trim().to_owned();
         entry.creator = creator;
@@ -891,6 +1057,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                 today: app.today,
             });
         }
+        Message::RetryLookup => app.lookup = lookup::LookupState::Results,
         Message::KeepSeason => {
             if let Some(Dialog::SeasonDropped { id, season }) = app.dialog.take() {
                 app.apply(Operation::KeepSeason { id, season });
@@ -1004,6 +1171,12 @@ fn update_form(
         Message::Type(media) => {
             form.media = media;
             form.picked = None;
+            // The lookup id, a picked cover and the platform go with the
+            // type.
+            form.cover_from = None;
+            form.platform_filter = None;
+            form.platform_open = false;
+            form.ebook_note = false;
             form.ensure_season();
         }
         Message::Query(query) => {
@@ -1013,8 +1186,45 @@ fn update_form(
         Message::Pick(index) => {
             if let Some(found) = form.matches().get(index).copied() {
                 form.picked = Some(index);
-                form.fill(found, library, platform);
+                if form.editing.is_some() {
+                    form.refill(found, library);
+                } else {
+                    form.fill(found, library, platform);
+                }
             }
+        }
+        Message::LookAgain => {
+            form.again = true;
+            form.query = form.title.clone();
+            form.picked = None;
+            form.platform_filter = form
+                .platforms
+                .iter()
+                .find(|p| form.platforms_on.contains(*p))
+                .cloned();
+        }
+        Message::CancelLookAgain => {
+            form.again = false;
+            form.picked = None;
+            form.platform_open = false;
+        }
+        Message::OpenCover => {
+            if !form.title.trim().is_empty() && form.source.is_some() {
+                form.cover_dialog = true;
+            }
+        }
+        Message::CloseCover => form.cover_dialog = false,
+        Message::PickCover(id) => form.cover_from = id,
+        Message::TogglePlatformPicker => {
+            form.platform_open = !form.platform_open;
+            form.platform_query.clear();
+        }
+        Message::PlatformQuery(query) => form.platform_query = query,
+        Message::PickPlatform(platform) => {
+            form.platform_filter = platform;
+            form.platform_open = false;
+            form.platform_query.clear();
+            form.picked = None;
         }
         Message::MovePick(step) => {
             let count = form.matches().len();
@@ -1032,7 +1242,10 @@ fn update_form(
         }
         Message::Title(title) => form.title = title,
         Message::Creator(creator) => form.creator = creator,
-        Message::Released(released) => form.released = released,
+        Message::Released(released) => {
+            form.released = released;
+            form.ebook_note = false;
+        }
         Message::TogglePlatform(platform) => {
             if !form.platforms_on.remove(&platform) {
                 if !form.platforms.contains(&platform) {
@@ -1124,14 +1337,20 @@ fn update_form(
         }
         Message::RemoveTag(tag, category) => form.untick(&tag, category, library),
         Message::AddSuggested(tag) => {
-            form.suggested.retain(|t| *t != tag);
+            let category = form
+                .suggested
+                .iter()
+                .find(|s| s.tag == tag)
+                .and_then(|s| s.category);
+            form.suggested.retain(|s| s.tag != tag);
             if library.all_tags().any(|t| t == tag) {
-                form.tick(&tag, None, library);
+                form.tick(&tag, category, library);
             } else {
-                // A new tag still goes through the confirmation.
+                // A new tag still goes through the confirmation, on the
+                // category the suggestion names.
                 form.new_tag = Some(NewTag {
                     name: tag,
-                    categories: vec![TagCategory::default_for(form.media)],
+                    categories: vec![category.unwrap_or(TagCategory::default_for(form.media))],
                 });
             }
         }
@@ -1366,6 +1585,8 @@ pub fn dismiss_top(app: &mut App) -> bool {
                 && form.new_tag.take().is_none()
                 && form.categories.take().is_none()
                 && form.season_menu.take().is_none()
+                && !std::mem::take(&mut form.cover_dialog)
+                && !std::mem::take(&mut form.platform_open)
                 && !form.picker.as_mut().is_some_and(PickerState::dismiss_inner)
                 && form.picker.take().is_none()
                 && !std::mem::take(&mut form.rating_open)
@@ -1465,7 +1686,7 @@ mod tests {
             "a known tag goes on"
         );
         assert!(
-            filled.suggested.contains(&"soulslike".to_owned()),
+            filled.suggested.iter().any(|s| s.tag == "soulslike"),
             "a new one is offered"
         );
         send(&mut app, Message::AlsoPlan(Some("halloween-2026".into())));
@@ -2006,5 +2227,162 @@ mod tests {
         );
         assert!(ui.find("3 movies · 2 in your library").is_ok());
         assert!(ui.find("+ Add").is_ok());
+    }
+
+    #[test]
+    fn look_up_again_replaces_the_lookups_fields_and_keeps_the_owners() {
+        let mut app = app();
+        let id = "books/dracula-1897";
+        send(&mut app, Message::Edit(id.into()));
+        send(&mut app, Message::Note("Read every October.".into()));
+        send(&mut app, Message::LookAgain);
+        let f = form(&app);
+        assert!(f.again && f.query == "Dracula");
+        assert_eq!(f.matches().len(), 3, "the lookup finds the editions");
+        send(&mut app, Message::Pick(1));
+        let f = form(&app);
+        assert!(f.fetched);
+        assert_eq!(f.released, "2003-02-25");
+        assert_eq!(f.source.as_deref(), Some("openlibrary:OL24241M"));
+        assert_eq!(f.title, "Dracula");
+        assert_eq!(f.note, "Read every October.");
+        assert!(!f.ebook_note, "never while editing");
+        send(&mut app, Message::CancelLookAgain);
+        send(&mut app, Message::Save);
+        let saved = app.repo.library().entry(id).unwrap();
+        assert_eq!(saved.source.as_deref(), Some("openlibrary:OL24241M"));
+        assert_eq!(saved.released.map(|r| r.year), Some(2003));
+        assert_eq!(saved.note, "Read every October.");
+    }
+
+    #[test]
+    fn a_picked_cover_is_stored_and_goes_with_the_type() {
+        let mut app = app();
+        let id = "books/dracula-1897";
+        send(&mut app, Message::Edit(id.into()));
+        send(&mut app, Message::OpenCover);
+        assert!(
+            !form(&app).cover_dialog,
+            "no match yet, so no cover to pick"
+        );
+        send(&mut app, Message::LookAgain);
+        send(&mut app, Message::Pick(0));
+        send(&mut app, Message::CancelLookAgain);
+        send(&mut app, Message::OpenCover);
+        assert!(form(&app).cover_dialog);
+        assert_eq!(form(&app).cover_choices().len(), 3, "the match's own first");
+        send(
+            &mut app,
+            Message::PickCover(Some("itunes:498187584".into())),
+        );
+        send(&mut app, Message::CloseCover);
+        send(&mut app, Message::Save);
+        let saved = app.repo.library().entry(id).unwrap();
+        assert_eq!(saved.cover_from.as_deref(), Some("itunes:498187584"));
+
+        send(&mut app, Message::Edit(id.into()));
+        send(&mut app, Message::PickCover(None));
+        assert!(form(&app).cover_from.is_none(), "the match's cover again");
+        send(
+            &mut app,
+            Message::PickCover(Some("itunes:498187584".into())),
+        );
+        send(&mut app, Message::Type(MediaType::Movies));
+        assert!(form(&app).cover_from.is_none(), "cleared with the type");
+    }
+
+    #[test]
+    fn a_platform_narrows_the_game_lookup_and_is_picked_with_the_match() {
+        let mut app = app();
+        app.settings.platform = Some("PC".into());
+        send(&mut app, Message::Add);
+        send(&mut app, Message::Type(MediaType::Games));
+        send(&mut app, Message::Query("street fighter".into()));
+        assert_eq!(form(&app).matches().len(), 3);
+        send(&mut app, Message::TogglePlatformPicker);
+        send(&mut app, Message::PlatformQuery("snes".into()));
+        send(
+            &mut app,
+            Message::PickPlatform(Some("Super Nintendo".into())),
+        );
+        let f = form(&app);
+        assert!(!f.platform_open && f.platform_query.is_empty());
+        assert_eq!(f.matches().len(), 3);
+        send(&mut app, Message::PickPlatform(Some("Mega Drive".into())));
+        assert_eq!(form(&app).matches().len(), 2);
+        send(&mut app, Message::Pick(0));
+        let f = form(&app);
+        assert_eq!(
+            f.platforms_on.iter().collect::<Vec<_>>(),
+            ["Mega Drive"],
+            "the searched platform, not the default"
+        );
+        send(&mut app, Message::PickPlatform(None));
+        assert_eq!(form(&app).matches().len(), 3);
+    }
+
+    #[test]
+    fn the_lookup_suggests_actors_a_language_and_a_known_network() {
+        let mut app = app();
+        send(&mut app, Message::Add);
+        send(&mut app, Message::Type(MediaType::Shows));
+        send(&mut app, Message::Query("adolescence".into()));
+        send(&mut app, Message::Pick(0));
+        let library = app.repo.library().clone();
+        let f = form(&app);
+        assert!(
+            f.has_tag_as("netflix", Some(TagCategory::Streaming), &library),
+            "a network the library has goes on at once"
+        );
+        let graham = f
+            .suggested
+            .iter()
+            .find(|s| s.tag == "stephen-graham")
+            .unwrap();
+        assert_eq!(graham.category, Some(TagCategory::Actors));
+        send(&mut app, Message::AddSuggested("stephen-graham".into()));
+        assert_eq!(
+            form(&app).new_tag.as_ref().unwrap().categories,
+            [TagCategory::Actors],
+            "a new actor starts on Actors"
+        );
+        send(&mut app, Message::CancelNewTag);
+
+        send(&mut app, Message::Type(MediaType::Movies));
+        send(&mut app, Message::Query("parasite".into()));
+        send(&mut app, Message::Pick(0));
+        let korean = form(&app)
+            .suggested
+            .iter()
+            .find(|s| s.tag == "korean")
+            .unwrap();
+        assert_eq!(korean.category, Some(TagCategory::Languages));
+
+        // A person the library has under another people category is
+        // offered with the new role and not as new.
+        send(&mut app, Message::Query("weapons".into()));
+        send(&mut app, Message::Pick(0));
+        send(&mut app, Message::OpenPicker);
+        send(&mut app, Message::ClosePicker);
+        let f = form(&app);
+        assert!(f.suggested.iter().any(|s| s.tag == "julia-garner"));
+        assert!(!f.ebook_note);
+    }
+
+    #[test]
+    fn the_ebook_year_note_shows_while_adding_until_the_date_changes() {
+        let mut app = app();
+        send(&mut app, Message::Add);
+        send(&mut app, Message::Type(MediaType::Books));
+        send(&mut app, Message::Query("a christmas carol".into()));
+        send(&mut app, Message::Pick(0));
+        assert!(form(&app).ebook_note);
+        send(&mut app, Message::Released("1843".into()));
+        assert!(!form(&app).ebook_note);
+        assert_eq!(
+            lookup::LookupState::from_env("partial-none"),
+            Some(lookup::LookupState::PartialNone)
+        );
+        assert_eq!(lookup::LookupState::from_env("nope"), None);
     }
 }

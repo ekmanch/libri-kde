@@ -135,13 +135,13 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [x] Tests for derived status, series grouping and the new fields; captures of every new state in Graphite and Light
 
 ### 1j. Add and Edit dialog
-- [ ] Canvas revision: the cover in the form with "From the match · tap to change" or "From another match · Use the match's cover", and the Pick a cover picker (the match's cover, then the other matches with year and edition)
-- [ ] Canvas revision: game lookup on a platform (a "Platform · Any" chip under the type chips with a cross to clear, the platform picker with search, Any, Your platforms and All platforms)
-- [ ] Canvas revision: Look up again for an existing entry (the lookup pane in Edit; a pick replaces creator, year, description, pages and album, keeps title, note, status, tags and formats)
-- [ ] Canvas revision: the lookup's states in the left pane: loading, offline, "not set up", partial failure ("a match may be missing"), no matches
-- [ ] Design note (no board needed): "Year from the ebook edition. Check if it's a reprint." under Released while adding a book dated only by Apple Books; suggested actor tags from the cast; Languages and Streaming suggestions
-- [ ] Build: `cover_from` in the model and codec, the cover picker and the platform filter on fixture results; Look up again and the lookup states driven by fake states (the real providers stay phase 4)
-- [ ] Tests and captures of the new states
+- [x] Canvas revision: the cover in the form with "From the match · tap to change" or "From another match · Use the match's cover", and the Pick a cover picker (the match's cover, then the other matches with year and edition)
+- [x] Canvas revision: game lookup on a platform (a "Platform · Any" chip under the type chips with a cross to clear, the platform picker with search, Any, Your platforms and All platforms)
+- [x] Canvas revision: Look up again for an existing entry (the lookup pane in Edit; a pick replaces creator, year, description, pages and album, keeps title, note, status, tags and formats)
+- [x] Canvas revision: the lookup's states in the left pane: loading, offline, "not set up", partial failure ("a match may be missing"), no matches
+- [x] Design note (no board needed): "Year from the ebook edition. Check if it's a reprint." under Released while adding a book dated only by Apple Books; suggested actor tags from the cast; Languages and Streaming suggestions (DESIGN.md section 10, "The lookup pane")
+- [x] Build: `cover_from` in the model and codec, the cover picker and the platform filter on fixture results; Look up again and the lookup states driven by fake states (`LIBRI_LOOKUP`; the real providers stay phase 4)
+- [x] Tests and captures of the new states
 
 ### 1k. Sync and settings
 - [ ] Canvas revision: sync states beyond "Synced" and "Token expired": offline, saving, "Could not save" with Retry, "Library not found on GitHub" with what is gone and Fix (to Settings → Library source). Decide where they show on desktop: the sidebar sync row alone, or a banner over the content as on the phone

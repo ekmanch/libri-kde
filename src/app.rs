@@ -9,6 +9,7 @@ use iced::{Element, Event, Size, Subscription, Task, event, mouse, time};
 
 use crate::decoration::TitleBar;
 use crate::history::{Direction, History, Place};
+use crate::lookup;
 use crate::model::Date;
 use crate::repo::Operation;
 use crate::repo::{FixtureLibraryRepository, LibraryRepository};
@@ -94,6 +95,9 @@ pub struct App {
     pub history: History,
     /// KWin's title bar, once the window is open on Plasma Wayland.
     pub title_bar: Option<TitleBar>,
+    /// What the online lookup is doing, faked until phase 4 asks the real
+    /// providers (`LIBRI_LOOKUP`).
+    pub lookup: lookup::LookupState,
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +204,11 @@ impl App {
             app.setup = setup::State::at(step, app.source.as_ref());
         }
         app.library.force_long = var("LIBRI_LONG_LISTS").is_some();
+        if let Some(state) =
+            var("LIBRI_LOOKUP").and_then(|value| lookup::LookupState::from_env(&value))
+        {
+            app.lookup = state;
+        }
         // The dropped-season dialog, until the daily check of phase 4 opens
         // it: "shows/stranger-things-2016:2".
         if let Some((id, season)) = var("LIBRI_DROPPED").and_then(|spec| {
@@ -235,6 +244,7 @@ impl App {
             window: WINDOW_SIZE,
             history: History::default(),
             title_bar: None,
+            lookup: lookup::LookupState::Results,
         }
     }
 
