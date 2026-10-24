@@ -155,7 +155,7 @@ pub fn season_dropped<'a>(app: &'a App, id: &str, season: u32) -> Element<'a, Ap
     };
     let body = column![
         text(format!(
-            "TMDB has dropped it, so it was probably canceled.{had}"
+            "It is no longer listed, so it was probably canceled.{had}"
         ))
         .size(14),
         text(others).size(13).color(tokens.sub),

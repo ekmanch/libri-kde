@@ -216,7 +216,10 @@ fn episodes_view<'a>(
     } else {
         let (first, last) = (first.unwrap_or(today), last.unwrap_or(today));
         let last = format!("{} {}, {}", &last.month_name()[..3], last.day, last.year);
-        format!("{} – {last} · {count} {plural}", first.month_day())
+        format!(
+            "{} – {last} · {count} {plural}",
+            short_day(first, first.year)
+        )
     };
 
     // The status row: the pill for a show with several seasons; a note for
@@ -303,10 +306,8 @@ fn episodes_view<'a>(
         Column::with_children(rows),
         ui::rule(tokens.line.scale_alpha(0.5)),
     ];
-    let credit = text("Episode details from TMDB.")
-        .size(12)
-        .color(tokens.sub);
-    let body = column![status, table, credit].spacing(16).into();
+    // No source is named here: the sources are listed in Settings › About.
+    let body = column![status, table].spacing(16).into();
     (text(line).size(14).color(tokens.sub).into(), body)
 }
 
