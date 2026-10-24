@@ -1,6 +1,6 @@
 # TODO
 
-Build order for Libri desktop (Rust + iced, KDE Plasma on CachyOS). Screens refer to design/libri-desktop-mockup.html (Splash, Setup, Library, Plans, Settings, with the design notes under each). Desktop decisions are in docs/DESIGN.md. The data model, tag rules and sync decisions are shared with the phone app and live in ekmanch/library-app → docs/DESIGN.md; this app follows them rather than redefining them.
+Build order for Libri desktop (Rust + iced, KDE Plasma on CachyOS). Screens refer to `design/canvas.html` (Splash, Setup, Library, Plans, Settings, with the design notes under each). Desktop decisions are in docs/DESIGN.md. The data model, tag rules and sync decisions are shared with the phone app and live in ekmanch/library-app → docs/DESIGN.md; this app follows them rather than redefining them.
 
 Phase 1 builds the whole UI on fixture data, with nothing saved and no network. Functionality is wired up from phase 2.
 
@@ -109,7 +109,48 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] `cargo clippy -- -D warnings` clean; remove the token sheet
 - [x] Mouse Back and Forward buttons (and Alt+Left, Alt+Right) move through the places visited: screens, library views, artist pages, plan pages
 - [x] KWin's title bar in Libri's colors: a KDE color scheme per theme and style under `assets/color-schemes/`, named to KWin through Plasma's decoration palette protocol (`src/decoration.rs`). Needs a decoration that follows color schemes (Klassy, Breeze, Darkly); an Aurorae theme paints its own
-- [ ] Desktop freezes with Libri open (reported 2026-10-20 to 2026-10-23: the whole desktop stops for tens of seconds to minutes, most often on coming back to Libri's virtual desktop or restoring it from minimized; intermittent). Not reproduced on 2026-10-23 in scripted runs (hidden on another desktop 15 s and 60 s, minimized 30 s, the splash animating while hidden 20 s, and the splash on Vulkan, OpenGL and tiny-skia): the compositor kept presenting, Libri's VRAM stayed at 82 MiB and nothing leaks per frame. Facts so far: no NVIDIA Xid or kernel error in five days of logs; during the 2026-10-20 freeze KWin logged `Failed to allocate a graphics buffer for a swapchain` for 20 minutes, each time one of its own popups opened (the desktop-switch OSD), so VRAM or the driver's allocator was exhausted then; KWin keeps sending frame callbacks to hidden windows at about 40 Hz, so an animating Libri keeps rendering while hidden; Libri is the only Vulkan-on-Wayland client on the machine (Qt, Chromium and mpv use EGL). Next: `~/.cache/libri/freeze-watch.sh` logs GPU memory, KWin CPU and a liveness timestamp every second to `~/.cache/libri/freeze-watch.log`; after the next freeze, read the minutes before the gap. A/B test over a few days: `WGPU_BACKEND=gl cargo run --release`, then `ICED_PRESENT_MODE=mailbox cargo run --release`; if one of them never freezes, make it the default in `app::run` (set the variable before `iced::application`, since iced 0.14 exposes neither through `iced::Settings`) and record the decision in DESIGN.md
+
+The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026-10-24 (`ekmanch/library-app` → `TODO.md`, "Ongoing: Polish and improvements"). Each part starts with a canvas revision of `design/canvas.html` that adapts the phone's boards to the desktop (sidebar, content pane, inspector, dialogs, right-click instead of long-press); the build items follow once the boards exist. Phone-only mechanics stay out: pull-to-close sheets, page transitions, the Released wheel picker, the grid's fast-scroll thumb, portrait lock, scroll capture.
+
+### 1h. Tags
+- [ ] Reconcile the tag categories with the phone first, since they are part of the file format: the phone added Languages (after Season) and Streaming (after Studios); the desktop has Animation style, which the phone's TODO never mentions. Settle the shared list in the phone's DESIGN.md, then follow it in `model::tag`, the codec and the fixture
+- [ ] Canvas revision: tags in more than one category (role chips such as "Clint Eastwood · Director, Actor" in the form's Tags box, the inspector, active filter chips and search results; per-group ticks in the tag picker; the categories dialog, opened with right-click; "Add to Directors" for a person found under another people category; the New tag dialog taking several categories of one kind)
+- [ ] Canvas revision: long tag groups (more than 24 tags) in the tag picker, the Filter popover and the plan dialog, as a desktop pattern in place of the phone's full-screen list (search, letter headers, index rail, a check per row); groups folded by default except those holding a tag on this entry and "New on this entry"
+- [ ] Canvas revision: moving a one-category tag to another one-category group (Other to Languages or Streaming) from the right-click menu
+- [ ] Build: `tag_categories` on entries in the model and codec (written only for tags in several categories), the per-category filter, and the screens from the boards above
+- [ ] Build: Languages and Streaming (once settled), Streaming only for movies and shows in the picker, the new-tag dialog and the Filter popover
+- [ ] Tests for the file form, filtering per category, searching and the picker; captures of the new states
+
+### 1i. Shows, anime and series
+- [ ] Canvas revision: seasons for shows (row subtitle "2022–2026 · 3 seasons" and the "New season" badge, shortening to "New" when tight; the inspector's Seasons section with a status pill per season and the derived Status row; one-season shows; announced seasons as "Coming 2027"; the catch-up dialog; "Announced season dropped")
+- [ ] Canvas revision: all seasons and a season's episodes (number, title, air date, runtime; "4 of 6 episodes out", "Airs Oct 22", "Title TBA"). Decide where they open on desktop: a drill-in inside the 352 px inspector, or the content pane with the inspector kept
+- [ ] Canvas revision: anime kind (series or movie): the "Series or movie" control in the form; an anime series uses the show screens in the anime color
+- [ ] Canvas revision: series (the inspector's Series section with up to five parts, else three around this one and "All N volumes"; "+ Add" for missing parts; Series and Number fields in the form; a series as one row in long lists with a stack icon and "2 of 4 done"; the series page; the cover sheet that picks which part's cover stands for the series)
+- [ ] Design note (no board needed): page count for books, "160 pages" under the author in the inspector and a Pages field in the form
+- [ ] Build: `pages`, `series` (with `cover`) and the anime `kind` in the model and codec, matching the phone's key order (`seasons` is already read)
+- [ ] Build: seasons in rows, the inspector, the form's season editor and plan ticks through the seasons; derived show status
+- [ ] Build: all seasons and episodes from the boards, on fixture episode lists until phase 4
+- [ ] Build: series in the inspector, series rows in long lists (`isLongList` rule, status All, Done or DNF, two parts or more), the series page and its cover sheet, on fixture part lists until phase 4
+- [ ] Fixture: the phone's Haunted Hotel, Carrie, South Park, Frieren, The Lord of the Rings and Berserk entries are in `assets/fixtures/library.json` once the phone's copy has them (keep it byte-identical)
+- [ ] Tests for derived status, series grouping and the new fields; captures of every new state in Graphite and Light
+
+### 1j. Add and Edit dialog
+- [ ] Canvas revision: the cover in the form with "From the match · tap to change" or "From another match · Use the match's cover", and the Pick a cover picker (the match's cover, then the other matches with year and edition)
+- [ ] Canvas revision: game lookup on a platform (a "Platform · Any" chip under the type chips with a cross to clear, the platform picker with search, Any, Your platforms and All platforms)
+- [ ] Canvas revision: Look up again for an existing entry (the lookup pane in Edit; a pick replaces creator, year, description, pages and album, keeps title, note, status, tags and formats)
+- [ ] Canvas revision: the lookup's states in the left pane: loading, offline, "not set up", partial failure ("a match may be missing"), no matches
+- [ ] Design note (no board needed): "Year from the ebook edition. Check if it's a reprint." under Released while adding a book dated only by Apple Books; suggested actor tags from the cast; Languages and Streaming suggestions
+- [ ] Build: `cover_from` in the model and codec, the cover picker and the platform filter on fixture results; Look up again and the lookup states driven by fake states (the real providers stay phase 4)
+- [ ] Tests and captures of the new states
+
+### 1k. Sync and settings
+- [ ] Canvas revision: sync states beyond "Synced" and "Token expired": offline, saving, "Could not save" with Retry, "Library not found on GitHub" with what is gone and Fix (to Settings → Library source). Decide where they show on desktop: the sidebar sync row alone, or a banner over the content as on the phone
+- [ ] Canvas revision: the conflict (where it is announced, and the "Keep mine / Keep GitHub's / Decide later" dialog, also reachable from Library source)
+- [ ] Canvas revision: Disconnect in two steps (confirm, then keep the library on this computer or delete it) and Library source in local mode ("Connect to GitHub"); reconnecting a kept library to another file ("Which library?")
+- [ ] Canvas revision: About Libri (icon, name, version and build, open-source licenses, Data sources with TMDB's logo and required sentence, Deezer's logo in its light and dark variant, AniList, Apple Books, Open Library, IGDB, Wikidata; each row opens the site). The logos are in `assets/logos/`
+- [ ] Decide with the phone: the Apple Books badge near book covers from the iTunes Search API (open on the phone too)
+- [ ] Build: every state above on fake sync states (`LIBRI_SYNC=offline`, `error`, `not-found`, `conflict`), so phase 3 only wires them up
+- [ ] Captures of every new state in Graphite and Light
 
 ## Phase 2: Local data
 
