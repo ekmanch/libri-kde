@@ -3,32 +3,45 @@
 # freeze can be read back afterwards: whether KWin's event loop answers
 # D-Bus, how much CPU KWin used, the GPU's load and memory, each client's
 # VRAM, the load average, and every KWin and Libri thread's state (D is
-# stuck in the kernel, R is spinning). A gap between timestamps longer
-# than a few seconds marks a stall of the whole system. Start it before
-# using Libri and leave it running; read the log once the desktop is
-# back. It replaces ~/.cache/libri/freeze-watch.sh from 2026-10-23.
+# stuck in the kernel, R is spinning) with the kernel function it waits
+# in. A gap between timestamps longer than a few seconds marks a stall of
+# the whole system.
 #
-#   scripts/freeze-monitor.sh            # writes /tmp/libri-freeze-<date>.log
-#   scripts/freeze-monitor.sh my.log     # or to a file of your choosing
+# Libri starts this itself (`app::run`) and the monitor stops when Libri
+# is gone, so it is running whenever Libri is. The log is under
+# ~/.cache/libri/, which survives a reboot (/tmp does not). Run it by hand
+# to watch the desktop without Libri, for example to see whether the
+# freeze happens without it:
+#
+#   scripts/freeze-monitor.sh                 # ~/.cache/libri/freeze-<date>.log, until Ctrl+C
+#   scripts/freeze-monitor.sh my.log          # to a file of your choosing
+#   scripts/freeze-monitor.sh my.log <pid>    # until that process exits (Libri passes its own)
 set -u
-log="${1:-/tmp/libri-freeze-$(date +%Y%m%d-%H%M%S).log}"
+dir="${XDG_CACHE_HOME:-$HOME/.cache}/libri"
+mkdir -p "$dir"
+log="${1:-$dir/freeze-$(date +%Y%m%d-%H%M%S).log}"
+follow="${2:-}"
 kwin=$(pgrep -x kwin_wayland | head -1)
-echo "monitoring kwin $kwin, log $log"
-echo "# $(date -Is) start; kwin=$kwin; kernel $(uname -r); nvidia $(cat /proc/driver/nvidia/version 2>/dev/null | head -1 | cut -c1-60)" >>"$log"
+echo "monitoring kwin $kwin${follow:+, libri $follow}, log $log"
+echo "# $(date -Is) start; kwin=$kwin; libri=${follow:-any}; kernel $(uname -r); nvidia $(cat /proc/driver/nvidia/version 2>/dev/null | head -1 | cut -c1-60)" >>"$log"
 threads() {
-    # pid: state, wchan and syscall number of every thread.
+    # pid: state, name and wchan of every thread. (Not the syscall number:
+    # reading it needs ptrace access and the kernel logs every attempt.)
     local pid=$1 t
     for t in /proc/"$pid"/task/*; do
         [ -r "$t/stat" ] || continue
-        printf '    %s %s wchan=%s syscall=%s\n' \
+        printf '    %s %s wchan=%s\n' \
             "$(cut -d' ' -f3 "$t/stat" 2>/dev/null)" \
             "$(tr -d '\n' <"$t/comm" 2>/dev/null)" \
-            "$(cat "$t/wchan" 2>/dev/null)" \
-            "$(cut -d' ' -f1 "$t/syscall" 2>/dev/null)"
+            "$(cat "$t/wchan" 2>/dev/null)"
     done | sort | uniq -c
 }
 prev_kwin=0
 while true; do
+    if [ -n "$follow" ] && ! kill -0 "$follow" 2>/dev/null; then
+        echo "# $(date -Is) libri $follow exited; stop" >>"$log"
+        exit 0
+    fi
     now=$(date -Is)
     ticks=$(awk '{print $14+$15}' /proc/"$kwin"/stat 2>/dev/null || echo 0)
     busy=$((ticks - prev_kwin)); prev_kwin=$ticks
@@ -45,7 +58,7 @@ while true; do
         echo "$now kwin-dbus=$dbus kwin-cpu-ticks=$busy gpu=$gpu vram[$vram] load=$(cut -d' ' -f1 /proc/loadavg)"
         echo "  kwin threads:"
         threads "$kwin"
-        for pid in $(pgrep -f 'libri$' ; pgrep -f 'target/(debug|release)/libri'); do
+        for pid in ${follow:-$(pgrep -f 'target/(debug|release)/libri')}; do
             echo "  libri $pid threads:"
             threads "$pid"
         done

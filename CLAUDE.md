@@ -56,7 +56,8 @@ ICED_BACKEND=tiny-skia cargo run   # software renderer
 WGPU_BACKEND=gl cargo run          # OpenGL instead of Vulkan (the freeze A/B test, TODO.md 1g)
 ICED_PRESENT_MODE=mailbox cargo run # Vulkan without FIFO waits (the freeze A/B test, TODO.md 1g)
 __NV_DISABLE_EXPLICIT_SYNC=1 cargo run # frames without explicit-sync fences (the freeze A/B test, TODO.md 1g)
-scripts/freeze-monitor.sh &        # before a session: logs KWin, VRAM and thread states every 2 s for the freeze
+LIBRI_NO_MONITOR=1 cargo run       # without the freeze log; by default every run writes ~/.cache/libri/freeze-<date>.log: Libri's window events, redraw rate and gaps, and iced/winit/wgpu warnings (src/trace.rs), and scripts/freeze-monitor.sh adds KWin, VRAM and thread states every 2 s until Libri exits
+scripts/freeze-monitor.sh          # the monitor on its own, to watch the desktop without Libri (Ctrl+C stops it)
 ```
 
 Before saying a task is done, run all three and tell me if any fail:

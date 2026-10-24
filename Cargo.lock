@@ -1944,6 +1944,7 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "iced_test",
+ "log",
  "raw-window-handle",
  "serde",
  "serde_json",

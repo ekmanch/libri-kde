@@ -35,13 +35,93 @@ pub fn run() -> iced::Result {
         },
         ..window::Settings::default()
     };
-    iced::application(App::boot, App::update, App::view)
+    let monitor = freeze_log();
+    let result = iced::application(App::boot, App::update, App::view)
         .title(App::title)
         .theme(App::iced_theme)
         .subscription(App::subscription)
         .settings(settings())
         .window(window)
-        .run()
+        .run();
+    crate::trace::line("exit");
+    if let Some(mut monitor) = monitor {
+        let _ = monitor.kill();
+        let _ = monitor.wait();
+    }
+    result
+}
+
+/// The freeze log of this run (TODO.md 1g, the desktop freeze):
+/// `~/.cache/libri/freeze-<date>.log`, which the trace (`crate::trace`)
+/// and `scripts/freeze-monitor.sh` write together, so every session is
+/// logged without anyone having to remember to. The monitor follows this
+/// process and stops when it exits. `LIBRI_NO_MONITOR=1` skips both; an
+/// installed binary has no script to start and only writes the trace.
+fn freeze_log() -> Option<std::process::Child> {
+    if std::env::var_os("LIBRI_NO_MONITOR").is_some() {
+        return None;
+    }
+    let dir = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".cache"))
+        })?
+        .join("libri");
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        eprintln!(
+            "libri: no freeze log, could not create {}: {error}",
+            dir.display()
+        );
+        return None;
+    }
+    let log = dir.join(format!("freeze-{}.log", date_stamp()));
+    if let Err(error) = crate::trace::start(&log) {
+        eprintln!(
+            "libri: no freeze log, could not open {}: {error}",
+            log.display()
+        );
+        return None;
+    }
+    eprintln!("libri: freeze log {}", log.display());
+    crate::trace::line(format_args!(
+        "start pid {} build {}",
+        std::process::id(),
+        option_env!("LIBRI_BUILD").unwrap_or("unknown")
+    ));
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/freeze-monitor.sh");
+    if !script.is_file() {
+        return None;
+    }
+    match std::process::Command::new(&script)
+        .arg(&log)
+        .arg(std::process::id().to_string())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(child) => Some(child),
+        Err(error) => {
+            eprintln!("libri: could not start the freeze monitor: {error}");
+            None
+        }
+    }
+}
+
+/// `20261024-212503`, from `date`, or the seconds since the epoch when
+/// that fails.
+fn date_stamp() -> String {
+    std::process::Command::new("date")
+        .arg("+%Y%m%d-%H%M%S")
+        .output()
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .filter(|stamp| !stamp.is_empty())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs().to_string())
+                .unwrap_or_default()
+        })
 }
 
 /// The bundled fonts with Figtree as the default. Shared with the headless
@@ -96,6 +176,8 @@ pub struct App {
     pub splash_phase: f32,
     /// The window's logical size, for layouts that give way when narrow.
     pub window: Size,
+    /// The redraw counter of the freeze trace.
+    pub frames: crate::trace::Frames,
     /// The places visited, for Back and Forward.
     pub history: History,
     /// KWin's title bar, once the window is open on Plasma Wayland.
@@ -117,6 +199,8 @@ pub enum Message {
     /// A frame of the splash's bar.
     Tick,
     Resized(Size),
+    /// The window's events, for the freeze trace.
+    Window(window::Event),
     /// The hold on KWin's title bar, once the window is open.
     TitleBar(Option<TitleBar>),
     /// The sync row's and the banner's actions, and the conflict dialog.
@@ -270,6 +354,7 @@ impl App {
             settings_page: screens::settings::State::default(),
             splash_phase: 0.0,
             window: WINDOW_SIZE,
+            frames: crate::trace::Frames::new(std::time::Instant::now()),
             history: History::default(),
             title_bar: None,
             lookup: lookup::LookupState::Results,
@@ -354,6 +439,7 @@ impl App {
             // One sweep of the bar takes 1.4 s.
             Message::Tick => self.splash_phase = (self.splash_phase + 0.016 / 1.4) % 1.0,
             Message::Resized(size) => self.window = size,
+            Message::Window(event) => self.trace_window(event),
             Message::TitleBar(title_bar) => self.title_bar = title_bar,
             // Phase 3 syncs for real; until then the fake state moves on.
             Message::Sync(SyncMessage::Retry) => self.sync = SyncState::Saving { changes: 3 },
@@ -575,11 +661,26 @@ impl App {
             _ => None,
         });
         let resizes = window::resize_events().map(|(_, size)| Message::Resized(size));
+        let traced = window::events().map(|(_, event)| Message::Window(event));
         if self.screen == Screen::Splash {
             let frames = time::every(Duration::from_millis(16)).map(|_| Message::Tick);
-            Subscription::batch([keys, buttons, resizes, frames])
+            Subscription::batch([keys, buttons, resizes, traced, frames])
         } else {
-            Subscription::batch([keys, buttons, resizes])
+            Subscription::batch([keys, buttons, resizes, traced])
+        }
+    }
+
+    /// A window event into the freeze trace: redraws as a rate and
+    /// gaps, everything else as it comes.
+    fn trace_window(&mut self, event: window::Event) {
+        match event {
+            window::Event::RedrawRequested(now) => {
+                for line in self.frames.redraw(now) {
+                    crate::trace::line(line);
+                }
+            }
+            window::Event::Moved(_) => {}
+            event => crate::trace::line(format_args!("window {event:?}")),
         }
     }
 }

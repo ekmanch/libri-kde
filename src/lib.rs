@@ -16,4 +16,5 @@ pub mod series;
 pub mod settings;
 pub mod tags;
 pub mod theme;
+pub mod trace;
 pub mod ui;
