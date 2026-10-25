@@ -253,13 +253,13 @@ fn rail<'a>(app: &App, tokens: &Tokens) -> Element<'a, AppMessage> {
     );
     for (index, name) in SECTIONS.into_iter().enumerate() {
         let on = index == current;
-        let (color, weight) = if on {
-            (tokens.text, font::SEMIBOLD)
-        } else {
-            (tokens.sub, font::REGULAR)
-        };
+        let weight = if on { font::SEMIBOLD } else { font::REGULAR };
+        // The links are in the text color, so they stand apart from the
+        // gray header; the button centers its text itself, since a
+        // button lays its content out at the top.
+        let link = text(name).size(13.5).font(weight).color(tokens.text);
         links = links.push(
-            button(text(name).size(13.5).font(weight).color(color))
+            button(container(link).align_y(Center).height(Fill))
                 .width(Fill)
                 .height(30)
                 .padding([0, 10])
