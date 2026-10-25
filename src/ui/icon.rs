@@ -98,6 +98,21 @@ impl Icon {
     }
 }
 
+/// A seasonal marker (the ghost or the star) `height` px tall, as wide
+/// as its drawing: the marker files are cropped to the glyph, so its
+/// edges are the widget's edges and it can sit flush with a bar's ends.
+pub fn marker<'a, Message>(which: Icon, height: f32) -> Element<'a, Message> {
+    let aspect = match which {
+        Icon::MarkerGhost => 13.2 / 17.2,
+        Icon::MarkerStar => 18.6 / 17.7,
+        _ => 1.0,
+    };
+    Svg::new(svg::Handle::from_memory(which.bytes()))
+        .width(height * aspect)
+        .height(height)
+        .into()
+}
+
 /// `which` at `size` px, tinted `color` unless it is a colored marker.
 pub fn icon<'a, Message>(which: Icon, size: f32, color: Color) -> Element<'a, Message> {
     let tint = which.is_tinted().then_some(color);

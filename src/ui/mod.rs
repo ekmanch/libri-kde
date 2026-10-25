@@ -39,7 +39,7 @@ pub use entry::{
 pub use field::{labeled, text_field};
 pub use focus::{Barrier, FocusExt, Focusable};
 pub use groups::{Groups, Measure};
-pub use icon::{Icon, icon};
+pub use icon::{Icon, icon, marker};
 pub use menu::radio_menu;
 pub use popover::{Align, Placement, Popover};
 pub use rating::{rating, track_rating};

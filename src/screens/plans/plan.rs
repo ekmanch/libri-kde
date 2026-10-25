@@ -403,13 +403,17 @@ fn progress_with_marker<'a>(app: &App, plan: &Plan, tokens: &Tokens) -> Element<
     };
     let total = plan.items.len().max(1);
     let done = rules::done_count(plan);
-    // FillPortion splits the bar; the marker sits at the end of the done part.
+    // FillPortion splits the bar; the marker sits at the end of the done
+    // part, flush with the bar's left end at 0 and its right end at 100.
     let before = u16::try_from(done * 100 / total).unwrap_or(100);
-    let marker_row = row![
-        Space::new().width(FillPortion(before.max(1))),
-        ui::icon(marker, 22.0, tokens.text),
-        Space::new().width(FillPortion((100 - before).max(1))),
-    ];
+    let mut marker_row = Row::new();
+    if before > 0 {
+        marker_row = marker_row.push(Space::new().width(FillPortion(before)));
+    }
+    marker_row = marker_row.push(ui::marker(marker, 17.0));
+    if before < 100 {
+        marker_row = marker_row.push(Space::new().width(FillPortion(100 - before)));
+    }
     stack![bar, marker_row].width(Fill).into()
 }
 
