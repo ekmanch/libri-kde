@@ -23,10 +23,13 @@ impl PlanState {
 }
 
 /// Finished: at least one entry and every entry done (an empty plan is
-/// never finished). Active: Started is on, or the plan's first date has
-/// come. Otherwise not started.
+/// never finished), and the plan's last date, if it has one, has passed,
+/// so a plan with days left stays active for more entries. Active:
+/// Started is on, or the plan's first date has come. Otherwise not
+/// started.
 pub fn plan_state(plan: &Plan, today: Date) -> PlanState {
-    if !plan.items.is_empty() && plan.items.iter().all(|i| i.done) {
+    let all_done = !plan.items.is_empty() && plan.items.iter().all(|i| i.done);
+    if all_done && plan.last_date().is_none_or(|d| d < today) {
         PlanState::Finished
     } else if plan.started || plan.first_date().is_some_and(|d| d <= today) {
         PlanState::Active
@@ -449,6 +452,23 @@ mod tests {
         assert_eq!(state("halloween-2026"), PlanState::Active);
         assert_eq!(state("christmas-2026"), PlanState::NotStarted);
         assert_eq!(state("halloween-2025"), PlanState::Finished);
+    }
+
+    #[test]
+    fn a_plan_all_done_stays_active_until_its_last_date_passes() {
+        let mut plan = library().plan("halloween-2026").unwrap().clone();
+        for item in &mut plan.items {
+            item.done = true;
+        }
+        let last = plan.last_date().unwrap();
+        assert_eq!(last, date("2026-10-31"));
+        assert_eq!(plan_state(&plan, date("2026-10-23")), PlanState::Active);
+        assert_eq!(plan_state(&plan, last), PlanState::Active);
+        assert_eq!(plan_state(&plan, date("2026-11-01")), PlanState::Finished);
+        for item in &mut plan.items {
+            item.when = None;
+        }
+        assert_eq!(plan_state(&plan, date("2026-10-23")), PlanState::Finished);
     }
 
     #[test]

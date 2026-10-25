@@ -91,6 +91,8 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Sidebar on Plans: plan rows open their plan, the + opens New plan, finished plans only under All plans
 - [x] Remove from plan or delete everywhere; Delete plan
 - [x] Ctrl+click on a checklist or timeline row ticks it or unticks it, without selecting it (2026-10-25)
+- [x] The seasonal progress marker sits flush with the bar's ends at 0 and at 100 percent; it was indented by a percent at both (2026-10-25)
+- [x] A plan with every entry ticked stays Active until its last date has passed, so more entries can be added while there is time left; the phone finishes it at once (2026-10-25)
 
 ### 1f. Settings and states
 - [x] Settings: type checkboxes (off or on), theme (System, Graphite, Charcoal, Catppuccin Mocha, Light; System follows Plasma's color scheme through the desktop portal), background style (two-tone or flat, with the flat tokens in `theme`), sidebar tags (pinned or most used), accent color (Vivid and Catppuccin groups, Peach default), timeline default, seasonal theme default, tags, About row

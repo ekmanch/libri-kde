@@ -44,6 +44,14 @@ impl Plan {
             .filter_map(|item| item.when.map(|when| when.from))
             .min()
     }
+
+    /// The last day of the latest "When" among the items.
+    pub fn last_date(&self) -> Option<Date> {
+        self.items
+            .iter()
+            .filter_map(|item| item.when.map(|when| when.to))
+            .max()
+    }
 }
 
 /// One entry inside a plan. `entry` is the entry id. `repeat` is set when
