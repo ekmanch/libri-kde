@@ -595,6 +595,14 @@ impl App {
                 self.library.update(message);
             }
             Message::Plans(message) => {
+                // Ctrl+click on a checklist or timeline row ticks it or
+                // unticks it, instead of selecting it.
+                let message = match message {
+                    plans::Message::Select(id) if self.modifiers.command() => {
+                        plans::Message::ToggleDone(id)
+                    }
+                    message => message,
+                };
                 self.screen = Screen::Plans;
                 return plans::update(self, message);
             }
@@ -914,6 +922,32 @@ mod tests {
         let _ = app.update(Message::Modifiers(keyboard::Modifiers::empty()));
         let _ = app.update(show(MediaType::Games));
         assert_eq!(app.title(), "Games — Libri");
+    }
+
+    #[test]
+    fn ctrl_click_on_a_plan_row_ticks_it() {
+        let mut app = App::new(Screen::Plans);
+        let id = "movies/die-hard-1988";
+        let click = || Message::Plans(plans::Message::Select(id.into()));
+        let done = |app: &App| {
+            app.repo
+                .library()
+                .plan("christmas-2026")
+                .and_then(|plan| plan.item_for(id))
+                .is_some_and(|item| item.done)
+        };
+        let _ = app.update(Message::Plans(plans::Message::ShowPlan(
+            "christmas-2026".into(),
+        )));
+        assert!(!done(&app));
+        let _ = app.update(Message::Modifiers(keyboard::Modifiers::CTRL));
+        let _ = app.update(click());
+        assert!(done(&app) && app.plans.selected.is_none());
+        let _ = app.update(click());
+        assert!(!done(&app) && app.plans.selected.is_none());
+        let _ = app.update(Message::Modifiers(keyboard::Modifiers::empty()));
+        let _ = app.update(click());
+        assert!(!done(&app) && app.plans.selected.as_deref() == Some(id));
     }
 
     #[test]

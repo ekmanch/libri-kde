@@ -90,6 +90,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] The plan page's side pane: "Add to this plan" (tagged entries not in the plan, or wanted ones for a plan without tags; the filter searches the whole library), and the entry details with the plan's When and note
 - [x] Sidebar on Plans: plan rows open their plan, the + opens New plan, finished plans only under All plans
 - [x] Remove from plan or delete everywhere; Delete plan
+- [x] Ctrl+click on a checklist or timeline row ticks it or unticks it, without selecting it (2026-10-25)
 
 ### 1f. Settings and states
 - [x] Settings: type checkboxes (off or on), theme (System, Graphite, Charcoal, Catppuccin Mocha, Light; System follows Plasma's color scheme through the desktop portal), background style (two-tone or flat, with the flat tokens in `theme`), sidebar tags (pinned or most used), accent color (Vivid and Catppuccin groups, Peach default), timeline default, seasonal theme default, tags, About row
