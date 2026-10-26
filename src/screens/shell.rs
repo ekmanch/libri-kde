@@ -1,10 +1,13 @@
 //! The window shell shared by Library, Plans and Settings: the sidebar on
 //! the chrome, and the content pane with its rounded top-left corner.
 
-use iced::border::Radius;
-use iced::widget::svg::{self, Svg};
-use iced::widget::{Column, button, column, container, progress_bar, row, space, stack, text};
-use iced::{Background, Border, Center, Color, Element, Fill, Padding};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+use iced::widget::{
+    Column, button, column, container, image, progress_bar, row, space, stack, text,
+};
+use iced::{Background, Border, Center, Color, Element, Fill, Length, Padding};
 
 use super::{Screen, library, plans, setup};
 use crate::app::{App, Message, SyncMessage};
@@ -33,37 +36,91 @@ pub fn shell<'a>(app: &'a App, content: impl Into<Element<'a, Message>>) -> Elem
         }
         _ => content.into(),
     };
-    let pane = container(content).width(Fill).height(Fill).style(move |_| {
-        container::background(tokens.content).border(Border {
-            radius: Radius::default().top_left(12),
-            ..Border::default()
-        })
-    });
-    // The chrome lies under the sidebar and shows in the pane's rounded
-    // corner, never under the whole pane: on Glass both are see-through,
-    // and the content's strength is its own, not laid over the chrome's.
-    let corner = container(corner(tokens.chrome)).width(Fill).height(Fill);
-    container(row![sidebar(app, &tokens), stack![pane, corner]])
+    // The pane's surface: the content fill, with the top-left corner as
+    // one 12 px tile that holds the chrome outside the arc and the content
+    // inside it. The fills meet the tile on straight, whole-pixel edges, so
+    // no two see-through fills ever overlap, not even by the width of an
+    // antialiased edge; on Glass such an overlap stacked into a dark seam
+    // along the corner. The chrome lies under the sidebar alone, never
+    // under the pane.
+    let fill = tokens.content;
+    let content_fill = move |height: Length| {
+        container(space())
+            .width(Fill)
+            .height(height)
+            .style(move |_| container::background(fill))
+    };
+    let surface = column![
+        row![
+            image(corner_tile(tokens.chrome, tokens.content))
+                .width(CORNER)
+                .height(CORNER),
+            content_fill(CORNER.into()),
+        ],
+        content_fill(Fill),
+    ];
+    let pane = stack![surface, container(content).width(Fill).height(Fill)];
+    container(row![sidebar(app, &tokens), pane])
         .width(Fill)
         .height(Fill)
         .style(move |_| container::Style::default().color(tokens.text))
         .into()
 }
 
-/// The chrome outside the pane's rounded top-left corner: the 12 px square
-/// less the arc, drawn over the pane's corner. A square under the pane
-/// would be painted over inside the arc, and on Glass the two layers of
-/// glass would show as a dark mark there.
-fn corner<'a>(chrome: Color) -> Element<'a, Message> {
-    let [r, g, b, _] = chrome.into_rgba8();
-    let shape = format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12"><path d="M0 0H12A12 12 0 0 0 0 12Z" fill="#{r:02x}{g:02x}{b:02x}" fill-opacity="{:.3}"/></svg>"##,
-        chrome.a
-    );
-    Svg::new(svg::Handle::from_memory(shape.into_bytes()))
-        .width(12)
-        .height(12)
-        .into()
+/// The radius of the pane's top-left corner, in px.
+const CORNER: f32 = 12.0;
+
+/// The corner tile for a chrome and a content color: the arc's coverage of
+/// each pixel is blended into that pixel's alpha and color, so the tile
+/// composites exactly as the two fills would, with no seam between them.
+/// Drawn at four times the size, so it stays smooth at every scale, and
+/// kept per color pair, since a raw image gets a new id on every call.
+fn corner_tile(chrome: Color, content: Color) -> image::Handle {
+    const SIZE: usize = 48;
+    const SAMPLES: usize = 4;
+    type Tiles = HashMap<([u8; 4], [u8; 4]), image::Handle>;
+    static TILES: OnceLock<Mutex<Tiles>> = OnceLock::new();
+    let key = (chrome.into_rgba8(), content.into_rgba8());
+    let mut tiles = TILES.get_or_init(Default::default).lock().unwrap();
+    tiles
+        .entry(key)
+        .or_insert_with(|| {
+            let radius = SIZE as f32;
+            let mut pixels = Vec::with_capacity(SIZE * SIZE * 4);
+            for y in 0..SIZE {
+                for x in 0..SIZE {
+                    // The arc's center is the tile's bottom-right corner.
+                    let inside = (0..SAMPLES * SAMPLES)
+                        .filter(|&sample| {
+                            let offset = |i: usize| (i as f32 + 0.5) / SAMPLES as f32;
+                            let px = x as f32 + offset(sample % SAMPLES) - radius;
+                            let py = y as f32 + offset(sample / SAMPLES) - radius;
+                            px * px + py * py <= radius * radius
+                        })
+                        .count();
+                    let coverage = inside as f32 / (SAMPLES * SAMPLES) as f32;
+                    let (chrome_part, content_part) =
+                        (chrome.a * (1.0 - coverage), content.a * coverage);
+                    let alpha = chrome_part + content_part;
+                    let mix = |from_chrome: f32, from_content: f32| {
+                        if alpha > 0.0 {
+                            (from_chrome * chrome_part + from_content * content_part) / alpha
+                        } else {
+                            0.0
+                        }
+                    };
+                    let byte = |value: f32| (value * 255.0).round() as u8;
+                    pixels.extend([
+                        byte(mix(chrome.r, content.r)),
+                        byte(mix(chrome.g, content.g)),
+                        byte(mix(chrome.b, content.b)),
+                        byte(alpha),
+                    ]);
+                }
+            }
+            image::Handle::from_rgba(SIZE as u32, SIZE as u32, pixels)
+        })
+        .clone()
 }
 
 fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
