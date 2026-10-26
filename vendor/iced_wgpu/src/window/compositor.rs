@@ -104,17 +104,18 @@ impl Compositor {
 
                 log::info!("Available formats: {formats:#?}");
 
-                // Skip formats whose alpha channel has fewer than 8 bits
-                // (10-bit color with 2-bit alpha): a transparent window
-                // would get its alpha rounded to thirds.
+                // Backported from iced master (Libri, 2026-10-26): formats
+                // with a 2-bit alpha are never picked, since a transparent
+                // window would get its alpha rounded to thirds.
+                const BLACKLIST: &[wgpu::TextureFormat] = &[
+                    wgpu::TextureFormat::Rgb10a2Unorm,
+                    wgpu::TextureFormat::Rgb10a2Uint,
+                    wgpu::TextureFormat::Rgba16Float,
+                ];
+
                 let mut formats = formats.filter(|format| {
                     format.required_features() == wgpu::Features::empty()
-                        && !matches!(
-                            format,
-                            wgpu::TextureFormat::Rgb10a2Unorm
-                                | wgpu::TextureFormat::Rgb10a2Uint
-                                | wgpu::TextureFormat::Rg11b10Ufloat
-                        )
+                        && !BLACKLIST.contains(format)
                 });
 
                 let format = if color::GAMMA_CORRECTION {

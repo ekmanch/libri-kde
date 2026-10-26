@@ -20,11 +20,13 @@ log = "0.4.29"
 [dev-dependencies]
 iced_test = "0.14.0"
 
-# iced_wgpu 0.14.0 with one change in `window/compositor.rs`: the surface
-# format is never one with fewer than 8 bits of alpha. NVIDIA's Wayland
-# driver lists 10-bit formats first, iced takes the first non-sRGB one with
-# its default `web-colors` blending, and a 2-bit alpha rounds every
-# see-through surface of Glass to thirds (docs/DESIGN.md section 10, Glass).
-# Drop the copy once iced carries the fix.
+# iced_wgpu 0.14.0 with one change in `window/compositor.rs`, backported
+# from iced master: the surface format is never one with a 2-bit alpha.
+# NVIDIA's Wayland driver lists 10-bit formats first, iced 0.14 takes the
+# first non-sRGB one with its default `web-colors` blending, and a 2-bit
+# alpha rounds every see-through surface of Glass to thirds (docs/DESIGN.md
+# section 10, Glass). The next iced release carries the fix; this patch
+# only matches iced_wgpu 0.14.0, so after the upgrade Cargo warns that it is
+# unused, and the folder and these lines go.
 [patch.crates-io]
 iced_wgpu = { path = "vendor/iced_wgpu" }

@@ -185,4 +185,4 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 
 ## Later
 
-- [ ] Drop `vendor/iced_wgpu` (iced_wgpu 0.14.0 with the surface-format fix of 2026-10-26, DESIGN.md section 10, Glass) once iced skips 2-bit-alpha surface formats upstream; report it to iced-rs first
+- [ ] Drop `vendor/iced_wgpu` and the `[patch.crates-io]` lines in `Cargo.toml` with the upgrade to the next iced: iced master already skips 2-bit-alpha surface formats (DESIGN.md section 10, Glass), and Cargo warns that the patch is unused once iced_wgpu moves past 0.14.0
