@@ -12,7 +12,7 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 ## Stack
 
 - System Rust 1.99 from the repos (cargo, rustfmt, clippy). No rustup.
-- iced 0.14 with `svg`, `image` and `tokio`; serde and serde_json for the data; `iced_test` for headless screen tests.
+- iced 0.14 with `svg`, `image` and `tokio`; serde and serde_json for the data; `iced_test` for headless screen tests. `vendor/iced_wgpu` is iced_wgpu 0.14.0 with one change (the surface format keeps 8 bits of alpha), patched in through `Cargo.toml`.
 - System packages (and anything else installed on the machine) go through Shelly.
 
 ## Module layout

@@ -184,3 +184,5 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [ ] Install the title bar color schemes (`assets/color-schemes/`) with the app and point `decoration::scheme_path` at the installed copy; until then they are read from the checkout, so an installed binary would keep KWin's default bar
 
 ## Later
+
+- [ ] Drop `vendor/iced_wgpu` (iced_wgpu 0.14.0 with the surface-format fix of 2026-10-26, DESIGN.md section 10, Glass) once iced skips 2-bit-alpha surface formats upstream; report it to iced-rs first

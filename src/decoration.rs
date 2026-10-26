@@ -256,9 +256,8 @@ mod tests {
             for flat in [false, true] {
                 let tokens = Tokens::styled(theme, PEACH, flat);
                 let entries = entries(scheme_path(theme, flat));
-                // Glass carries the bar's alpha: 157, measured so Klassy's
-                // bar reads like Libri's chrome (DESIGN.md section 10).
-                let alpha = theme.is_glass().then_some(157);
+                // Glass carries the chrome's strength as the bar's alpha.
+                let alpha = theme.is_glass().then_some(140);
                 let expect = |key: &str, color: Color| {
                     let (got, got_alpha) = entries[key];
                     assert_eq!(
