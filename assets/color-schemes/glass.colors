@@ -3,19 +3,19 @@ ColorScheme=LibriGlass
 Name=Libri Glass
 
 [Colors:Window]
-BackgroundNormal=21,21,21,140
+BackgroundNormal=21,21,21,157
 ForegroundNormal=238,240,242
 
 [Colors:Header]
-BackgroundNormal=21,21,21,140
+BackgroundNormal=21,21,21,157
 ForegroundNormal=184,189,195
 
 [Colors:Header][Inactive]
-BackgroundNormal=21,21,21,140
+BackgroundNormal=21,21,21,157
 ForegroundNormal=103,105,108
 
 [WM]
-activeBackground=21,21,21,140
+activeBackground=21,21,21,157
 activeForeground=184,189,195
-inactiveBackground=21,21,21,140
+inactiveBackground=21,21,21,157
 inactiveForeground=103,105,108

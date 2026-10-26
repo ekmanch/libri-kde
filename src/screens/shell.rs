@@ -2,8 +2,9 @@
 //! the chrome, and the content pane with its rounded top-left corner.
 
 use iced::border::Radius;
+use iced::widget::svg::{self, Svg};
 use iced::widget::{Column, button, column, container, progress_bar, row, space, stack, text};
-use iced::{Background, Border, Center, Element, Fill, Padding};
+use iced::{Background, Border, Center, Color, Element, Fill, Padding};
 
 use super::{Screen, library, plans, setup};
 use crate::app::{App, Message, SyncMessage};
@@ -38,22 +39,30 @@ pub fn shell<'a>(app: &'a App, content: impl Into<Element<'a, Message>>) -> Elem
             ..Border::default()
         })
     });
-    // The chrome lies under the sidebar and under the pane's rounded corner
-    // alone, never under the whole pane: on Glass both are see-through, and
-    // the content's strength is its own, not laid over the chrome's.
-    let chrome = tokens.chrome;
-    let notch = container(
-        container(space())
-            .width(12)
-            .height(12)
-            .style(move |_| container::background(chrome)),
-    )
-    .width(Fill)
-    .height(Fill);
-    container(row![sidebar(app, &tokens), stack![notch, pane]])
+    // The chrome lies under the sidebar and shows in the pane's rounded
+    // corner, never under the whole pane: on Glass both are see-through,
+    // and the content's strength is its own, not laid over the chrome's.
+    let corner = container(corner(tokens.chrome)).width(Fill).height(Fill);
+    container(row![sidebar(app, &tokens), stack![pane, corner]])
         .width(Fill)
         .height(Fill)
         .style(move |_| container::Style::default().color(tokens.text))
+        .into()
+}
+
+/// The chrome outside the pane's rounded top-left corner: the 12 px square
+/// less the arc, drawn over the pane's corner. A square under the pane
+/// would be painted over inside the arc, and on Glass the two layers of
+/// glass would show as a dark mark there.
+fn corner<'a>(chrome: Color) -> Element<'a, Message> {
+    let [r, g, b, _] = chrome.into_rgba8();
+    let shape = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12"><path d="M0 0H12A12 12 0 0 0 0 12Z" fill="#{r:02x}{g:02x}{b:02x}" fill-opacity="{:.3}"/></svg>"##,
+        chrome.a
+    );
+    Svg::new(svg::Handle::from_memory(shape.into_bytes()))
+        .width(12)
+        .height(12)
         .into()
 }
 
