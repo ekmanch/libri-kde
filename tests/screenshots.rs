@@ -1,6 +1,7 @@
-//! Renders every screen headless, in Graphite and Light at the default
-//! window size, to `screenshots/` (git-ignored), to compare with the
-//! mockup. Skipped by a plain `cargo test`; run it with:
+//! Renders every screen headless, in Graphite, Light and Glass at the
+//! default window size, to `screenshots/` (git-ignored), to compare with
+//! the mockup. Glass comes out see-through, on nothing; the desktop
+//! behind it is KWin's. Skipped by a plain `cargo test`; run it with:
 //!
 //! ```fish
 //! cargo test --test screenshots -- --ignored
@@ -790,7 +791,7 @@ fn capture_every_screen() {
         {
             continue;
         }
-        for theme in [Theme::Graphite, Theme::Light] {
+        for theme in [Theme::Graphite, Theme::Light, Theme::Glass] {
             let mut app = App::new(screen);
             app.settings.theme = ThemeChoice::Fixed(theme);
             // The fixture's dates are set around this day.

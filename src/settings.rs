@@ -14,13 +14,28 @@ pub enum ThemeChoice {
 }
 
 impl ThemeChoice {
-    pub const ALL: [ThemeChoice; 5] = [
+    pub const ALL: [ThemeChoice; 6] = [
         ThemeChoice::System,
         ThemeChoice::Fixed(Theme::Graphite),
         ThemeChoice::Fixed(Theme::Charcoal),
         ThemeChoice::Fixed(Theme::Mocha),
+        ThemeChoice::Fixed(Theme::Glass),
         ThemeChoice::Fixed(Theme::Light),
     ];
+
+    /// `LIBRI_THEME`: "system", "graphite", "charcoal", "mocha", "glass"
+    /// or "light".
+    pub fn from_env(value: &str) -> Option<ThemeChoice> {
+        Some(match value {
+            "system" => ThemeChoice::System,
+            "graphite" => ThemeChoice::Fixed(Theme::Graphite),
+            "charcoal" => ThemeChoice::Fixed(Theme::Charcoal),
+            "mocha" => ThemeChoice::Fixed(Theme::Mocha),
+            "glass" => ThemeChoice::Fixed(Theme::Glass),
+            "light" => ThemeChoice::Fixed(Theme::Light),
+            _ => return None,
+        })
+    }
 
     /// The theme drawn: System is Graphite with a dark Plasma and Light
     /// with a light one.
@@ -47,6 +62,9 @@ impl ThemeChoice {
             ThemeChoice::Fixed(Theme::Charcoal) => "Pure neutral gray. Matches Darkly.",
             ThemeChoice::Fixed(Theme::Mocha) => {
                 "Mocha's base and mantle, with Catppuccin type colors."
+            }
+            ThemeChoice::Fixed(Theme::Glass) => {
+                "Dark and see-through. Plasma's blur shows behind it."
             }
             ThemeChoice::Fixed(Theme::Light) => "White content, light gray sidebar.",
         }
@@ -111,12 +129,16 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// The help under Background style.
-    pub fn flat_help(&self, light: bool) -> &'static str {
-        match (self.flat, light) {
+    /// The help under Background style, for the theme drawn.
+    pub fn flat_help(&self, theme: Theme) -> &'static str {
+        match (self.flat, theme) {
+            (true, Theme::Glass) => "One even layer of glass over the whole window.",
+            (false, Theme::Glass) => {
+                "Clearer glass on the sidebar and title bar, denser behind the content."
+            }
             (true, _) => "One shade for the whole window, like Dolphin.",
-            (false, true) => "Light gray sidebar and title bar, white content area.",
-            (false, false) => "Darker sidebar and title bar, lighter content area.",
+            (false, Theme::Light) => "Light gray sidebar and title bar, white content area.",
+            (false, _) => "Darker sidebar and title bar, lighter content area.",
         }
     }
 
@@ -297,6 +319,22 @@ mod tests {
 
     #[test]
     fn system_follows_plasma_and_a_fixed_theme_does_not() {
+        assert_eq!(
+            ThemeChoice::from_env("glass"),
+            Some(ThemeChoice::Fixed(Theme::Glass))
+        );
+        assert_eq!(ThemeChoice::from_env("system"), Some(ThemeChoice::System));
+        assert_eq!(ThemeChoice::from_env("neon"), None);
+        let glass = Settings {
+            flat: false,
+            ..Settings::default()
+        };
+        assert!(glass.flat_help(Theme::Glass).starts_with("Clearer glass"));
+        assert!(
+            glass
+                .flat_help(Theme::Graphite)
+                .starts_with("Darker sidebar")
+        );
         assert_eq!(ThemeChoice::System.resolve(true), Theme::Graphite);
         assert_eq!(ThemeChoice::System.resolve(false), Theme::Light);
         let mocha = ThemeChoice::Fixed(Theme::Mocha);

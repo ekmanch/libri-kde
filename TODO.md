@@ -157,6 +157,7 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [ ] Decide with the phone: the Apple Books badge near book covers from the iTunes Search API (open on the phone too)
 - [x] Build: every state above on fake sync states (`LIBRI_SYNC=saving`, `offline`, `error`, `not-found`, `conflict`; `LIBRI_LOCAL=1` for the kept library), so phase 3 only wires them up. The licenses dialog lists the crates and fonts with their licenses; phase 5 generates the full texts at build time
 - [x] Captures of every new state in Graphite and Light
+- [x] Glass theme from the canvas revision of 2026-10-26 (`design/canvas.html`, Library and Settings boards): see-through surfaces on a transparent window, KWin's blur asked for through the `org_kde_kwin_blur` protocol (`decoration`), the Settings card and help, `glass.colors` for the title bar, the contrast check over a mid gray, and Glass in the captures. `LIBRI_THEME=glass` and `LIBRI_FLAT=1` start in it (DESIGN.md section 10, Glass)
 - [x] Fix: opening a dialog (the licenses, Disconnect, the tag picker, any `ui::modal`) scrolled the screen under it back to the top, since the stack only existed with a dialog open and iced rebuilt the tree. The stack and the barrier are always there now, the barrier inactive without a dialog (2026-10-24)
 
 ## Phase 2: Local data

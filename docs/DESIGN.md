@@ -75,7 +75,7 @@ Items in section 11 ("Open") are not decided yet; decide them in the phase the T
 
 - A sidebar of its own sections ("On this page"), changes apply right away.
 - **Appearance:**
-  - **Theme**, one list of five (decided 2026-10-18, replacing a Dark/Light switch plus a separate "Dark background" choice). There are four themes; System picks one of them:
+  - **Theme**, one list of six (decided 2026-10-18, replacing a Dark/Light switch plus a separate "Dark background" choice; Glass added 2026-10-26). There are five themes; System picks one of them:
 
     | Theme | Behavior |
     |---|---|
@@ -83,6 +83,7 @@ Items in section 11 ("Open") are not decided yet; decide them in the phase the T
     | Graphite | Always Graphite |
     | Charcoal | Always Charcoal |
     | Catppuccin Mocha | Always Mocha, and the type colors switch to the Catppuccin set (section 8) |
+    | Glass | Always Glass: dark and see-through, with KWin's blur behind the window (section 8) |
     | Light | Always light |
 
     Picking a named theme is an explicit override and ignores Plasma. Plasma's light or dark preference is read from the desktop portal (`org.freedesktop.appearance` `color-scheme`), including changes while Libri runs. With no portal answer, System means Graphite.
@@ -147,6 +148,8 @@ Exact values live in the `theme` module once it exists; these are the mockup's.
 | secondary text | #A3A8AE | #A3A3A3 | #A6ADC8 |
 
 Flat style uses one shade for chrome and content (Graphite flat: #151515 everywhere, raised #252525, line #2A2A2A; Charcoal flat: #151515, raised #242424; Mocha flat: #181825, raised #2A2B3C).
+
+**Glass** (2026-10-26) is flat Graphite's #151515 at a fixed see-through strength, with KWin's blur behind the window: chrome (sidebar, title bar) 55 %, content 72 %; flat gives the content the chrome's 55 %, as flat does in every theme. No slider (decided 2026-10-25). The grays are white veils, so they read the same over any wallpaper: raised 8 %, field 5 %, line 14 %, selection 13 %, hover 7 %, track 14 %, cards 4 %; text #EEF0F2, secondary text #B8BDC3; popovers and menus solid #26292D. Type colors and accents as on Graphite. How the window gets there is in section 10, Glass.
 
 **Surfaces (light):** content #FFFFFF, raised #E9EBEE, field #FFFFFF, line #D5D9DE, text #17181B, secondary text #5B616B; chrome #F4F5F7 when two-tone, #FFFFFF when flat.
 
@@ -260,6 +263,7 @@ Add decisions here as they are made during phases 0 and 1, with the date.
 - **Settings rail** (2026-10-25, phase 1f): the "On this page" links are in the text color, the current one semibold on the selection fill, and only the header is gray, so the header stands apart from the links as the tag picker's group headers do from its tags; the mockup drew the other links gray. The link's text is centered in its 30 px row through a container, since an iced button lays its content out at the top.
 - **The seasonal marker's ends** (2026-10-25, phase 1e): the ghost or star rides the end of the done part and sits flush with the bar's left end at 0 and its right end at 100 percent; before, both ends kept a one-percent space, and the glyphs sat inside a 24-unit box with empty margins, so an empty plan read as slightly begun and a finished one as slightly short. The marker files are now cropped to the glyph and `ui::marker` draws them at their own aspect, 17 px tall.
 - **A finished plan with days left** (2026-10-25, phase 1e): a plan with every entry ticked is Finished only once its last date has passed (the last day of the latest When, or at once without dates), so a plan with time left stays Active in the sidebar and on the overview and more entries can be added before it ends. The phone finishes a plan the moment its last entry is ticked (its DESIGN.md plan states); the two agree again the day after the plan's last date.
+- **Glass** (2026-10-26, after phase 1k): the canvas revision's see-through theme as built here. The window is created transparent (every other theme paints every pixel, so they lose nothing), and with Glass the iced background clears to nothing: the shell paints the chrome under the sidebar and under the pane's rounded corner alone, and the content under the pane, so each surface has the mockup's own strength (55 % and 72 %) instead of the content lying on the chrome; before, the chrome filled the whole window under the pane, which an opaque pane hid. iced's renderer blends premultiplied and the Vulkan surface composites premultiplied, so the colors come out as set. The blur is KWin's: `decoration` asks for it through the `org_kde_kwin_blur` protocol over the whole surface while Glass is on, and takes the request back for any other theme; on a Plasma with the stock blur effect off and Better Blur in its place, the window class `libri` has to be in Better Blur's Force blur list, since that effect blurs only what it is told to. The title bar is KWin's: `glass.colors` names the chrome with an alpha of 140 (the chrome's 55 %) on the `[WM]` backgrounds, which Klassy honors and blurs itself, unless its own titlebar opacity override is on (`OverrideTitleBarOpacityActive` in `klassyrc`, which then has to be off); Breeze ignores the alpha and paints the bar opaque. The window frame is Klassy's too, filled from the window color and outside Klassy's blur, so it shows as a strip of its own tint around the glass; the mockup has no frame. Libri cannot turn it off (Wayland has no per-window border request), so it is a Klassy window-specific override for the class `libri` with no border, or no borders globally. The Settings card for Glass is the miniature in the glass tokens, see-through over the page, where the mockup's card is empty. Contrast is checked with the surfaces laid over a mid gray, about what a blurred wallpaper averages: body text 8.4 on the chrome and 11.1 on the content, secondary text 5.1 and 6.7, the type colors 4.3 and up; over a white wallpaper the body text would fall to 3.5 on the chrome, the price of glass, which is why Glass is a choice and not the default.
 
 ## 11. Open
 

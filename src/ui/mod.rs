@@ -170,11 +170,14 @@ pub fn type_checkbox<'a, Message: Clone + 'a>(
     on_toggle: Message,
 ) -> Element<'a, Message> {
     // The check reads on the type color: dark on the dark themes, white on
-    // Light's darker inks.
+    // Light's darker inks. Solid even on Glass, where the chrome is not.
     let mark = if tokens.light {
         Color::WHITE
     } else {
-        tokens.chrome
+        Color {
+            a: 1.0,
+            ..tokens.chrome
+        }
     };
     let check: Element<'a, Message> = if on {
         icon(Icon::Check, 10.0, mark)

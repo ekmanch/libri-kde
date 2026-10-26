@@ -1,8 +1,8 @@
-//! The window shell shared by Library and Plans: the sidebar on the
-//! chrome, and the content pane with its rounded top-left corner.
+//! The window shell shared by Library, Plans and Settings: the sidebar on
+//! the chrome, and the content pane with its rounded top-left corner.
 
 use iced::border::Radius;
-use iced::widget::{Column, button, column, container, progress_bar, row, space, text};
+use iced::widget::{Column, button, column, container, progress_bar, row, space, stack, text};
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
 use super::{Screen, library, plans, setup};
@@ -38,11 +38,22 @@ pub fn shell<'a>(app: &'a App, content: impl Into<Element<'a, Message>>) -> Elem
             ..Border::default()
         })
     });
+    // The chrome lies under the sidebar and under the pane's rounded corner
+    // alone, never under the whole pane: on Glass both are see-through, and
+    // the content's strength is its own, not laid over the chrome's.
     let chrome = tokens.chrome;
-    container(row![sidebar(app, &tokens), pane])
+    let notch = container(
+        container(space())
+            .width(12)
+            .height(12)
+            .style(move |_| container::background(chrome)),
+    )
+    .width(Fill)
+    .height(Fill);
+    container(row![sidebar(app, &tokens), stack![notch, pane]])
         .width(Fill)
         .height(Fill)
-        .style(move |_| container::background(chrome).color(tokens.text))
+        .style(move |_| container::Style::default().color(tokens.text))
         .into()
 }
 
@@ -155,10 +166,12 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
     }
 
     let column = column![ui::scroll(items).height(Fill), sync_row(app, tokens)];
+    let chrome = tokens.chrome;
     container(column)
         .width(SIDEBAR_WIDTH)
         .height(Fill)
         .padding(Padding::new(0.0).top(6).left(12).right(12))
+        .style(move |_| container::background(chrome))
         .into()
 }
 

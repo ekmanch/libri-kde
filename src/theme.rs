@@ -1,4 +1,4 @@
-//! Design tokens from the desktop mockup (`design/canvas.html`): the four
+//! Design tokens from the desktop mockup (`design/canvas.html`): the five
 //! themes, the type colors, the accent palette and the fonts. Never
 //! hard-code a color or font in a screen; add it here instead.
 
@@ -11,7 +11,12 @@ const fn hex(rgb: u32) -> Color {
     Color::from_rgb8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
 }
 
-/// The four themes. Settings also offers System, which follows Plasma and
+/// White at `alpha`: the veils Glass lays on its see-through surfaces.
+const fn white(alpha: f32) -> Color {
+    Color::from_rgba(1.0, 1.0, 1.0, alpha)
+}
+
+/// The five themes. Settings also offers System, which follows Plasma and
 /// resolves to Graphite or Light (docs/DESIGN.md 4.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Theme {
@@ -20,23 +25,39 @@ pub enum Theme {
     Charcoal,
     /// Catppuccin Mocha, with the Catppuccin type colors.
     Mocha,
+    /// Dark and see-through: flat Graphite's shade at a fixed strength,
+    /// with KWin's blur behind the window (docs/DESIGN.md section 8).
+    Glass,
     Light,
 }
 
 impl Theme {
-    pub const ALL: [Theme; 4] = [Theme::Graphite, Theme::Charcoal, Theme::Mocha, Theme::Light];
+    pub const ALL: [Theme; 5] = [
+        Theme::Graphite,
+        Theme::Charcoal,
+        Theme::Mocha,
+        Theme::Glass,
+        Theme::Light,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Theme::Graphite => "Graphite",
             Theme::Charcoal => "Charcoal",
             Theme::Mocha => "Catppuccin Mocha",
+            Theme::Glass => "Glass",
             Theme::Light => "Light",
         }
     }
 
     pub fn is_light(self) -> bool {
         self == Theme::Light
+    }
+
+    /// Whether the surfaces are see-through and the window asks KWin for
+    /// blur behind it.
+    pub fn is_glass(self) -> bool {
+        self == Theme::Glass
     }
 }
 
@@ -186,35 +207,59 @@ impl Tokens {
     /// chrome and the content (docs/DESIGN.md section 8).
     pub fn styled(theme: Theme, accent: Accent, flat: bool) -> Tokens {
         let accent = accent.for_theme(theme);
-        let (chrome, content, raised, field, line, text, sub) = match (theme, flat) {
-            (Theme::Graphite, false) => (
+        let opaque = |colors: [u32; 7]| colors.map(hex);
+        let [chrome, content, raised, field, line, text, sub] = match (theme, flat) {
+            (Theme::Graphite, false) => opaque([
                 0x131416, 0x1D1F22, 0x2A2D31, 0x1D1F22, 0x3A3E44, 0xEEF0F2, 0xA3A8AE,
-            ),
-            (Theme::Graphite, true) => (
+            ]),
+            (Theme::Graphite, true) => opaque([
                 0x151515, 0x151515, 0x252525, 0x151515, 0x2A2A2A, 0xEEF0F2, 0xA3A8AE,
-            ),
-            (Theme::Charcoal, false) => (
+            ]),
+            (Theme::Charcoal, false) => opaque([
                 0x151515, 0x1C1C1C, 0x272727, 0x202020, 0x2E2E2E, 0xEDEDED, 0xA3A3A3,
-            ),
-            (Theme::Charcoal, true) => (
+            ]),
+            (Theme::Charcoal, true) => opaque([
                 0x151515, 0x151515, 0x242424, 0x202020, 0x2E2E2E, 0xEDEDED, 0xA3A3A3,
-            ),
-            (Theme::Mocha, false) => (
+            ]),
+            (Theme::Mocha, false) => opaque([
                 0x181825, 0x1E1E2E, 0x2B2C3E, 0x232334, 0x313244, 0xCDD6F4, 0xA6ADC8,
-            ),
-            (Theme::Mocha, true) => (
+            ]),
+            (Theme::Mocha, true) => opaque([
                 0x181825, 0x181825, 0x2A2B3C, 0x232334, 0x313244, 0xCDD6F4, 0xA6ADC8,
-            ),
-            (Theme::Light, false) => (
+            ]),
+            // One base, flat Graphite's #151515, at two strengths: the chrome
+            // lets 45 % of the blurred desktop through, the content 28 %;
+            // flat gives the content the chrome's glass, as flat does in
+            // every theme. The grays are white veils, so they read the same
+            // over any wallpaper. Fixed, no slider (decided 2026-10-25).
+            (Theme::Glass, flat) => {
+                let base = |alpha| Color {
+                    a: alpha,
+                    ..hex(0x151515)
+                };
+                [
+                    base(0.55),
+                    base(if flat { 0.55 } else { 0.72 }),
+                    white(0.08),
+                    white(0.05),
+                    white(0.14),
+                    hex(0xEEF0F2),
+                    hex(0xB8BDC3),
+                ]
+            }
+            (Theme::Light, false) => opaque([
                 0xF4F5F7, 0xFFFFFF, 0xE9EBEE, 0xFFFFFF, 0xD5D9DE, 0x17181B, 0x5B616B,
-            ),
-            (Theme::Light, true) => (
+            ]),
+            (Theme::Light, true) => opaque([
                 0xFFFFFF, 0xFFFFFF, 0xE9EBEE, 0xFFFFFF, 0xD5D9DE, 0x17181B, 0x5B616B,
-            ),
+            ]),
         };
-        let content = hex(content);
         let light = theme.is_light();
         let pick = |on_light: Color, on_dark: Color| if light { on_light } else { on_dark };
+        // On Glass a shade mixed from the see-through content would be
+        // opaque, so the fills are white veils at the mockup's strengths.
+        let glass = theme.is_glass();
+        let veil = |alpha: f32, mixed: Color| if glass { white(alpha) } else { mixed };
         let faint = |color: Color| color.scale_alpha(0.08);
         let success = pick(hex(0x40A02B), hex(0xA6E3A1));
         let warning = pick(hex(0xA36706), hex(0xF2B544));
@@ -222,17 +267,19 @@ impl Tokens {
         Tokens {
             theme,
             light,
-            chrome: hex(chrome),
+            chrome,
             content,
-            raised: hex(raised),
-            field: hex(field),
-            line: hex(line),
-            text: hex(text),
-            sub: hex(sub),
-            selection: pick(hex(0xE9EBEE), mix_white(content, 0.14)),
-            hover: pick(hex(0xF1F2F4), mix_white(content, 0.07)),
-            track: pick(hex(0xE3E5E9), mix_white(content, 0.12)),
-            popover: pick(hex(0xFFFFFF), hex(raised)),
+            raised,
+            field,
+            line,
+            text,
+            sub,
+            selection: pick(hex(0xE9EBEE), veil(0.13, mix_white(content, 0.14))),
+            hover: pick(hex(0xF1F2F4), veil(0.07, mix_white(content, 0.07))),
+            track: pick(hex(0xE3E5E9), veil(0.14, mix_white(content, 0.12))),
+            // Popovers and menus stay solid on Glass, so they read over the
+            // glass they open on.
+            popover: pick(hex(0xFFFFFF), if glass { hex(0x26292D) } else { raised }),
             danger,
             success,
             success_fill: faint(success),
@@ -270,19 +317,27 @@ impl Tokens {
             MediaType::Music => (0xC4A7FF, 0xCBA6F7, 0x7C3AED),
         };
         hex(match self.theme {
-            Theme::Graphite | Theme::Charcoal => libri,
+            Theme::Graphite | Theme::Charcoal | Theme::Glass => libri,
             Theme::Mocha => catppuccin,
             Theme::Light => light,
         })
     }
 
     /// The iced theme behind the custom styles: the window background and
-    /// the defaults for widgets that are not styled by hand yet.
+    /// the defaults for widgets that are not styled by hand yet. Glass
+    /// clears the window to nothing: each screen paints its own surfaces at
+    /// their see-through strengths (the shell lays the chrome under the
+    /// sidebar alone, not under the content), and KWin blurs the desktop
+    /// behind them (`decoration`).
     pub fn iced_theme(&self) -> iced::Theme {
         iced::Theme::custom(
             "Libri",
             Palette {
-                background: self.chrome,
+                background: if self.theme.is_glass() {
+                    Color::TRANSPARENT
+                } else {
+                    self.chrome
+                },
                 text: self.text,
                 primary: self.accent,
                 success: hex(0x5EE08A),
@@ -294,17 +349,19 @@ impl Tokens {
 }
 
 /// Mixes `color` toward white by `amount` (0 to 1), as the mockup's
-/// `mixWhite` does.
+/// `mixWhite` does. The alpha is kept, so a see-through surface stays one.
 pub fn mix_white(color: Color, amount: f32) -> Color {
     let mix = |c: f32| ((c * 255.0) + (255.0 - c * 255.0) * amount).round() / 255.0;
-    Color::from_rgb(mix(color.r), mix(color.g), mix(color.b))
+    Color::from_rgba(mix(color.r), mix(color.g), mix(color.b), color.a)
 }
 
 /// The surface of plan cards and card-style sections: white on Light, a
-/// touch lighter than the content otherwise.
+/// faint white veil on Glass, a touch lighter than the content otherwise.
 pub fn card_background(tokens: &Tokens) -> Color {
     if tokens.light {
         Color::WHITE
+    } else if tokens.theme.is_glass() {
+        white(0.04)
     } else {
         mix_white(tokens.content, 0.035)
     }
@@ -391,10 +448,23 @@ pub fn contrast(a: Color, b: Color) -> f32 {
 mod tests {
     use super::*;
 
+    /// `color` laid over `backdrop`: what a see-through surface shows.
+    fn over(color: Color, backdrop: Color) -> Color {
+        let lay = |c: f32, b: f32| c * color.a + b * (1.0 - color.a);
+        Color::from_rgb(
+            lay(color.r, backdrop.r),
+            lay(color.g, backdrop.g),
+            lay(color.b, backdrop.b),
+        )
+    }
+
     /// The contrast check of phase 1g (docs/DESIGN.md section 10): body
     /// and secondary text reach AA (4.5), the accent inks and the type
     /// colors, used for labels and headings in SemiBold or larger, reach
     /// 3, on the content and the chrome of every theme, two-tone and flat.
+    /// Glass is see-through, so its surfaces are checked over a mid gray,
+    /// about what a blurred wallpaper averages; over white the body text
+    /// would fall to 3.5 on the chrome, the price of glass.
     #[test]
     fn inks_and_type_colors_read_on_every_theme() {
         let mut table = String::new();
@@ -411,6 +481,7 @@ mod tests {
                 let tokens = Tokens::styled(theme, PEACH, flat);
                 let name = format!("{}{}", theme.label(), if flat { " flat" } else { "" });
                 for (surface, bg) in [("content", tokens.content), ("chrome", tokens.chrome)] {
+                    let bg = over(bg, hex(0x808080));
                     check(format!("{name} text on {surface}"), tokens.text, bg, 4.5);
                     check(format!("{name} sub on {surface}"), tokens.sub, bg, 4.5);
                     for media in MediaType::ALL {
@@ -464,6 +535,39 @@ mod tests {
     }
 
     #[test]
+    fn glass_is_one_shade_at_two_strengths_with_white_veils() {
+        let glass = Tokens::new(Theme::Glass, PEACH);
+        let base = |alpha| Color {
+            a: alpha,
+            ..hex(0x151515)
+        };
+        assert_eq!(glass.chrome, base(0.55));
+        assert_eq!(glass.content, base(0.72));
+        assert_eq!(
+            Tokens::styled(Theme::Glass, PEACH, true).content,
+            base(0.55)
+        );
+        assert_eq!(glass.raised, white(0.08));
+        assert_eq!(glass.selection, white(0.13));
+        assert_eq!(glass.hover, white(0.07));
+        assert_eq!(card_background(&glass), white(0.04));
+        assert_eq!(glass.popover, hex(0x26292D));
+        assert_eq!(glass.type_color(MediaType::Movies), hex(0xF2B544));
+        assert!(!glass.light);
+        // The window clears to nothing; the shell paints the surfaces.
+        assert_eq!(glass.iced_theme().palette().background, Color::TRANSPARENT);
+        assert_eq!(
+            Tokens::new(Theme::Graphite, PEACH)
+                .iced_theme()
+                .palette()
+                .background,
+            hex(0x131416)
+        );
+        // A mix keeps the surface see-through.
+        assert_eq!(mix_white(glass.content, 0.1).a, 0.72);
+    }
+
+    #[test]
     fn the_ink_is_the_fill_on_dark_and_the_darker_ink_on_light() {
         assert_eq!(Tokens::new(Theme::Graphite, PEACH).ink, PEACH.fill);
         assert_eq!(Tokens::new(Theme::Light, PEACH).ink, PEACH.ink);
@@ -474,6 +578,7 @@ mod tests {
         let movies = |theme| Tokens::new(theme, PEACH).type_color(MediaType::Movies);
         assert_eq!(movies(Theme::Graphite), hex(0xF2B544));
         assert_eq!(movies(Theme::Charcoal), hex(0xF2B544));
+        assert_eq!(movies(Theme::Glass), hex(0xF2B544));
         assert_eq!(movies(Theme::Mocha), hex(0xF9E2AF));
         assert_eq!(movies(Theme::Light), hex(0xA87C00));
     }

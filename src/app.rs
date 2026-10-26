@@ -7,7 +7,7 @@ use iced::widget::{operation, scrollable};
 use iced::window::{self, settings::PlatformSpecific};
 use iced::{Element, Event, Size, Subscription, Task, event, mouse, time};
 
-use crate::decoration::TitleBar;
+use crate::decoration::Decoration;
 use crate::history::{Direction, History, Place};
 use crate::lookup;
 use crate::model::Date;
@@ -34,6 +34,9 @@ pub fn run() -> iced::Result {
             application_id: "libri".into(),
             ..PlatformSpecific::default()
         },
+        // Glass paints see-through surfaces over the blurred desktop; the
+        // other themes paint every pixel, so they lose nothing by it.
+        transparent: true,
         ..window::Settings::default()
     };
     freeze_log();
@@ -202,7 +205,7 @@ pub struct App {
     /// The places visited, for Back and Forward.
     pub history: History,
     /// KWin's title bar, once the window is open on Plasma Wayland.
-    pub title_bar: Option<TitleBar>,
+    pub decoration: Option<Box<Decoration>>,
     /// What the online lookup is doing, faked until phase 4 asks the real
     /// providers (`LIBRI_LOOKUP`).
     pub lookup: lookup::LookupState,
@@ -223,7 +226,7 @@ pub enum Message {
     /// The window's events, for the freeze trace.
     Window(window::Event),
     /// The hold on KWin's title bar, once the window is open.
-    TitleBar(Option<TitleBar>),
+    Decoration(Option<Box<Decoration>>),
     /// The sync row's and the banner's actions, and the conflict dialog.
     Sync(SyncMessage),
     Library(library::Message),
@@ -307,8 +310,9 @@ impl App {
     /// Starts on the screen named by `LIBRI_SCREEN` (development only),
     /// or the library. `LIBRI_FIRST_RUN` starts with no repository,
     /// `LIBRI_SYNC` fakes the sync state ("expired", "expires-in-6"),
-    /// `LIBRI_PLASMA=light` a light Plasma, and `LIBRI_SETUP` picks the
-    /// setup step (welcome, connect, branch, file, create, existing, done).
+    /// `LIBRI_PLASMA=light` a light Plasma, `LIBRI_THEME` and `LIBRI_FLAT`
+    /// the theme and style, and `LIBRI_SETUP` picks the setup step
+    /// (welcome, connect, branch, file, create, existing, done).
     fn boot() -> (App, Task<Message>) {
         let var = |name| std::env::var(name).ok();
         let screen = var("LIBRI_SCREEN")
@@ -331,6 +335,10 @@ impl App {
         if var("LIBRI_PLASMA").is_some_and(|value| value == "light") {
             app.plasma_dark = false;
         }
+        if let Some(theme) = var("LIBRI_THEME").and_then(|value| ThemeChoice::from_env(&value)) {
+            app.settings.theme = theme;
+        }
+        app.settings.flat |= var("LIBRI_FLAT").is_some();
         if let Some(step) = var("LIBRI_SETUP").and_then(|name| setup::Step::from_name(&name)) {
             app.setup = setup::State::at(step, app.source.as_ref());
         }
@@ -348,7 +356,7 @@ impl App {
         }) {
             app.dialog = Some(entry::Dialog::SeasonDropped { id, season });
         }
-        (app, TitleBar::take().map(Message::TitleBar))
+        (app, Decoration::take().map(Message::Decoration))
     }
 
     /// The app on `screen`, connected to the fixture repository.
@@ -377,7 +385,7 @@ impl App {
             window: WINDOW_SIZE,
             frames: crate::trace::Frames::new(std::time::Instant::now()),
             history: History::default(),
-            title_bar: None,
+            decoration: None,
             lookup: lookup::LookupState::Results,
         }
     }
@@ -411,8 +419,8 @@ impl App {
             self.history.visit(from);
         }
         let (theme, flat) = (self.theme(), self.settings.flat);
-        if let Some(title_bar) = &mut self.title_bar {
-            title_bar.set(theme, flat);
+        if let Some(decoration) = &mut self.decoration {
+            decoration.set(theme, flat);
         }
         task
     }
@@ -461,7 +469,7 @@ impl App {
             Message::Tick => self.splash_phase = (self.splash_phase + 0.016 / 1.4) % 1.0,
             Message::Resized(size) => self.window = size,
             Message::Window(event) => self.trace_window(event),
-            Message::TitleBar(title_bar) => self.title_bar = title_bar,
+            Message::Decoration(decoration) => self.decoration = decoration,
             // Phase 3 syncs for real; until then the fake state moves on.
             Message::Sync(SyncMessage::Retry) => self.sync = SyncState::Saving { changes: 3 },
             Message::Sync(SyncMessage::Fix) => {

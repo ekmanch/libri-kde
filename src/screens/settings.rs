@@ -374,7 +374,7 @@ fn appearance<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             ),
             setting(
                 "Background style",
-                settings.flat_help(tokens.light).into(),
+                settings.flat_help(tokens.theme).into(),
                 style,
                 tokens,
             ),
@@ -404,7 +404,7 @@ fn segment<'a>(items: [(&'a str, bool, Message); 2], tokens: &Tokens) -> Element
     .into()
 }
 
-/// The five theme cards, three to a row, each with a small preview.
+/// The six theme cards, three to a row, each with a small preview.
 fn theme_cards<'a>(app: &App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let mut rows = Column::new().spacing(14);
     for chunk in ThemeChoice::ALL.chunks(3) {

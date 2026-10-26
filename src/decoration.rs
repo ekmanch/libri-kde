@@ -1,4 +1,5 @@
-//! KWin's title bar in Libri's colors.
+//! What KWin draws for Libri's window: the title bar in Libri's colors,
+//! and the blur behind the window with the Glass theme.
 //!
 //! The title bar is KDE's own (docs/DESIGN.md section 3), so Libri cannot
 //! paint it. On Plasma Wayland KWin takes a color scheme per window through
@@ -14,6 +15,12 @@
 //! Klassy keeps the colors it derived until the window's application
 //! palette changes, and the title bar entries are not part of that palette,
 //! so without the window colors every scheme after the first was ignored.
+//!
+//! Glass paints see-through surfaces, and asks KWin through the
+//! `org_kde_kwin_blur` protocol to blur what is behind the whole window,
+//! as Plasma's own panels do; the blur effect (or Better Blur) does the
+//! rest, with the strength, noise and tint the owner set for it. Any other
+//! theme takes the request back.
 
 use std::fmt;
 use std::sync::Arc;
@@ -25,6 +32,9 @@ use wayland_client::backend::{Backend, ObjectId};
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::{wl_registry, wl_surface::WlSurface};
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, delegate_noop};
+use wayland_protocols_plasma::blur::client::{
+    org_kde_kwin_blur::OrgKdeKwinBlur, org_kde_kwin_blur_manager::OrgKdeKwinBlurManager,
+};
 use wayland_protocols_plasma::server_decoration_palette::client::{
     org_kde_kwin_server_decoration_palette::OrgKdeKwinServerDecorationPalette,
     org_kde_kwin_server_decoration_palette_manager::OrgKdeKwinServerDecorationPaletteManager,
@@ -51,6 +61,9 @@ pub fn scheme_path(theme: Theme, flat: bool) -> &'static str {
         (Theme::Graphite, true) => scheme!("graphite-flat"),
         (Theme::Charcoal, _) => scheme!("charcoal"),
         (Theme::Mocha, _) => scheme!("mocha"),
+        // The chrome's shade at the chrome's strength: Klassy takes the
+        // alpha (unless its own opacity override is on), Breeze does not.
+        (Theme::Glass, _) => scheme!("glass"),
         (Theme::Light, false) => scheme!("light"),
         (Theme::Light, true) => scheme!("light-flat"),
     }
@@ -63,25 +76,33 @@ pub fn inactive_title(tokens: &Tokens) -> Color {
     Color::from_rgb((a.r + b.r) / 2.0, (a.g + b.g) / 2.0, (a.b + b.b) / 2.0)
 }
 
-/// Libri's hold on its window's title bar: the palette object KWin keeps
-/// for the window, and the scheme named last.
+/// Libri's hold on what KWin draws for its window: the palette object KWin
+/// keeps for the title bar and the scheme named last, and the blur request
+/// while Glass is on.
 #[derive(Clone)]
-pub struct TitleBar {
+pub struct Decoration {
     connection: Connection,
-    /// The queue the palette objects belong to, kept for as long as they are.
+    /// The queue the objects belong to, kept for as long as they are.
     _queue: Arc<EventQueue<Registry>>,
+    handle: QueueHandle<Registry>,
+    surface: WlSurface,
     palette: OrgKdeKwinServerDecorationPalette,
     current: &'static str,
+    /// `None` without KWin's blur effect, or any other compositor.
+    blur_manager: Option<OrgKdeKwinBlurManager>,
+    blur: Option<OrgKdeKwinBlur>,
 }
 
-impl TitleBar {
-    /// Takes hold of the main window's title bar once the window is open:
-    /// `None` anywhere but Plasma Wayland.
-    pub fn take() -> Task<Option<TitleBar>> {
-        window::oldest().and_then(|id| window::run(id, TitleBar::attach))
+impl Decoration {
+    /// Takes hold of the main window's decoration once the window is open:
+    /// `None` anywhere but Plasma Wayland. Boxed, since the Wayland objects
+    /// would otherwise make it the app's largest message by far.
+    pub fn take() -> Task<Option<Box<Decoration>>> {
+        window::oldest()
+            .and_then(|id| window::run(id, |window| Decoration::attach(window).map(Box::new)))
     }
 
-    fn attach(window: &dyn Window) -> Option<TitleBar> {
+    fn attach(window: &dyn Window) -> Option<Decoration> {
         let RawDisplayHandle::Wayland(display) = window.display_handle().ok()?.as_raw() else {
             return None;
         };
@@ -103,36 +124,73 @@ impl TitleBar {
         let manager: OrgKdeKwinServerDecorationPaletteManager =
             globals.bind(&handle, 1..=1, ()).ok()?;
         let palette = manager.create(&surface, &handle, ());
-        Some(TitleBar {
+        let blur_manager = globals.bind(&handle, 1..=1, ()).ok();
+        Some(Decoration {
             connection,
             _queue: Arc::new(queue),
+            handle,
+            surface,
             palette,
             current: "",
+            blur_manager,
+            blur: None,
         })
     }
 
-    /// Names the scheme for `theme` and `flat` to KWin, when it changed.
+    /// Names the scheme for `theme` and `flat` to KWin, and asks for the
+    /// blur behind the window or takes the request back, when either
+    /// changed.
     pub fn set(&mut self, theme: Theme, flat: bool) {
         let path = scheme_path(theme, flat);
-        if path == self.current {
-            return;
+        let mut changed = false;
+        if path != self.current {
+            self.current = path;
+            self.palette.set_palette(path.to_owned());
+            changed = true;
         }
-        self.current = path;
-        self.palette.set_palette(path.to_owned());
-        let _ = self.connection.flush();
+        if let Some(manager) = &self.blur_manager
+            && theme.is_glass() != self.blur.is_some()
+        {
+            match self.blur.take() {
+                Some(blur) => {
+                    manager.unset(&self.surface);
+                    blur.release();
+                }
+                None => {
+                    // No region: the whole surface. KWin applies it with
+                    // the surface's next commit, the redraw of the theme
+                    // change.
+                    let blur = manager.create(&self.surface, &self.handle, ());
+                    blur.set_region(None);
+                    blur.commit();
+                    self.blur = Some(blur);
+                }
+            }
+            changed = true;
+        }
+        if changed {
+            let _ = self.connection.flush();
+        }
+    }
+
+    /// Whether KWin is blurring what is behind the window.
+    pub fn blurred(&self) -> bool {
+        self.blur.is_some()
     }
 }
 
-impl fmt::Debug for TitleBar {
+impl fmt::Debug for Decoration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TitleBar")
+        f.debug_struct("Decoration")
             .field("current", &self.current)
+            .field("blurred", &self.blurred())
             .finish()
     }
 }
 
-/// The state behind the palette objects' queue. No event ever arrives:
-/// the registry's globals are read once, and the palette has none.
+/// The state behind the objects' queue. No event ever arrives: the
+/// registry's globals are read once, and the palette and the blur have
+/// none.
 struct Registry;
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Registry {
@@ -149,6 +207,8 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Registry {
 
 delegate_noop!(Registry: ignore OrgKdeKwinServerDecorationPaletteManager);
 delegate_noop!(Registry: ignore OrgKdeKwinServerDecorationPalette);
+delegate_noop!(Registry: ignore OrgKdeKwinBlurManager);
+delegate_noop!(Registry: ignore OrgKdeKwinBlur);
 
 #[cfg(test)]
 mod tests {
@@ -157,8 +217,12 @@ mod tests {
     use super::*;
     use crate::theme::PEACH;
 
-    /// The `key=r,g,b` entries of a scheme file, by `group.key`.
-    fn entries(path: &str) -> HashMap<String, (u8, u8, u8)> {
+    /// A scheme entry: the color, and the alpha where there is one.
+    type Entry = ((u8, u8, u8), Option<u8>);
+
+    /// The `key=r,g,b` or `key=r,g,b,a` entries of a scheme file, by
+    /// `group.key`.
+    fn entries(path: &str) -> HashMap<String, Entry> {
         let text = std::fs::read_to_string(path).expect("the scheme file is in the checkout");
         let mut group = String::new();
         let mut entries = HashMap::new();
@@ -174,9 +238,10 @@ mod tests {
         entries
     }
 
-    fn parse_rgb(value: &str) -> Option<(u8, u8, u8)> {
+    fn parse_rgb(value: &str) -> Option<Entry> {
         let mut parts = value.split(',').map(|part| part.trim().parse::<u8>().ok());
-        Some((parts.next()??, parts.next()??, parts.next()??))
+        let rgb = (parts.next()??, parts.next()??, parts.next()??);
+        Some((rgb, parts.next().flatten()))
     }
 
     fn rgb(color: Color) -> (u8, u8, u8) {
@@ -190,10 +255,20 @@ mod tests {
             for flat in [false, true] {
                 let tokens = Tokens::styled(theme, PEACH, flat);
                 let entries = entries(scheme_path(theme, flat));
+                // Glass carries the chrome's strength as the bar's alpha.
+                let alpha = theme.is_glass().then_some(140);
                 let expect = |key: &str, color: Color| {
+                    let (got, got_alpha) = entries[key];
                     assert_eq!(
-                        entries.get(key).copied(),
-                        Some(rgb(color)),
+                        (got, got_alpha),
+                        (
+                            rgb(color),
+                            if key.ends_with("Background") || key.ends_with("BackgroundNormal") {
+                                alpha
+                            } else {
+                                None
+                            }
+                        ),
                         "{theme:?} flat={flat} {key}"
                     );
                 };
@@ -221,6 +296,10 @@ mod tests {
         assert_eq!(
             scheme_path(Theme::Mocha, false),
             scheme_path(Theme::Mocha, true)
+        );
+        assert_eq!(
+            scheme_path(Theme::Glass, false),
+            scheme_path(Theme::Glass, true)
         );
         assert_ne!(
             scheme_path(Theme::Graphite, false),

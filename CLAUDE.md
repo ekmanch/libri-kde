@@ -47,6 +47,7 @@ LIBRI_SYNC=expired cargo run       # the sync row's state: synced, saving, offli
 LIBRI_LOCAL=1 cargo run            # disconnected with the library kept on this computer (local mode)
 LIBRI_SHOT=settings cargo test --test screenshots -- --ignored capture_every_screen   # only the captures whose name contains it
 LIBRI_PLASMA=light cargo run       # a light Plasma, for the System theme
+LIBRI_THEME=glass cargo run        # starts in a theme: system, graphite, charcoal, mocha, glass, light; LIBRI_FLAT=1 for the flat style
 LIBRI_FIRST_RUN=1 cargo run        # no repository yet (the splash's first-run line, Settings not connected)
 LIBRI_SETUP=branch cargo run       # with LIBRI_SCREEN=setup: welcome, connect, branch, file, create, existing, done
 LIBRI_LONG_LISTS=1 cargo run       # section headers and the jump rail on every list, and tag groups of four or more as long groups, since the fixture is short
@@ -68,7 +69,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-To look at a screen, capture it rather than taking a desktop screenshot. This renders every screen in Graphite and Light at 1600 × 900 (2× scale) to `screenshots/` (git-ignored), and the window sizes of phase 1g to `screenshots/sizes/`:
+To look at a screen, capture it rather than taking a desktop screenshot. This renders every screen in Graphite, Light and Glass at 1600 × 900 (2× scale) to `screenshots/` (git-ignored), and the window sizes of phase 1g to `screenshots/sizes/`. Glass comes out see-through on nothing; to see it over the blur, run `LIBRI_THEME=glass cargo run` and capture the window with `spectacle -b -n -a -o <file>`:
 
 ```fish
 cargo test --test screenshots -- --ignored
