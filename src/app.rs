@@ -390,11 +390,14 @@ impl App {
         }
     }
 
-    /// Applies one change to the library. A change that cannot apply (an
-    /// entry gone meanwhile) leaves the library as it was.
+    /// Applies one change to the library and notes its summary in the
+    /// trace. A change that cannot apply (an entry gone meanwhile) leaves
+    /// the library as it was.
     pub fn apply(&mut self, operation: Operation) {
-        if let Err(error) = self.repo.apply(operation) {
-            eprintln!("libri: change not applied: {error}");
+        let summary = operation.summary(self.repo.library());
+        match self.repo.apply(operation) {
+            Ok(_) => crate::trace::line(format_args!("change: {summary}")),
+            Err(error) => eprintln!("libri: change not applied ({summary}): {error}"),
         }
     }
 

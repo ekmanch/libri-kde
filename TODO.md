@@ -163,7 +163,7 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 ## Phase 2: Local data
 
 - [ ] Persist the library to a local file (`~/.local/share/libri/`), changes survive a restart
-- [ ] Operations layer: every change is a small named operation with a readable summary, as on the phone
+- [x] Operations layer: every change is a small named operation with a readable summary, as on the phone (`Operation::summary`, in the phone's words; written to the trace until phase 3 uses them as commit messages)
 - [ ] Display preferences on the device (`~/.config/libri/`), never synced
 - [ ] System theme for real: read Plasma's color scheme from the desktop portal (`org.freedesktop.appearance` `color-scheme`) and follow it while Libri runs. Needs a D-Bus crate (`ashpd` or `zbus`) or a `busctl` call; decide which. Until then `LIBRI_PLASMA=light` fakes a light Plasma
 

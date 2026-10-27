@@ -21,9 +21,10 @@ pub trait LibraryRepository {
     fn apply(&mut self, operation: Operation) -> Result<&Library, RepoError>;
 }
 
-/// The starter set of changes. Each is small and named so phase 2 can give
-/// it a readable summary and re-apply it after a sync conflict. None of
-/// them reorders existing entries or plans.
+/// Every change to the library. Each is small and named, with a readable
+/// summary (`Operation::summary`) for the commit messages of phase 3 and
+/// a safe re-apply after a sync conflict. None of them reorders existing
+/// entries or plans.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operation {
     AddEntry(Entry),
@@ -125,6 +126,142 @@ pub enum Operation {
 }
 
 impl Operation {
+    /// A one-line account of the change in the imperative, worded as on
+    /// the phone ("Mark The Mummy as done", "Tick The Mummy in Halloween
+    /// 2026"): the commit messages of phase 3, and the trace meanwhile.
+    /// `before` is the library the change applies to, for the titles; a
+    /// target that is gone is named by its id.
+    pub fn summary(&self, before: &Library) -> String {
+        let title = |id: &str| {
+            before
+                .entry(id)
+                .map_or_else(|| id.to_owned(), |entry| entry.title.clone())
+        };
+        let plan_title = |id: &str| before.plan(id).map_or_else(|| id.to_owned(), Plan::title);
+        match self {
+            Operation::AddEntry(entry) => format!("Add {}", entry.title),
+            Operation::UpdateEntry(entry) => format!("Edit {}", entry.title),
+            Operation::DeleteEntry { id } => format!("Delete {}", title(id)),
+            Operation::SetStatus { id, status } => {
+                format!("Mark {} as {}", title(id), status_word(Some(*status)))
+            }
+            Operation::SetRating {
+                id,
+                rating: Some(rating),
+            } => format!("Rate {} {rating} of 10", title(id)),
+            Operation::SetRating { id, rating: None } => {
+                format!("Clear the rating of {}", title(id))
+            }
+            Operation::SetPlanItemDone { plan, entry, done } => format!(
+                "{} {} in {}",
+                if *done { "Tick" } else { "Untick" },
+                title(entry),
+                plan_title(plan)
+            ),
+            Operation::AddPlan(plan) => format!("Add the plan {}", plan.title()),
+            Operation::UpdatePlan(plan) => format!("Edit the plan {}", plan.title()),
+            Operation::DeletePlan { id } => format!("Delete the plan {}", plan_title(id)),
+            Operation::CreateTag { name, .. } => format!("Add the tag #{name}"),
+            Operation::SetTagCategories { name, categories } => {
+                let labels: Vec<&str> = in_order(categories)
+                    .into_iter()
+                    .map(TagCategory::name)
+                    .collect();
+                format!("Put the tag #{name} under {}", labels.join(", "))
+            }
+            Operation::SetPlanItem { plan, item } => {
+                let old = before.plan(plan).and_then(|p| p.item_for(&item.entry));
+                let (entry, plan) = (title(&item.entry), plan_title(plan));
+                let Some(old) = old else {
+                    return format!("Add {entry} to {plan}");
+                };
+                let only = |changed: PlanItem| changed == *item;
+                if old.done != item.done
+                    && only(PlanItem {
+                        done: item.done,
+                        ..old.clone()
+                    })
+                {
+                    let tick = if item.done { "Tick" } else { "Untick" };
+                    format!("{tick} {entry} in {plan}")
+                } else if only(PlanItem {
+                    note: item.note.clone(),
+                    ..old.clone()
+                }) {
+                    format!("Edit the note on {entry} in {plan}")
+                } else if only(PlanItem {
+                    when: item.when,
+                    ..old.clone()
+                }) {
+                    if item.when.is_none() {
+                        format!("Clear the date of {entry} in {plan}")
+                    } else {
+                        format!("Set the date of {entry} in {plan}")
+                    }
+                } else {
+                    format!("Edit {entry} in {plan}")
+                }
+            }
+            Operation::RemovePlanItem { plan, entry } => {
+                format!("Remove {} from {}", title(entry), plan_title(plan))
+            }
+            Operation::SetTrackRating {
+                album,
+                title: track,
+                rating: Some(rating),
+            } => format!("Rate {track} on {} {rating} of 10", title(album)),
+            Operation::SetTrackRating {
+                album,
+                title: track,
+                rating: None,
+            } => format!("Clear the rating of {track} on {}", title(album)),
+            Operation::SetSeasonStatus {
+                id,
+                season,
+                status: Some(status),
+                ..
+            } => format!(
+                "Mark {} season {season} as {}",
+                title(id),
+                status_word(Some(*status))
+            ),
+            Operation::SetSeasonStatus {
+                id,
+                season,
+                status: None,
+                ..
+            } => format!("Clear the status of {} season {season}", title(id)),
+            Operation::MarkSeasonsDone {
+                id, before: upto, ..
+            } => {
+                let numbers: Vec<u32> = before
+                    .entry(id)
+                    .map(|show| show.season_list())
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|s| s.season)
+                    .filter(|n| n < upto)
+                    .collect();
+                let what = if numbers.is_empty() {
+                    "earlier seasons".to_owned()
+                } else {
+                    seasons_phrase(&numbers)
+                };
+                format!("Mark {} {what} as done", title(id))
+            }
+            Operation::SetSeasons { id, .. } => format!("Set the seasons of {}", title(id)),
+            Operation::RemoveSeason { id, season, .. } => {
+                format!("Remove season {season} of {}", title(id))
+            }
+            Operation::KeepSeason { id, season } => {
+                format!("Keep season {season} of {}", title(id))
+            }
+            Operation::SetSeriesCover { id } => {
+                format!("Use {} as the cover of its series", title(id))
+            }
+        }
+    }
+
     pub fn apply_to(self, library: &mut Library) -> Result<(), RepoError> {
         match self {
             Operation::AddEntry(entry) => {
@@ -342,6 +479,36 @@ impl Operation {
     }
 }
 
+/// Mid-sentence status words: "want", "in progress", "done", "DNF", or
+/// "not set" for none.
+fn status_word(status: Option<EntryStatus>) -> &'static str {
+    match status {
+        None => "not set",
+        Some(EntryStatus::Want) => "want",
+        Some(EntryStatus::InProgress) => "in progress",
+        Some(EntryStatus::Done) => "done",
+        Some(EntryStatus::Dnf) => "DNF",
+    }
+}
+
+/// "season 3", "seasons 1–5", "seasons 2, 4 and 5".
+fn seasons_phrase(numbers: &[u32]) -> String {
+    let mut sorted = numbers.to_vec();
+    sorted.sort_unstable();
+    let (first, last) = (sorted[0], sorted[sorted.len() - 1]);
+    if sorted.len() == 1 {
+        return format!("season {first}");
+    }
+    if last - first == sorted.len() as u32 - 1 {
+        return format!("seasons {first}–{last}");
+    }
+    let head: Vec<String> = sorted[..sorted.len() - 1]
+        .iter()
+        .map(u32::to_string)
+        .collect();
+    format!("seasons {} and {last}", head.join(", "))
+}
+
 /// `categories` without repeats, in category order.
 fn in_order(categories: &[TagCategory]) -> Vec<TagCategory> {
     TagCategory::ALL
@@ -416,3 +583,252 @@ impl fmt::Display for RepoError {
 }
 
 impl std::error::Error for RepoError {}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+    use crate::fixtures;
+    use crate::model::{PlanWhen, codec};
+
+    const MUMMY: &str = "movies/the-mummy-1999";
+    const DRACULA: &str = "books/dracula-1897";
+    const DIRT: &str = "music/dirt-alice-in-chains";
+    const FRIEREN: &str = "anime/frieren-beyond-journeys-end-2023";
+    const TOWERS: &str = "movies/the-lord-of-the-rings-the-two-towers-2002";
+    const HALLOWEEN: &str = "halloween-2025";
+
+    fn today() -> Date {
+        Date::parse("2026-10-19").unwrap()
+    }
+
+    #[test]
+    fn every_change_has_a_summary_in_the_phones_words() {
+        let library: Library = codec::decode(fixtures::LIBRARY_JSON).unwrap();
+        let title = |id: &str| library.entry(id).unwrap().title.clone();
+        let mummy = library.entry(MUMMY).unwrap().clone();
+        let halloween = library.plan(HALLOWEEN).unwrap().clone();
+        let plan = halloween.title();
+        let item = halloween.item_for(DRACULA).unwrap().clone();
+        let (frieren, dracula, dirt) = (title(FRIEREN), title(DRACULA), title(DIRT));
+        let id = |s: &str| s.to_owned();
+        let in_plan = |item: PlanItem| Operation::SetPlanItem {
+            plan: id(HALLOWEEN),
+            item,
+        };
+        let tick = if item.done { "Untick" } else { "Tick" };
+        let cases = [
+            (
+                Operation::AddEntry(mummy.clone()),
+                "Add The Mummy".to_owned(),
+            ),
+            (
+                Operation::UpdateEntry(mummy.clone()),
+                "Edit The Mummy".into(),
+            ),
+            (
+                Operation::DeleteEntry { id: id(MUMMY) },
+                "Delete The Mummy".into(),
+            ),
+            (
+                Operation::DeleteEntry {
+                    id: id("movies/gone"),
+                },
+                "Delete movies/gone".into(),
+            ),
+            (
+                Operation::SetStatus {
+                    id: id(MUMMY),
+                    status: EntryStatus::InProgress,
+                },
+                "Mark The Mummy as in progress".into(),
+            ),
+            (
+                Operation::SetRating {
+                    id: id(MUMMY),
+                    rating: Some(9),
+                },
+                "Rate The Mummy 9 of 10".into(),
+            ),
+            (
+                Operation::SetRating {
+                    id: id(MUMMY),
+                    rating: None,
+                },
+                "Clear the rating of The Mummy".into(),
+            ),
+            (
+                Operation::SetPlanItemDone {
+                    plan: id(HALLOWEEN),
+                    entry: id(DRACULA),
+                    done: false,
+                },
+                format!("Untick {dracula} in {plan}"),
+            ),
+            (
+                Operation::AddPlan(halloween.clone()),
+                format!("Add the plan {plan}"),
+            ),
+            (
+                Operation::UpdatePlan(halloween.clone()),
+                format!("Edit the plan {plan}"),
+            ),
+            (
+                Operation::DeletePlan { id: id(HALLOWEEN) },
+                format!("Delete the plan {plan}"),
+            ),
+            (
+                Operation::CreateTag {
+                    name: id("eerie"),
+                    categories: vec![TagCategory::Mood],
+                },
+                "Add the tag #eerie".into(),
+            ),
+            (
+                Operation::SetTagCategories {
+                    name: id("clint-eastwood"),
+                    categories: vec![TagCategory::Actors, TagCategory::Directors],
+                },
+                "Put the tag #clint-eastwood under Directors, Actors".into(),
+            ),
+            (
+                in_plan(PlanItem {
+                    entry: id(MUMMY),
+                    done: false,
+                    repeat: false,
+                    note: String::new(),
+                    when: None,
+                }),
+                format!("Add The Mummy to {plan}"),
+            ),
+            (
+                in_plan(PlanItem {
+                    done: !item.done,
+                    ..item.clone()
+                }),
+                format!("{tick} {dracula} in {plan}"),
+            ),
+            (
+                in_plan(PlanItem {
+                    note: id("Again"),
+                    ..item.clone()
+                }),
+                format!("Edit the note on {dracula} in {plan}"),
+            ),
+            (
+                in_plan(PlanItem {
+                    when: Some(PlanWhen {
+                        from: today(),
+                        to: today(),
+                    }),
+                    ..item.clone()
+                }),
+                format!("Set the date of {dracula} in {plan}"),
+            ),
+            (
+                in_plan(PlanItem {
+                    note: id("x"),
+                    repeat: !item.repeat,
+                    ..item.clone()
+                }),
+                format!("Edit {dracula} in {plan}"),
+            ),
+            (
+                Operation::RemovePlanItem {
+                    plan: id(HALLOWEEN),
+                    entry: id(DRACULA),
+                },
+                format!("Remove {dracula} from {plan}"),
+            ),
+            (
+                Operation::SetTrackRating {
+                    album: id(DIRT),
+                    title: id("Would?"),
+                    rating: Some(10),
+                },
+                format!("Rate Would? on {dirt} 10 of 10"),
+            ),
+            (
+                Operation::SetTrackRating {
+                    album: id(DIRT),
+                    title: id("Would?"),
+                    rating: None,
+                },
+                format!("Clear the rating of Would? on {dirt}"),
+            ),
+            (
+                Operation::SetSeasonStatus {
+                    id: id(FRIEREN),
+                    season: 2,
+                    status: Some(EntryStatus::Done),
+                    today: today(),
+                },
+                format!("Mark {frieren} season 2 as done"),
+            ),
+            (
+                Operation::SetSeasonStatus {
+                    id: id(FRIEREN),
+                    season: 2,
+                    status: None,
+                    today: today(),
+                },
+                format!("Clear the status of {frieren} season 2"),
+            ),
+            (
+                Operation::MarkSeasonsDone {
+                    id: id(FRIEREN),
+                    before: 2,
+                    today: today(),
+                },
+                format!("Mark {frieren} season 1 as done"),
+            ),
+            (
+                Operation::MarkSeasonsDone {
+                    id: id(FRIEREN),
+                    before: 1,
+                    today: today(),
+                },
+                format!("Mark {frieren} earlier seasons as done"),
+            ),
+            (
+                Operation::SetSeasons {
+                    id: id(FRIEREN),
+                    seasons: Vec::new(),
+                    today: today(),
+                },
+                format!("Set the seasons of {frieren}"),
+            ),
+            (
+                Operation::RemoveSeason {
+                    id: id(FRIEREN),
+                    season: 2,
+                    today: today(),
+                },
+                format!("Remove season 2 of {frieren}"),
+            ),
+            (
+                Operation::KeepSeason {
+                    id: id(FRIEREN),
+                    season: 2,
+                },
+                format!("Keep season 2 of {frieren}"),
+            ),
+            (
+                Operation::SetSeriesCover { id: id(TOWERS) },
+                format!("Use {} as the cover of its series", title(TOWERS)),
+            ),
+        ];
+        for (operation, expected) in cases {
+            assert_eq!(operation.summary(&library), expected, "{operation:?}");
+        }
+    }
+
+    #[test]
+    fn seasons_are_phrased_as_one_a_run_or_a_list() {
+        assert_eq!(seasons_phrase(&[3]), "season 3");
+        assert_eq!(seasons_phrase(&[1, 2, 3]), "seasons 1–3");
+        assert_eq!(seasons_phrase(&[5, 4]), "seasons 4–5");
+        assert_eq!(seasons_phrase(&[2, 4, 5]), "seasons 2, 4 and 5");
+        assert_eq!(status_word(None), "not set");
+        assert_eq!(status_word(Some(EntryStatus::Dnf)), "DNF");
+    }
+}

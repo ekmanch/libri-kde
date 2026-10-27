@@ -22,7 +22,7 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 - `ui`: widgets shared by every screen (buttons, headers, icons). UI that repeats across screens is one shared widget here, never copied.
 - `screens`: one module per screen (splash, setup, library, plans, settings), the window shell and the token warning.
 - `model`: the `library.json` model and `model::codec`, the canonical JSON encoding.
-- `repo`: the `LibraryRepository` trait and its implementations (the fixture one for now).
+- `repo`: the `LibraryRepository` trait, every change as an `Operation` with its summary, and its implementations (the fixture one for now).
 - `fixtures`: the bundled fixture library.
 
 ## Git rules
