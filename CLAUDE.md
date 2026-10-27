@@ -24,6 +24,7 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 - `model`: the `library.json` model and `model::codec`, the canonical JSON encoding.
 - `repo`: the `LibraryRepository` trait, every change as an `Operation` with its summary, and the implementations: the local file (`LocalLibraryRepository`) and the fixture in memory for the tests.
 - `storage`: the folders under the XDG homes and the atomic file write.
+- `preferences`: the display preferences file, what it holds and when it is written.
 - `fixtures`: the bundled fixture library.
 
 ## Git rules
@@ -34,8 +35,8 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 ## Working rules
 
 - Tick off items in `TODO.md` as they are completed. Add new items there when you find missing work, instead of doing unplanned work silently.
-- No networking and no GitHub access before phase 3. Phase 2 writes only the library file below, atomically through `storage`.
-- The library is `~/.local/share/libri/library.json` (seeded from the fixture until phase 3). The tests never touch it: `App::new` keeps everything in memory, and file tests use `storage::TempDir`.
+- No networking and no GitHub access before phase 3. Phase 2 writes only the two files below, both atomically through `storage`.
+- The library is `~/.local/share/libri/library.json` (seeded from the fixture until phase 3) and the preferences `~/.config/libri/preferences.json`. The tests never touch them: `App::new` keeps everything in memory, and file tests use `storage::TempDir`.
 - UI text uses American spelling ("color", "favorite") and sentence case.
 - All `library.json` text goes through `model::codec`, which writes the same bytes as the phone's `lib/data/library_codec.dart`. Keep `assets/fixtures/library.json` byte-identical to the phone's copy; the round-trip test checks it is canonical.
 - Ask before adding a crate. Say what it is for and what the alternative is.
@@ -49,7 +50,7 @@ LIBRI_SYNC=expired cargo run       # the sync row's state: synced, saving, offli
 LIBRI_LOCAL=1 cargo run            # disconnected with the library kept on this computer (local mode)
 LIBRI_SHOT=settings cargo test --test screenshots -- --ignored capture_every_screen   # only the captures whose name contains it
 LIBRI_PLASMA=light cargo run       # a light Plasma, for the System theme
-LIBRI_THEME=glass cargo run        # starts in a theme: system, graphite, charcoal, mocha, glass, light; LIBRI_FLAT=1 for the flat style
+LIBRI_THEME=glass cargo run        # starts in a theme: system, graphite, charcoal, mocha, glass, light; LIBRI_FLAT=1 for the flat style. With LIBRI_THEME, LIBRI_FLAT or LIBRI_PLASMA set the preferences are read but never written
 LIBRI_FIRST_RUN=1 cargo run        # no repository yet (the splash's first-run line, Settings not connected)
 LIBRI_SETUP=branch cargo run       # with LIBRI_SCREEN=setup: welcome, connect, branch, file, create, existing, done
 LIBRI_LONG_LISTS=1 cargo run       # section headers and the jump rail on every list, and tag groups of four or more as long groups, since the fixture is short

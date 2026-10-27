@@ -11,6 +11,7 @@ use crate::decoration::Decoration;
 use crate::history::{Direction, History, Place};
 use crate::lookup;
 use crate::model::Date;
+use crate::preferences::{Preferences, PreferencesFile};
 use crate::repo::Operation;
 use crate::repo::{FixtureLibraryRepository, LibraryRepository, LocalLibraryRepository};
 use crate::screens::{self, Screen, entry, library, plans, setup, token};
@@ -210,6 +211,8 @@ pub struct App {
     /// What the online lookup is doing, faked until phase 4 asks the real
     /// providers (`LIBRI_LOOKUP`).
     pub lookup: lookup::LookupState,
+    /// `preferences.json` on this computer; kept nowhere in the tests.
+    pub preferences: PreferencesFile,
 }
 
 #[derive(Debug, Clone)]
@@ -309,12 +312,13 @@ pub enum KeyPress {
 
 impl App {
     /// Starts on the screen named by `LIBRI_SCREEN` (development only),
-    /// or the library, with the library from this computer's file.
-    /// `LIBRI_FIRST_RUN` starts with no repository,
+    /// or the library, with the library and the preferences from this
+    /// computer's files. `LIBRI_FIRST_RUN` starts with no repository,
     /// `LIBRI_SYNC` fakes the sync state ("expired", "expires-in-6"),
     /// `LIBRI_PLASMA=light` a light Plasma, `LIBRI_THEME` and `LIBRI_FLAT`
-    /// the theme and style, and `LIBRI_SETUP` picks the setup step
-    /// (welcome, connect, branch, file, create, existing, done).
+    /// the theme and style (a faked look is never saved as the
+    /// preference), and `LIBRI_SETUP` picks the setup step (welcome,
+    /// connect, branch, file, create, existing, done).
     fn boot() -> (App, Task<Message>) {
         let var = |name| std::env::var(name).ok();
         let screen = var("LIBRI_SCREEN")
@@ -338,10 +342,18 @@ impl App {
         if var("LIBRI_PLASMA").is_some_and(|value| value == "light") {
             app.plasma_dark = false;
         }
-        if let Some(theme) = var("LIBRI_THEME").and_then(|value| ThemeChoice::from_env(&value)) {
+        if let Some(theme) = var("LIBRI_THEME").and_then(|value| ThemeChoice::from_key(&value)) {
             app.settings.theme = theme;
         }
         app.settings.flat |= var("LIBRI_FLAT").is_some();
+        // A faked look is for looking at; it never becomes the preference.
+        if ["LIBRI_THEME", "LIBRI_FLAT", "LIBRI_PLASMA"]
+            .iter()
+            .any(|name| var(name).is_some())
+        {
+            app.preferences.detach();
+        }
+        app.preferences.mark_saved(Preferences::of(&app));
         if let Some(step) = var("LIBRI_SETUP").and_then(|name| setup::Step::from_name(&name)) {
             app.setup = setup::State::at(step, app.source.as_ref());
         }
@@ -362,11 +374,11 @@ impl App {
         (app, Decoration::take().map(Message::Decoration))
     }
 
-    /// The library from this computer's file (`storage`), in place of the
-    /// fixture in memory. With no library file yet, the bundled fixture
-    /// seeds it until phase 3 fetches GitHub's copy. Without a home
-    /// folder, or when the file cannot be opened, the fixture stays in
-    /// memory and nothing is kept this run.
+    /// The library and the preferences from this computer's files
+    /// (`storage`), in place of the fixture in memory. With no library
+    /// file yet, the bundled fixture seeds it until phase 3 fetches
+    /// GitHub's copy. Without a home folder, or when the file cannot be
+    /// opened, the fixture stays in memory and nothing is kept this run.
     fn open_files(&mut self) {
         match storage::data_dir() {
             Some(dir) => {
@@ -383,6 +395,12 @@ impl App {
                 }
             }
             None => eprintln!("libri: no home folder, so nothing is saved this run"),
+        }
+        if let Some(dir) = storage::config_dir() {
+            self.preferences = PreferencesFile::at(dir.join("preferences.json"));
+            if let Some(preferences) = self.preferences.load() {
+                preferences.apply_to(self);
+            }
         }
     }
 
@@ -414,6 +432,7 @@ impl App {
             history: History::default(),
             decoration: None,
             lookup: lookup::LookupState::Results,
+            preferences: PreferencesFile::default(),
         }
     }
 
@@ -451,6 +470,10 @@ impl App {
         let (theme, flat) = (self.theme(), self.settings.flat);
         if let Some(decoration) = &mut self.decoration {
             decoration.set(theme, flat);
+        }
+        if self.preferences.is_attached() {
+            let now = Preferences::of(self);
+            self.preferences.save_if_changed(now);
         }
         task
     }
@@ -925,6 +948,46 @@ mod tests {
         assert_eq!(app.theme(), Theme::Light);
         let _ = app.update(Message::SetTheme(ThemeChoice::Fixed(Theme::Mocha)));
         assert_eq!(app.theme(), Theme::Mocha);
+    }
+
+    #[test]
+    fn a_changed_preference_is_written_and_a_change_to_the_library_too() {
+        let dir = crate::storage::TempDir::new("app");
+        let mut app = App::new(Screen::Library);
+        app.preferences = PreferencesFile::at(dir.path("preferences.json"));
+        app.preferences.mark_saved(Preferences::of(&app));
+        app.repo = Box::new(
+            LocalLibraryRepository::open(dir.path("library.json"), crate::fixtures::LIBRARY_JSON)
+                .unwrap(),
+        );
+        let _ = app.update(Message::Show(Screen::Plans));
+        assert!(
+            !dir.path("preferences.json").exists(),
+            "a screen change is no preference"
+        );
+        let _ = app.update(Message::SetAccent(theme::VIVID[1]));
+        let text = std::fs::read_to_string(dir.path("preferences.json")).unwrap();
+        assert!(text.contains(&format!("\"accent\": \"vivid:{}\"", theme::VIVID[1].name)));
+        let _ = app.update(Message::Library(library::Message::TogglePin(
+            "horror".into(),
+        )));
+        let text = std::fs::read_to_string(dir.path("preferences.json")).unwrap();
+        assert!(text.contains("\"horror\""));
+
+        app.apply(Operation::SetRating {
+            id: "movies/the-mummy-1999".into(),
+            rating: Some(3),
+        });
+        let text = std::fs::read_to_string(dir.path("library.json")).unwrap();
+        assert_eq!(text, crate::model::codec::encode(app.repo.library()));
+        assert_eq!(
+            app.repo
+                .library()
+                .entry("movies/the-mummy-1999")
+                .unwrap()
+                .rating,
+            Some(3)
+        );
     }
 
     #[test]

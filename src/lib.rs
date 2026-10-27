@@ -10,6 +10,7 @@ pub mod lookup;
 pub mod model;
 pub mod music;
 pub mod plans;
+pub mod preferences;
 pub mod repo;
 pub mod screens;
 pub mod series;

@@ -23,9 +23,21 @@ impl ThemeChoice {
         ThemeChoice::Fixed(Theme::Light),
     ];
 
-    /// `LIBRI_THEME`: "system", "graphite", "charcoal", "mocha", "glass"
-    /// or "light".
-    pub fn from_env(value: &str) -> Option<ThemeChoice> {
+    /// The choice's word in `preferences.json` and `LIBRI_THEME`:
+    /// "system", "graphite", "charcoal", "mocha", "glass" or "light".
+    pub fn key(self) -> &'static str {
+        match self {
+            ThemeChoice::System => "system",
+            ThemeChoice::Fixed(Theme::Graphite) => "graphite",
+            ThemeChoice::Fixed(Theme::Charcoal) => "charcoal",
+            ThemeChoice::Fixed(Theme::Mocha) => "mocha",
+            ThemeChoice::Fixed(Theme::Glass) => "glass",
+            ThemeChoice::Fixed(Theme::Light) => "light",
+        }
+    }
+
+    /// The choice for a `key`.
+    pub fn from_key(value: &str) -> Option<ThemeChoice> {
         Some(match value {
             "system" => ThemeChoice::System,
             "graphite" => ThemeChoice::Fixed(Theme::Graphite),
@@ -320,11 +332,14 @@ mod tests {
     #[test]
     fn system_follows_plasma_and_a_fixed_theme_does_not() {
         assert_eq!(
-            ThemeChoice::from_env("glass"),
+            ThemeChoice::from_key("glass"),
             Some(ThemeChoice::Fixed(Theme::Glass))
         );
-        assert_eq!(ThemeChoice::from_env("system"), Some(ThemeChoice::System));
-        assert_eq!(ThemeChoice::from_env("neon"), None);
+        assert_eq!(ThemeChoice::from_key("system"), Some(ThemeChoice::System));
+        assert_eq!(ThemeChoice::from_key("neon"), None);
+        for choice in ThemeChoice::ALL {
+            assert_eq!(ThemeChoice::from_key(choice.key()), Some(choice));
+        }
         let glass = Settings {
             flat: false,
             ..Settings::default()
