@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use iced::keyboard::{self, Key, key::Named};
+use iced::theme::Mode as ThemeMode;
 use iced::widget::{operation, scrollable};
 use iced::window::{self, settings::PlatformSpecific};
 use iced::{Element, Event, Size, Subscription, Task, event, mouse, time};
@@ -170,9 +171,12 @@ pub fn open_url(url: &str) {
 pub struct App {
     pub screen: Screen,
     pub settings: Settings,
-    /// Plasma's color scheme, for the System theme. `LIBRI_PLASMA=light`
-    /// fakes a light one until the desktop portal is read.
+    /// Plasma's color scheme, for the System theme: the desktop portal's
+    /// answer, through iced (`Message::SystemTheme`).
     pub plasma_dark: bool,
+    /// `LIBRI_PLASMA` set: the scheme is faked and the portal's answers
+    /// are ignored.
+    pub plasma_fixed: bool,
     /// The connected repository, or `None` on a first run.
     pub source: Option<Source>,
     /// Disconnected with the library kept on this computer: browsing and
@@ -220,6 +224,9 @@ pub enum Message {
     Show(Screen),
     SetTheme(ThemeChoice),
     SetAccent(Accent),
+    /// Plasma's color scheme from the desktop portal, through iced: once
+    /// at the start, then on every change.
+    SystemTheme(ThemeMode),
     Key(KeyPress),
     Modifiers(keyboard::Modifiers),
     /// The mouse's Back or Forward button, or Alt+Left and Alt+Right.
@@ -339,8 +346,9 @@ impl App {
             app.sync = sync;
             app.token_warning = sync.warns();
         }
-        if var("LIBRI_PLASMA").is_some_and(|value| value == "light") {
-            app.plasma_dark = false;
+        if let Some(plasma) = var("LIBRI_PLASMA") {
+            app.plasma_dark = plasma != "light";
+            app.plasma_fixed = true;
         }
         if let Some(theme) = var("LIBRI_THEME").and_then(|value| ThemeChoice::from_key(&value)) {
             app.settings.theme = theme;
@@ -371,7 +379,11 @@ impl App {
         }) {
             app.dialog = Some(entry::Dialog::SeasonDropped { id, season });
         }
-        (app, Decoration::take().map(Message::Decoration))
+        let tasks = Task::batch([
+            Decoration::take().map(Message::Decoration),
+            iced::system::theme().map(Message::SystemTheme),
+        ]);
+        (app, tasks)
     }
 
     /// The library and the preferences from this computer's files
@@ -412,6 +424,7 @@ impl App {
             screen,
             settings: Settings::default(),
             plasma_dark: true,
+            plasma_fixed: false,
             setup: setup::State::at(setup::Step::Welcome, Some(&source)),
             source: Some(source),
             kept_locally: false,
@@ -518,6 +531,17 @@ impl App {
             Message::History(direction) => return self.travel(direction),
             Message::SetTheme(choice) => self.settings.theme = choice,
             Message::SetAccent(accent) => self.settings.accent = accent,
+            // No answer from the portal (`None`) keeps the scheme, which
+            // is dark at the start: System then means Graphite.
+            Message::SystemTheme(mode) if !self.plasma_fixed => {
+                crate::trace::line(format_args!("plasma scheme {mode:?}"));
+                match mode {
+                    ThemeMode::Dark => self.plasma_dark = true,
+                    ThemeMode::Light => self.plasma_dark = false,
+                    ThemeMode::None => {}
+                }
+            }
+            Message::SystemTheme(_) => {}
             // One sweep of the bar takes 1.4 s.
             Message::Tick => self.splash_phase = (self.splash_phase + 0.016 / 1.4) % 1.0,
             Message::Resized(size) => self.window = size,
@@ -752,11 +776,12 @@ impl App {
         });
         let resizes = window::resize_events().map(|(_, size)| Message::Resized(size));
         let traced = window::events().map(|(_, event)| Message::Window(event));
+        let scheme = iced::system::theme_changes().map(Message::SystemTheme);
         if self.screen == Screen::Splash {
             let frames = time::every(Duration::from_millis(16)).map(|_| Message::Tick);
-            Subscription::batch([keys, buttons, resizes, traced, frames])
+            Subscription::batch([keys, buttons, resizes, traced, scheme, frames])
         } else {
-            Subscription::batch([keys, buttons, resizes, traced])
+            Subscription::batch([keys, buttons, resizes, traced, scheme])
         }
     }
 
@@ -948,6 +973,25 @@ mod tests {
         assert_eq!(app.theme(), Theme::Light);
         let _ = app.update(Message::SetTheme(ThemeChoice::Fixed(Theme::Mocha)));
         assert_eq!(app.theme(), Theme::Mocha);
+    }
+
+    #[test]
+    fn the_portal_switches_the_system_theme_unless_plasma_is_faked() {
+        let mut app = App::new(Screen::Library);
+        assert_eq!(app.theme(), Theme::Graphite);
+        let _ = app.update(Message::SystemTheme(ThemeMode::Light));
+        assert_eq!(app.theme(), Theme::Light);
+        let _ = app.update(Message::SystemTheme(ThemeMode::None));
+        assert_eq!(app.theme(), Theme::Light, "no answer keeps the scheme");
+        let _ = app.update(Message::SystemTheme(ThemeMode::Dark));
+        assert_eq!(app.theme(), Theme::Graphite);
+        app.plasma_fixed = true;
+        let _ = app.update(Message::SystemTheme(ThemeMode::Light));
+        assert_eq!(app.theme(), Theme::Graphite, "LIBRI_PLASMA wins");
+        app.plasma_fixed = false;
+        let _ = app.update(Message::SetTheme(ThemeChoice::Fixed(Theme::Mocha)));
+        let _ = app.update(Message::SystemTheme(ThemeMode::Light));
+        assert_eq!(app.theme(), Theme::Mocha, "a named theme ignores Plasma");
     }
 
     #[test]

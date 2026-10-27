@@ -49,7 +49,7 @@ LIBRI_SCREEN=plans cargo run       # starts on another screen: splash, setup, li
 LIBRI_SYNC=expired cargo run       # the sync row's state: synced, saving, offline, error, not-found, conflict, expired; expires-in-6 shows the warning
 LIBRI_LOCAL=1 cargo run            # disconnected with the library kept on this computer (local mode)
 LIBRI_SHOT=settings cargo test --test screenshots -- --ignored capture_every_screen   # only the captures whose name contains it
-LIBRI_PLASMA=light cargo run       # a light Plasma, for the System theme
+LIBRI_PLASMA=light cargo run       # a light Plasma, for the System theme (any value stops following the portal)
 LIBRI_THEME=glass cargo run        # starts in a theme: system, graphite, charcoal, mocha, glass, light; LIBRI_FLAT=1 for the flat style. With LIBRI_THEME, LIBRI_FLAT or LIBRI_PLASMA set the preferences are read but never written
 LIBRI_FIRST_RUN=1 cargo run        # no repository yet (the splash's first-run line, Settings not connected)
 LIBRI_SETUP=branch cargo run       # with LIBRI_SCREEN=setup: welcome, connect, branch, file, create, existing, done
