@@ -162,7 +162,7 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 
 ## Phase 2: Local data
 
-- [ ] Persist the library to a local file (`~/.local/share/libri/`), changes survive a restart
+- [x] Persist the library to a local file (`~/.local/share/libri/`), changes survive a restart (`repo::LocalLibraryRepository`, `storage`; seeded from the fixture until phase 3, DESIGN.md section 10, "Local files")
 - [x] Operations layer: every change is a small named operation with a readable summary, as on the phone (`Operation::summary`, in the phone's words; written to the trace until phase 3 uses them as commit messages)
 - [ ] Display preferences on the device (`~/.config/libri/`), never synced
 - [ ] System theme for real: read Plasma's color scheme from the desktop portal (`org.freedesktop.appearance` `color-scheme`) and follow it while Libri runs. Needs a D-Bus crate (`ashpd` or `zbus`) or a `busctl` call; decide which. Until then `LIBRI_PLASMA=light` fakes a light Plasma
@@ -170,6 +170,8 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 ## Phase 3: GitHub sync
 
 - [ ] Setup for real: token in KDE Wallet (Secret Service), repo, branch, file; the real branch and file lists, the mockup's "Checking access…" and "Creating library.json…" states, Sync now and Disconnect repository doing their work
+- [ ] `connection.json` next to the library (repo, branch, file, and whether the library was kept on this computer, as on the phone), so a restart keeps the connection and local mode; until then every start is connected to the mockup's source, and a library deleted through Disconnect is seeded from the fixture again on the next start
+- [ ] `pending.json`: the operations in JSON (the phone's `op` names) with their summaries, written before the local file applies the change, and the commit messages from the summaries (one gives its summary, several "<first> and N other changes" with every summary in the body)
 - [ ] Read, bundled saves with readable commit messages, three-way sync and conflicts, offline queue, the same rules as the phone (DESIGN.md section 10b)
 - [ ] Real token expiry from GitHub's response header drives the warning dialog
 

@@ -12,9 +12,10 @@ use crate::history::{Direction, History, Place};
 use crate::lookup;
 use crate::model::Date;
 use crate::repo::Operation;
-use crate::repo::{FixtureLibraryRepository, LibraryRepository};
+use crate::repo::{FixtureLibraryRepository, LibraryRepository, LocalLibraryRepository};
 use crate::screens::{self, Screen, entry, library, plans, setup, token};
 use crate::settings::{Settings, Source, SyncState, ThemeChoice};
+use crate::storage;
 use crate::tags;
 use crate::theme::{Accent, Theme, Tokens, font};
 
@@ -308,7 +309,8 @@ pub enum KeyPress {
 
 impl App {
     /// Starts on the screen named by `LIBRI_SCREEN` (development only),
-    /// or the library. `LIBRI_FIRST_RUN` starts with no repository,
+    /// or the library, with the library from this computer's file.
+    /// `LIBRI_FIRST_RUN` starts with no repository,
     /// `LIBRI_SYNC` fakes the sync state ("expired", "expires-in-6"),
     /// `LIBRI_PLASMA=light` a light Plasma, `LIBRI_THEME` and `LIBRI_FLAT`
     /// the theme and style, and `LIBRI_SETUP` picks the setup step
@@ -319,6 +321,7 @@ impl App {
             .and_then(|name| Screen::from_name(&name))
             .unwrap_or_default();
         let mut app = App::new(screen);
+        app.open_files();
         if var("LIBRI_FIRST_RUN").is_some() {
             app.source = None;
             app.setup = setup::State::at(setup::Step::Welcome, None);
@@ -359,7 +362,31 @@ impl App {
         (app, Decoration::take().map(Message::Decoration))
     }
 
-    /// The app on `screen`, connected to the fixture repository.
+    /// The library from this computer's file (`storage`), in place of the
+    /// fixture in memory. With no library file yet, the bundled fixture
+    /// seeds it until phase 3 fetches GitHub's copy. Without a home
+    /// folder, or when the file cannot be opened, the fixture stays in
+    /// memory and nothing is kept this run.
+    fn open_files(&mut self) {
+        match storage::data_dir() {
+            Some(dir) => {
+                let path = dir.join("library.json");
+                match LocalLibraryRepository::open(path.clone(), crate::fixtures::LIBRARY_JSON) {
+                    Ok(repo) => {
+                        crate::trace::line(format_args!("library {}", path.display()));
+                        self.repo = Box::new(repo);
+                    }
+                    Err(error) => eprintln!(
+                        "libri: {} cannot be opened, so nothing is saved this run: {error}",
+                        path.display()
+                    ),
+                }
+            }
+            None => eprintln!("libri: no home folder, so nothing is saved this run"),
+        }
+    }
+
+    /// The app on `screen`, connected to the fixture repository in memory.
     pub fn new(screen: Screen) -> App {
         let repo = FixtureLibraryRepository::load().expect("the bundled fixture decodes");
         let source = Source::fixture();

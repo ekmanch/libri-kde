@@ -156,6 +156,9 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         }
         Message::DisconnectDelete => {
             page.disconnect = None;
+            if let Err(error) = app.repo.delete() {
+                eprintln!("libri: could not delete the library: {error}");
+            }
             app.source = None;
             app.kept_locally = false;
             app.sync = SyncState::Synced;

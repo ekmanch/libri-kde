@@ -112,8 +112,21 @@ impl Frames {
     }
 }
 
-/// Local time as `2026-10-24T21:25:03.417+02:00`.
-fn timestamp() -> String {
+/// Local time for a file name: `20261027-213005`. UTC until the trace
+/// has started, since that is when the offset is read.
+pub fn file_stamp() -> String {
+    let (year, month, day, secs, _) = local_now();
+    format!(
+        "{year:04}{month:02}{day:02}-{:02}{:02}{:02}",
+        secs / 3600,
+        secs % 3600 / 60,
+        secs % 60
+    )
+}
+
+/// The local calendar date, the seconds into the day and the
+/// milliseconds, now.
+fn local_now() -> (i64, u32, u32, i64, u32) {
     let offset = *OFFSET.get().unwrap_or(&0);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -121,6 +134,13 @@ fn timestamp() -> String {
     let local = now.as_secs() as i64 + offset;
     let (days, secs) = (local.div_euclid(86_400), local.rem_euclid(86_400));
     let (year, month, day) = civil(days);
+    (year, month, day, secs, now.subsec_millis())
+}
+
+/// Local time as `2026-10-24T21:25:03.417+02:00`.
+fn timestamp() -> String {
+    let offset = *OFFSET.get().unwrap_or(&0);
+    let (year, month, day, secs, millis) = local_now();
     let (sign, magnitude) = if offset < 0 {
         ('-', -offset)
     } else {
@@ -131,7 +151,7 @@ fn timestamp() -> String {
         secs / 3600,
         secs % 3600 / 60,
         secs % 60,
-        now.subsec_millis(),
+        millis,
         magnitude / 3600,
         magnitude % 3600 / 60
     )

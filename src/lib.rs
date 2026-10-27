@@ -14,6 +14,7 @@ pub mod repo;
 pub mod screens;
 pub mod series;
 pub mod settings;
+pub mod storage;
 pub mod tags;
 pub mod theme;
 pub mod trace;

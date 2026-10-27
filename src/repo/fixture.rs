@@ -30,6 +30,11 @@ impl LibraryRepository for FixtureLibraryRepository {
         self.library = next;
         Ok(&self.library)
     }
+
+    fn delete(&mut self) -> std::io::Result<()> {
+        self.library = Library::default();
+        Ok(())
+    }
 }
 
 #[cfg(test)]

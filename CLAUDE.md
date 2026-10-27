@@ -22,7 +22,8 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 - `ui`: widgets shared by every screen (buttons, headers, icons). UI that repeats across screens is one shared widget here, never copied.
 - `screens`: one module per screen (splash, setup, library, plans, settings), the window shell and the token warning.
 - `model`: the `library.json` model and `model::codec`, the canonical JSON encoding.
-- `repo`: the `LibraryRepository` trait, every change as an `Operation` with its summary, and its implementations (the fixture one for now).
+- `repo`: the `LibraryRepository` trait, every change as an `Operation` with its summary, and the implementations: the local file (`LocalLibraryRepository`) and the fixture in memory for the tests.
+- `storage`: the folders under the XDG homes and the atomic file write.
 - `fixtures`: the bundled fixture library.
 
 ## Git rules
@@ -33,7 +34,8 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 ## Working rules
 
 - Tick off items in `TODO.md` as they are completed. Add new items there when you find missing work, instead of doing unplanned work silently.
-- Phase 1 is UI only, on fixture data: no networking, no GitHub access, no file writing before the phase that calls for it.
+- No networking and no GitHub access before phase 3. Phase 2 writes only the library file below, atomically through `storage`.
+- The library is `~/.local/share/libri/library.json` (seeded from the fixture until phase 3). The tests never touch it: `App::new` keeps everything in memory, and file tests use `storage::TempDir`.
 - UI text uses American spelling ("color", "favorite") and sentence case.
 - All `library.json` text goes through `model::codec`, which writes the same bytes as the phone's `lib/data/library_codec.dart`. Keep `assets/fixtures/library.json` byte-identical to the phone's copy; the round-trip test checks it is canonical.
 - Ask before adding a crate. Say what it is for and what the alternative is.
