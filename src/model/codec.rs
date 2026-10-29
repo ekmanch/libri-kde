@@ -13,6 +13,11 @@ use serde_json::ser::{PrettyFormatter, Serializer};
 
 use super::Library;
 
+/// An empty library in the canonical form: what the setup creates, and
+/// what a real run starts from until GitHub's copy arrives.
+pub const EMPTY: &str =
+    "{\n  \"version\": 2,\n  \"tags\": {},\n  \"entries\": [],\n  \"plans\": []\n}\n";
+
 /// Decodes `library.json` text. Tag categories come back in category order
 /// whatever order the file had them in, so the next save moves them.
 pub fn decode(text: &str) -> Result<Library, serde_json::Error> {
@@ -52,6 +57,11 @@ mod tests {
         let original = std::fs::read(path).unwrap();
         let library = decode(std::str::from_utf8(&original).unwrap()).unwrap();
         assert_eq!(encode(&library).into_bytes(), original);
+    }
+
+    #[test]
+    fn the_empty_library_is_canonical() {
+        assert_eq!(encode(&Library::default()), EMPTY);
     }
 
     #[test]

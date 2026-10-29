@@ -1,8 +1,15 @@
 //! First-time setup, the whole window (docs/DESIGN.md 4.2): Welcome,
 //! Connect GitHub, Branch, Library file, Create or Pick, All set. The steps
 //! rail sits where the sidebar normally is, the form in the content pane,
-//! Back and the main action pinned at the bottom. UI only, on fixture
-//! branches and files, until phase 3 talks to GitHub.
+//! Back and the main action pinned at the bottom. Talks to GitHub through
+//! `github::Client` (phase 3): Connect checks the token against the repo,
+//! Branch lists the repo's branches, Pick file opens the JSON files on the
+//! branch to tell libraries from other JSON, Create commits the new file,
+//! and Open Libri keeps the token in KDE Wallet and the connection in
+//! `connection.json`. A mock state (`State::at`: the tests, the captures,
+//! `LIBRI_SETUP`) keeps the mockup's fixture branches and files instead.
+
+use std::sync::Arc;
 
 use iced::alignment::{Horizontal, Vertical};
 use iced::border::Radius;
@@ -11,18 +18,28 @@ use iced::{Background, Border, Center, Element, Fill, Padding, Task};
 
 use super::Screen;
 use crate::app::{self, App, Message as AppMessage};
+use crate::clock::Timestamp;
+use crate::connection::{Connection, Target};
+use crate::github::{BranchInfo, Client, Failure, FailureKind, PutResult, RepoInfo};
+use crate::model::{Library, codec};
 use crate::settings::{Source, SyncState};
+use crate::sync::{Base, BaseFile};
 use crate::theme::{Tokens, font};
 use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
 /// GitHub's guide to fine-grained tokens, for "How do I create a token?".
 pub const TOKEN_HELP_URL: &str = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token";
 
-/// What setup commits for a new library.
-const EMPTY_LIBRARY: &str =
-    "{\n  \"version\": 2,\n  \"tags\": {},\n  \"entries\": [],\n  \"plans\": []\n}";
+/// The commit that creates a new library file.
+pub const CREATE_MESSAGE: &str = "Create Libri library";
+/// The commit that puts the library kept on this computer over a file.
+pub const REPLACE_MESSAGE: &str = "Replace with the library from this computer";
+/// Pick file opens at most this many JSON files, each of at most this
+/// size, to tell libraries from other JSON.
+const MAX_FILES: usize = 20;
+const MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
 
-/// A fixture token, so the field shows something before phase 3.
+/// A fixture token, so the field shows something in the captures.
 const FIXTURE_TOKEN: &str = "github_pat_11A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6a91F";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -97,55 +114,114 @@ pub enum Choice {
     Existing,
 }
 
-/// A branch of the repository, as the fixture lists it.
+/// A branch of the repository, as listed: the default first.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Branch {
-    pub name: &'static str,
-    pub info: &'static str,
+    pub name: String,
+    /// "Updated 2 days ago".
+    pub info: String,
     pub default: bool,
 }
 
-pub const BRANCHES: [Branch; 3] = [
-    Branch {
-        name: "main",
-        info: "Updated 2 days ago",
-        default: true,
-    },
-    Branch {
-        name: "app-sync-test",
-        info: "Updated last week",
-        default: false,
-    },
-    Branch {
-        name: "dev",
-        info: "Updated in August",
-        default: false,
-    },
-];
-
 /// A JSON file in the repository; only Libri's own format can be picked.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct File {
-    pub path: &'static str,
-    pub info: &'static str,
-    pub usable: bool,
+    pub path: String,
+    /// "Libri library · 214 entries · updated 2 days ago", or "Not a
+    /// Libri library file".
+    pub info: String,
+    /// The blob sha, which a save over the file needs.
+    pub sha: String,
+    /// How many entries the library holds; `None` for JSON that is not
+    /// a library.
+    pub entries: Option<usize>,
+    /// When the file was last committed, when known.
+    pub updated: Option<Timestamp>,
 }
 
-pub const FILES: [File; 3] = [
-    File {
-        path: "library.json",
-        info: "Libri library · 214 entries · updated 2 days ago",
-        usable: true,
-    },
-    File {
-        path: "backup/library-2025.json",
-        info: "Libri library · 168 entries · updated in March",
-        usable: true,
-    },
-    File {
-        path: "data/old-lists.json",
-        info: "Not a Libri library file",
-        usable: false,
-    },
-];
+impl File {
+    pub fn usable(&self) -> bool {
+        self.entries.is_some()
+    }
+}
+
+/// The mockup's branches: `main` (the default, updated two days ago),
+/// `app-sync-test` (last week) and `dev` (August).
+pub fn fixture_branches() -> Vec<Branch> {
+    [
+        ("main", "Updated 2 days ago", true),
+        ("app-sync-test", "Updated last week", false),
+        ("dev", "Updated in August", false),
+    ]
+    .into_iter()
+    .map(|(name, info, default)| Branch {
+        name: name.into(),
+        info: info.into(),
+        default,
+    })
+    .collect()
+}
+
+/// The mockup's files: the library, a smaller backup from March, and
+/// JSON that is not a library.
+pub fn fixture_files() -> Vec<File> {
+    [
+        (
+            "library.json",
+            "Libri library · 214 entries · updated 2 days ago",
+            Some(214),
+        ),
+        (
+            "backup/library-2025.json",
+            "Libri library · 168 entries · updated in March",
+            Some(168),
+        ),
+        ("data/old-lists.json", "Not a Libri library file", None),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (path, info, entries))| File {
+        path: path.into(),
+        info: info.into(),
+        sha: format!("fixture-{i}"),
+        entries,
+        updated: None,
+    })
+    .collect()
+}
+
+/// What the wizard is waiting on GitHub for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Busy {
+    /// "Checking access to owner/repo…"
+    Connecting,
+    /// "Loading branches…"
+    Branches,
+    /// "Looking for library files…"
+    Files,
+    /// "Creating library.json and pushing to GitHub…"
+    Creating,
+    /// "Replacing library.json with the library from this computer…"
+    Replacing,
+}
+
+/// The client for the repository and token typed, shared with the tasks.
+#[derive(Clone)]
+pub struct ClientHandle(pub Arc<Client>);
+
+impl PartialEq for ClientHandle {
+    fn eq(&self, other: &ClientHandle) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for ClientHandle {}
+
+impl std::fmt::Debug for ClientHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct State {
@@ -163,6 +239,21 @@ pub struct State {
     /// "Which library?": reconnecting a library kept on this computer to
     /// an existing file, and which copy was picked.
     pub which: Option<Which>,
+    /// The mockup's fixture branches and files, no GitHub: the tests, the
+    /// captures and `LIBRI_SETUP`.
+    pub mock: bool,
+    pub busy: Option<Busy>,
+    /// What went wrong with the last call, under the form.
+    pub error: Option<String>,
+    pub branches: Vec<Branch>,
+    pub files: Vec<File>,
+    /// The repo's default branch, from Connect.
+    pub default_branch: String,
+    pub client: Option<ClientHandle>,
+    /// The base of the file the setup created or replaced, for the sync.
+    pub base: Option<Base>,
+    /// How many entries the chosen file holds, for All set.
+    pub loaded_entries: Option<usize>,
 }
 
 /// The copy that stays when a kept library meets a file on GitHub.
@@ -176,26 +267,50 @@ pub enum Which {
 }
 
 impl State {
-    /// The wizard at `step`, filled in from `source` when there is one
-    /// (`LIBRI_SETUP` and the screen captures).
+    /// The mock wizard at `step`, on the fixture branches and files,
+    /// filled in from `source` when there is one (the tests, the captures
+    /// and `LIBRI_SETUP`).
     pub fn at(step: Step, source: Option<&Source>) -> State {
         let mut state = State {
             step,
             file_name: "library.json".into(),
+            mock: true,
+            branches: fixture_branches(),
+            files: fixture_files(),
+            default_branch: "main".into(),
             ..State::default()
         };
         if let Some(source) = source {
             state.repo = source.repo.clone();
             state.token = FIXTURE_TOKEN.into();
-            state.branch = BRANCHES
+            state.branch = state
+                .branches
                 .iter()
                 .position(|b| b.name == source.branch)
                 .unwrap_or(0);
-            state.file = FILES
+            state.file = state
+                .files
                 .iter()
                 .position(|f| f.path == source.file)
                 .unwrap_or(0);
             state.file_name = source.file.clone();
+        }
+        state
+    }
+
+    /// The real wizard at `step`, with the last connection's repo and
+    /// file prefilled when there was one.
+    pub fn real(step: Step, last: Option<&Connection>) -> State {
+        let mut state = State {
+            step,
+            file_name: "library.json".into(),
+            default_branch: "main".into(),
+            ..State::default()
+        };
+        if let Some(last) = last {
+            state.repo = last.target.repository.clone();
+            state.file_name = last.target.file.clone();
+            state.default_branch = last.target.branch.clone();
         }
         state
     }
@@ -206,37 +321,76 @@ impl State {
         self.step.index().is_some()
     }
 
-    fn branch_name(&self) -> &'static str {
-        BRANCHES[self.branch].name
+    /// The branch picked, or the default branch of a repo without any.
+    fn branch_name(&self) -> String {
+        self.branches
+            .get(self.branch)
+            .map_or_else(|| self.default_branch.clone(), |b| b.name.clone())
     }
 
     fn file_name(&self) -> String {
         match self.choice {
-            Choice::New => self.file_name.clone(),
-            Choice::Existing => FILES[self.file].path.to_owned(),
+            Choice::New => self.file_name.trim().to_owned(),
+            Choice::Existing => self
+                .files
+                .get(self.file)
+                .map(|f| f.path.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    fn picked_file(&self) -> Option<&File> {
+        self.files.get(self.file).filter(|f| f.usable())
+    }
+
+    /// Where the wizard's choices point.
+    fn target(&self) -> Target {
+        Target {
+            repository: self.repo.trim().to_owned(),
+            file: self.file_name(),
+            branch: self.branch_name(),
         }
     }
 
     /// Whether the step's main action can go ahead.
     pub fn can_continue(&self) -> bool {
+        if self.busy.is_some() {
+            return false;
+        }
         match self.step {
             Step::Connect => !self.repo.trim().is_empty() && !self.token.trim().is_empty(),
             Step::Create => {
                 let name = self.file_name.trim();
                 name.len() > 5 && name.ends_with(".json")
             }
-            Step::Existing => FILES[self.file].usable,
+            Step::Existing => self.picked_file().is_some(),
             _ => true,
         }
     }
 
     fn primary_label(&self) -> &'static str {
-        match self.step {
-            Step::Connect => "Connect",
-            Step::Create => "Create library",
-            Step::Existing => "Use this file",
+        match (self.step, self.busy) {
+            (Step::Connect, Some(_)) => "Connecting…",
+            (Step::Connect, None) => "Connect",
+            (Step::Create, Some(_)) => "Creating…",
+            (Step::Create, None) => "Create library",
+            (Step::Existing, _) => "Use this file",
             _ => "Continue",
         }
+    }
+
+    /// The line under the form while a call runs.
+    fn busy_line(&self) -> Option<String> {
+        Some(match self.busy? {
+            Busy::Connecting => format!("Checking access to {}…", self.repo.trim()),
+            Busy::Branches => "Loading branches…".into(),
+            Busy::Files => "Looking for library files…".into(),
+            Busy::Creating => format!("Creating {} and pushing to GitHub…", self.file_name.trim()),
+            Busy::Replacing => format!(
+                "Replacing {} with the library from this computer…",
+                self.file_name()
+            ),
+        })
     }
 }
 
@@ -263,6 +417,13 @@ pub enum Message {
     PickWhich(Which),
     CloseWhich,
     ConfirmWhich,
+    /// GitHub's answers: the repo (Connect), its branches, the library
+    /// files on the branch, and the commit that created or replaced the
+    /// file.
+    Connected(Result<RepoInfo, Failure>),
+    Branches(Result<Vec<BranchInfo>, Failure>),
+    Files(Result<Vec<File>, Failure>),
+    Created(Result<PutResult, Failure>),
 }
 
 fn msg(message: Message) -> AppMessage {
@@ -277,80 +438,367 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::PickBranch(index) => state.branch = index,
         Message::Choose(choice) => state.choice = choice,
         Message::PickFile(index) => {
-            if FILES[index].usable {
+            if state.files.get(index).is_some_and(File::usable) {
                 state.file = index;
             }
         }
         Message::FileName(value) => state.file_name = value,
-        Message::Back => match state.replacing.take() {
-            Some(screen) => app.screen = screen,
-            None => state.step = state.step.back(),
-        },
+        Message::Back => {
+            state.busy = None;
+            state.error = None;
+            match state.replacing.take() {
+                Some(screen) => app.screen = screen,
+                None => state.step = state.step.back(),
+            }
+        }
         Message::Continue => {
             if !state.can_continue() {
                 return Task::none();
             }
+            state.error = None;
             match state.step {
                 Step::Welcome => state.step = Step::Connect,
-                Step::Connect => match state.replacing.take() {
-                    // Phase 3 checks the token; for now it just works.
+                Step::Connect if state.mock => match state.replacing.take() {
                     Some(screen) => {
                         app.sync = SyncState::Synced;
                         app.screen = screen;
                     }
                     None => state.step = Step::Branch,
                 },
-                Step::Branch => state.step = Step::File,
-                Step::File => {
-                    state.step = match state.choice {
-                        Choice::New => Step::Create,
-                        Choice::Existing => Step::Existing,
-                    }
+                // The token against the repo: a token that can read but
+                // not write is refused here, not at the first save.
+                Step::Connect => {
+                    let client = Arc::new(Client::new(state.token.trim(), state.repo.trim()));
+                    state.client = Some(ClientHandle(client.clone()));
+                    state.busy = Some(Busy::Connecting);
+                    return github_task(move || client.repo(), Message::Connected);
                 }
+                Step::Branch => state.step = Step::File,
+                Step::File => match state.choice {
+                    Choice::New => state.step = Step::Create,
+                    Choice::Existing => {
+                        state.step = Step::Existing;
+                        if let (false, Some(client)) = (state.mock, state.client.clone()) {
+                            state.files.clear();
+                            state.busy = Some(Busy::Files);
+                            let branch = state.branch_name();
+                            return github_task(
+                                move || library_files(&client.0, &branch),
+                                Message::Files,
+                            );
+                        }
+                    }
+                },
                 // A kept library meeting an existing file asks which to
-                // keep; a new file is made from the kept library, no
-                // question asked.
-                Step::Existing if app.kept_locally && state.which.is_none() => {
+                // keep, unless the file is the kept library's own; a new
+                // file is made from the kept library, no question asked.
+                Step::Existing
+                    if app.kept_locally
+                        && state.which.is_none()
+                        && !is_kept_librarys_own(&state.target()) =>
+                {
                     state.which = Some(Which::Here);
                 }
-                Step::Create | Step::Existing => state.step = Step::Done,
+                Step::Existing => {
+                    state.loaded_entries = state.picked_file().and_then(|f| f.entries);
+                    state.step = Step::Done;
+                }
+                Step::Create if state.mock => state.step = Step::Done,
+                Step::Create => {
+                    let Some(client) = state.client.clone() else {
+                        return Task::none();
+                    };
+                    let kept = app.kept_locally.then(|| app.repo.library().clone());
+                    state.loaded_entries = Some(kept.as_ref().map_or(0, |l| l.entries.len()));
+                    let bytes = kept.map_or_else(
+                        || codec::EMPTY.as_bytes().to_vec(),
+                        |library| codec::encode(&library).into_bytes(),
+                    );
+                    let (file, branch) = (state.file_name.trim().to_owned(), state.branch_name());
+                    state.busy = Some(Busy::Creating);
+                    return github_task(
+                        move || {
+                            client
+                                .0
+                                .put_file(&file, &branch, &bytes, CREATE_MESSAGE, None)
+                        },
+                        Message::Created,
+                    );
+                }
                 Step::Done => return update(app, Message::Open),
             }
         }
         Message::PickWhich(which) => state.which = Some(which),
         Message::CloseWhich => state.which = None,
-        Message::ConfirmWhich => {
-            if state.which.is_some() {
+        Message::ConfirmWhich => match (state.which, state.mock, state.client.clone()) {
+            (None, ..) => {}
+            // This computer's library goes over the file before connecting.
+            (Some(Which::Here), false, Some(client)) => {
+                let Some(file) = state.picked_file() else {
+                    return Task::none();
+                };
+                let (path, sha, branch) =
+                    (file.path.clone(), file.sha.clone(), state.branch_name());
+                let bytes = codec::encode(app.repo.library()).into_bytes();
+                state.loaded_entries = Some(app.repo.library().entries.len());
+                state.busy = Some(Busy::Replacing);
+                state.which = None;
+                return github_task(
+                    move || {
+                        client
+                            .0
+                            .put_file(&path, &branch, &bytes, REPLACE_MESSAGE, Some(&sha))
+                    },
+                    Message::Created,
+                );
+            }
+            (Some(which), ..) => {
+                state.loaded_entries = match which {
+                    Which::Here => Some(app.repo.library().entries.len()),
+                    Which::GitHub => state.picked_file().and_then(|f| f.entries),
+                };
                 state.step = Step::Done;
             }
-        }
-        Message::Open => {
-            app.source = Some(Source {
-                repo: state.repo.trim().to_owned(),
-                branch: state.branch_name().to_owned(),
-                file: state.file_name(),
-                token_hint: token_hint(&state.token),
-            });
+        },
+        Message::Open if state.mock => {
+            app.source = Some(Source::of(&state.target(), token_hint(&state.token)));
             app.kept_locally = false;
             app.screen = Screen::Library;
+        }
+        Message::Open => {
+            let Some(client) = state.client.take() else {
+                return Task::none();
+            };
+            let target = state.target();
+            let token = state.token.trim().to_owned();
+            let base = state.base.take();
+            // A new empty file: the local library matches what was
+            // created. A new file from the kept library, or a replaced
+            // file: the local library is what was pushed. An existing
+            // file without a base: GitHub's copy replaces it on the
+            // first sync.
+            if base.is_some() && !app.kept_locally && state.choice == Choice::New {
+                app.repo.replace(Library::default());
+            }
+            crate::trace::line(format_args!("setup: connecting {}", target.key()));
+            return app.connect(target, token, client.0, base);
         }
         Message::ReplaceToken => {
             let from = match app.screen {
                 Screen::Setup => Screen::Library,
                 screen => screen,
             };
-            *state = State::at(Step::Connect, app.source.as_ref());
+            *state = if app.mock {
+                State::at(Step::Connect, app.source.as_ref())
+            } else {
+                State::real(Step::Connect, app.connection.as_ref())
+            };
             state.token.clear();
             state.replacing = Some(from);
             app.screen = Screen::Setup;
         }
         Message::TokenHelp => app::open_url(TOKEN_HELP_URL),
+        Message::Connected(result) => {
+            if state.busy != Some(Busy::Connecting) {
+                return Task::none();
+            }
+            state.busy = None;
+            let info = match result {
+                Ok(info) => info,
+                Err(failure) => {
+                    state.error = Some(failure.describe());
+                    return Task::none();
+                }
+            };
+            if !info.can_push {
+                state.error = Some(
+                    "The token can read this repo but not write to it. It needs Contents: read and write."
+                        .into(),
+                );
+                return Task::none();
+            }
+            state.default_branch = info.default_branch;
+            let Some(client) = state.client.clone() else {
+                return Task::none();
+            };
+            if let Some(screen) = state.replacing.take() {
+                let token = state.token.trim().to_owned();
+                app.screen = screen;
+                return app.replace_token(token, client.0);
+            }
+            state.step = Step::Branch;
+            state.branches.clear();
+            state.busy = Some(Busy::Branches);
+            return github_task(move || client.0.branches(), Message::Branches);
+        }
+        Message::Branches(result) => {
+            if state.busy != Some(Busy::Branches) {
+                return Task::none();
+            }
+            state.busy = None;
+            match result {
+                Ok(list) => state.branches = branch_rows(list, &state.default_branch),
+                Err(failure) => {
+                    state.error = Some(failure.describe());
+                    state.branches = branch_rows(Vec::new(), &state.default_branch);
+                }
+            }
+            state.branch = 0;
+        }
+        Message::Files(result) => {
+            if state.busy != Some(Busy::Files) {
+                return Task::none();
+            }
+            state.busy = None;
+            match result {
+                Ok(files) => {
+                    state.file = files.iter().position(File::usable).unwrap_or(0);
+                    state.files = files;
+                }
+                Err(failure) => {
+                    state.error = Some(failure.describe());
+                    state.files.clear();
+                }
+            }
+        }
+        Message::Created(result) => {
+            let Some(busy) = state.busy.take() else {
+                return Task::none();
+            };
+            match result {
+                Ok(result) => {
+                    let now = Timestamp::now();
+                    state.base = Some(Base {
+                        target: state.target().key(),
+                        etag: Some(format!("\"{}\"", result.blob_sha)),
+                        remote_sha: result.blob_sha.clone(),
+                        canonical_sha: result.blob_sha,
+                        commit_sha: Some(result.commit_sha),
+                        last_synced: Some(now),
+                        last_checked: Some(now),
+                    });
+                    state.step = Step::Done;
+                }
+                Err(failure) if busy == Busy::Creating && failure.kind == FailureKind::Conflict => {
+                    state.error = Some("A file with that name already exists.".into());
+                }
+                Err(failure) => state.error = Some(failure.describe()),
+            }
+        }
     }
     Task::none()
 }
 
+/// Runs one GitHub call on tokio's blocking pool and brings the answer
+/// back as a setup message.
+fn github_task<T: Send + 'static>(
+    call: impl FnOnce() -> Result<T, Failure> + Send + 'static,
+    wrap: impl Fn(Result<T, Failure>) -> Message + Send + 'static,
+) -> Task<AppMessage> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(call)
+                .await
+                .unwrap_or_else(|error| Err(Failure::new(FailureKind::Other, error.to_string())))
+        },
+        move |result| msg(wrap(result)),
+    )
+}
+
+/// The repo's branches as rows: the default first with its badge, the
+/// rest A to Z, each with when its head was committed. A repo without
+/// commits has no branches; the default branch is then where the first
+/// commit goes.
+fn branch_rows(list: Vec<BranchInfo>, default_branch: &str) -> Vec<Branch> {
+    let now = Timestamp::now();
+    let info = |b: &BranchInfo| {
+        b.updated
+            .map(|at| format!("Updated {}", at.ago(now)))
+            .unwrap_or_default()
+    };
+    let mut rows: Vec<Branch> = list
+        .iter()
+        .filter(|b| b.name == default_branch)
+        .map(|b| Branch {
+            name: b.name.clone(),
+            info: info(b),
+            default: true,
+        })
+        .collect();
+    let mut others: Vec<&BranchInfo> = list.iter().filter(|b| b.name != default_branch).collect();
+    others.sort_by_key(|b| b.name.to_lowercase());
+    rows.extend(others.into_iter().map(|b| Branch {
+        name: b.name.clone(),
+        info: info(b),
+        default: false,
+    }));
+    if rows.is_empty() {
+        rows.push(Branch {
+            name: default_branch.to_owned(),
+            info: "No commits yet".into(),
+            default: true,
+        });
+    }
+    rows
+}
+
+/// The JSON files on `branch`, each opened to tell a Libri library (with
+/// its entry count and last commit) from other JSON. At most `MAX_FILES`
+/// of at most `MAX_FILE_BYTES`.
+fn library_files(client: &Client, branch: &str) -> Result<Vec<File>, Failure> {
+    let now = Timestamp::now();
+    let tree = client.files(branch, ".json")?;
+    let mut files = Vec::new();
+    for blob in tree
+        .into_iter()
+        .filter(|b| b.size <= MAX_FILE_BYTES)
+        .take(MAX_FILES)
+    {
+        let raw = client.file_raw(&blob.path, branch, None)?;
+        let entries = raw
+            .as_ref()
+            .and_then(|r| r.text().ok())
+            .and_then(|text| codec::decode(text).ok())
+            .map(|library| library.entries.len());
+        let updated = match entries {
+            Some(_) => client
+                .commits(&blob.path, branch, 1)?
+                .first()
+                .map(|c| c.date),
+            None => None,
+        };
+        let info = match entries {
+            Some(n) => format!(
+                "Libri library · {n} {}{}",
+                if n == 1 { "entry" } else { "entries" },
+                updated
+                    .map(|at| format!(" · updated {}", at.ago(now)))
+                    .unwrap_or_default()
+            ),
+            None => "Not a Libri library file".into(),
+        };
+        files.push(File {
+            path: blob.path,
+            info,
+            sha: blob.sha,
+            entries,
+            updated,
+        });
+    }
+    Ok(files)
+}
+
+/// Whether `target` is the file the library kept on this computer came
+/// from: its base is in `sync.json`, so the sync compares both copies to
+/// it and no question is asked.
+fn is_kept_librarys_own(target: &Target) -> bool {
+    crate::storage::data_dir()
+        .map(|dir| BaseFile::at(dir.join("sync.json")))
+        .is_some_and(|file| file.load(&target.key()).is_some())
+}
+
 /// "github_pat_••••••a91F": the token's prefix and last four characters.
-fn token_hint(token: &str) -> String {
+pub fn token_hint(token: &str) -> String {
     let token = token.trim();
     let tail: String = token
         .chars()
@@ -395,20 +843,29 @@ fn which_dialog<'a>(app: &'a App, picked: Which, tokens: &Tokens) -> Element<'a,
     let state = &app.setup;
     let here = app.repo.library().entries.len();
     let file = state.file_name();
+    let theirs = match state.picked_file() {
+        Some(picked) if !state.mock => format!(
+            "{} entries{}. Replaces the library on this computer.",
+            thousands(picked.entries.unwrap_or(0)),
+            picked
+                .updated
+                .map(|at| format!(" · last commit {}", at.month_day_time()))
+                .unwrap_or_default()
+        ),
+        _ => {
+            "1,279 entries · last commit Oct 13. Replaces the library on this computer.".to_owned()
+        }
+    };
     let options = [
         (
             Which::Here,
             "This computer's",
             format!(
-                "{} entries · changed Oct 20. Uploaded over {file} on GitHub.",
+                "{} entries. Uploaded over {file} on GitHub.",
                 thousands(here)
             ),
         ),
-        (
-            Which::GitHub,
-            "The one on GitHub",
-            "1,279 entries · last commit Oct 13. Replaces the library on this computer.".to_owned(),
-        ),
+        (Which::GitHub, "The one on GitHub", theirs),
     ];
     let rows = options.into_iter().map(|(which, title, sub)| {
         radio_row(
@@ -503,7 +960,7 @@ fn wizard<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let current = state.step.index().unwrap_or(0);
     let values = [
         state.repo.trim().to_owned(),
-        state.branch_name().to_owned(),
+        state.branch_name(),
         match state.choice {
             Choice::New => "New library".to_owned(),
             Choice::Existing => "Existing file".to_owned(),
@@ -558,12 +1015,23 @@ fn wizard<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
         Step::Create => create(state, tokens),
         _ => existing(state, tokens),
     };
-    let form = column![
+    let mut form = column![
         ui::section_header(&format!("Step {} of 4", current + 1), tokens),
         form
     ]
     .spacing(22)
     .max_width(680);
+    if let Some(line) = state.busy_line() {
+        form = form.push(busy_row(line, tokens));
+    }
+    if let Some(error) = &state.error {
+        form = form.push(
+            text(error.clone())
+                .size(13.5)
+                .line_height(1.5)
+                .color(tokens.danger),
+        );
+    }
     let scroll = ui::scroll(
         container(form)
             .width(Fill)
@@ -739,9 +1207,9 @@ fn branch<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
     .size(14.5)
     .line_height(1.55)
     .color(tokens.sub);
-    let rows = BRANCHES.iter().enumerate().map(|(index, branch)| {
+    let rows = state.branches.iter().enumerate().map(|(index, branch)| {
         let on = index == state.branch;
-        let mut title = row![ui::mono(branch.name, 14.0, tokens.text)]
+        let mut title = row![ui::mono(branch.name.as_str(), 14.0, tokens.text)]
             .spacing(8)
             .align_y(Center);
         if branch.default {
@@ -758,7 +1226,7 @@ fn branch<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
         }
         radio_row(
             title.into(),
-            branch.info,
+            branch.info.as_str(),
             on,
             true,
             tokens,
@@ -782,7 +1250,7 @@ fn file<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
         span("Libri keeps everything in one JSON file in "),
         mono_span(&state.repo, tokens),
         span(" on "),
-        mono_span(state.branch_name(), tokens),
+        mono_span(&state.branch_name(), tokens),
         span(". Start fresh, or use a file you already have."),
     ])
     .size(14.5)
@@ -841,7 +1309,7 @@ fn file<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
 fn create<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
     let (chrome, line) = (tokens.chrome, tokens.line);
     let preview = container(
-        text(EMPTY_LIBRARY)
+        text(codec::EMPTY.trim_end())
             .size(13)
             .font(font::MONO)
             .line_height(1.55),
@@ -892,14 +1360,15 @@ fn create<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
 }
 
 fn existing<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let rows = FILES.iter().enumerate().map(|(index, file)| {
-        let on = index == state.file && file.usable;
-        let color = if file.usable { tokens.text } else { tokens.sub };
+    let rows = state.files.iter().enumerate().map(|(index, file)| {
+        let usable = file.usable();
+        let on = index == state.file && usable;
+        let color = if usable { tokens.text } else { tokens.sub };
         radio_row(
-            ui::mono(file.path, 14.0, color).into(),
-            file.info,
+            ui::mono(file.path.as_str(), 14.0, color).into(),
+            file.info.as_str(),
             on,
-            file.usable,
+            usable,
             tokens,
             msg(Message::PickFile(index)),
         )
@@ -953,7 +1422,11 @@ fn done<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             state.file_name(),
             thousands(n)
         ),
-        (Choice::Existing, _, _) => format!("Loaded 214 entries from {}.", state.file_name()),
+        (Choice::Existing, _, _) => format!(
+            "Loaded {} entries from {}.",
+            thousands(state.loaded_entries.unwrap_or(214)),
+            state.file_name()
+        ),
     };
     let summary = |label: &'static str, value: String| {
         row![
@@ -964,7 +1437,7 @@ fn done<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let card = container(
         column![
             summary("repo", state.repo.trim().to_owned()),
-            summary("branch", state.branch_name().to_owned()),
+            summary("branch", state.branch_name()),
             summary("file", state.file_name()),
         ]
         .spacing(6),
@@ -1037,6 +1510,20 @@ fn label<'a>(name: &'a str, tokens: &Tokens) -> Element<'a, AppMessage> {
         .size(13)
         .font(font::SEMIBOLD)
         .color(tokens.text)
+        .into()
+}
+
+/// A ring in the accent and the words, while GitHub is asked: the
+/// mockup's "Checking access to ekmanch/library…" (its ring spins; this
+/// one stands still, iced has no animation for a border).
+fn busy_row<'a>(words: String, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let accent = tokens.accent;
+    let ring = container(space()).width(14).height(14).style(move |_| {
+        container::Style::default().border(Border::default().rounded(7).width(2).color(accent))
+    });
+    row![ring, text(words).size(13.5).color(tokens.sub)]
+        .spacing(10)
+        .align_y(Center)
         .into()
 }
 

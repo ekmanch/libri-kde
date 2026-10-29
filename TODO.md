@@ -170,11 +170,16 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 
 ## Phase 3: GitHub sync
 
-- [ ] Setup for real: token in KDE Wallet (Secret Service), repo, branch, file; the real branch and file lists, the mockup's "Checking access…" and "Creating library.json…" states, Sync now and Disconnect repository doing their work
-- [ ] `connection.json` next to the library (repo, branch, file, and whether the library was kept on this computer, as on the phone), so a restart keeps the connection and local mode; until then every start is connected to the mockup's source, and a library deleted through Disconnect is seeded from the fixture again on the next start
-- [ ] `pending.json`: the operations in JSON (the phone's `op` names) with their summaries, written before the local file applies the change, and the commit messages from the summaries (one gives its summary, several "<first> and N other changes" with every summary in the body)
-- [ ] Read, bundled saves with readable commit messages, three-way sync and conflicts, offline queue, the same rules as the phone (DESIGN.md section 10b)
-- [ ] Real token expiry from GitHub's response header drives the warning dialog
+- [x] Setup for real: token in KDE Wallet (`wallet`, over kwalletd's own D-Bus interface), repo, branch, file; the real branch and file lists, the mockup's "Checking access…" and "Creating library.json…" states, Sync now and Disconnect repository doing their work (`screens::setup` with `github::Client`; DESIGN.md section 10, "GitHub sync" and "Setup for real")
+- [x] `connection.json` next to the library (repo, branch, file, and whether the library was kept on this computer, as on the phone), so a restart keeps the connection and local mode (`connection`); a start without one is the first run, and a run with a screen switch keeps the mockup's source
+- [x] `pending.json`: the operations in JSON (the phone's `op` names) with their summaries, written before the local file applies the change, and the commit messages from the summaries (one gives its summary, several "<first> and N other changes" with every summary in the body) (`repo::json`, `sync::pending`, `sync::commit_message`)
+- [x] Read, bundled saves with readable commit messages, three-way sync and conflicts, offline queue, the same rules as the phone (DESIGN.md section 10b) (`sync::Engine` with `sync.json` as the base; the app runs its requests as Tasks)
+- [x] Real token expiry from GitHub's response header drives the warning dialog (`connection.json` keeps the date and the day last warned)
+- [ ] Live test against `ekmanch/libri-scratch` (seeded with a copy of the real `library.json` on 2026-10-29): the first run picking the file, an edit landing as one commit, a hand edit on GitHub pulled, a conflict with Keep mine and Keep GitHub's, Disconnect keeping the library and connecting the same file again, Replace token
+- [ ] Settings › Library source shows the repository, branch and file but no longer edits them: a change goes through the setup (Pick a file from the not-found card, Disconnect and connect again). Decide whether typing a new value should reconnect in place
+- [ ] "Pick a file" from Library not found drops the queue with the old engine, so edits queued for the missing file stay only in the local file and are lost when the new file's copy replaces it. Match the phone's "Different file: which library?" there
+- [ ] A spinning ring for the setup's busy line; iced 0.14 has no animation for a border, so it stands still (a canvas, or the splash's tick)
+- [ ] The daily token warning is checked only at start; Libri left open past midnight waits for the next start
 
 ## Phase 4: Lookups and images
 

@@ -127,7 +127,7 @@ pub fn file_stamp() -> String {
 /// The local calendar date, the seconds into the day and the
 /// milliseconds, now.
 fn local_now() -> (i64, u32, u32, i64, u32) {
-    let offset = *OFFSET.get().unwrap_or(&0);
+    let offset = utc_offset();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
@@ -139,7 +139,7 @@ fn local_now() -> (i64, u32, u32, i64, u32) {
 
 /// Local time as `2026-10-24T21:25:03.417+02:00`.
 fn timestamp() -> String {
-    let offset = *OFFSET.get().unwrap_or(&0);
+    let offset = utc_offset();
     let (year, month, day, secs, millis) = local_now();
     let (sign, magnitude) = if offset < 0 {
         ('-', -offset)
@@ -170,6 +170,13 @@ fn civil(days: i64) -> (i64, u32, u32) {
     let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     let year = yoe + era * 400 + i64::from(month <= 2);
     (year, month, day)
+}
+
+/// Seconds east of UTC on this computer, read once from `date +%z`: the
+/// trace's timestamps and `clock`'s local dates share it. The trace sets
+/// it when it starts; without one it is read on the first use.
+pub fn utc_offset() -> i64 {
+    *OFFSET.get_or_init(local_offset)
 }
 
 /// The zone offset from `date +%z` (`+0200`), 0 when it cannot be read.

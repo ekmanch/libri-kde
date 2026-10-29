@@ -25,6 +25,11 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 - `repo`: the `LibraryRepository` trait, every change as an `Operation` with its summary, and the implementations: the local file (`LocalLibraryRepository`) and the fixture in memory for the tests.
 - `storage`: the folders under the XDG homes and the atomic file write.
 - `preferences`: the display preferences file, what it holds and when it is written.
+- `connection`: `connection.json`, the repo, branch, file, local mode and the token's expiry.
+- `github`: the REST client (blocking `ureq`, run on tokio's blocking pool from a Task) and the git blob sha.
+- `sync`: the three-way sync engine (pure: requests out, answers in), `pending.json` and `sync.json`.
+- `wallet`: the token in KDE Wallet over kwalletd's D-Bus interface.
+- `clock`: timestamps as GitHub and the sync files write them, local dates, "5 minutes ago".
 - `fixtures`: the bundled fixture library.
 
 ## Git rules
@@ -35,8 +40,8 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 ## Working rules
 
 - Tick off items in `TODO.md` as they are completed. Add new items there when you find missing work, instead of doing unplanned work silently.
-- No networking and no GitHub access before phase 3. Phase 2 writes only the two files below, both atomically through `storage`.
-- The library is `~/.local/share/libri/library.json` (seeded from the fixture until phase 3) and the preferences `~/.config/libri/preferences.json`. The tests never touch them: `App::new` keeps everything in memory, and file tests use `storage::TempDir`.
+- The files on this computer, all written atomically through `storage`: the library `~/.local/share/libri/library.json` with `connection.json`, `pending.json` and `sync.json` beside it, and the preferences `~/.config/libri/preferences.json`. The token is in KDE Wallet only. The tests never touch any of them: `App::new` keeps everything in memory, and file tests use `storage::TempDir`.
+- Networking is GitHub's REST API alone, through `github::Client`, and only from the sync engine's requests and the setup. The sync logic lives in `sync::Engine` and is tested with scripted answers, never against GitHub; the live checks run by hand against `ekmanch/libri-scratch`, never `ekmanch/library`.
 - UI text uses American spelling ("color", "favorite") and sentence case.
 - All `library.json` text goes through `model::codec`, which writes the same bytes as the phone's `lib/data/library_codec.dart`. Keep `assets/fixtures/library.json` byte-identical to the phone's copy; the round-trip test checks it is canonical.
 - Ask before adding a crate. Say what it is for and what the alternative is.
@@ -44,8 +49,8 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 ## Run and test
 
 ```fish
-cargo run                          # opens the app (library screen)
-LIBRI_SCREEN=plans cargo run       # starts on another screen: splash, setup, library, plans, settings
+cargo run                          # the real app: connection.json, KDE Wallet and GitHub; the setup on a first run
+LIBRI_SCREEN=plans cargo run       # a mock run on another screen: splash, setup, library, plans, settings. LIBRI_SCREEN, LIBRI_SYNC, LIBRI_SETUP, LIBRI_FIRST_RUN and LIBRI_LOCAL all make the run a mock: the mockup's source, the fixture library, no GitHub and no wallet
 LIBRI_SYNC=expired cargo run       # the sync row's state: synced, saving, offline, error, not-found, conflict, expired; expires-in-6 shows the warning
 LIBRI_LOCAL=1 cargo run            # disconnected with the library kept on this computer (local mode)
 LIBRI_SHOT=settings cargo test --test screenshots -- --ignored capture_every_screen   # only the captures whose name contains it

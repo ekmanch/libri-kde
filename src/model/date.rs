@@ -93,7 +93,7 @@ impl Date {
     }
 
     /// Days since 1970-01-01 (Howard Hinnant's `days_from_civil`).
-    fn days(self) -> i64 {
+    pub(crate) fn days(self) -> i64 {
         let (month, day) = (i64::from(self.month), i64::from(self.day));
         let year = i64::from(self.year) - i64::from(month <= 2);
         let era = year.div_euclid(400);
@@ -104,7 +104,7 @@ impl Date {
     }
 
     /// The date `days` after 1970-01-01 (`civil_from_days`).
-    fn from_days(days: i64) -> Date {
+    pub(crate) fn from_days(days: i64) -> Date {
         let z = days + 719_468;
         let era = z.div_euclid(146_097);
         let day_of_era = z - era * 146_097;

@@ -62,7 +62,7 @@ impl LocalLibraryRepository {
                     });
                 }
                 Err(error) => {
-                    let aside = aside_path(&path);
+                    let aside = storage::aside_path(&path);
                     fs::rename(&path, &aside)?;
                     let message = format!(
                         "{} could not be read ({error}); moved to {}",
@@ -101,16 +101,6 @@ impl LocalLibraryRepository {
     }
 }
 
-/// `library.json.20261027-213005.unreadable` next to `library.json`.
-fn aside_path(path: &Path) -> PathBuf {
-    let mut name = path
-        .file_name()
-        .map(std::ffi::OsString::from)
-        .unwrap_or_default();
-    name.push(format!(".{}.unreadable", storage::file_stamp()));
-    path.with_file_name(name)
-}
-
 impl LibraryRepository for LocalLibraryRepository {
     fn library(&self) -> &Library {
         &self.library
@@ -136,6 +126,16 @@ impl LibraryRepository for LocalLibraryRepository {
         self.library = Library::default();
         self.written = None;
         storage::remove_if_exists(&self.path)
+    }
+
+    fn replace(&mut self, library: Library) {
+        self.library = library;
+        if let Err(error) = self.write() {
+            let message = format!("could not write {}: {error}", self.path.display());
+            eprintln!("libri: {message}");
+            crate::trace::line(message);
+            self.written = None;
+        }
     }
 }
 

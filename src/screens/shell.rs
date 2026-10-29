@@ -383,33 +383,30 @@ fn sync_parts(
             if n == 1 { "change" } else { "changes" }
         )
     };
-    match app.sync {
+    match &app.sync {
         _ if app.kept_locally => (
             tokens.sub,
             "Not connected".into(),
             "Library kept on this computer".into(),
             None,
         ),
-        SyncState::Synced | SyncState::ExpiresIn(_) => (
-            theme::SYNC_OK,
-            "Synced 2 min ago".into(),
-            String::new(),
-            None,
-        ),
+        SyncState::Synced | SyncState::ExpiresIn(_) => {
+            (theme::SYNC_OK, app.synced_label(), String::new(), None)
+        }
         SyncState::Saving { changes } => (
             tokens.accent,
             format!(
                 "Saving {changes} {}…",
-                if changes == 1 { "change" } else { "changes" }
+                if *changes == 1 { "change" } else { "changes" }
             ),
             String::new(),
             None,
         ),
-        SyncState::Offline { kept } => (tokens.sub, "Offline".into(), changes(kept), None),
+        SyncState::Offline { kept } => (tokens.sub, "Offline".into(), changes(*kept), None),
         SyncState::Failed { kept } => (
             theme::SYNC_ERROR,
             "Could not save".into(),
-            changes(kept),
+            changes(*kept),
             Some(("Retry", Message::Sync(SyncMessage::Retry))),
         ),
         SyncState::NotFound(missing) => (
@@ -532,11 +529,11 @@ pub fn conflict_overlay<'a>(app: &'a App, base: Element<'a, Message>) -> Element
 }
 
 fn conflict_dialog<'a>(app: &App, tokens: &Tokens) -> Element<'a, Message> {
-    let (local, remote) = match app.sync {
+    let (local, remote) = match &app.sync {
         SyncState::Conflict {
             local_changes,
             remote_commit,
-        } => (local_changes, remote_commit),
+        } => (*local_changes, remote_commit.as_str()),
         _ => (0, ""),
     };
     let sides = row![

@@ -35,6 +35,10 @@ impl LibraryRepository for FixtureLibraryRepository {
         self.library = Library::default();
         Ok(())
     }
+
+    fn replace(&mut self, library: Library) {
+        self.library = library;
+    }
 }
 
 #[cfg(test)]

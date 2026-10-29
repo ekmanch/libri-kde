@@ -140,39 +140,59 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                 source.file = value;
             }
         }
-        Message::SyncNow => {}
+        Message::SyncNow => return app.sync_now(),
         Message::ReplaceToken => return setup::update(app, setup::Message::ReplaceToken),
         Message::Disconnect => page.disconnect = Some(DisconnectStep::Confirm),
         Message::ConfirmDisconnect => page.disconnect = Some(DisconnectStep::KeepOrDelete),
         Message::DisconnectKeep => {
-            // The token, the queue and the sync meta go; the library stays
+            // The token, the queue and the sync base go; the library stays
             // and can be browsed and edited until a repo is connected.
             page.disconnect = None;
             app.source = None;
             app.kept_locally = true;
-            app.sync = SyncState::Synced;
-            app.conflict_open = false;
             app.screen = super::Screen::Library;
+            return app.disconnect(true);
         }
         Message::DisconnectDelete => {
             page.disconnect = None;
-            if let Err(error) = app.repo.delete() {
-                eprintln!("libri: could not delete the library: {error}");
-            }
+            let task = app.disconnect(false);
             app.source = None;
             app.kept_locally = false;
-            app.sync = SyncState::Synced;
-            app.conflict_open = false;
-            app.setup = setup::State::at(setup::Step::Welcome, None);
+            app.setup = if app.mock {
+                setup::State::at(setup::Step::Welcome, None)
+            } else {
+                setup::State::real(setup::Step::Welcome, None)
+            };
             app.screen = super::Screen::Setup;
+            return task;
         }
         Message::CloseDisconnect => page.disconnect = None,
+        // "Pick a file" while the library is not found: the file step for
+        // the connected repo and branch, with the token in use.
         Message::PickFile => {
-            app.setup = setup::State::at(setup::Step::File, app.source.as_ref());
+            app.setup = if app.mock {
+                setup::State::at(setup::Step::File, app.source.as_ref())
+            } else {
+                let mut state = setup::State::real(setup::Step::File, app.connection.as_ref());
+                if let (Some(source), Some(token)) = (&app.source, &app.token) {
+                    state.token = token.clone();
+                    state.branches = vec![setup::Branch {
+                        name: source.branch.clone(),
+                        info: "The connected branch".into(),
+                        default: true,
+                    }];
+                }
+                state.client = app.github.clone().map(setup::ClientHandle);
+                state
+            };
             app.screen = super::Screen::Setup;
         }
         Message::Connect | Message::SetUp => {
-            app.setup = setup::State::at(setup::Step::Connect, None);
+            app.setup = if app.mock {
+                setup::State::at(setup::Step::Connect, None)
+            } else {
+                setup::State::real(setup::Step::Connect, app.connection.as_ref())
+            };
             app.screen = super::Screen::Setup;
         }
         Message::OpenLicenses => page.licenses_open = true,
@@ -622,7 +642,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let library = app.repo.library();
     let control: Element<'a, AppMessage> = match &app.source {
         Some(source) => {
-            let (fill, dot, title, detail, action) = match app.sync {
+            let (fill, dot, title, detail, action) = match &app.sync {
                 SyncState::TokenExpired => (
                     tokens.danger_fill,
                     tokens.danger,
@@ -655,7 +675,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     "Library not found on GitHub",
                     format!(
                         "{} Pick the file again, or restore it on GitHub.",
-                        SyncState::missing_text(missing, Some(source))
+                        SyncState::missing_text(*missing, Some(source))
                     ),
                     ui::sized_button(
                         "Pick a file",
@@ -671,7 +691,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     "Could not save",
                     format!(
                         "GitHub didn't answer. {kept} {} kept on this computer; Libri tries again by itself.",
-                        if kept == 1 {
+                        if *kept == 1 {
                             "change is"
                         } else {
                             "changes are"
@@ -691,7 +711,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     "Offline",
                     format!(
                         "{kept} {} kept on this computer and saved when you're back online.",
-                        if kept == 1 {
+                        if *kept == 1 {
                             "change is"
                         } else {
                             "changes are"
@@ -710,7 +730,8 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     tokens.success,
                     "Connected",
                     format!(
-                        "Last synced 2 min ago · {} entries · {} plans{}",
+                        "{} · {} entries · {} plans{}",
+                        app.last_synced_label(),
                         thousands(library.entries.len()),
                         library.plans.len(),
                         match sync {
@@ -745,22 +766,26 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             .padding([12, 14])
             .style(move |_| container::background(fill).border(Border::default().rounded(10)));
 
-            let field = |label, value: &str, make: fn(String) -> Message| {
-                ui::labeled(
-                    label,
-                    ui::text_field("", value, move |v| msg(make(v)), font::MONO, tokens),
-                    tokens,
-                )
-            };
+            // The connection's values come from `connection.json` and
+            // change through the setup (Pick a file, Replace token), so
+            // the fields only show them.
             let (field_bg, line) = (tokens.field, tokens.line);
-            let token = row![
-                container(ui::mono(source.token_hint.clone(), 14.0, tokens.sub))
+            let shown = |value: String, color| {
+                container(ui::mono(value, 14.0, color))
                     .width(Fill)
                     .height(38)
                     .padding([0, 12])
                     .align_y(Center)
-                    .style(move |_| container::background(field_bg)
-                        .border(Border::default().rounded(8).width(1).color(line))),
+                    .style(move |_| {
+                        container::background(field_bg)
+                            .border(Border::default().rounded(8).width(1).color(line))
+                    })
+            };
+            let field = |label, value: &str| {
+                ui::labeled(label, shown(value.to_owned(), tokens.text), tokens)
+            };
+            let token = row![
+                shown(source.token_hint.clone(), tokens.sub),
                 ui::sized_button(
                     "Replace",
                     ButtonKind::Outline,
@@ -772,12 +797,12 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             .spacing(8);
             let fields = column![
                 row![
-                    field("Repository", &source.repo, Message::Repo),
-                    field("Branch", &source.branch, Message::Branch),
+                    field("Repository", &source.repo),
+                    field("Branch", &source.branch),
                 ]
                 .spacing(14),
                 row![
-                    field("Library file", &source.file, Message::File),
+                    field("Library file", &source.file),
                     ui::labeled("Access token", token, tokens),
                 ]
                 .spacing(14),
@@ -1066,7 +1091,7 @@ const DATA_SOURCES: [DataSource; 8] = [
 
 /// The crates and fonts Libri ships, for the licenses dialog. Phase 5
 /// generates the full list with their texts at build time.
-const LICENSES: [(&str, &str); 8] = [
+const LICENSES: [(&str, &str); 12] = [
     ("iced", "MIT"),
     (
         "wgpu, winit and the Rust ecosystem iced builds on",
@@ -1075,6 +1100,10 @@ const LICENSES: [(&str, &str); 8] = [
     ("serde and serde_json", "MIT or Apache-2.0"),
     ("raw-window-handle", "MIT, Apache-2.0 or Zlib"),
     ("wayland-client and wayland-protocols-plasma", "MIT"),
+    ("ureq", "MIT or Apache-2.0"),
+    ("rustls and its TLS stack", "Apache-2.0, ISC or MIT"),
+    ("sha1 and base64", "MIT or Apache-2.0"),
+    ("zbus and tokio", "MIT"),
     ("Figtree", "SIL Open Font License 1.1"),
     ("JetBrains Mono", "SIL Open Font License 1.1"),
     ("Libri", "MIT"),

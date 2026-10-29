@@ -8,7 +8,6 @@ use iced::{Border, Center, Element, Padding, Task};
 
 use super::setup;
 use crate::app::{self, App, Message as AppMessage};
-use crate::settings::SyncState;
 use crate::theme::font;
 use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
@@ -50,10 +49,10 @@ pub fn overlay<'a>(app: &'a App, base: Element<'a, AppMessage>) -> Element<'a, A
 
 fn view(app: &App) -> Element<'_, AppMessage> {
     let tokens = app.tokens();
-    let SyncState::ExpiresIn(days) = app.sync else {
+    let Some(days) = app.token_expires_in().filter(|days| *days >= 0) else {
         return space().into();
     };
-    let date = app.today.add_days(i64::from(days)).month_day();
+    let date = app.today.add_days(days).month_day();
     let repo = app
         .source
         .as_ref()
@@ -138,6 +137,7 @@ fn view(app: &App) -> Element<'_, AppMessage> {
 mod tests {
     use super::*;
     use crate::screens::Screen;
+    use crate::settings::SyncState;
 
     #[test]
     fn later_closes_the_warning_and_replace_opens_the_connect_step() {

@@ -16,6 +16,17 @@ wayland-protocols-plasma = { version = "0.3.12", features = ["client"] }
 # The freeze trace (src/trace.rs) catches iced's, winit's and wgpu's
 # warnings; already in the build through all three.
 log = "0.4.29"
+# GitHub's REST API (src/github): a small blocking client, run on tokio's
+# blocking pool from an iced Task. rustls through its default features.
+ureq = "3.4"
+# The git blob sha of the library file (SHA-1 of "blob <len>\0" and the
+# bytes), which the Contents API wants and the three-way sync compares.
+sha1 = "0.11"
+# Already in the build: base64 for the Contents API's content, tokio for
+# the blocking pool and the timers (iced's runtime), zbus for KDE Wallet.
+base64 = "0.22"
+tokio = "1"
+zbus = "5.19"
 
 [dev-dependencies]
 iced_test = "0.14.0"

@@ -3,6 +3,7 @@
 //! have: the fixture in phase 1, a local file in phase 2, GitHub in phase 3.
 
 mod fixture;
+pub mod json;
 mod local;
 
 use std::fmt;
@@ -26,6 +27,10 @@ pub trait LibraryRepository {
     /// library in memory is emptied (Disconnect, "Delete it from this
     /// computer"). The fixture only empties.
     fn delete(&mut self) -> std::io::Result<()>;
+
+    /// Puts `library` in place of the one held, whole: GitHub's copy
+    /// taken by the sync, or the library a new file was created from.
+    fn replace(&mut self, library: Library);
 }
 
 /// Every change to the library. Each is small and named, with a readable

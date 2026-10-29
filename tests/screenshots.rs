@@ -157,6 +157,28 @@ fn capture_every_screen() {
             Screen::Setup,
             ("setup-create", |app| setup_at(Step::Create)(app)),
         ),
+        // Phase 3: the wizard waiting on GitHub, and a refused token.
+        (
+            Screen::Setup,
+            ("setup-connect-checking", |app| {
+                setup_at(Step::Connect)(app);
+                app.setup.busy = Some(setup::Busy::Connecting);
+            }),
+        ),
+        (
+            Screen::Setup,
+            ("setup-connect-refused", |app| {
+                setup_at(Step::Connect)(app);
+                app.setup.error = Some("GitHub refused the token. Check it and try again.".into());
+            }),
+        ),
+        (
+            Screen::Setup,
+            ("setup-create-creating", |app| {
+                setup_at(Step::Create)(app);
+                app.setup.busy = Some(setup::Busy::Creating);
+            }),
+        ),
         (
             Screen::Setup,
             ("setup-existing", |app| {

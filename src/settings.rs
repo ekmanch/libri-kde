@@ -184,6 +184,16 @@ pub struct Source {
 }
 
 impl Source {
+    /// The connection's target, with the token's hint.
+    pub fn of(target: &crate::connection::Target, token_hint: impl Into<String>) -> Source {
+        Source {
+            repo: target.repository.clone(),
+            branch: target.branch.clone(),
+            file: target.file.clone(),
+            token_hint: token_hint.into(),
+        }
+    }
+
     /// The mockup's connection.
     pub fn fixture() -> Source {
         Source {
@@ -214,9 +224,9 @@ pub enum Missing {
 }
 
 /// The sync row's state, the banner over the content and the token
-/// warning (docs/DESIGN.md 4.6 and 10). Faked until phase 3 syncs for
-/// real; `LIBRI_SYNC` picks one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// warning (docs/DESIGN.md 4.6 and 10), as the sync engine's status maps
+/// to it (`App::refresh_sync_state`); `LIBRI_SYNC` fakes one.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SyncState {
     #[default]
     Synced,
@@ -238,7 +248,9 @@ pub enum SyncState {
     /// until one copy is picked.
     Conflict {
         local_changes: u32,
-        remote_commit: &'static str,
+        /// "Oct 13, 20:12", or "unknown" when the commit list could not
+        /// be read.
+        remote_commit: String,
     },
     /// The token expires in this many days; from 7 days before, the
     /// warning dialog shows.
@@ -261,7 +273,7 @@ impl SyncState {
             "not-found-repo" => SyncState::NotFound(Missing::Repo),
             "conflict" => SyncState::Conflict {
                 local_changes: 3,
-                remote_commit: "Oct 13, 20:12",
+                remote_commit: "Oct 13, 20:12".into(),
             },
             "expired" => SyncState::TokenExpired,
             _ => {
@@ -272,13 +284,13 @@ impl SyncState {
     }
 
     /// Whether the warning dialog shows when Libri opens.
-    pub fn warns(self) -> bool {
-        matches!(self, SyncState::ExpiresIn(days) if days <= 7)
+    pub fn warns(&self) -> bool {
+        matches!(self, SyncState::ExpiresIn(days) if *days <= 7)
     }
 
     /// Whether the state needs the owner to act, so a banner shows over
     /// the content on Library and Plans besides the sidebar row.
-    pub fn needs_action(self) -> bool {
+    pub fn needs_action(&self) -> bool {
         matches!(
             self,
             SyncState::Failed { .. } | SyncState::NotFound(_) | SyncState::Conflict { .. }
@@ -286,8 +298,8 @@ impl SyncState {
     }
 
     /// Whether the connection is in trouble, for the red dot.
-    pub fn is_error(self) -> bool {
-        self.needs_action() || self == SyncState::TokenExpired
+    pub fn is_error(&self) -> bool {
+        self.needs_action() || *self == SyncState::TokenExpired
     }
 
     /// "library.json is gone from ekmanch/library (main).", for the

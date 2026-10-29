@@ -102,6 +102,14 @@ pub fn file_stamp() -> String {
     crate::trace::file_stamp()
 }
 
+/// `library.json.20261027-213005.unreadable` next to `library.json`: where
+/// a file that does not parse is moved, never overwritten.
+pub fn aside_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().map(OsString::from).unwrap_or_default();
+    name.push(format!(".{}.unreadable", file_stamp()));
+    path.with_file_name(name)
+}
+
 /// A folder of its own under the system's temp dir, removed when dropped,
 /// for the tests that write files.
 #[cfg(test)]
