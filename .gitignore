@@ -30,3 +30,6 @@ rustc-ice-*.txt
 
 # Screen captures from tests/screenshots.rs
 /screenshots
+
+# API keys for the lookup providers (phase 4); never committed
+/secrets.json
