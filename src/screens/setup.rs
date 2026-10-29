@@ -1046,6 +1046,7 @@ fn wizard<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             text("Back").size(14)
         ]
         .spacing(6)
+        .height(Fill)
         .align_y(Center),
     )
     .height(40)
@@ -1053,12 +1054,18 @@ fn wizard<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     .on_press(msg(Message::Back))
     .style(action_style(ButtonKind::Outline, tokens))
     .focusable(9.0, tokens);
-    let primary = button(text(state.primary_label()).size(14).font(font::BOLD))
-        .height(40)
-        .padding([0, 22])
-        .on_press_maybe(state.can_continue().then_some(msg(Message::Continue)))
-        .style(action_style(ButtonKind::Primary, tokens))
-        .focusable(9.0, tokens);
+    let primary = button(
+        text(state.primary_label())
+            .size(14)
+            .font(font::BOLD)
+            .height(Fill)
+            .align_y(Vertical::Center),
+    )
+    .height(40)
+    .padding([0, 22])
+    .on_press_maybe(state.can_continue().then_some(msg(Message::Continue)))
+    .style(action_style(ButtonKind::Primary, tokens))
+    .focusable(9.0, tokens);
     let footer = container(
         container(
             row![back, space::horizontal(), primary]
@@ -1132,6 +1139,7 @@ fn step_row<'a>(
     container(row![disc, words].spacing(12).align_y(Center))
         .width(Fill)
         .height(44)
+        .align_y(Center)
         .padding([0, 10])
         .style(move |_| container::Style {
             background: current.then_some(Background::Color(tokens.selection)),
@@ -1554,6 +1562,7 @@ fn radio_row<'a>(
     button(
         row![radio(on, enabled, &tokens), words]
             .spacing(12)
+            .height(Fill)
             .align_y(Center),
     )
     .width(Fill)
