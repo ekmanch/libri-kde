@@ -52,7 +52,7 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
         .clip(true)
         .style(move |_| container::Style {
             text_color: Some(tokens.text),
-            background: Some(Background::Color(tokens.content)),
+            background: Some(Background::Color(tokens.dialog)),
             border: Border::default().rounded(14).width(1).color(tokens.line),
             shadow: Shadow {
                 color: tokens.shadow,
@@ -362,7 +362,7 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         .push(text(head).size(12).color(tokens.sub))
         .push(ui::scroll(list).height(Fill))
         .push(container(foot).center_x(Fill));
-    let chrome = tokens.chrome;
+    let chrome = tokens.dialog_chrome;
     container(pane)
         .width(380)
         .height(Fill)

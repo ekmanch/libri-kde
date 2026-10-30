@@ -53,7 +53,7 @@ cargo run                          # the real app: connection.json, KDE Wallet a
 LIBRI_SCREEN=plans cargo run       # a mock run on another screen: splash, setup, library, plans, settings. LIBRI_SCREEN, LIBRI_SYNC, LIBRI_SETUP, LIBRI_FIRST_RUN and LIBRI_LOCAL all make the run a mock: the mockup's source, the fixture library, no GitHub and no wallet
 LIBRI_SYNC=expired cargo run       # the sync row's state: synced, saving, offline, error, not-found, conflict, expired; expires-in-6 shows the warning
 LIBRI_LOCAL=1 cargo run            # disconnected with the library kept on this computer (local mode)
-LIBRI_SHOT=settings cargo test --test screenshots -- --ignored capture_every_screen   # only the captures whose name contains it
+LIBRI_SHOT=settings cargo test --test screenshots -- --ignored capture_every_screen   # only the captures whose name contains it; LIBRI_SHOT_THEME=charcoal,mocha picks other themes than Graphite, Light and Glass, LIBRI_SHOT_FLAT=1 the flat style (named "-flat")
 LIBRI_PLASMA=light cargo run       # a light Plasma, for the System theme (any value stops following the portal)
 LIBRI_THEME=glass cargo run        # starts in a theme: system, graphite, charcoal, mocha, glass, light; LIBRI_FLAT=1 for the flat style. With LIBRI_THEME, LIBRI_FLAT or LIBRI_PLASMA set the preferences are read but never written
 LIBRI_FIRST_RUN=1 cargo run        # no repository yet (the splash's first-run line, Settings not connected)

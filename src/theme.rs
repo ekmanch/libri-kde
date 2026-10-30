@@ -174,6 +174,11 @@ pub struct Tokens {
     pub track: Color,
     /// Popovers and menus.
     pub popover: Color,
+    /// The Add and Edit dialog's surface, and the lookup pane beside it.
+    /// Opaque on every theme: a dialog never shows the screen through it,
+    /// so on Glass they are Graphite's content and chrome.
+    pub dialog: Color,
+    pub dialog_chrome: Color,
     /// Destructive text: Delete, Disconnect.
     pub danger: Color,
     /// Behind a modal dialog.
@@ -280,6 +285,16 @@ impl Tokens {
             // Popovers and menus stay solid on Glass, so they read over the
             // glass they open on.
             popover: pick(hex(0xFFFFFF), if glass { hex(0x26292D) } else { raised }),
+            dialog: if glass {
+                hex(if flat { 0x151515 } else { 0x1D1F22 })
+            } else {
+                content
+            },
+            dialog_chrome: if glass {
+                hex(if flat { 0x151515 } else { 0x131416 })
+            } else {
+                chrome
+            },
             danger,
             success,
             success_fill: faint(success),
@@ -511,6 +526,25 @@ mod tests {
         }
         println!("{table}");
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// Every dialog surface is opaque, the popovers too: a see-through
+    /// dialog would show the screen it stands on, and a picker over the
+    /// form would show the form.
+    #[test]
+    fn dialogs_and_popovers_are_opaque_on_every_theme() {
+        for theme in Theme::ALL {
+            for flat in [false, true] {
+                let tokens = Tokens::styled(theme, PEACH, flat);
+                for (name, color) in [
+                    ("dialog", tokens.dialog),
+                    ("dialog chrome", tokens.dialog_chrome),
+                    ("popover", tokens.popover),
+                ] {
+                    assert_eq!(color.a, 1.0, "{} {name} (flat: {flat})", theme.label());
+                }
+            }
+        }
     }
 
     #[test]

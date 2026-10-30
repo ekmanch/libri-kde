@@ -6,6 +6,10 @@
 //! ```fish
 //! cargo test --test screenshots -- --ignored
 //! ```
+//!
+//! `LIBRI_SHOT=settings` renders only the captures whose name contains
+//! it, `LIBRI_SHOT_THEME=charcoal,mocha` other themes than the three, and
+//! `LIBRI_SHOT_FLAT=1` the flat style.
 
 use std::path::PathBuf;
 
@@ -806,6 +810,27 @@ fn capture_every_screen() {
 
     // `LIBRI_SHOT=settings` renders only the variants whose name contains it.
     let only = std::env::var("LIBRI_SHOT").ok();
+    let themes = match std::env::var("LIBRI_SHOT_THEME") {
+        Ok(names) => names
+            .split(',')
+            .map(|name| {
+                // "mocha" names Catppuccin Mocha.
+                let name = name.trim().to_lowercase();
+                Theme::ALL
+                    .into_iter()
+                    .find(|theme| {
+                        theme
+                            .label()
+                            .to_lowercase()
+                            .split_whitespace()
+                            .any(|word| word == name)
+                    })
+                    .unwrap_or_else(|| panic!("no theme {name}"))
+            })
+            .collect(),
+        Err(_) => vec![Theme::Graphite, Theme::Light, Theme::Glass],
+    };
+    let flat = std::env::var_os("LIBRI_SHOT_FLAT").is_some();
     for (screen, (name, change)) in variants {
         if only
             .as_ref()
@@ -813,9 +838,10 @@ fn capture_every_screen() {
         {
             continue;
         }
-        for theme in [Theme::Graphite, Theme::Light, Theme::Glass] {
+        for &theme in &themes {
             let mut app = App::new(screen);
             app.settings.theme = ThemeChoice::Fixed(theme);
+            app.settings.flat = flat;
             // The fixture's dates are set around this day.
             app.today = Date::parse("2026-10-19").unwrap();
             change(&mut app);
@@ -838,7 +864,9 @@ fn capture_every_screen() {
 
             // `matches_image` writes the file when it is missing and adds the
             // renderer to the name ("library-light-wgpu.png").
-            let name = format!("{name}-{}", theme.label().to_lowercase());
+            let style = if flat { "-flat" } else { "" };
+            let theme_name = theme.label().to_lowercase().replace(' ', "-");
+            let name = format!("{name}-{theme_name}{style}");
             let path = folder.join(format!("{name}.png"));
             let written = folder.join(format!("{name}-wgpu.png"));
             let _ = std::fs::remove_file(&written);
