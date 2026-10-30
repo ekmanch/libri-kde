@@ -266,6 +266,13 @@ fn capture_every_screen() {
             }),
         ),
         (
+            Screen::Library,
+            ("library-unreadable-dialog", |app| {
+                app.sync = SyncState::from_env("unreadable").unwrap();
+                app.conflict_open = true;
+            }),
+        ),
+        (
             Screen::Plans,
             ("plans-sync-conflict", |app| {
                 app.sync = SyncState::from_env("conflict").unwrap();
@@ -282,6 +289,12 @@ fn capture_every_screen() {
             Screen::Settings,
             ("settings-source-conflict", |app| {
                 app.sync = SyncState::from_env("conflict").unwrap();
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-source-unreadable", |app| {
+                app.sync = SyncState::from_env("unreadable").unwrap();
             }),
         ),
         (

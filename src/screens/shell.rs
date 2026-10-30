@@ -425,6 +425,12 @@ fn sync_parts(
             "Changed here and on GitHub".into(),
             Some(("Choose", Message::Sync(SyncMessage::OpenConflict))),
         ),
+        SyncState::Unreadable { .. } => (
+            theme::SYNC_ERROR,
+            "Broken on GitHub".into(),
+            "The file isn't a valid library".into(),
+            Some(("Choose", Message::Sync(SyncMessage::OpenConflict))),
+        ),
         SyncState::TokenExpired => (
             theme::SYNC_ERROR,
             "Token expired".into(),
@@ -476,6 +482,17 @@ fn banner<'a>(app: &App, tokens: &Tokens) -> Option<Element<'a, Message>> {
             "Choose",
             Message::Sync(SyncMessage::OpenConflict),
         ),
+        SyncState::Unreadable { .. } => (
+            "GitHub's copy can't be read",
+            format!(
+                "{} on {repo} is no longer a valid library. Fix it there, or replace it with this computer's copy.",
+                app.source
+                    .as_ref()
+                    .map_or("library.json", |s| s.file.as_str())
+            ),
+            "Choose",
+            Message::Sync(SyncMessage::OpenConflict),
+        ),
         _ => return None,
     };
     let (fill, line, danger) = (
@@ -516,10 +533,14 @@ fn banner<'a>(app: &App, tokens: &Tokens) -> Option<Element<'a, Message>> {
     )
 }
 
-/// "Keep which copy?", over everything while a conflict is being decided.
+/// "Keep which copy?", over everything while a conflict is being decided;
+/// "GitHub's copy can't be read" when that is what stopped the sync.
 pub fn conflict_overlay<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, Message> {
     let tokens = app.tokens();
-    let dialog = app.conflict_open.then(|| conflict_dialog(app, &tokens));
+    let dialog = app.conflict_open.then(|| match &app.sync {
+        SyncState::Unreadable { kept, reason } => unreadable_dialog(app, *kept, reason, &tokens),
+        _ => conflict_dialog(app, &tokens),
+    });
     ui::modal(
         base,
         dialog,
@@ -589,6 +610,83 @@ fn conflict_dialog<'a>(app: &App, tokens: &Tokens) -> Element<'a, Message> {
     .align_y(Center);
     ui::dialog(
         "Keep which copy?",
+        body,
+        footer,
+        520,
+        tokens,
+        Message::Sync(SyncMessage::CloseConflict),
+    )
+}
+
+/// GitHub's copy is no library any more: the reason, and the ways out.
+/// Keep mine is the neutral fill as in the conflict dialog; Check again
+/// is for after a fix on GitHub.
+fn unreadable_dialog<'a>(
+    app: &App,
+    kept: u32,
+    reason: &str,
+    tokens: &Tokens,
+) -> Element<'a, Message> {
+    let (repo, file) = app
+        .source
+        .as_ref()
+        .map_or(("the repository", "library.json"), |s| {
+            (s.repo.as_str(), s.file.as_str())
+        });
+    let sides = row![
+        text(format!(
+            "This computer: {kept} {}",
+            if kept == 1 { "change" } else { "changes" }
+        ))
+        .size(13)
+        .color(tokens.sub)
+        .width(Fill),
+        text(format!("GitHub: {file} on {repo}"))
+            .size(13)
+            .color(tokens.sub),
+    ];
+    let warning = row![
+        ui::dot(tokens.danger, 9.0, 4.5),
+        text("Keep mine replaces the file on GitHub with this computer's copy; the edits made there are gone. Earlier versions stay in the repo's history.")
+            .size(13)
+            .color(tokens.text)
+            .width(Fill),
+    ]
+    .spacing(10)
+    .align_y(Center);
+    let body = column![
+        text("The file on GitHub is no longer a valid library, so it can't replace this computer's copy.")
+            .size(14),
+        ui::mono(reason.to_owned(), 12.5, tokens.sub),
+        sides,
+        warning,
+    ]
+    .spacing(12);
+    let footer = row![
+        ui::labeled_button(
+            "Decide later",
+            ui::ButtonKind::Text,
+            *tokens,
+            Some(Message::Sync(SyncMessage::CloseConflict))
+        ),
+        space::horizontal(),
+        ui::labeled_button(
+            "Check again",
+            ui::ButtonKind::Outline,
+            *tokens,
+            Some(Message::Sync(SyncMessage::Retry))
+        ),
+        ui::labeled_button(
+            "Keep mine",
+            ui::ButtonKind::Neutral,
+            *tokens,
+            Some(Message::Sync(SyncMessage::KeepMine))
+        ),
+    ]
+    .spacing(8)
+    .align_y(Center);
+    ui::dialog(
+        "GitHub's copy can't be read",
         body,
         footer,
         520,

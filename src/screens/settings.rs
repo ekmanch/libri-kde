@@ -669,6 +669,19 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                         Some(AppMessage::Sync(crate::app::SyncMessage::OpenConflict)),
                     ),
                 ),
+                SyncState::Unreadable { reason, .. } => (
+                    tokens.danger_fill,
+                    tokens.danger,
+                    "GitHub's copy can't be read",
+                    format!("{reason}. Fix the file on GitHub, or keep this computer's copy."),
+                    ui::sized_button(
+                        "Choose",
+                        ButtonKind::Outline,
+                        32.0,
+                        *tokens,
+                        Some(AppMessage::Sync(crate::app::SyncMessage::OpenConflict)),
+                    ),
+                ),
                 SyncState::NotFound(missing) => (
                     tokens.danger_fill,
                     tokens.danger,

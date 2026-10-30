@@ -244,6 +244,15 @@ pub enum SyncState {
     },
     /// A 404: the file, the branch or the repo is gone.
     NotFound(Missing),
+    /// GitHub's copy is no library any more (a hand edit broke it), so
+    /// it cannot replace this computer's. Nothing syncs until it is fixed
+    /// there or Keep mine replaces it.
+    Unreadable {
+        kept: u32,
+        /// serde's message: "invalid type: integer `2015`, expected a
+        /// string at line 17365 column 22".
+        reason: String,
+    },
     /// Changed here and on GitHub since they last matched; nothing syncs
     /// until one copy is picked.
     Conflict {
@@ -260,8 +269,8 @@ pub enum SyncState {
 
 impl SyncState {
     /// `LIBRI_SYNC`: "saving", "offline", "error", "not-found" (or
-    /// "not-found-branch", "not-found-repo"), "conflict", "expired", or
-    /// "expires-in-6" for a warning.
+    /// "not-found-branch", "not-found-repo"), "conflict", "unreadable",
+    /// "expired", or "expires-in-6" for a warning.
     pub fn from_env(value: &str) -> Option<SyncState> {
         Some(match value {
             "synced" => SyncState::Synced,
@@ -274,6 +283,11 @@ impl SyncState {
             "conflict" => SyncState::Conflict {
                 local_changes: 3,
                 remote_commit: "Oct 13, 20:12".into(),
+            },
+            "unreadable" => SyncState::Unreadable {
+                kept: 1,
+                reason: "invalid type: integer `2015`, expected a string at line 17365 column 22"
+                    .into(),
             },
             "expired" => SyncState::TokenExpired,
             _ => {
@@ -293,7 +307,10 @@ impl SyncState {
     pub fn needs_action(&self) -> bool {
         matches!(
             self,
-            SyncState::Failed { .. } | SyncState::NotFound(_) | SyncState::Conflict { .. }
+            SyncState::Failed { .. }
+                | SyncState::NotFound(_)
+                | SyncState::Conflict { .. }
+                | SyncState::Unreadable { .. }
         )
     }
 
@@ -332,6 +349,7 @@ mod tests {
             Some(SyncState::NotFound(Missing::Repo))
         );
         assert!(SyncState::from_env("conflict").unwrap().needs_action());
+        assert!(SyncState::from_env("unreadable").unwrap().needs_action());
         assert!(!SyncState::from_env("saving").unwrap().needs_action());
         assert!(SyncState::from_env("expired").unwrap().is_error());
         assert_eq!(SyncState::from_env("nope"), None);

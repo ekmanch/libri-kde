@@ -116,6 +116,11 @@ pub enum Phase {
     /// The file changed on GitHub and on this computer since they last
     /// matched. Nothing moves until a side is picked.
     Conflict,
+    /// GitHub's copy is no library any more (a hand edit broke it), so it
+    /// cannot replace this computer's. Nothing moves until it is fixed
+    /// there or "Keep mine" replaces it; the checks go on, so a fixed
+    /// file is picked up again. The reason is `Engine::remote_error`.
+    Unreadable,
     /// GitHub answered 404: the file, its branch or the whole repo is
     /// gone, or the token no longer sees the repo. Nothing syncs until the
     /// connection is fixed; the checks go on, so a restored file or
@@ -194,6 +199,8 @@ pub struct Engine {
     base: Option<Base>,
     phase: Phase,
     remote_changed_at: Option<Timestamp>,
+    /// Why GitHub's copy cannot be read, while the phase is Unreadable.
+    remote_error: Option<String>,
     step: Option<Step>,
     /// The round running, and whether it pushes after its check: a save
     /// refused for a stale sha is checked again, and the queue goes out
@@ -225,6 +232,7 @@ impl Engine {
             base,
             phase: Phase::Idle,
             remote_changed_at: None,
+            remote_error: None,
             step: None,
             kind: Kind::Sync,
             push: true,
@@ -264,6 +272,12 @@ impl Engine {
             last_checked: self.base.as_ref().and_then(|b| b.last_checked),
             remote_changed_at: self.remote_changed_at,
         }
+    }
+
+    /// Why GitHub's copy cannot be read, while the phase is Unreadable:
+    /// serde's message with the line and column.
+    pub fn remote_error(&self) -> Option<&str> {
+        self.remote_error.as_deref()
     }
 
     /// Whether a request is out.
@@ -396,7 +410,10 @@ impl Engine {
                 self.finish(Phase::Conflict)
             }
             (Step::TakeRemote { reapply }, Answer::Raw(Ok(Some(raw)))) => {
-                self.take_remote(&raw, reapply)
+                match self.decode_remote(&raw) {
+                    Some(remote) => self.take_remote(&raw, remote, reapply),
+                    None => self.finish(Phase::Unreadable),
+                }
             }
             (Step::TakeRemote { .. }, Answer::Raw(Ok(None))) => {
                 log("an unconditional request answered 304");
@@ -525,8 +542,13 @@ impl Engine {
             };
         }
         let raw = raw.expect("a changed file came with its content");
+        // A copy that cannot be read is told before a conflict is: there
+        // is no "Keep GitHub's" to offer then.
+        let Some(remote) = self.decode_remote(&raw) else {
+            return self.finish(Phase::Unreadable);
+        };
         if !local_changed {
-            return self.take_remote(&raw, true);
+            return self.take_remote(&raw, remote, true);
         }
         log(
             "the file changed on GitHub and on this computer since they last matched; waiting for a choice",
@@ -539,21 +561,30 @@ impl Engine {
         Outcome::request(Request::Commits { limit: 1 })
     }
 
-    /// Takes GitHub's copy as this computer's and the new base. With
-    /// `reapply` the queued operations go on top of it, dropping any that
-    /// no longer applies; without it the queue is dropped whole.
-    fn take_remote(&mut self, raw: &RawFile, reapply: bool) -> Outcome {
-        let remote = match raw
+    /// GitHub's copy decoded, or `None` with the reason kept for the
+    /// Unreadable phase the caller ends in: a file that is no library (a
+    /// hand edit that broke it) can replace nothing, so the sync stops
+    /// until it is fixed there or "Keep mine" replaces it.
+    fn decode_remote(&mut self, raw: &RawFile) -> Option<Library> {
+        match raw
             .text()
             .map_err(|e| e.to_string())
             .and_then(|text| codec::decode(text).map_err(|e| e.to_string()))
         {
-            Ok(remote) => remote,
+            Ok(remote) => Some(remote),
             Err(error) => {
                 log(format_args!("the file on GitHub cannot be read: {error}"));
-                return self.finish(Phase::Failed);
+                self.remote_error = Some(error);
+                None
             }
-        };
+        }
+    }
+
+    /// Takes GitHub's copy (`raw`, decoded as `remote`) as this
+    /// computer's and the new base. With `reapply` the queued operations
+    /// go on top of it, dropping any that no longer applies; without it
+    /// the queue is dropped whole.
+    fn take_remote(&mut self, raw: &RawFile, remote: Library, reapply: bool) -> Outcome {
         let mut library = remote.clone();
         let mut dropped = Vec::new();
         for pending in self.pending.operations() {
@@ -699,6 +730,9 @@ impl Engine {
         self.phase = phase;
         if phase != Phase::Conflict {
             self.remote_changed_at = None;
+        }
+        if phase != Phase::Unreadable {
+            self.remote_error = None;
         }
         match self.queued.take() {
             Some(kind) => self.begin(kind),
@@ -1028,6 +1062,63 @@ mod tests {
         assert_eq!(engine.status().phase, Phase::Idle);
         assert_eq!(engine.status().pending, 0);
         let _ = library;
+    }
+
+    #[test]
+    fn a_file_on_github_that_is_no_library_stops_with_the_reason() {
+        // A hand edit on GitHub put a number where a string goes. The
+        // check finds a changed file that cannot be read: not a conflict,
+        // since there is no "Keep GitHub's" to offer, and not a failed
+        // save.
+        let (mut engine, library) = synced();
+        let mine = flip(&library, MUMMY);
+        engine.queue(mine.clone(), "Mark The Mummy as want".into());
+        let local = with(&library, mine);
+        let broken = RawFile::new(
+            br#"{"entries": [{"id": "movies/x", "released": 2015}]}"#.to_vec(),
+            Some("\"broken\"".into()),
+        );
+        let _ = engine.begin(Kind::Sync);
+        let outcome = engine.answer(Answer::Raw(Ok(Some(broken.clone()))), &local);
+        assert_eq!(outcome.request, None);
+        assert_eq!(outcome.library, None);
+        assert_eq!(engine.status().phase, Phase::Unreadable);
+        assert_eq!(engine.status().pending, 1);
+        let reason = engine.remote_error().unwrap().to_owned();
+        assert!(reason.contains("2015"), "{reason}");
+        assert!(reason.contains("line 1"), "{reason}");
+
+        // Keep GitHub's cannot help either: the same state again.
+        let _ = engine.begin(Kind::KeepTheirs);
+        let outcome = engine.answer(Answer::Raw(Ok(Some(broken.clone()))), &local);
+        assert_eq!(outcome.library, None);
+        assert_eq!(engine.status().phase, Phase::Unreadable);
+        assert_eq!(engine.status().pending, 1);
+
+        // Keep mine replaces the broken file and clears the reason.
+        let outcome = engine.begin(Kind::KeepMine);
+        assert_eq!(outcome.request, Some(Request::Raw { etag: None }));
+        let outcome = engine.answer(Answer::Raw(Ok(Some(broken.clone()))), &local);
+        let Some(Request::Put { sha, .. }) = outcome.request else {
+            panic!("a save was expected");
+        };
+        assert_eq!(sha, Some(broken.blob_sha.clone()));
+        let _ = engine.answer(put_ok("mine"), &local);
+        assert_eq!(engine.status().phase, Phase::Idle);
+        assert_eq!(engine.status().pending, 0);
+        assert_eq!(engine.remote_error(), None);
+
+        // Fixed on GitHub instead: the next check reads it again.
+        let (mut engine, library) = synced();
+        let _ = engine.begin(Kind::Sync);
+        let _ = engine.answer(Answer::Raw(Ok(Some(broken))), &library);
+        assert_eq!(engine.status().phase, Phase::Unreadable);
+        let fixed = with(&library, flip(&library, DIE_HARD));
+        let _ = engine.begin(Kind::Sync);
+        let outcome = engine.answer(Answer::Raw(Ok(Some(raw(&fixed)))), &library);
+        assert_eq!(outcome.library, Some(fixed));
+        assert_eq!(engine.status().phase, Phase::Idle);
+        assert_eq!(engine.remote_error(), None);
     }
 
     #[test]

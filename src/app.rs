@@ -282,7 +282,8 @@ pub enum SyncMessage {
     Fix,
     OpenConflict,
     CloseConflict,
-    /// This computer's copy replaces GitHub's.
+    /// This computer's copy replaces GitHub's; also the way out of a
+    /// file on GitHub that cannot be read.
     KeepMine,
     /// GitHub's copy replaces this computer's and the queue is dropped.
     KeepTheirs,
@@ -808,6 +809,7 @@ impl App {
             return;
         };
         let status = engine.status();
+        let remote_error = engine.remote_error().unwrap_or_default().to_owned();
         let n = status.pending as u32;
         let expires_in = self.token_expires_in();
         self.sync = match status.phase {
@@ -828,6 +830,10 @@ impl App {
                     .map_or_else(|| "unknown".to_owned(), Timestamp::month_day_time),
             },
             Phase::NotFound(missing) => SyncState::NotFound(missing),
+            Phase::Unreadable => SyncState::Unreadable {
+                kept: n,
+                reason: remote_error,
+            },
         };
     }
 
@@ -1004,6 +1010,11 @@ impl App {
             Message::Window(event) => return self.window_event(event),
             Message::Decoration(decoration) => self.decoration = decoration,
             Message::Sync(SyncMessage::Retry | SyncMessage::Now) => {
+                // "Check again" in the unreadable dialog closes it; the
+                // five-minute check leaves an open dialog alone.
+                if matches!(message, Message::Sync(SyncMessage::Retry)) {
+                    self.conflict_open = false;
+                }
                 if self.engine.is_some() {
                     return self.sync_now();
                 }
