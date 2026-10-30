@@ -56,6 +56,10 @@ pub struct State {
     pub when_open: bool,
     pub month: Option<Date>,
     pub anchor: Option<Date>,
+    /// The details' plan note as typed, with its plan and entry, until
+    /// Enter saves it, the pane moves on (which saves it too) or Esc drops
+    /// it.
+    pub item_note_draft: Option<(String, String, String)>,
     /// What a tick changed on an entry, by plan and entry, so the untick
     /// can put it back: the status, and a show's seasons. App memory, as
     /// on the phone; never saved.
@@ -211,7 +215,10 @@ pub enum Message {
     Month(i32),
     PickDay(Date),
     ClearWhen,
+    /// The details' plan note as typed.
     ItemNote(String),
+    /// Enter in the details' plan note.
+    SaveItemNote,
     /// Opens D4 for the selected entry.
     RemoveItem(String),
     RemoveFromPlan,
@@ -351,7 +358,15 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             state.anchor = None;
             update_selected_item(app, |item| item.when = None);
         }
-        Message::ItemNote(note) => update_selected_item(app, |item| item.note = note),
+        Message::ItemNote(note) => {
+            if let (Some(plan), Some(entry)) = (
+                app.plans.plan_id().map(str::to_owned),
+                app.plans.selected.clone(),
+            ) {
+                app.plans.item_note_draft = Some((plan, entry, note));
+            }
+        }
+        Message::SaveItemNote => save_item_note(app),
         Message::RemoveItem(entry) => {
             if let Some(plan) = app.plans.plan_id() {
                 let plan = plan.to_owned();
@@ -520,6 +535,27 @@ pub fn selected_item(app: &App) -> Option<&PlanItem> {
     current_plan(app)?.item_for(entry)
 }
 
+/// Saves the plan note typed in the details pane when it differs from the
+/// saved one: on Enter, and before the pane moves on to another entry, a
+/// page, a screen or a dialog.
+pub fn save_item_note(app: &mut App) {
+    let Some((plan, entry, note)) = app.plans.item_note_draft.take() else {
+        return;
+    };
+    let note = note.trim().to_owned();
+    let item = app
+        .repo
+        .library()
+        .plan(&plan)
+        .and_then(|p| p.item_for(&entry))
+        .filter(|item| item.note != note)
+        .cloned();
+    if let Some(mut item) = item {
+        item.note = note;
+        app.apply(Operation::SetPlanItem { plan, item });
+    }
+}
+
 fn update_selected_item(app: &mut App, change: impl FnOnce(&mut PlanItem)) {
     let (Some(plan), Some(mut item)) = (
         current_plan(app).map(|p| p.id.clone()),
@@ -611,6 +647,8 @@ pub fn dismiss_top(app: &mut App) -> bool {
                 state.when_open = false;
             } else if state.popup.is_some() {
                 state.popup = None;
+            } else if state.item_note_draft.is_some() {
+                state.item_note_draft = None;
             } else {
                 return false;
             }
@@ -809,6 +847,43 @@ mod tests {
         assert_eq!((when.from, when.to), (day("2026-12-20"), day("2026-12-24")));
         send(&mut app, Message::ClearWhen);
         assert_eq!(selected_item(&app).unwrap().when, None);
+    }
+
+    /// The plan note is typed in the details pane: Enter saves it as one
+    /// change, Esc puts the saved note back, moving on saves it.
+    #[test]
+    fn the_plan_note_saves_on_enter_and_esc_restores_it() {
+        let mut app = app();
+        send(&mut app, Message::ShowPlan("christmas-2026".into()));
+        send(&mut app, Message::Select("movies/die-hard-1988".into()));
+        let saved = selected_item(&app).unwrap().note.clone();
+        send(&mut app, Message::ItemNote("With the ".into()));
+        assert_eq!(selected_item(&app).unwrap().note, saved, "not before Enter");
+        send(&mut app, Message::ItemNote("With the family. ".into()));
+        send(&mut app, Message::SaveItemNote);
+        assert_eq!(selected_item(&app).unwrap().note, "With the family.");
+        assert!(app.plans.item_note_draft.is_none());
+
+        send(&mut app, Message::ItemNote("Something else".into()));
+        assert!(dismiss_top(&mut app));
+        assert!(app.plans.item_note_draft.is_none());
+        assert_eq!(selected_item(&app).unwrap().note, "With the family.");
+
+        // Selecting another entry saves what was typed.
+        send(&mut app, Message::ItemNote("Alone".into()));
+        let _ = app.update(AppMessage::Plans(Message::Select(
+            "movies/the-mummy-1999".into(),
+        )));
+        assert_eq!(
+            app.repo
+                .library()
+                .plan("christmas-2026")
+                .unwrap()
+                .item_for("movies/die-hard-1988")
+                .unwrap()
+                .note,
+            "Alone"
+        );
     }
 
     #[test]

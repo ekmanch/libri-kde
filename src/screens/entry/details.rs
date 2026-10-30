@@ -408,13 +408,30 @@ fn in_plan<'a>(
             .on_dismiss(AppMessage::Plans(plans::Message::ToggleWhen));
         column = column.push(labeled("When", when.into(), tokens));
     }
-    let note = ui::text_field(
+    // Typed here, like the entry's note: Enter saves, Esc restores, moving
+    // on saves.
+    let draft = app
+        .plans
+        .item_note_draft
+        .as_ref()
+        .filter(|(for_plan, for_entry, _)| *for_plan == plan.id && *for_entry == entry.id)
+        .map(|(_, _, note)| note.as_str());
+    let field = ui::text_field(
         "A note for this plan",
-        &item.note,
+        draft.unwrap_or(&item.note),
         |note| AppMessage::Plans(plans::Message::ItemNote(note)),
         font::REGULAR,
         tokens,
-    );
+    )
+    .on_submit(AppMessage::Plans(plans::Message::SaveItemNote));
+    let mut note = Column::new().spacing(5).push(field);
+    if draft.is_some_and(|draft| draft.trim() != item.note) {
+        note = note.push(
+            text("Enter saves · Esc puts the saved note back")
+                .size(12)
+                .color(tokens.sub),
+        );
+    }
     column
         .push(labeled("Plan note", note.into(), tokens))
         .into()

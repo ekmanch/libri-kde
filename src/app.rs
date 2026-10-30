@@ -305,10 +305,32 @@ impl Message {
     /// popovers and the list's own measurements, the selection keys, and
     /// the dialogs from the pane.
     fn leaves_note(&self) -> bool {
+        matches!(self, Message::Plans(_)) || self.leaves_pane()
+    }
+
+    /// The same for the plan note typed in the pane on a plan page: the
+    /// plan's own typing, calendar and popovers stay.
+    fn leaves_plan_note(&self) -> bool {
+        use plans::Message as P;
+        match self {
+            Message::Plans(message) => !matches!(
+                message,
+                P::ItemNote(_)
+                    | P::SaveItemNote
+                    | P::ToggleWhen
+                    | P::Month(_)
+                    | P::TogglePopup(_)
+                    | P::ClosePopup
+            ),
+            _ => self.leaves_pane(),
+        }
+    }
+
+    fn leaves_pane(&self) -> bool {
         use entry::Message as E;
         use library::Message as L;
         match self {
-            Message::Show(_) | Message::History(_) | Message::Plans(_) => true,
+            Message::Show(_) | Message::History(_) => true,
             Message::Library(message) => !matches!(
                 message,
                 L::Scrolled(_)
@@ -903,6 +925,9 @@ impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         if self.library.note_draft.is_some() && message.leaves_note() {
             entry::save_note(self);
+        }
+        if self.plans.item_note_draft.is_some() && message.leaves_plan_note() {
+            plans::save_item_note(self);
         }
         let from = (message.navigates() && self.screen.in_history()).then(|| self.place());
         let task = self.handle(message);

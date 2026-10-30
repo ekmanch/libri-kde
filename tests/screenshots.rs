@@ -830,6 +830,20 @@ fn capture_every_screen() {
             }),
         ),
         (Screen::Plans, ("plans", nothing)),
+        (
+            Screen::Plans,
+            ("plan-note-draft", |app| {
+                let _ = app.update(Message::Plans(plans::Message::ShowPlan(
+                    "christmas-2026".into(),
+                )));
+                let _ = app.update(Message::Plans(plans::Message::Select(
+                    "movies/die-hard-1988".into(),
+                )));
+                let _ = app.update(Message::Plans(plans::Message::ItemNote(
+                    "Christmas Eve, with the family".into(),
+                )));
+            }),
+        ),
         (Screen::Settings, ("settings", nothing)),
         (
             Screen::Settings,
