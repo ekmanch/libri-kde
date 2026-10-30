@@ -75,28 +75,14 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
     );
     let with_picker = ui::modal(
         with_cover,
-        form.picker
-            .as_ref()
-            .map(|picker| tag_picker(app, form, picker, &tokens)),
+        form.picker.as_ref().map(|picker| {
+            let close = msg(Message::ClosePicker);
+            tag_picker(app, form, picker, &tokens, close.clone(), close)
+        }),
         msg(Message::ClosePicker),
         &tokens,
     );
-    let with_new_tag = ui::modal(
-        with_picker,
-        form.new_tag
-            .as_ref()
-            .map(|new_tag| new_tag_dialog(new_tag, form.media, &tokens)),
-        msg(Message::CancelNewTag),
-        &tokens,
-    );
-    let with_categories = ui::modal(
-        with_new_tag,
-        form.categories
-            .as_ref()
-            .map(|dialog| categories_dialog(app, form, dialog, &tokens)),
-        msg(Message::CancelCategories),
-        &tokens,
-    );
+    let with_categories = tag_layers(app, form, with_picker, &tokens);
     ui::modal(
         with_categories,
         form.replace
@@ -104,6 +90,53 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
             .map(|replace| replace_dialog(replace, &tokens)),
         msg(Message::ReplaceCancel),
         &tokens,
+    )
+}
+
+/// The details pane's "+ Tag": the tag picker alone over the library,
+/// with the new-tag confirmation and the categories dialog over it. X
+/// drops the changes, Done saves them.
+pub fn tags_view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
+    let tokens = app.tokens();
+    let picker: Element<'a, AppMessage> = match &form.picker {
+        Some(picker) => tag_picker(
+            app,
+            form,
+            picker,
+            &tokens,
+            msg(Message::Close),
+            msg(Message::SaveTags),
+        ),
+        None => space().into(),
+    };
+    // The window's size, so the layers over the picker cover it all.
+    let picker: Element<'_, AppMessage> = container(picker).padding([30, 40]).center(Fill).into();
+    tag_layers(app, form, picker, &tokens)
+}
+
+/// The new-tag confirmation and the categories dialog over `base`, each
+/// through `ui::modal` whether or not it is open.
+fn tag_layers<'a>(
+    app: &'a App,
+    form: &'a Form,
+    base: Element<'a, AppMessage>,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let with_new_tag = ui::modal(
+        base,
+        form.new_tag
+            .as_ref()
+            .map(|new_tag| new_tag_dialog(new_tag, form.media, tokens)),
+        msg(Message::CancelNewTag),
+        tokens,
+    );
+    ui::modal(
+        with_new_tag,
+        form.categories
+            .as_ref()
+            .map(|dialog| categories_dialog(app, form, dialog, tokens)),
+        msg(Message::CancelCategories),
+        tokens,
     )
 }
 
@@ -1397,12 +1430,16 @@ fn hinted_button<'a>(
 
 /// The form's tag picker: the shared picker with a search that can also
 /// create a tag (with a "Did you mean" for near misses), the right-click
-/// menu and "+ Add to Directors", then Clear and Done.
+/// menu and "+ Add to Directors", then Clear and Done. `on_close` is the
+/// X, `on_done` the Done button: the same in the form, where neither
+/// saves; Close and Save in the details' picker.
 fn tag_picker<'a>(
     app: &'a App,
     form: &'a Form,
     state: &'a PickerState,
     tokens: &Tokens,
+    on_close: AppMessage,
+    on_done: AppMessage,
 ) -> Element<'a, AppMessage> {
     let library = app.repo.library();
     let query = rules::normalize_tag(&state.query);
@@ -1437,7 +1474,7 @@ fn tag_picker<'a>(
     let exists =
         library.all_tags().any(|t| t == query) || form.new_tags.iter().any(|(t, _)| *t == query);
     let create = (searching && !exists).then(|| create_box(app, form, &query, tokens));
-    let header = picker.header("Tags", None, None, msg(Message::ClosePicker), tokens);
+    let header = picker.header("Tags", None, None, on_close, tokens);
     let body = picker.body("Search or create a tag", create, tokens);
 
     let summary = if form.tags.is_empty() {
@@ -1455,7 +1492,7 @@ fn tag_picker<'a>(
         Some(msg(Message::PickerClear)),
         summary,
         "Done".to_owned(),
-        msg(Message::ClosePicker),
+        on_done,
         tokens,
     );
     ui::panel(header, body, footer, 560, tokens)

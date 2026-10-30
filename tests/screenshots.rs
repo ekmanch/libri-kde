@@ -43,12 +43,21 @@ fn movies(app: &mut App) {
     let _ = app.update(Message::Library(library::Message::SetView(View::List)));
 }
 
-/// Edit Million Dollar Baby with the tag picker open.
+const BABY: &str = "movies/million-dollar-baby-2004";
+
+/// Edit Million Dollar Baby with the form's tag picker open.
 fn edit_baby_tags(app: &mut App) {
     movies(app);
-    let _ = app.update(Message::Entry(entry::Message::EditTags(
-        "movies/million-dollar-baby-2004".into(),
-    )));
+    let _ = app.update(Message::Entry(entry::Message::Edit(BABY.into())));
+    let _ = app.update(Message::Entry(entry::Message::OpenPicker));
+}
+
+/// Million Dollar Baby selected with the details pane's "+ Tag" picker
+/// open.
+fn details_baby_tags(app: &mut App) {
+    movies(app);
+    select(app, BABY);
+    let _ = app.update(Message::Entry(entry::Message::EditTags(BABY.into())));
 }
 
 fn picker(app: &mut App, message: PickerMessage) {
@@ -395,6 +404,26 @@ fn capture_every_screen() {
             }),
         ),
         (Screen::Library, ("edit-tag-picker", edit_baby_tags)),
+        (Screen::Library, ("details-tag-picker", details_baby_tags)),
+        (
+            Screen::Library,
+            ("details-new-tag", |app| {
+                details_baby_tags(app);
+                picker(app, PickerMessage::Query("gothic".into()));
+                let _ = app.update(Message::Entry(entry::Message::CreateTag));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("details-note-draft", |app| {
+                movies(app);
+                select(app, BABY);
+                let _ = app.update(Message::Entry(entry::Message::NoteDraft {
+                    id: BABY.into(),
+                    note: "Rewatch with the commentary track".into(),
+                }));
+            }),
+        ),
         (
             Screen::Library,
             ("edit-tag-menu", |app| {

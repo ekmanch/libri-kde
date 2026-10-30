@@ -149,6 +149,9 @@ pub struct State {
     pub type_boxes: bool,
     /// The details pane's rating picker.
     pub details_rating_open: bool,
+    /// The details pane's note as typed, with its entry's id, until Enter
+    /// saves it, the pane moves on (which saves it too) or Esc drops it.
+    pub note_draft: Option<(String, String)>,
     /// The album track whose rating picker is open, by title.
     pub track_rating_open: Option<String>,
     pub music_tab: MusicTab,
@@ -456,7 +459,7 @@ impl State {
             }
             return true;
         }
-        self.popup.take().is_some()
+        self.popup.take().is_some() || self.note_draft.take().is_some()
     }
 
     /// Closes every popover: the Filter, Sort and All tags popovers and

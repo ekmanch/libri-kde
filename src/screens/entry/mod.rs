@@ -29,6 +29,10 @@ use crate::ui;
 #[derive(Debug)]
 pub enum Dialog {
     Form(Box<Form>),
+    /// The details pane's "+ Tag": the tag picker alone, over the library,
+    /// on a form that holds the entry's tags. Done saves them at once;
+    /// X, Esc or Close drops the changes.
+    Tags(Box<Form>),
     Delete {
         id: String,
     },
@@ -248,8 +252,17 @@ pub enum Message {
     /// "Try again" in the lookup pane.
     RetryLookup,
     Edit(String),
-    /// Edit with the tag picker open: the details' "+ Tag".
+    /// The details' "+ Tag": the tag picker alone.
     EditTags(String),
+    /// The details' picker's Done: the tags as one change.
+    SaveTags,
+    /// The details' note as typed.
+    NoteDraft {
+        id: String,
+        note: String,
+    },
+    /// Enter in the details' note.
+    SaveNote,
     Delete(String),
     AddToPlan(String),
     Close,
@@ -786,6 +799,31 @@ impl Form {
         library.tag_usage(tag)
     }
 
+    /// The tag changes made in the picker, applied right before the entry
+    /// is saved, as on the phone: new tags on the entry are filed, then
+    /// the categories changed are set.
+    fn tag_operations(&self, library: &Library) -> Vec<Operation> {
+        let mut operations: Vec<Operation> = self
+            .new_tags
+            .iter()
+            .filter(|(name, _)| self.tags.contains(name))
+            .map(|(name, categories)| Operation::CreateTag {
+                name: name.clone(),
+                categories: categories.clone(),
+            })
+            .collect();
+        operations.extend(
+            self.recategorized
+                .iter()
+                .filter(|(name, categories)| library.categories_of(name) != **categories)
+                .map(|(name, categories)| Operation::SetTagCategories {
+                    name: name.clone(),
+                    categories: categories.clone(),
+                }),
+        );
+        operations
+    }
+
     /// Opens `category` in the picker, after a tag was created or filed
     /// into it.
     fn open_group(&mut self, category: TagCategory) {
@@ -1081,8 +1119,19 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             let entry = app.repo.library().entry(&id).expect("checked above");
             let mut form = Form::edit(entry);
             form.picker = Some(PickerState::default());
-            app.dialog = Some(Dialog::Form(Box::new(form)));
+            app.dialog = Some(Dialog::Tags(Box::new(form)));
         }
+        Message::SaveTags => {
+            if let Some(Dialog::Tags(form)) = app.dialog.take() {
+                save_tags(app, &form);
+            }
+        }
+        // Ctrl+Enter in the details' picker is Done.
+        Message::Save if matches!(app.dialog, Some(Dialog::Tags(_))) => {
+            return update(app, Message::SaveTags);
+        }
+        Message::NoteDraft { id, note } => app.library.note_draft = Some((id, note)),
+        Message::SaveNote => save_note(app),
         Message::Delete(id) => app.dialog = Some(Dialog::Delete { id }),
         Message::AddToPlan(id) => app.dialog = Some(Dialog::AddToPlan { id }),
         Message::Close => app.dialog = None,
@@ -1119,7 +1168,9 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             let library = app.repo.library().clone();
             let today = app.today;
             let platform = app.settings.platform.clone();
-            let Some(Dialog::Form(form)) = &mut app.dialog else {
+            // The details' picker takes the picker's messages the same way;
+            // it never saves from here.
+            let Some(Dialog::Form(form) | Dialog::Tags(form)) = &mut app.dialog else {
                 return Task::none();
             };
             if let Some(operations) =
@@ -1144,6 +1195,50 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         app.library.close_popovers();
     }
     Task::none()
+}
+
+/// The details' picker's Done: the tags the form holds go on the entry
+/// as one change, after the new tags are filed and the categories changed
+/// in the picker are applied, as the form does on Save. Nothing is written
+/// when nothing changed.
+fn save_tags(app: &mut App, form: &Form) {
+    let library = app.repo.library().clone();
+    let Some(base) = form.editing.as_deref().and_then(|id| library.entry(id)) else {
+        return;
+    };
+    let entry = form.entry(Some(base), &library, app.today);
+    let mut operations = form.tag_operations(&library);
+    if !operations.is_empty()
+        || entry.tags != base.tags
+        || entry.tag_categories != base.tag_categories
+    {
+        operations.push(Operation::SetTags {
+            id: base.id.clone(),
+            tags: entry.tags,
+            tag_categories: entry.tag_categories,
+        });
+    }
+    for operation in operations {
+        app.apply(operation);
+    }
+}
+
+/// Saves the note typed in the details pane when it differs from the
+/// saved one: on Enter, and before the pane moves on to another entry, a
+/// page, a screen or the form.
+pub fn save_note(app: &mut App) {
+    let Some((id, note)) = app.library.note_draft.take() else {
+        return;
+    };
+    let note = note.trim().to_owned();
+    if app
+        .repo
+        .library()
+        .entry(&id)
+        .is_some_and(|entry| entry.note != note)
+    {
+        app.apply(Operation::SetNote { id, note });
+    }
 }
 
 /// A new plan item; an entry already done is a repeat (a rewatch or
@@ -1531,26 +1626,7 @@ fn update_form(
                     .collect();
             }
 
-            // New tags are filed, then category changes made in the picker
-            // are applied, right before the entry is saved, as on the phone.
-            let mut operations: Vec<Operation> = form
-                .new_tags
-                .iter()
-                .filter(|(name, _)| form.tags.contains(name))
-                .map(|(name, categories)| Operation::CreateTag {
-                    name: name.clone(),
-                    categories: categories.clone(),
-                })
-                .collect();
-            operations.extend(
-                form.recategorized
-                    .iter()
-                    .filter(|(name, categories)| library.categories_of(name) != **categories)
-                    .map(|(name, categories)| Operation::SetTagCategories {
-                        name: name.clone(),
-                        categories: categories.clone(),
-                    }),
-            );
+            let mut operations = form.tag_operations(library);
             let id = entry.id.clone();
             let done = entry.status == EntryStatus::Done;
             operations.push(if base.is_some() {
@@ -1580,6 +1656,15 @@ fn update_form(
 /// dialog was open.
 pub fn dismiss_top(app: &mut App) -> bool {
     match &mut app.dialog {
+        Some(Dialog::Tags(form)) => {
+            if form.new_tag.take().is_none()
+                && form.categories.take().is_none()
+                && !form.picker.as_mut().is_some_and(PickerState::dismiss_inner)
+            {
+                app.dialog = None;
+            }
+            true
+        }
         Some(Dialog::Form(form)) => {
             if form.replace.take().is_none()
                 && form.new_tag.take().is_none()
@@ -1607,8 +1692,13 @@ pub fn dismiss_top(app: &mut App) -> bool {
 /// picker's layers take Enter; Ctrl+Enter saves.
 pub fn confirm(app: &mut App) -> Task<AppMessage> {
     let message = match &app.dialog {
-        Some(Dialog::Form(form)) if form.new_tag.is_some() => Message::ConfirmNewTag,
-        Some(Dialog::Form(form)) if form.categories.is_some() => Message::SaveCategories,
+        Some(Dialog::Form(form) | Dialog::Tags(form)) if form.new_tag.is_some() => {
+            Message::ConfirmNewTag
+        }
+        Some(Dialog::Form(form) | Dialog::Tags(form)) if form.categories.is_some() => {
+            Message::SaveCategories
+        }
+        Some(Dialog::Tags(_)) => Message::SaveTags,
         Some(Dialog::Form(form)) if form.picker.is_some() => Message::ClosePicker,
         Some(Dialog::Form(form)) if form.picked.is_none() && !form.matches().is_empty() => {
             Message::Pick(0)
@@ -1626,6 +1716,7 @@ pub fn overlay<'a>(app: &'a App, base: Element<'a, AppMessage>) -> Element<'a, A
     let tokens = app.tokens();
     let dialog = app.dialog.as_ref().map(|dialog| match dialog {
         Dialog::Form(form) => form::view(app, form),
+        Dialog::Tags(form) => form::tags_view(app, form),
         Dialog::Delete { id } => dialogs::delete(app, id),
         Dialog::AddToPlan { id } => dialogs::add_to_plan(app, id),
         Dialog::SeasonDropped { id, season } => dialogs::season_dropped(app, id, *season),
@@ -1651,7 +1742,7 @@ mod tests {
 
     fn form(app: &App) -> &Form {
         match &app.dialog {
-            Some(Dialog::Form(form)) => form,
+            Some(Dialog::Form(form) | Dialog::Tags(form)) => form,
             other => panic!("no form: {other:?}"),
         }
     }
@@ -1894,11 +1985,10 @@ mod tests {
         assert!(!app.library.details_rating_open);
     }
 
+    /// Edit Million Dollar Baby with the form's tag picker open.
     fn edit_baby(app: &mut App) {
-        send(
-            app,
-            Message::EditTags("movies/million-dollar-baby-2004".into()),
-        );
+        send(app, Message::Edit("movies/million-dollar-baby-2004".into()));
+        send(app, Message::OpenPicker);
     }
 
     #[test]
@@ -2384,5 +2474,158 @@ mod tests {
             Some(lookup::LookupState::PartialNone)
         );
         assert_eq!(lookup::LookupState::from_env("nope"), None);
+    }
+
+    const BABY: &str = "movies/million-dollar-baby-2004";
+
+    /// "+ Tag" in the details pane: the picker alone, and Done writes the
+    /// tags as one change; X drops them.
+    #[test]
+    fn the_details_picker_saves_the_tags_as_one_change_and_close_drops_them() {
+        let mut app = app();
+        send(&mut app, Message::EditTags(BABY.into()));
+        assert!(matches!(app.dialog, Some(Dialog::Tags(_))));
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Toggle("horror".into(), None)),
+        );
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Toggle(
+                "clint-eastwood".into(),
+                Some(TagCategory::Directors),
+            )),
+        );
+        send(&mut app, Message::SaveTags);
+        assert!(app.dialog.is_none());
+        let baby = app.repo.library().entry(BABY).unwrap();
+        assert!(baby.tags.iter().any(|t| t == "horror"));
+        assert_eq!(
+            baby.tag_categories.as_ref().unwrap().get("clint-eastwood"),
+            Some(&[TagCategory::Actors][..])
+        );
+        let change = Operation::SetTags {
+            id: BABY.into(),
+            tags: baby.tags.clone(),
+            tag_categories: baby.tag_categories.clone(),
+        };
+        assert_eq!(
+            change.summary(app.repo.library()),
+            "Change the tags on Million Dollar Baby"
+        );
+
+        // Closed without Done: nothing changes.
+        let before = app.repo.library().clone();
+        send(&mut app, Message::EditTags(BABY.into()));
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Toggle("comedy".into(), None)),
+        );
+        send(&mut app, Message::Close);
+        assert!(app.dialog.is_none());
+        assert_eq!(*app.repo.library(), before);
+
+        // Done with nothing changed writes nothing.
+        send(&mut app, Message::EditTags(BABY.into()));
+        send(&mut app, Message::SaveTags);
+        assert_eq!(*app.repo.library(), before);
+    }
+
+    /// A new tag from the details' picker still asks for its category,
+    /// and is filed right before the tags are saved.
+    #[test]
+    fn a_new_tag_from_the_details_asks_for_its_category_and_is_filed_on_done() {
+        let mut app = app();
+        send(&mut app, Message::EditTags(BABY.into()));
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Query("gothic".into())),
+        );
+        send(&mut app, Message::CreateTag);
+        assert!(form(&app).new_tag.is_some());
+        send(&mut app, Message::NewTagCategory(TagCategory::Mood));
+        // Enter confirms the new tag, then Esc closes the picker.
+        let _ = confirm(&mut app);
+        assert!(form(&app).new_tag.is_none());
+        assert!(app.repo.library().category_of("gothic").is_none());
+        let _ = confirm(&mut app);
+        assert!(app.dialog.is_none());
+        assert_eq!(
+            app.repo.library().category_of("gothic"),
+            Some(TagCategory::Mood)
+        );
+        assert!(
+            app.repo
+                .library()
+                .entry(BABY)
+                .unwrap()
+                .tags
+                .iter()
+                .any(|t| t == "gothic")
+        );
+    }
+
+    /// Esc in the details' picker closes its layers first, then drops the
+    /// changes.
+    #[test]
+    fn esc_in_the_details_picker_closes_the_layers_then_the_picker() {
+        let mut app = app();
+        send(&mut app, Message::EditTags(BABY.into()));
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Query("gothic".into())),
+        );
+        send(&mut app, Message::CreateTag);
+        assert!(dismiss_top(&mut app));
+        assert!(form(&app).new_tag.is_none());
+        assert!(dismiss_top(&mut app));
+        assert!(app.dialog.is_none());
+    }
+
+    /// The note is typed in the details pane: Enter saves it as one change,
+    /// Esc puts the saved note back.
+    #[test]
+    fn the_details_note_saves_on_enter_and_esc_restores_it() {
+        let mut app = app();
+        let draft = |note: &str| Message::NoteDraft {
+            id: BABY.into(),
+            note: note.into(),
+        };
+        let saved = app.repo.library().entry(BABY).unwrap().note.clone();
+        send(&mut app, draft("Rewatch in "));
+        assert_eq!(
+            app.repo.library().entry(BABY).unwrap().note,
+            saved,
+            "not before Enter"
+        );
+        send(&mut app, draft("Rewatch in October. "));
+        send(&mut app, Message::SaveNote);
+        assert_eq!(
+            app.repo.library().entry(BABY).unwrap().note,
+            "Rewatch in October."
+        );
+        assert!(app.library.note_draft.is_none());
+        let change = Operation::SetNote {
+            id: BABY.into(),
+            note: String::new(),
+        };
+        assert_eq!(
+            change.summary(app.repo.library()),
+            "Clear the note on Million Dollar Baby"
+        );
+
+        send(&mut app, draft("Something else"));
+        assert!(app.library.dismiss_top());
+        assert!(app.library.note_draft.is_none());
+        assert_eq!(
+            app.repo.library().entry(BABY).unwrap().note,
+            "Rewatch in October."
+        );
+
+        // Enter with the saved note typed again writes nothing.
+        let before = app.repo.library().clone();
+        send(&mut app, draft("Rewatch in October."));
+        send(&mut app, Message::SaveNote);
+        assert_eq!(*app.repo.library(), before);
     }
 }

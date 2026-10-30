@@ -299,6 +299,44 @@ pub enum SyncMessage {
 }
 
 impl Message {
+    /// Whether the message takes the details pane away from the note being
+    /// typed there, so the note is saved first: another screen, a step
+    /// back or forward, anything in the library or on a plan page but the
+    /// popovers and the list's own measurements, the selection keys, and
+    /// the dialogs from the pane.
+    fn leaves_note(&self) -> bool {
+        use entry::Message as E;
+        use library::Message as L;
+        match self {
+            Message::Show(_) | Message::History(_) | Message::Plans(_) => true,
+            Message::Library(message) => !matches!(
+                message,
+                L::Scrolled(_)
+                    | L::GroupsMeasured(_)
+                    | L::Toggle(_)
+                    | L::ClosePopup
+                    | L::SeasonMenu(_)
+                    | L::Picker(_)
+                    | L::Search(_)
+                    | L::JumpToGroup(_)
+            ),
+            Message::Key(key) => matches!(
+                key,
+                KeyPress::Up | KeyPress::Down | KeyPress::Edit | KeyPress::New | KeyPress::Search
+            ),
+            Message::Entry(message) => matches!(
+                message,
+                E::Edit(_)
+                    | E::EditTags(_)
+                    | E::Delete(_)
+                    | E::AddToPlan(_)
+                    | E::Add
+                    | E::AddWithTitle(..)
+            ),
+            _ => false,
+        }
+    }
+
     /// Whether the message moves to another place the history remembers:
     /// a screen, what the library shows, an artist page or a plan page.
     fn navigates(&self) -> bool {
@@ -863,6 +901,9 @@ impl App {
     /// new one. The splash and the setup are not places to come back to.
     /// The title bar follows the theme.
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        if self.library.note_draft.is_some() && message.leaves_note() {
+            entry::save_note(self);
+        }
         let from = (message.navigates() && self.screen.in_history()).then(|| self.place());
         let task = self.handle(message);
         if let Some(from) = from

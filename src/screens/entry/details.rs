@@ -131,22 +131,37 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
         .wrap()
         .vertical_spacing(6);
 
-    // The note is edited in the form; the box opens it.
-    let (note, note_color) = if entry.note.is_empty() {
-        ("Add a personal note…", tokens.sub)
-    } else {
-        (entry.note.as_str(), tokens.text)
-    };
-    let note = button(text(note).size(14).font(font::ITALIC).color(note_color))
-        .width(Fill)
-        .padding([9, 12])
-        .on_press(msg(Message::Edit(id())))
-        .style(move |_, _| button::Style {
-            background: Some(Background::Color(tokens.field)),
-            border: Border::default().rounded(8).width(1).color(tokens.line),
-            ..button::Style::default()
-        })
-        .focusable(8.0, &tokens);
+    // The note is edited here: Enter saves it as one change, Esc puts the
+    // saved note back, and moving on to another entry saves it too.
+    let draft = app
+        .library
+        .note_draft
+        .as_ref()
+        .filter(|(for_entry, _)| *for_entry == entry.id)
+        .map(|(_, note)| note.as_str());
+    let note_id = entry.id.clone();
+    let field = ui::text_field(
+        "Add a personal note…",
+        draft.unwrap_or(&entry.note),
+        move |note| {
+            msg(Message::NoteDraft {
+                id: note_id.clone(),
+                note,
+            })
+        },
+        font::REGULAR,
+        &tokens,
+    )
+    .on_submit(msg(Message::SaveNote));
+    let mut note = Column::new().spacing(5).push(field);
+    if draft.is_some_and(|draft| draft.trim() != entry.note) {
+        note = note.push(
+            text("Enter saves · Esc puts the saved note back")
+                .size(12)
+                .color(tokens.sub),
+        );
+    }
+    let note: Element<'a, AppMessage> = note.into();
 
     let plans: Vec<_> = library
         .plans

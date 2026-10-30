@@ -12,7 +12,8 @@ pub use fixture::FixtureLibraryRepository;
 pub use local::{LocalLibraryRepository, OpenError};
 
 use crate::model::{
-    Date, Entry, EntryStatus, Library, MediaType, Plan, PlanItem, Season, TagCategory, Track,
+    Date, Entry, EntryStatus, Library, MediaType, Plan, PlanItem, Season, TagCategory, TagPicks,
+    Track,
 };
 
 pub trait LibraryRepository {
@@ -53,6 +54,20 @@ pub enum Operation {
     SetRating {
         id: String,
         rating: Option<u8>,
+    },
+    /// Replaces the entry's tags and its picks for tags in several
+    /// categories (the details pane's "+ Tag"). Tags no entry or plan uses
+    /// any more are dropped, as after an edit.
+    SetTags {
+        id: String,
+        tags: Vec<String>,
+        tag_categories: Option<TagPicks>,
+    },
+    /// Replaces the entry's note (the details pane's note box); empty
+    /// clears it.
+    SetNote {
+        id: String,
+        note: String,
     },
     SetPlanItemDone {
         plan: String,
@@ -164,6 +179,11 @@ impl Operation {
             Operation::SetRating { id, rating: None } => {
                 format!("Clear the rating of {}", title(id))
             }
+            Operation::SetTags { id, .. } => format!("Change the tags on {}", title(id)),
+            Operation::SetNote { id, note } if note.is_empty() => {
+                format!("Clear the note on {}", title(id))
+            }
+            Operation::SetNote { id, .. } => format!("Edit the note on {}", title(id)),
             Operation::SetPlanItemDone { plan, entry, done } => format!(
                 "{} {} in {}",
                 if *done { "Tick" } else { "Untick" },
@@ -302,6 +322,17 @@ impl Operation {
                 }
                 entry_mut(library, &id)?.rating = rating;
             }
+            Operation::SetTags {
+                id,
+                tags,
+                tag_categories,
+            } => {
+                let entry = entry_mut(library, &id)?;
+                entry.tags = tags;
+                entry.tag_categories = tag_categories;
+                library.remove_unused_tags();
+            }
+            Operation::SetNote { id, note } => entry_mut(library, &id)?.note = note,
             Operation::SetPlanItemDone { plan, entry, done } => {
                 let found = library.plans.iter_mut().find(|p| p.id == plan);
                 let plan = found.ok_or(RepoError::MissingPlan(plan))?;

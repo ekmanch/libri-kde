@@ -8,7 +8,7 @@
 
 use serde_json::{Map, Value, json};
 
-use crate::model::{Date, Entry, EntryStatus, Plan, PlanItem, Season, TagCategory};
+use crate::model::{Date, Entry, EntryStatus, Plan, PlanItem, Season, TagCategory, TagPicks};
 
 use super::Operation;
 
@@ -24,6 +24,15 @@ pub fn encode(operation: &Operation) -> Value {
         Operation::SetRating { id, rating } => {
             ("setRating", json!({ "entryId": id, "rating": rating }))
         }
+        Operation::SetTags {
+            id,
+            tags,
+            tag_categories,
+        } => (
+            "setTags",
+            json!({ "entryId": id, "tags": tags, "tagCategories": tag_categories }),
+        ),
+        Operation::SetNote { id, note } => ("setNote", json!({ "entryId": id, "note": note })),
         Operation::SetPlanItemDone { plan, entry, done } => (
             "setPlanItemDone",
             json!({ "planId": plan, "entryId": entry, "done": done }),
@@ -140,6 +149,15 @@ pub fn decode(value: &Value) -> Result<Operation, String> {
             id: string("entryId")?,
             rating: field::<Option<u8>>(op, value, "rating")?,
         },
+        "setTags" => Operation::SetTags {
+            id: string("entryId")?,
+            tags: field::<Vec<String>>(op, value, "tags")?,
+            tag_categories: field::<Option<TagPicks>>(op, value, "tagCategories")?,
+        },
+        "setNote" => Operation::SetNote {
+            id: string("entryId")?,
+            note: string("note")?,
+        },
         "setPlanItemDone" => Operation::SetPlanItemDone {
             plan: string("planId")?,
             entry: string("entryId")?,
@@ -252,6 +270,23 @@ mod tests {
             Operation::SetRating {
                 id: id(),
                 rating: None,
+            },
+            Operation::SetTags {
+                id: id(),
+                tags: vec!["horror".into(), "clint-eastwood".into()],
+                tag_categories: Some(TagPicks(vec![(
+                    "clint-eastwood".into(),
+                    vec![TagCategory::Actors],
+                )])),
+            },
+            Operation::SetTags {
+                id: id(),
+                tags: vec!["horror".into()],
+                tag_categories: None,
+            },
+            Operation::SetNote {
+                id: id(),
+                note: "Rewatch in October.".into(),
             },
             Operation::SetPlanItemDone {
                 plan: plan.id.clone(),
