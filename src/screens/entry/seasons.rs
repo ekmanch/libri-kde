@@ -123,10 +123,13 @@ pub fn season_row<'a>(
 
 /// One part of a series: its number, title and year, then "This one", the
 /// part's status with a chevron, or "+ Add" for a part not in the library.
+/// In the series pane (`in_pane`) every part in the library shows its
+/// status and opens its details, the marked one in the selection gray.
 pub fn series_row<'a>(
     app: &'a App,
     part: &SeriesRow<'a>,
     media: MediaType,
+    in_pane: bool,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let number = part
@@ -156,7 +159,7 @@ pub fn series_row<'a>(
     .align_y(Center)
     .height(Fill);
     let (on_press, selected) = match part.entry {
-        Some(_) if part.is_this => {
+        Some(_) if part.is_this && !in_pane => {
             content = content.push(
                 text("This one")
                     .size(12.5)
@@ -172,13 +175,14 @@ pub fn series_row<'a>(
                 14.0,
                 tokens.sub,
             ));
-            let selected = app.library.selected.as_deref() == Some(entry.id.as_str());
-            (
-                Some(AppMessage::Library(library::Message::Select(
-                    entry.id.clone(),
-                ))),
-                selected,
-            )
+            if in_pane {
+                let open = library::Message::OpenSeriesPart(entry.id.clone());
+                (Some(AppMessage::Library(open)), part.is_this)
+            } else {
+                let selected = app.library.selected.as_deref() == Some(entry.id.as_str());
+                let select = library::Message::Select(entry.id.clone());
+                (Some(AppMessage::Library(select)), selected)
+            }
         }
         None => {
             content = content.push(ui::add_chip(

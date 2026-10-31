@@ -1,5 +1,5 @@
-//! A series' parts as the inspector's Series section and the series page
-//! list them: the lookup's list of parts matched to the library's
+//! A series' parts as the inspector's Series section and the series in
+//! the details pane list them: the lookup's list of parts matched to the library's
 //! entries, or the library's own entries of the series when the lookup
 //! has no list.
 
@@ -49,6 +49,16 @@ pub fn entries_in<'a>(library: &'a Library, media: MediaType, name: &str) -> Vec
         })
         .collect();
     crate::browse::in_series_order(parts)
+}
+
+/// The part whose cover stands for the series: the one marked, else the
+/// first in series order.
+pub fn cover_entry<'a>(parts: &[&'a Entry]) -> Option<&'a Entry> {
+    parts
+        .iter()
+        .copied()
+        .find(|p| p.series.as_ref().is_some_and(|s| s.cover == Some(true)))
+        .or(parts.first().copied())
 }
 
 /// Every part of the series, in order. The lookup's parts (`fetched`, when

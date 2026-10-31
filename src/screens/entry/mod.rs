@@ -8,6 +8,7 @@ pub mod details;
 mod dialogs;
 mod form;
 pub mod seasons;
+pub mod series;
 
 pub use form::LOOKUP_ID;
 
@@ -2967,7 +2968,7 @@ mod tests {
         }
 
         let _ = app.update(AppMessage::Library(
-            crate::screens::library::Message::OpenPage(crate::screens::library::Page::Series {
+            crate::screens::library::Message::OpenSeries(crate::screens::library::OpenSeries {
                 media: MediaType::Movies,
                 name: "The Lord of the Rings".into(),
                 highlight: None,
@@ -2978,7 +2979,8 @@ mod tests {
             crate::app::WINDOW_SIZE,
             app.view(),
         );
-        assert!(ui.find("3 movies · 2 in your library").is_ok());
+        assert!(ui.find("2 of 3 in your library").is_ok());
+        assert!(ui.find("3 movies · 2001–2003").is_ok());
         assert!(ui.find("+ Add").is_ok());
     }
 

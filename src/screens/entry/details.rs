@@ -24,6 +24,9 @@ fn msg(message: Message) -> AppMessage {
 
 /// The pane is this wide.
 pub const WIDTH: f32 = 352.0;
+/// The pane's scroll area, scrolled to the top for each entry or series
+/// it opens on, and to the marked part of a series.
+pub const PANE_ID: &str = "details-pane";
 
 pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
@@ -196,6 +199,13 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
         msg(Message::AddToPlan(id())),
     ));
 
+    // A part picked from a series in the pane: ‹ the series' name, back.
+    let header: Element<'a, AppMessage> = match app.library.back_series() {
+        Some(back) if plan.is_none() => column![back_link(&back.name, &tokens), header]
+            .spacing(14)
+            .into(),
+        _ => header.into(),
+    };
     let mut sections = Column::new().spacing(20).push(header);
     if let Some(plan) = plan {
         sections = sections.push(section(
@@ -246,18 +256,57 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
     ]
     .spacing(8);
 
+    pane(sections.into(), Some(actions.into()), &tokens)
+}
+
+/// The pane around `body`: it scrolls, with `actions` kept at the bottom.
+pub fn pane<'a>(
+    body: Element<'a, AppMessage>,
+    actions: Option<Element<'a, AppMessage>>,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
     let content_bg = tokens.content;
-    container(
-        column![
-            ui::scroll(container(sections).padding(Padding::new(22.0).bottom(8))).height(Fill),
-            container(actions).padding(Padding::new(22.0).top(6).bottom(18)),
+    let bottom = if actions.is_some() { 8 } else { 18 };
+    let mut column = Column::new().height(Fill).push(
+        ui::scroll(container(body).padding(Padding::new(22.0).bottom(bottom)))
+            .id(PANE_ID)
+            .height(Fill),
+    );
+    if let Some(actions) = actions {
+        column = column.push(container(actions).padding(Padding::new(22.0).top(6).bottom(18)));
+    }
+    container(column)
+        .width(WIDTH)
+        .height(Fill)
+        .style(move |_| container::background(content_bg))
+        .into()
+}
+
+/// "‹ Kung Fu Panda" above a part's details, back to its series.
+fn back_link<'a>(name: &str, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let tokens = *tokens;
+    button(
+        row![
+            ui::icon(Icon::ChevronLeft, 16.0, tokens.sub),
+            text(Series::display_name(name))
+                .size(13.5)
+                .color(tokens.sub)
+                .wrapping(text::Wrapping::None),
         ]
-        .height(Fill),
+        .spacing(4)
+        .align_y(iced::Center),
     )
-    .width(WIDTH)
-    .height(Fill)
-    .style(move |_| container::background(content_bg))
-    .into()
+    .height(30)
+    .padding(Padding::new(0.0).left(2).right(10))
+    .on_press(AppMessage::Library(library::Message::BackToSeries))
+    .style(move |_, status| button::Style {
+        background: matches!(status, button::Status::Hovered)
+            .then_some(Background::Color(tokens.hover)),
+        text_color: tokens.sub,
+        border: Border::default().rounded(8),
+        ..button::Style::default()
+    })
+    .focusable(8.0, &tokens)
 }
 
 /// Seasons: the heading with the count, one row per season (every one up
@@ -321,12 +370,12 @@ fn series_section<'a>(
             .color(tokens.sub),
     );
     for part in series::window(&all) {
-        rows = rows.push(seasons::series_row(app, &part, entry.media, tokens));
+        rows = rows.push(seasons::series_row(app, &part, entry.media, false, tokens));
     }
     if all.len() > 5 {
         rows = rows.push(seasons::all_row(
             format!("All {} {}", all.len(), Series::nouns(entry.media).1),
-            AppMessage::Library(library::Message::OpenPage(Page::Series {
+            AppMessage::Library(library::Message::OpenSeries(library::OpenSeries {
                 media: entry.media,
                 name: part_of.name.clone(),
                 highlight: Some(entry.id.clone()),

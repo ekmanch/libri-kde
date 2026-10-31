@@ -82,6 +82,16 @@ fn open_page(app: &mut App, page: Page) {
     let _ = app.update(Message::Library(library::Message::OpenPage(page)));
 }
 
+/// A series in the details pane, marking `highlight`.
+fn open_series(app: &mut App, media: MediaType, name: &str, highlight: Option<&str>) {
+    let open = library::OpenSeries {
+        media,
+        name: name.into(),
+        highlight: highlight.map(Into::into),
+    };
+    let _ = app.update(Message::Library(library::Message::OpenSeries(open)));
+}
+
 /// The Add dialog on `media` with `query` typed and its first match picked.
 fn add_from(app: &mut App, media: MediaType, query: &str) {
     show_type(app, media);
@@ -537,7 +547,8 @@ fn capture_every_screen() {
                 )));
             }),
         ),
-        // Phase 1i: seasons, series and the pages in the content pane.
+        // Phase 1i: seasons, series (in the details pane) and the pages in
+        // the content pane.
         (
             Screen::Library,
             ("shows-list", |app| show_type(app, MediaType::Shows)),
@@ -673,30 +684,28 @@ fn capture_every_screen() {
         ),
         (
             Screen::Library,
-            ("page-series", |app| {
+            ("series-pane", |app| {
+                app.library.force_long = true;
                 show_type(app, MediaType::Movies);
-                open_page(
-                    app,
-                    Page::Series {
-                        media: MediaType::Movies,
-                        name: "The Lord of the Rings".into(),
-                        highlight: None,
-                    },
-                );
+                open_series(app, MediaType::Movies, "The Lord of the Rings", None);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("series-part", |app| {
+                app.library.force_long = true;
+                show_type(app, MediaType::Movies);
+                open_series(app, MediaType::Movies, "The Lord of the Rings", None);
+                let _ = app.update(Message::Library(library::Message::OpenSeriesPart(
+                    FELLOWSHIP.into(),
+                )));
             }),
         ),
         (
             Screen::Library,
             ("series-cover", |app| {
                 show_type(app, MediaType::Movies);
-                open_page(
-                    app,
-                    Page::Series {
-                        media: MediaType::Movies,
-                        name: "The Lord of the Rings".into(),
-                        highlight: None,
-                    },
-                );
+                open_series(app, MediaType::Movies, "The Lord of the Rings", None);
                 let _ = app.update(Message::Library(library::Message::OpenSeriesCover(
                     MediaType::Movies,
                     "The Lord of the Rings".into(),
@@ -712,17 +721,10 @@ fn capture_every_screen() {
         ),
         (
             Screen::Library,
-            ("page-all-volumes", |app| {
+            ("series-all-volumes", |app| {
                 show_type(app, MediaType::Books);
                 select(app, BERSERK_43);
-                open_page(
-                    app,
-                    Page::Series {
-                        media: MediaType::Books,
-                        name: "Berserk".into(),
-                        highlight: Some(BERSERK_43.into()),
-                    },
-                );
+                open_series(app, MediaType::Books, "Berserk", Some(BERSERK_43));
             }),
         ),
         (

@@ -1,18 +1,17 @@
 //! A page in the content pane, in place of the list, with the inspector
-//! kept: a series, all of a show's seasons, or a season's episodes. A
-//! back button returns to the list.
+//! kept: all of a show's seasons, or a season's episodes. A back button
+//! returns to the list, scrolled where it was.
 
-use iced::widget::{Column, Row, button, column, container, row, space, text};
+use iced::widget::{Column, Row, button, column, container, row, text};
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
 use super::{Message, Page};
 use crate::app::{App, Message as AppMessage};
 use crate::lookup;
-use crate::model::{Entry, MediaType, Season, Series};
+use crate::model::{Entry, MediaType, Season};
 use crate::screens::entry::seasons;
-use crate::series;
-use crate::theme::{self, Tokens, font};
-use crate::ui::{self, ButtonKind, FocusExt, Icon};
+use crate::theme::{Tokens, font};
+use crate::ui::{self, FocusExt, Icon};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Library(message)
@@ -29,50 +28,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, AppMessage> {
     };
     let entry_of = |id: &str| library.entry(id);
 
-    let (back_label, extra, kicker, kicker_color, title, line, body): Head<'a> = match page {
-        Page::Series {
-            media,
-            name,
-            highlight,
-        } => {
-            let first = series::entries_in(library, *media, name).first().copied();
-            let state = first.and_then(|e| app.artwork.series_for(e));
-            let fetched = state.and_then(|s| match &s.loaded {
-                crate::artwork::Loaded::Ready(parts) => Some(parts),
-                _ => None,
-            });
-            let rows = series::rows(library, *media, name, highlight.as_deref(), fetched);
-            let owned = rows.iter().filter(|r| r.owned()).count();
-            let line = format!(
-                "{} {} · {owned} in your library",
-                rows.len(),
-                Series::nouns(*media).1
-            );
-            let list = Column::with_children(
-                rows.iter()
-                    .map(|part| seasons::series_row(app, part, *media, &tokens)),
-            )
-            .spacing(2);
-            // Series cover: with two or more parts in the library, and not
-            // from an entry's "All N volumes".
-            let cover = (owned >= 2 && highlight.is_none()).then(|| {
-                ui::labeled_button(
-                    "Series cover…",
-                    ButtonKind::Outline,
-                    tokens,
-                    Some(msg(Message::OpenSeriesCover(*media, name.clone()))),
-                )
-            });
-            (
-                type_label(),
-                cover,
-                "Series".into(),
-                tokens.type_color(*media),
-                Series::display_name(name),
-                text(line).size(14).color(tokens.sub).into(),
-                list.into(),
-            )
-        }
+    let (back_label, kicker, kicker_color, title, line, body): Head<'a> = match page {
         Page::Seasons { id } => {
             let Some(entry) = entry_of(id) else {
                 return missing(&tokens);
@@ -87,7 +43,6 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, AppMessage> {
             let years = entry.years(app.today).unwrap_or_default();
             (
                 type_label(),
-                None,
                 kind_kicker(entry),
                 tokens.type_color(entry.media),
                 entry.title.clone(),
@@ -140,7 +95,6 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, AppMessage> {
             };
             (
                 entry.title.clone(),
-                None,
                 entry.title.clone(),
                 tokens.type_color(entry.media),
                 season.name(),
@@ -173,10 +127,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, AppMessage> {
         })
         .focusable(8.0, &tokens)
     };
-    let mut top = Row::new().push(back).spacing(10).align_y(Center);
-    if let Some(extra) = extra {
-        top = top.push(space::horizontal()).push(extra);
-    }
+    let top = Row::new().push(back).spacing(10).align_y(Center);
     let header = column![
         ui::mono(kicker.to_uppercase(), 11.5, kicker_color),
         text(title).size(28).font(font::EXTRABOLD),
@@ -192,11 +143,10 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, AppMessage> {
     .into()
 }
 
-/// A page's parts: the back label, an extra button, the kicker and its
-/// color, the title, the line under it and the body.
+/// A page's parts: the back label, the kicker and its color, the title,
+/// the line under it and the body.
 type Head<'a> = (
     String,
-    Option<Element<'a, AppMessage>>,
     String,
     iced::Color,
     String,
@@ -369,105 +319,4 @@ fn small_caps<'a>(label: &str, tokens: &Tokens) -> Element<'a, AppMessage> {
         .font(font::SEMIBOLD)
         .color(tokens.sub)
         .into()
-}
-
-/// Series cover: the covers of the parts in the library, the picked one
-/// ringed; a click picks at once, Done closes.
-pub fn cover_dialog<'a>(app: &'a App, media: MediaType, name: &str) -> Element<'a, AppMessage> {
-    let tokens = app.tokens();
-    let library = app.repo.library();
-    let parts = series::entries_in(library, media, name);
-    let picked = parts
-        .iter()
-        .copied()
-        .find(|p| p.series.as_ref().is_some_and(|s| s.cover == Some(true)))
-        .or(parts.first().copied())
-        .map(|p| p.id.clone());
-    let tiles = parts.iter().enumerate().map(|(index, part)| {
-        let on = picked.as_deref() == Some(part.id.as_str());
-        let tint = theme::cover_color(&part.id);
-        let (accent, line) = (tokens.accent, tokens.line);
-        let cover = container(ui::titled_cover(
-            app.artwork.cover(part),
-            tint,
-            &part.title,
-            104.0,
-            156.0,
-            13.0,
-        ))
-        .style(move |_| {
-            container::Style::default().border(
-                Border::default()
-                    .rounded(8)
-                    .width(if on { 3.0 } else { 1.0 })
-                    .color(if on { accent } else { line }),
-            )
-        });
-        let note = if !on {
-            String::new()
-        } else if index == 0 {
-            "First in the series".into()
-        } else {
-            "Your pick".into()
-        };
-        let year = part.year().map(|y| y.to_string()).unwrap_or_default();
-        let title = Series::part_title(&part.title, &Series::display_name(name));
-        button(
-            column![
-                cover,
-                container(
-                    text(title)
-                        .size(13)
-                        .font(font::SEMIBOLD)
-                        .wrapping(text::Wrapping::None)
-                )
-                .width(104)
-                .clip(true),
-                ui::mono(year, 12.0, tokens.sub),
-                text(note).size(12).color(tokens.sub),
-            ]
-            .spacing(3)
-            .width(104),
-        )
-        .padding(0)
-        .on_press(msg(Message::PickSeriesCover(part.id.clone())))
-        .style({
-            let text_color = tokens.text;
-            move |_, _| button::Style {
-                text_color,
-                ..button::Style::default()
-            }
-        })
-        .focusable(8.0, &tokens)
-    });
-    let body = column![
-        text(format!(
-            "Shown for {} in your library.",
-            Series::display_name(name)
-        ))
-        .size(14)
-        .color(tokens.sub),
-        Row::with_children(tiles).spacing(16).wrap().vertical_spacing(16),
-        text("Only parts in your library can be the cover. The first in the series is used until you pick another.")
-            .size(12.5)
-            .color(tokens.sub),
-    ]
-    .spacing(16);
-    let footer = row![
-        space::horizontal(),
-        ui::labeled_button(
-            "Done",
-            ButtonKind::Primary,
-            tokens,
-            Some(msg(Message::CloseSeriesCover))
-        ),
-    ];
-    ui::dialog(
-        "Series cover",
-        body,
-        footer,
-        560,
-        &tokens,
-        msg(Message::CloseSeriesCover),
-    )
 }

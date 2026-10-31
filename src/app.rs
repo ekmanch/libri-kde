@@ -348,6 +348,7 @@ impl Message {
             Message::Library(message) => !matches!(
                 message,
                 L::Scrolled(_)
+                    | L::HomeScrolled(_)
                     | L::ShelfScrolled(..)
                     | L::NudgeShelf(..)
                     | L::GroupsMeasured(_)
@@ -1020,10 +1021,18 @@ impl App {
         }
         let from = (message.navigates() && self.screen.in_history()).then(|| self.place());
         let selected = self.library.selected.clone();
+        let page = self.library.page.is_some();
         let task = self.handle(message);
         // Home's shelves keep the selected cover in view.
         let task = if self.library.selected != selected {
+            self.library.selection_moved();
             Task::batch([task, library::follow_selection(self)])
+        } else {
+            task
+        };
+        // Back from a page, the list or Home is where it was left.
+        let task = if page && self.library.page.is_none() && self.screen == Screen::Library {
+            Task::batch([task, library::restore_scroll(&self.library)])
         } else {
             task
         };
@@ -1282,6 +1291,23 @@ impl App {
             }
             Message::Library(library::Message::Picker(tags::PickerMessage::Jump(offset))) => {
                 return tags::jump(offset);
+            }
+            Message::Library(
+                message @ (library::Message::OpenSeries(_)
+                | library::Message::OpenSeriesPart(_)
+                | library::Message::BackToSeries),
+            ) => {
+                self.library.update(message);
+                // The pane starts at the top, or at the part it marks.
+                let offset = self
+                    .library
+                    .open_series()
+                    .map_or(0.0, |open| entry::series::offset(self, open));
+                let offset = scrollable::AbsoluteOffset {
+                    x: None,
+                    y: Some(offset),
+                };
+                return operation::scroll_to(entry::details::PANE_ID, offset);
             }
             Message::Library(library::Message::PickSeriesCover(id)) => {
                 self.apply(Operation::SetSeriesCover { id });

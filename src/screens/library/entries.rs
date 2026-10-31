@@ -366,7 +366,7 @@ pub(super) fn block<'a>(
 }
 
 /// What the views show of a row, and what a click does: an entry is
-/// selected; a series opens its page. A show's creator gets its season
+/// selected; a series opens in the details pane. A show's creator gets its season
 /// count, and its year is the years it ran.
 fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryLook, AppMessage) {
     let state = &app.library;
@@ -403,13 +403,20 @@ fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryL
                 rating: entry.rating.map_or("—".into(), |r| format!("{r}/10")),
                 tags: tags.join("  "),
                 selected: is_selected,
-                dimmed: view == View::Grid && selected.is_some() && !is_selected,
+                dimmed: view == View::Grid && state.pane_open() && !is_selected,
                 stack: None,
                 new_season: entry.has_new_season(today),
             };
             (look, msg(Message::Select(entry.id.clone())))
         }
         Row::Series(group) => {
+            // Its row stays marked while the series is in the pane, or a
+            // part picked from it.
+            let shows = |media: MediaType, name: &str| {
+                media == group.media && crate::model::Series::same(name, &group.name)
+            };
+            let series_on = state.open_series().is_some_and(|s| shows(s.media, &s.name))
+                || state.back_series().is_some_and(|b| shows(b.media, &b.name));
             let look = EntryLook {
                 title: group.title(),
                 creator: group.subtitle(),
@@ -427,17 +434,17 @@ fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryL
                 status_label: group.done_label(),
                 rating: String::new(),
                 tags: String::new(),
-                selected: false,
-                dimmed: view == View::Grid && selected.is_some(),
+                selected: series_on,
+                dimmed: view == View::Grid && state.pane_open() && !series_on,
                 stack: Some(group.parts.len()),
                 new_season: false,
             };
-            let page = super::Page::Series {
+            let open = super::OpenSeries {
                 media: group.media,
                 name: group.name.clone(),
                 highlight: None,
             };
-            (look, msg(Message::OpenPage(page)))
+            (look, msg(Message::OpenSeries(open)))
         }
     }
 }

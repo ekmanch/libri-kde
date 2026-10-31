@@ -20,7 +20,7 @@ use super::shell::shell;
 use crate::app::{App, Message as AppMessage};
 use crate::artwork::Wants;
 use crate::browse::{self, Decade, Filter, Row, Section, Sort};
-use crate::model::{Date, Entry, EntryStatus, Library, MediaType, TagCategory};
+use crate::model::{Date, Entry, EntryStatus, Library, MediaType, Series, TagCategory};
 use crate::settings::Source;
 use crate::tags::{PickerMessage, PickerState};
 use crate::ui;
@@ -31,6 +31,8 @@ pub use overview::{ShelfScroll, follow_selection, nudge};
 pub const SEARCH_ID: &str = "library-search";
 /// The entry list's scroll area, for the type rail's jumps.
 pub const LIST_ID: &str = "library-list";
+/// Home's scroll area, to return to where it was after a page.
+pub const HOME_ID: &str = "library-home";
 /// How many tags can be pinned to the sidebar.
 pub const MAX_PINS: usize = 8;
 /// How many of the most used tags the sidebar and the Filter popover list.
@@ -72,24 +74,32 @@ pub enum Popup {
 }
 
 /// A page in the content pane, in place of the list: all of a show's
-/// seasons, a season's episodes, or a series (decided 2026-10-24: the
-/// content pane, with the inspector kept, not a drill-in inside it).
+/// seasons or a season's episodes (decided 2026-10-24: the content pane,
+/// with the inspector kept, not a drill-in inside it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Page {
-    Seasons {
-        id: String,
-    },
-    Season {
-        id: String,
-        number: u32,
-    },
-    Series {
-        media: MediaType,
-        name: String,
-        /// The part the page was opened from ("All 43 volumes"), marked
-        /// "This one".
-        highlight: Option<String>,
-    },
+    Seasons { id: String },
+    Season { id: String, number: u32 },
+}
+
+/// A series open in the details pane, with nothing selected (decided
+/// 2026-10-31: the pane, not a page over the list).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenSeries {
+    pub media: MediaType,
+    pub name: String,
+    /// The part it was opened from ("All 43 volumes", or ‹ back from a
+    /// part), marked and scrolled to.
+    pub highlight: Option<String>,
+}
+
+/// The series a selected part was opened from, for the ‹ series name at
+/// the top of its details.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeriesBack {
+    pub id: String,
+    pub media: MediaType,
+    pub name: String,
 }
 
 /// Which season's status menu is open: in the inspector, or on a page.
@@ -165,10 +175,16 @@ pub struct State {
     pub artist: Option<String>,
     /// A page in the content pane, over the list.
     pub page: Option<Page>,
+    /// A series in the details pane, while nothing is selected.
+    pub series: Option<OpenSeries>,
+    /// The series the selected part was picked from.
+    pub series_back: Option<SeriesBack>,
     pub season_menu: Option<SeasonMenu>,
     /// The Series cover dialog, for a series of a type.
     pub cover_dialog: Option<(MediaType, String)>,
     pub scroll: Scroll,
+    /// How far Home is scrolled, in px, to return to after a page.
+    pub home_offset: f32,
     /// Where each group or section starts in the list, from its top, and
     /// how tall the list's visible part is.
     pub group_tops: Vec<f32>,
@@ -238,6 +254,16 @@ pub enum Message {
     JumpToGroup(usize),
     OpenPage(Page),
     ClosePage,
+    /// A series row, or an entry's "All N volumes" with that entry to
+    /// mark: the series in the details pane. A second click on its row
+    /// closes it.
+    OpenSeries(OpenSeries),
+    /// A part in the series pane: its details, with ‹ back to the series.
+    OpenSeriesPart(String),
+    /// The ‹ series name above a part's details.
+    BackToSeries,
+    /// Home scrolled to this offset.
+    HomeScrolled(f32),
     SeasonMenu(Option<SeasonMenu>),
     OpenSeriesCover(MediaType, String),
     CloseSeriesCover,
@@ -292,18 +318,21 @@ pub fn wanted(app: &App, wants: &mut Wants) {
             wants.episodes.push((id.clone(), *number));
             return;
         }
-        Some(Page::Series { media, name, .. }) => {
-            let parts = crate::series::entries_in(library, *media, name);
-            if let Some(first) = parts.first() {
-                wants.series.push(first.id.clone());
-            }
-            if state.cover_dialog.is_some() {
-                wants.covers.extend(parts.iter().map(|e| e.id.clone()));
-            }
-            return;
-        }
         Some(Page::Seasons { .. }) => return,
         None => {}
+    }
+    if let Some(open) = state.series.as_ref().filter(|_| state.selected.is_none()) {
+        let parts = crate::series::entries_in(library, open.media, &open.name);
+        if let Some(first) = parts.first() {
+            wants.series.push(first.id.clone());
+        }
+        if let Some(lead) = crate::series::cover_entry(&parts) {
+            wants.covers.push(lead.id.clone());
+        }
+    }
+    if let Some((media, name)) = &state.cover_dialog {
+        let parts = crate::series::entries_in(library, *media, name);
+        wants.covers.extend(parts.iter().map(|e| e.id.clone()));
     }
     let view = state.view_mode();
     if state.is_overview() {
@@ -374,7 +403,7 @@ impl State {
         self.music_tab = place.music_tab;
         self.artist = place.artist;
         self.page = place.page;
-        self.selected = None;
+        self.deselect();
         self.popup = None;
         self.picker = None;
         self.season_menu = None;
@@ -387,7 +416,7 @@ impl State {
                 self.types = media.into_iter().collect();
                 self.artist = None;
                 self.status = None;
-                self.selected = None;
+                self.deselect();
                 self.popup = None;
                 self.page = None;
             }
@@ -395,12 +424,12 @@ impl State {
                 if !self.types.remove(&media) {
                     self.types.insert(media);
                 }
-                self.selected = None;
+                self.deselect();
                 self.page = None;
             }
             Message::SeeAll(section) => {
                 self.types.clear();
-                self.selected = None;
+                self.deselect();
                 self.page = None;
                 match section {
                     Section::InProgress => self.status = Some(EntryStatus::InProgress),
@@ -426,17 +455,18 @@ impl State {
                 } else {
                     vec![tag]
                 };
-                self.selected = None;
+                self.deselect();
             }
             Message::Status(status) => {
                 self.status = status;
-                self.selected = None;
+                self.deselect();
             }
             Message::Search(query) => self.query = query,
             Message::SetView(view) => {
                 self.views.insert(self.view_key(), view);
             }
             Message::Select(id) => {
+                self.series = None;
                 self.details_rating_open = false;
                 self.track_rating_open = None;
                 self.season_menu = None;
@@ -496,7 +526,7 @@ impl State {
                 self.filter.tags.clear();
                 self.filter.tag_categories.clear();
                 self.filter.toggle_tag(&tag, category);
-                self.selected = None;
+                self.deselect();
                 self.popup = None;
                 self.all_tags_query.clear();
             }
@@ -510,18 +540,8 @@ impl State {
             Message::UnpinAll => self.pins.clear(),
             Message::Add | Message::JumpToGroup(_) | Message::PickSeriesCover(_) => {}
             Message::OpenPage(page) => {
+                // A page keeps the entry it was opened from selected.
                 self.close_popovers();
-                // A page opened from a row keeps the row's entry selected;
-                // a series page from a series row has nothing selected.
-                if matches!(
-                    page,
-                    Page::Series {
-                        highlight: None,
-                        ..
-                    }
-                ) {
-                    self.selected = None;
-                }
                 self.page = Some(page);
             }
             Message::ClosePage => {
@@ -529,6 +549,40 @@ impl State {
                 self.season_menu = None;
                 self.cover_dialog = None;
             }
+            Message::OpenSeries(open) => {
+                self.close_popovers();
+                let showing = |name: &str| Series::same(name, &open.name);
+                let again = open.highlight.is_none()
+                    && (self.series.as_ref().is_some_and(|s| showing(&s.name))
+                        || self.back_series().is_some_and(|b| showing(&b.name)));
+                self.deselect();
+                if !again {
+                    self.series = Some(open);
+                }
+            }
+            Message::OpenSeriesPart(id) => {
+                if let Some(open) = self.series.take() {
+                    self.close_popovers();
+                    self.series_back = Some(SeriesBack {
+                        id: id.clone(),
+                        media: open.media,
+                        name: open.name,
+                    });
+                    self.selected = Some(id);
+                }
+            }
+            Message::BackToSeries => {
+                if let Some(back) = self.back_series().cloned() {
+                    self.deselect();
+                    self.close_popovers();
+                    self.series = Some(OpenSeries {
+                        media: back.media,
+                        name: back.name,
+                        highlight: Some(back.id),
+                    });
+                }
+            }
+            Message::HomeScrolled(offset) => self.home_offset = offset,
             Message::SeasonMenu(menu) => self.season_menu = menu,
             Message::OpenSeriesCover(media, name) => self.cover_dialog = Some((media, name)),
             Message::CloseSeriesCover => self.cover_dialog = None,
@@ -544,7 +598,7 @@ impl State {
             }
             Message::OpenArtist(name) => {
                 self.artist = Some(name);
-                self.selected = None;
+                self.deselect();
             }
             Message::CloseArtist => self.artist = None,
             Message::GroupsMeasured(measure) => {
@@ -567,6 +621,43 @@ impl State {
             return true;
         }
         self.popup.take().is_some() || self.note_draft.take().is_some()
+    }
+
+    /// Nothing in the details pane: no entry and no series.
+    pub fn deselect(&mut self) {
+        self.selected = None;
+        self.series = None;
+        self.series_back = None;
+    }
+
+    /// The selection moved (a click, the arrow keys, a save): an entry in
+    /// the pane closes the series, and ‹ back to a series stays only on
+    /// the part it was picked from.
+    pub fn selection_moved(&mut self) {
+        if self.selected.is_some() {
+            self.series = None;
+        }
+        if self.back_series().is_none() {
+            self.series_back = None;
+        }
+    }
+
+    /// The series the selected part was picked from, while it is selected.
+    pub fn back_series(&self) -> Option<&SeriesBack> {
+        self.series_back
+            .as_ref()
+            .filter(|b| self.selected.as_deref() == Some(b.id.as_str()))
+    }
+
+    /// The series the details pane shows: one is open and nothing is
+    /// selected.
+    pub fn open_series(&self) -> Option<&OpenSeries> {
+        self.series.as_ref().filter(|_| self.selected.is_none())
+    }
+
+    /// Whether the details pane is open, for an entry or a series.
+    pub fn pane_open(&self) -> bool {
+        self.selected.is_some() || self.series.is_some()
     }
 
     /// Closes every popover: the Filter, Sort and All tags popovers and
@@ -841,7 +932,7 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
         ]
     };
     let picker = match (&state.picker, &state.cover_dialog) {
-        (_, Some((media, name))) => Some(page::cover_dialog(app, *media, name)),
+        (_, Some((media, name))) => Some(entry::series::cover_dialog(app, *media, name)),
         (Some(picker), None) => Some(tags::picker(app, picker, &listing)),
         (None, None) => None,
     };
@@ -850,17 +941,34 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
     } else {
         AppMessage::Library(Message::ClosePicker)
     };
-    // The details pane shows beside the list while an entry is selected.
+    // The details pane shows beside the list while an entry is selected,
+    // or a series is open.
     let selected = state.selected.as_deref().and_then(|id| library.entry(id));
-    let main: Element<'_, AppMessage> = match selected {
-        Some(entry) => row![
-            container(content).width(Fill),
-            entry::details::view(app, entry, None)
-        ]
-        .into(),
+    let pane = match (selected, state.open_series()) {
+        (Some(entry), _) => Some(entry::details::view(app, entry, None)),
+        (None, Some(open)) => entry::series::view(app, open),
+        (None, None) => None,
+    };
+    let main: Element<'_, AppMessage> = match pane {
+        Some(pane) => row![container(content).width(Fill), pane].into(),
         None => content.into(),
     };
     ui::modal(shell(app, main), picker, close, &tokens)
+}
+
+/// Scrolls the list, or Home, back to where it was before a page took
+/// its place: the scroll area is a new one when it comes back.
+pub fn restore_scroll<T: Send + 'static>(state: &State) -> iced::Task<T> {
+    let (id, y) = if state.is_overview() {
+        (HOME_ID, state.home_offset)
+    } else {
+        (LIST_ID, state.scroll.offset)
+    };
+    let offset = iced::widget::scrollable::AbsoluteOffset {
+        x: None,
+        y: Some(y),
+    };
+    iced::widget::operation::scroll_to(id, offset)
 }
 
 /// The repository and branch, quietly at the bottom of the content.
@@ -1157,6 +1265,75 @@ mod tests {
         assert!(state.page.is_some());
         state.update(Message::ShowType(Some(MediaType::Movies)));
         assert!(state.page.is_none());
+    }
+
+    #[test]
+    fn a_series_opens_in_the_pane_and_a_part_picked_from_it_comes_back() {
+        use crate::app::{KeyPress, Message as App};
+        const FELLOWSHIP: &str = "movies/the-lord-of-the-rings-the-fellowship-of-the-ring-2001";
+        let lotr = |highlight: Option<&str>| {
+            App::Library(Message::OpenSeries(OpenSeries {
+                media: MediaType::Movies,
+                name: "The Lord of the Rings".into(),
+                highlight: highlight.map(Into::into),
+            }))
+        };
+        let mut app = crate::app::App::new(crate::screens::Screen::Library);
+        let _ = app.update(App::Library(Message::ShowType(Some(MediaType::Movies))));
+        let _ = app.update(App::Library(Message::Select(
+            "movies/the-mummy-1999".into(),
+        )));
+        let _ = app.update(lotr(None));
+        assert_eq!(app.library.selected, None);
+        assert!(app.library.open_series().is_some());
+        let _ = app.update(lotr(None));
+        assert!(
+            !app.library.pane_open(),
+            "a second click on its row closes it"
+        );
+
+        let _ = app.update(lotr(None));
+        let _ = app.update(App::Library(Message::OpenSeriesPart(FELLOWSHIP.into())));
+        assert_eq!(app.library.selected.as_deref(), Some(FELLOWSHIP));
+        assert!(app.library.open_series().is_none());
+        assert!(app.library.back_series().is_some());
+        let _ = app.update(App::Library(Message::BackToSeries));
+        let open = app.library.open_series().unwrap();
+        assert_eq!(open.highlight.as_deref(), Some(FELLOWSHIP));
+        assert_eq!(app.library.selected, None);
+
+        // Another entry drops the way back; the arrow keys close the
+        // series.
+        let _ = app.update(App::Library(Message::OpenSeriesPart(FELLOWSHIP.into())));
+        let _ = app.update(App::Library(Message::Select(
+            "movies/the-mummy-1999".into(),
+        )));
+        assert!(app.library.series_back.is_none());
+        let _ = app.update(lotr(None));
+        let _ = app.update(App::Key(KeyPress::Down));
+        assert!(app.library.selected.is_some());
+        assert!(app.library.series.is_none());
+
+        // "All N volumes" from a part opens the series marking it.
+        let _ = app.update(App::Library(Message::Select(FELLOWSHIP.into())));
+        let _ = app.update(lotr(Some(FELLOWSHIP)));
+        assert!(app.library.open_series().is_some());
+    }
+
+    #[test]
+    fn a_page_closed_scrolls_back_where_the_list_was() {
+        let mut state = State::default();
+        state.update(Message::ShowType(Some(MediaType::Shows)));
+        state.update(Message::Scrolled(Scroll {
+            offset: 640.0,
+            viewport: 500.0,
+            content: 3000.0,
+        }));
+        state.update(Message::OpenPage(Page::Seasons {
+            id: "shows/x".into(),
+        }));
+        state.update(Message::ClosePage);
+        assert_eq!(state.scroll.offset, 640.0, "kept for the way back");
     }
 
     #[test]

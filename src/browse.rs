@@ -445,11 +445,7 @@ impl<'a> SeriesGroup<'a> {
     /// The part whose cover stands for the series: the one marked, else
     /// the first in series order.
     pub fn cover_entry(&self) -> &'a Entry {
-        self.parts
-            .iter()
-            .copied()
-            .find(|p| p.series.as_ref().is_some_and(|s| s.cover == Some(true)))
-            .unwrap_or(self.parts[0])
+        crate::series::cover_entry(&self.parts).unwrap_or(self.parts[0])
     }
 }
 

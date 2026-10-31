@@ -137,6 +137,8 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [x] Build: seasons in rows, the inspector, the form's season editor and plan ticks through the seasons; derived show status. The dropped-season dialog is built too, opened by `LIBRI_DROPPED=<id>:<n>` until the daily check of phase 4
 - [x] Build: all seasons and episodes from the boards, on fixture episode lists until phase 4 (`lookup::episodes`)
 - [x] Build: series in the inspector, series rows in long lists (`isLongList` rule, status All, Done or DNF, two parts or more), the series page and its cover sheet, on fixture part lists until phase 4 (`lookup::series_parts`: The Lord of the Rings and Berserk)
+- [x] Canvas revision: a series opens in the details pane instead of a page (the stacked cover, Progress, the parts; ‹ series name above a part's details)
+- [x] Build: the series in the details pane from the revised boards, and the list or Home scrolled back to where it was when a page closes
 - [ ] Fixture: the phone's Haunted Hotel, Carrie, South Park, Frieren, The Lord of the Rings and Berserk entries are in `assets/fixtures/library.json` once the phone's copy has them (keep it byte-identical). Frieren, The Lord of the Rings and Berserk are in since phase 1h; Haunted Hotel, Carrie and South Park are not in the phone's copy yet, so the captures build those states with `SetSeasons` on Stranger Things
 - [x] Tests for derived status, series grouping and the new fields; captures of every new state in Graphite and Light
 

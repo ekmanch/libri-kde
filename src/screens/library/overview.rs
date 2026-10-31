@@ -231,6 +231,8 @@ pub fn body(app: &App) -> Element<'_, AppMessage> {
         view => columns(app, &overview, view, &tokens),
     };
     ui::scroll(container(content).padding(Padding::new(24.0).top(10)))
+        .id(super::HOME_ID)
+        .on_scroll(|viewport| msg(Message::HomeScrolled(viewport.absolute_offset().y)))
         .height(Fill)
         .into()
 }
