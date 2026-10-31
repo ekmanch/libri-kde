@@ -18,8 +18,6 @@ pub struct EntryLook {
     pub year: String,
     /// The full release text: "2026-12-25".
     pub released: String,
-    /// "Movie", on the cover.
-    pub kind: &'static str,
     pub type_color: Color,
     /// The placeholder's color, and the fetched cover once it is on this
     /// computer.
@@ -41,8 +39,8 @@ pub struct EntryLook {
     pub new_season: bool,
 }
 
-/// A grid card: the 2:3 cover with the type, a status badge, the title and
-/// creator on it, then the title and year under it. Fills its grid cell.
+/// A grid card: the 2:3 cover with a status badge (and a series' count or
+/// a new season), the placeholder's title and creator on it, then the title and year under it. Fills its grid cell.
 pub fn entry_card<'a, Message: Clone + 'a>(
     look: EntryLook,
     tokens: &Tokens,
@@ -60,11 +58,7 @@ pub fn entry_card<'a, Message: Clone + 'a>(
         .align_y(Center)
         .into()
     } else {
-        text(look.kind.to_uppercase())
-            .size(10.5)
-            .font(font::MONO)
-            .color(white)
-            .into()
+        Space::new().into()
     };
     let mut top = row![corner].height(24).align_y(Center);
     // A series shows the check only when every part is done.
