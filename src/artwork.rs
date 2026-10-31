@@ -60,9 +60,13 @@ pub const PRUNE_DELAY: Duration = Duration::from_secs(15);
 /// What the screens show right now, so the missing pieces are fetched:
 /// entries whose covers are on screen, artists whose photos are, image
 /// URLs the form shows (match thumbnails), and the entries whose series,
-/// season or track list is open.
+/// season or track list is open. `large` are the cover viewer's sharper
+/// copies, fetched ahead of everything else; `sizes` the images whose
+/// width and height are read from the file once it is here.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Wants {
+    pub large: Vec<String>,
+    pub sizes: Vec<String>,
     pub covers: Vec<String>,
     pub artists: Vec<String>,
     pub images: Vec<String>,
@@ -214,6 +218,9 @@ pub struct Artwork {
     image_states: HashMap<String, ImageState>,
     downloading: HashSet<String>,
     image_queue: Vec<String>,
+    /// Images' widths and heights by URL, read once each (none when the
+    /// header was not understood).
+    sizes: HashMap<String, Option<(u32, u32)>>,
     series: HashMap<String, SeriesState>,
     episodes: HashMap<(String, u32), EpisodesState>,
     tracks: HashMap<String, TracksState>,
@@ -262,6 +269,7 @@ impl Artwork {
             image_states: HashMap::new(),
             downloading: HashSet::new(),
             image_queue: Vec::new(),
+            sizes: HashMap::new(),
             series: HashMap::new(),
             episodes: HashMap::new(),
             tracks: HashMap::new(),
@@ -386,6 +394,18 @@ impl Artwork {
         }
     }
 
+    /// An image's width and height, once it is on this computer and was
+    /// wanted in `Wants::sizes`.
+    pub fn image_size(&self, url: &str) -> Option<(u32, u32)> {
+        self.sizes.get(url).copied().flatten()
+    }
+
+    /// Whether the image's download failed and is not to be tried again
+    /// yet.
+    pub fn image_failed(&self, url: &str) -> bool {
+        matches!(self.image_states.get(url), Some(ImageState::Failed(until)) if Instant::now() < *until)
+    }
+
     fn artist_key(name: &str) -> String {
         name.trim().to_lowercase()
     }
@@ -452,6 +472,9 @@ impl Artwork {
         let now = Instant::now();
         self.failures
             .retain(|_, (_, at)| now.duration_since(*at) < FAILURE_RETRY);
+        for url in &wants.large {
+            self.want_image(url);
+        }
         for id in &wants.covers {
             if let Some(entry) = library.entry(id) {
                 self.want_cover(entry);
@@ -462,6 +485,14 @@ impl Artwork {
         }
         for url in &wants.images {
             self.want_image(url);
+        }
+        for url in &wants.sizes {
+            if !self.sizes.contains_key(url)
+                && let Some(ImageState::Ready(path)) = self.image_states.get(url)
+            {
+                let size = lookup::store::image_size_of(path);
+                self.sizes.insert(url.clone(), size);
+            }
         }
         let mut tasks = Vec::new();
         for id in &wants.series {
@@ -1009,6 +1040,20 @@ impl Artwork {
         Task::none()
     }
 
+    /// The images the records want kept: each cover and photo, and the
+    /// cover viewer's sharper copies of them.
+    fn kept_images(&self) -> Vec<String> {
+        self.records
+            .values()
+            .chain(self.artists.values())
+            .filter_map(|r| r.url.clone())
+            .flat_map(|url| {
+                let large = lookup::viewer_urls(&url);
+                std::iter::once(url).chain(large)
+            })
+            .collect()
+    }
+
     /// Once per session: drops the records and files of entries and
     /// artists that are gone, and every image whose URL no record wants.
     fn prune(&mut self, library: &Library) -> Task<Message> {
@@ -1030,12 +1075,7 @@ impl Artwork {
             self.mark_dirty();
         }
         self.flush(true);
-        let keep: Vec<String> = self
-            .records
-            .values()
-            .chain(self.artists.values())
-            .filter_map(|r| r.url.clone())
-            .collect();
+        let keep = self.kept_images();
         let sources = |test: &dyn Fn(&Entry) -> bool| -> Vec<String> {
             library
                 .entries
@@ -1293,6 +1333,45 @@ mod tests {
             tracks: None,
             seasons: None,
         }
+    }
+
+    #[test]
+    fn the_viewers_copies_are_kept_and_sizes_read_once_here() {
+        let dir = crate::storage::TempDir::new("artwork-sizes");
+        let mut artwork = Artwork::at(None);
+        let e = entry("movies/x-1999", "X", Some("tmdb:movie:1"));
+        let cached = "https://image.tmdb.org/t/p/w342/x.jpg";
+        artwork.cover_resolved(
+            e.id.clone(),
+            Artwork::key_for(&e),
+            Ok((Some(cached.into()), None)),
+        );
+        let mut kept = artwork.kept_images();
+        kept.sort();
+        assert_eq!(kept, [cached, "https://image.tmdb.org/t/p/w780/x.jpg"]);
+
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend(342u32.to_be_bytes());
+        png.extend(513u32.to_be_bytes());
+        let path = dir.path("x.png");
+        std::fs::write(&path, &png).unwrap();
+        let library = Library::default();
+        let service = Arc::new(Service::fake());
+        let wants = Wants {
+            sizes: vec![cached.into()],
+            ..Wants::default()
+        };
+        let _ = artwork.refresh(&wants, &library, &service);
+        assert_eq!(artwork.image_size(cached), None, "not here yet");
+        let _ = artwork.update(
+            Message::ImageFetched {
+                url: cached.into(),
+                outcome: Ok(path),
+            },
+            &library,
+        );
+        let _ = artwork.refresh(&wants, &library, &service);
+        assert_eq!(artwork.image_size(cached), Some((342, 513)));
     }
 
     #[test]

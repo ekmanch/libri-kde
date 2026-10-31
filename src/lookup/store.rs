@@ -436,6 +436,61 @@ fn image_extension(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// An image file's width and height from its header, for the cover
+/// viewer's frame; none when the file cannot be read or the header is not
+/// understood.
+pub fn image_size_of(path: &Path) -> Option<(u32, u32)> {
+    image_size(&std::fs::read(path).ok()?)
+}
+
+/// The width and height a JPEG, PNG, WebP or GIF header gives.
+fn image_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    let be16 = |at: usize| Some(u16::from_be_bytes(bytes.get(at..at + 2)?.try_into().ok()?) as u32);
+    let le16 = |at: usize| Some(u16::from_le_bytes(bytes.get(at..at + 2)?.try_into().ok()?) as u32);
+    let le24 = |at: usize| {
+        let b = bytes.get(at..at + 3)?;
+        Some(u32::from(b[0]) | u32::from(b[1]) << 8 | u32::from(b[2]) << 16)
+    };
+    let size = match image_extension(bytes)? {
+        "png" => {
+            let be32 =
+                |at: usize| Some(u32::from_be_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
+            (be32(16)?, be32(20)?)
+        }
+        "gif" => (le16(6)?, le16(8)?),
+        "webp" => match bytes.get(12..16)? {
+            b"VP8 " => (le16(26)? & 0x3fff, le16(28)? & 0x3fff),
+            b"VP8L" => {
+                let b = bytes.get(21..25)?;
+                let bits = u32::from_le_bytes(b.try_into().ok()?);
+                ((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1)
+            }
+            b"VP8X" => (le24(24)? + 1, le24(27)? + 1),
+            _ => return None,
+        },
+        // A JPEG's size is in its start-of-frame segment: walk the
+        // segments until one (SOF0 to SOF15, less DHT, JPG and DAC).
+        _ => {
+            let mut at = 2;
+            loop {
+                if *bytes.get(at)? != 0xFF {
+                    return None;
+                }
+                let marker = *bytes.get(at + 1)?;
+                if marker == 0xFF {
+                    at += 1;
+                    continue;
+                }
+                if (0xC0..=0xCF).contains(&marker) && ![0xC4, 0xC8, 0xCC].contains(&marker) {
+                    break (be16(at + 7)?, be16(at + 5)?);
+                }
+                at += 2 + be16(at + 2)? as usize;
+            }
+        }
+    };
+    (size.0 > 0 && size.1 > 0).then_some(size)
+}
+
 /// The SHA-1 of the URL, in hex.
 pub fn key_for(url: &str) -> String {
     use sha1::Digest;
@@ -550,6 +605,31 @@ mod tests {
         assert_eq!(stores.read_tracks("deezer:album:9").unwrap(), tracks);
         assert!(stores.read_tracks("deezer:album:8").is_none());
         assert!(Stores::default().read_tracks("deezer:album:9").is_none());
+    }
+
+    #[test]
+    fn an_images_size_comes_from_its_header() {
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend(342u32.to_be_bytes());
+        png.extend(513u32.to_be_bytes());
+        assert_eq!(image_size(&png), Some((342, 513)));
+
+        let gif = b"GIF89a\xe8\x03\xe8\x03";
+        assert_eq!(image_size(gif), Some((1000, 1000)));
+
+        // A JPEG with an APP0 segment before its baseline frame.
+        let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 4, 0, 0];
+        jpeg.extend([0xFF, 0xC0, 0, 17, 8]);
+        jpeg.extend(1170u16.to_be_bytes());
+        jpeg.extend(780u16.to_be_bytes());
+        assert_eq!(image_size(&jpeg), Some((780, 1170)));
+
+        let mut webp = b"RIFF\0\0\0\0WEBPVP8X\0\0\0\0\0\0\0\0".to_vec();
+        webp.extend([0x0F, 0x02, 0, 0x2F, 0x03, 0]);
+        assert_eq!(image_size(&webp), Some((528, 816)));
+
+        assert_eq!(image_size(b"not an image"), None);
+        assert_eq!(image_size(&[0xFF, 0xD8, 0xFF, 0xE0]), None, "cut short");
     }
 
     #[test]

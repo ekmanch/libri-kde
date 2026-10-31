@@ -197,6 +197,7 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [x] The sidebar's All reads Home. Done 2026-10-31
 - [x] Home's grid with details open: shelves that scroll sideways (fades, ‹ ›, the selected cover kept in view) and a side column that keeps 340 px. Done 2026-10-31
 - [x] The tag picker's long group: the dialog grew to the window and the letter rail ran past the list. Done 2026-10-31
+- [x] The cover viewer blew the cached cover up past its size (TMDB's w342, IGDB's 264 × 374 at 800 × 1200 pixels). Done 2026-10-31: the viewer opens with the cached cover in a frame of the image's own shape and fetches a sharper copy of the same image (TMDB w780, IGDB 1080p else the 2× cover, Deezer 1000², Apple 1200²) when it opens or the pointer goes over the cover in details; a copy that does not come leaves the cached cover
 
 ## Phase 5: Packaging
 

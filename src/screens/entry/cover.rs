@@ -5,15 +5,22 @@
 //! everywhere, and "Use the match's cover" puts the default back. Esc
 //! closes Pick a cover, then the viewer; × or a click on the backdrop
 //! closes it.
+//!
+//! The cover opens at once as the cache keeps it, in a frame of the
+//! image's own shape, and a sharper copy of the same image
+//! (`lookup::viewer_urls`) is fetched and drawn over it once it is here;
+//! a copy that does not come leaves the cached cover, without a word.
+//! Hovering the cover in details starts that fetch already.
 
+use iced::widget::image::{Handle, Image};
 use iced::widget::{Column, Row, button, column, container, mouse_area, opaque, row, stack, text};
-use iced::{Border, Center, Element, Fill, Right};
+use iced::{Border, Center, ContentFit, Element, Fill, Right};
 
 use super::{CoverView, Message};
 use crate::app::{App, Message as AppMessage};
 use crate::artwork::Wants;
 use crate::browse;
-use crate::lookup::Match;
+use crate::lookup::{self, Match};
 use crate::model::{Entry, MediaType};
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, ButtonKind, FocusExt, Icon};
@@ -22,9 +29,14 @@ fn msg(message: Message) -> AppMessage {
     AppMessage::Entry(message)
 }
 
-/// The cover at its largest, and the room kept around it.
-const MAX_HEIGHT: f32 = 600.0;
+/// The cover's longer side at its largest, the room kept around it and
+/// its corners.
+const MAX_SIDE: f32 = 600.0;
 const MARGIN: f32 = 240.0;
+const RADIUS: f32 = 12.0;
+/// The shapes a cover's frame keeps within, width over height.
+const NARROWEST: f32 = 0.5;
+const WIDEST: f32 = 1.5;
 /// Pick a cover's panel, its three columns of tiles and the gaps.
 const PANEL_WIDTH: f32 = 560.0;
 const PANEL_PADDING: f32 = 22.0;
@@ -79,13 +91,9 @@ fn choices<'a>(app: &App, view: &'a CoverView, entry: &Entry) -> Vec<Choice<'a>>
     list
 }
 
-/// The picked choice's image while the new cover record is on its way,
-/// else the cover the library shows.
-fn current_handle(
-    app: &App,
-    view: &CoverView,
-    entry: &Entry,
-) -> Option<iced::widget::image::Handle> {
+/// The image the viewer shows: the picked choice's while the new cover
+/// record is on its way, else the cover the library shows.
+fn shown_url<'a>(app: &'a App, view: &'a CoverView, entry: &Entry) -> Option<&'a str> {
     if let Some(cover_from) = &entry.cover_from
         && let Some(url) = view
             .choices
@@ -93,11 +101,37 @@ fn current_handle(
             .flat_map(|r| r.matches.iter())
             .find(|m| m.cover_from() == cover_from)
             .and_then(Match::cache_cover_url)
-        && let Some(handle) = app.artwork.image(url)
+        && app.artwork.image(url).is_some()
     {
-        return Some(handle);
+        return Some(url);
     }
-    app.artwork.cover(entry)
+    app.artwork.cover_url(entry)
+}
+
+/// The sharper copy of the cached cover `url` that is here, best first.
+fn large_handle(app: &App, url: &str) -> Option<Handle> {
+    lookup::viewer_urls(url)
+        .iter()
+        .find_map(|large| app.artwork.image(large))
+}
+
+/// Asks for the sharper copy of the cached cover `url`: the best one that
+/// has not failed, so IGDB's 2× cover is tried when its 1080p is not
+/// there. Once all have failed, nothing.
+pub fn want_large(app: &App, url: &str, wants: &mut Wants) {
+    let copies = lookup::viewer_urls(url);
+    if copies
+        .iter()
+        .any(|large| app.artwork.image(large).is_some())
+    {
+        return;
+    }
+    if let Some(large) = copies
+        .into_iter()
+        .find(|large| !app.artwork.image_failed(large))
+    {
+        wants.large.push(large);
+    }
 }
 
 pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
@@ -106,19 +140,30 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
         return iced::widget::space().into();
     };
 
-    // 2:3, or square for music, as tall as the window allows.
-    let height = (app.window.height - MARGIN).clamp(240.0, MAX_HEIGHT);
-    let width = if entry.media == MediaType::Music {
-        height
+    // The image's own shape, 2:3 or square for music until it is
+    // measured, its longer side as long as the window allows.
+    let url = shown_url(app, view, entry);
+    let side = (app.window.height - MARGIN).clamp(240.0, MAX_SIDE);
+    let ratio = url
+        .and_then(|url| app.artwork.image_size(url))
+        .map(|(w, h)| w as f32 / h as f32)
+        .unwrap_or(if entry.media == MediaType::Music {
+            1.0
+        } else {
+            2.0 / 3.0
+        })
+        .clamp(NARROWEST, WIDEST);
+    let (width, height) = if ratio <= 1.0 {
+        (side * ratio, side)
     } else {
-        height / 1.5
+        (side, side / ratio)
     };
     let face = ui::cover(
-        current_handle(app, view, entry),
+        url.and_then(|url| app.artwork.image(url)),
         theme::cover_color(&entry.id),
         width,
         height,
-        12.0,
+        RADIUS,
         Some(ui::cover::Label {
             words: entry.title.clone(),
             size: 36.0,
@@ -126,6 +171,19 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
             centered: false,
         }),
     );
+    // The sharper copy over it, which draws nothing until it is decoded.
+    let face: Element<'_, AppMessage> = match url.and_then(|url| large_handle(app, url)) {
+        Some(large) => stack![
+            face,
+            Image::new(large)
+                .width(width)
+                .height(height)
+                .content_fit(ContentFit::Cover)
+                .border_radius(RADIUS),
+        ]
+        .into(),
+        None => face,
+    };
 
     let picked = entry.cover_from.as_deref().and_then(|cover_from| {
         view.choices
@@ -339,12 +397,16 @@ fn picker<'a>(
 /// each choice's image.
 pub fn wanted(app: &App, view: &CoverView, wants: &mut Wants) {
     wants.covers.push(view.id.clone());
-    if !view.changing {
-        return;
-    }
     let Some(entry) = app.repo.library().entry(&view.id) else {
         return;
     };
+    if let Some(url) = shown_url(app, view, entry) {
+        wants.sizes.push(url.to_owned());
+        want_large(app, url, wants);
+    }
+    if !view.changing {
+        return;
+    }
     for choice in choices(app, view, entry) {
         if let Some(url) = choice.url {
             wants.images.push(url);

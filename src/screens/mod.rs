@@ -72,12 +72,18 @@ pub fn wanted(app: &App) -> Wants {
 }
 
 /// The inspector's wants for the entry it shows: its cover, its series'
-/// parts and, for an album, its track list.
+/// parts, for an album its track list, and with the pointer over the
+/// cover the viewer's sharper copy.
 pub fn details_wants(app: &App, id: &str, wants: &mut Wants) {
     let Some(entry) = app.repo.library().entry(id) else {
         return;
     };
     wants.covers.push(entry.id.clone());
+    if app.library.cover_warm.as_deref() == Some(id)
+        && let Some(url) = app.artwork.cover_url(entry)
+    {
+        entry::want_large(app, url, wants);
+    }
     if entry.series.is_some() && entry.can_have_series() {
         wants.series.push(entry.id.clone());
     }

@@ -838,9 +838,52 @@ impl Service {
     }
 }
 
+/// The cover viewer's sharper copies of a cached cover, best first: the
+/// same image at a larger size, made by rewriting the size in `url`, so
+/// no lookup is asked. None for a cover already at its provider's largest
+/// (AniList's `extraLarge`, Open Library's `-L`) or from elsewhere.
+pub fn viewer_urls(url: &str) -> Vec<String> {
+    tmdb::Tmdb::viewer_urls(url)
+        .or_else(|| igdb::Igdb::viewer_urls(url))
+        .or_else(|| deezer::Deezer::viewer_urls(url))
+        .or_else(|| books::ITunes::viewer_urls(url))
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_viewer_asks_for_each_providers_larger_copy() {
+        assert_eq!(
+            viewer_urls("https://image.tmdb.org/t/p/w342/abc.jpg"),
+            ["https://image.tmdb.org/t/p/w780/abc.jpg"]
+        );
+        assert!(viewer_urls("https://image.tmdb.org/t/p/w780/abc.jpg").is_empty());
+        assert_eq!(
+            viewer_urls("https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg"),
+            [
+                "https://images.igdb.com/igdb/image/upload/t_1080p/co1.jpg",
+                "https://images.igdb.com/igdb/image/upload/t_cover_big_2x/co1.jpg",
+            ]
+        );
+        assert_eq!(
+            viewer_urls("https://images.igdb.com/igdb/image/upload/t_cover_big_2x/co1.jpg"),
+            ["https://images.igdb.com/igdb/image/upload/t_1080p/co1.jpg"]
+        );
+        assert_eq!(
+            viewer_urls("https://cdn-images.dzcdn.net/images/cover/h/500x500-000000-80-0-0.jpg"),
+            ["https://cdn-images.dzcdn.net/images/cover/h/1000x1000-000000-80-0-0.jpg"]
+        );
+        assert_eq!(
+            viewer_urls("https://is1-ssl.mzstatic.com/image/thumb/x/600x600bb.jpg"),
+            ["https://is1-ssl.mzstatic.com/image/thumb/x/1200x1200bb.jpg"]
+        );
+        // Already the largest, or from a provider without a larger size.
+        assert!(viewer_urls("https://covers.openlibrary.org/b/id/1-L.jpg").is_empty());
+        assert!(viewer_urls("https://s4.anilist.co/file/anilistcdn/media/x.jpg").is_empty());
+    }
 
     /// A source that answers as told, for the service's rules.
     struct Scripted {

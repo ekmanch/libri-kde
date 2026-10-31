@@ -252,6 +252,29 @@ impl Source for Deezer {
     }
 }
 
+/// The album cover size the cover viewer asks for (Deezer's `cover_xl`).
+const VIEWER_COVER: u32 = 1000;
+
+impl Deezer {
+    /// The same cover at `cover_xl`'s size, when `url` is a smaller Deezer
+    /// image ("…/500x500-000000-80-0-0.jpg").
+    pub fn viewer_urls(url: &str) -> Option<Vec<String>> {
+        let (head, file) = url.rsplit_once('/')?;
+        let host = url.split('/').nth(2)?;
+        if !host.ends_with(".dzcdn.net") {
+            return None;
+        }
+        let (size, tail) = file.split_once('-')?;
+        let (w, h) = size.split_once('x')?;
+        let (w, _): (u32, u32) = (w.parse().ok()?, h.parse().ok()?);
+        Some(if w < VIEWER_COVER {
+            vec![format!("{head}/{VIEWER_COVER}x{VIEWER_COVER}-{tail}")]
+        } else {
+            Vec::new()
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

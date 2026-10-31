@@ -361,6 +361,25 @@ impl Source for Tmdb {
     }
 }
 
+/// The poster width the cover viewer asks for: 780 × 1170, enough for
+/// its 400 × 600 at twice the scale.
+const VIEWER_POSTER: u32 = 780;
+
+impl Tmdb {
+    /// The same poster at the viewer's width, when `url` is a smaller
+    /// TMDB poster.
+    pub fn viewer_urls(url: &str) -> Option<Vec<String>> {
+        let rest = url.strip_prefix(IMAGES)?;
+        let (size, path) = rest.split_once('/')?;
+        let width: u32 = size.strip_prefix('w')?.parse().ok()?;
+        Some(if width < VIEWER_POSTER {
+            vec![format!("{IMAGES}w{VIEWER_POSTER}/{path}")]
+        } else {
+            Vec::new()
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

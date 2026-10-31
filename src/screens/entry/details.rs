@@ -46,6 +46,7 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
         .style(|_, _| button::Style::default())
         .focusable(8.0, &tokens),
     )
+    .on_enter(msg(Message::WarmCover(entry.id.clone())))
     .interaction(iced::mouse::Interaction::ZoomIn);
     let seasons = entry.season_list();
     let today = app.today;

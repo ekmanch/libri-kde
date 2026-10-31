@@ -711,6 +711,29 @@ impl Source for Igdb {
     }
 }
 
+/// The sizes the cover viewer asks for, best first: 1080p fits within
+/// 1920 × 1080 (about 760 × 1080 for a cover), the 2× cover is 528 × 748.
+const VIEWER_SIZES: [&str; 2] = ["t_1080p", "t_cover_big_2x"];
+
+impl Igdb {
+    /// The same cover at the viewer's sizes, best first, when `url` is an
+    /// IGDB image at another size.
+    pub fn viewer_urls(url: &str) -> Option<Vec<String>> {
+        let rest = url.strip_prefix(IMAGES)?;
+        let (size, file) = rest.split_once('/')?;
+        let at = VIEWER_SIZES
+            .iter()
+            .position(|s| *s == size)
+            .unwrap_or(VIEWER_SIZES.len());
+        Some(
+            VIEWER_SIZES[..at]
+                .iter()
+                .map(|s| format!("{IMAGES}{s}/{file}"))
+                .collect(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

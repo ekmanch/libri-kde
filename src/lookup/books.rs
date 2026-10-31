@@ -1117,6 +1117,29 @@ impl Source for Books {
     }
 }
 
+/// The artwork size the cover viewer asks for of Apple's image server.
+const VIEWER_ARTWORK: u32 = 1200;
+
+impl ITunes {
+    /// The same artwork at the viewer's size, when `url` is a smaller one
+    /// from Apple's image server.
+    pub fn viewer_urls(url: &str) -> Option<Vec<String>> {
+        let host = url.split('/').nth(2)?;
+        if !host.ends_with(".mzstatic.com") {
+            return None;
+        }
+        let large = ITunes::artwork_at(url, VIEWER_ARTWORK);
+        let width: Option<u32> = url
+            .rsplit_once('/')
+            .and_then(|(_, file)| file.split_once('x'))
+            .and_then(|(w, _)| w.parse().ok());
+        Some(match width {
+            Some(w) if w < VIEWER_ARTWORK && large != url => vec![large],
+            _ => Vec::new(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

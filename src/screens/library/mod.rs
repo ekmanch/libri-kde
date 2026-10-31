@@ -152,6 +152,9 @@ pub struct State {
     pub type_boxes: bool,
     /// The details pane's rating picker.
     pub details_rating_open: bool,
+    /// The entry whose cover in details the pointer went over, so its
+    /// sharper copy for the viewer is fetched while it stays selected.
+    pub cover_warm: Option<String>,
     /// The details pane's note as typed, with its entry's id, until Enter
     /// saves it, the pane moves on (which saves it too) or Esc drops it.
     pub note_draft: Option<(String, String)>,

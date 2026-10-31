@@ -3,6 +3,7 @@
 //! plan and the delete confirmation.
 
 mod cover;
+pub use cover::want_large;
 pub mod details;
 mod dialogs;
 mod form;
@@ -375,6 +376,9 @@ pub enum Message {
     AddToPlan(String),
     Close,
     // The cover viewer.
+    /// The pointer is over the cover in details: its sharper copy for the
+    /// viewer is fetched already.
+    WarmCover(String),
     ViewCover(String),
     /// Change cover…: opens Pick a cover beside the cover.
     ChangeCover,
@@ -1539,6 +1543,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::Delete(id) => app.dialog = Some(Dialog::Delete { id }),
         Message::AddToPlan(id) => app.dialog = Some(Dialog::AddToPlan { id }),
         Message::Close => app.dialog = None,
+        Message::WarmCover(id) => app.library.cover_warm = Some(id),
         Message::ViewCover(id) => {
             app.library.details_rating_open = false;
             app.dialog = Some(Dialog::Cover(Box::new(CoverView {
@@ -3037,6 +3042,61 @@ mod tests {
         );
         send(&mut app, Message::Type(MediaType::Movies));
         assert!(form(&app).cover_from.is_none(), "cleared with the type");
+    }
+
+    /// Tells the app's artwork an answer, as a task would.
+    fn artwork_says(app: &mut App, message: crate::artwork::Message) {
+        let library = app.repo.library().clone();
+        let _ = app.artwork.update(message, &library);
+    }
+
+    #[test]
+    fn the_viewer_asks_for_the_sharper_copy_and_falls_back_quietly() {
+        use crate::artwork::Message as Art;
+        use crate::lookup::store::ImageFailure;
+        let mut app = app();
+        let id = "games/elden-ring-2022";
+        let entry = app.repo.library().entry(id).unwrap().clone();
+        let cached = "https://images.igdb.com/igdb/image/upload/t_cover_big/co4jni.jpg";
+        let at = |size: &str| cached.replace("t_cover_big", size);
+        artwork_says(
+            &mut app,
+            Art::CoverResolved {
+                id: id.into(),
+                key: crate::artwork::Artwork::key_for(&entry),
+                outcome: Ok((Some(cached.into()), None)),
+            },
+        );
+        // Details alone ask for nothing more until the pointer is over
+        // the cover.
+        let details = |app: &App| {
+            let mut wants = Wants::default();
+            crate::screens::details_wants(app, id, &mut wants);
+            wants.large
+        };
+        assert!(details(&app).is_empty());
+        send(&mut app, Message::WarmCover(id.into()));
+        assert_eq!(details(&app), [at("t_1080p")]);
+
+        send(&mut app, Message::ViewCover(id.into()));
+        let wants = crate::screens::wanted(&app);
+        assert_eq!(wants.large, [at("t_1080p")]);
+        assert_eq!(wants.sizes, [cached], "the frame takes the image's shape");
+
+        // A 1080p that fails gives way to the 2× cover, and once that
+        // fails too the cached cover stays without asking again.
+        for size in ["t_1080p", "t_cover_big_2x"] {
+            artwork_says(
+                &mut app,
+                Art::ImageFetched {
+                    url: at(size),
+                    outcome: Err(ImageFailure::Other("status 404".into())),
+                },
+            );
+        }
+        let wants = crate::screens::wanted(&app);
+        assert!(wants.large.is_empty());
+        assert!(wants.covers.contains(&id.to_owned()));
     }
 
     #[test]
