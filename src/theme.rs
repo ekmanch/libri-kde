@@ -207,7 +207,8 @@ pub struct Tokens {
     /// and on Glass nearly solid, so covers never show through it.
     pub pinned: Color,
     /// The unpinned details panel, a drawer over the list: the content
-    /// pane (nearly solid on Glass), with a shadow to its left.
+    /// pane, and on Glass its base #151515 fully opaque, with a shadow to
+    /// its left.
     pub drawer: Color,
     pub drawer_shadow: Color,
     pub accent: Color,
@@ -344,14 +345,9 @@ impl Tokens {
             } else {
                 content
             },
-            drawer: if glass {
-                Color {
-                    a: 0.94,
-                    ..hex(0x151515)
-                }
-            } else {
-                content
-            },
+            // KWin blurs what is behind the window, never Libri's own
+            // list, so a see-through drawer would show the covers under it.
+            drawer: if glass { hex(0x151515) } else { content },
             drawer_shadow: pick(
                 Color::from_rgba8(20, 22, 28, 0.16),
                 Color::from_rgba8(0, 0, 0, 0.55),
@@ -632,6 +628,7 @@ mod tests {
         assert_eq!(card_background(&glass), white(0.04));
         assert_eq!(glass.popover, hex(0x26292D));
         assert_eq!(glass.pinned, base(0.94));
+        assert_eq!(glass.drawer, hex(0x151515), "opaque over the list");
         assert_eq!(Tokens::new(Theme::Mocha, PEACH).pinned, hex(0x1E1E2E));
         assert_eq!(glass.type_color(MediaType::Movies), hex(0xF2B544));
         assert!(!glass.light);

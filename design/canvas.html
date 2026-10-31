@@ -2205,8 +2205,8 @@ class Component extends DCLogic {
       tags: Object.keys(gtc).sort((a, b) => gtc[b] - gtc[a] || a.localeCompare(b)).slice(0, 6).map((g) => ({ name: g, n: String(gtc[g]), go: () => set({ tagSel: [g], sel: null }) })) };
     // The panel always starts below the toolbar (and the status chips): the title, search, filter, sort, view, pin and Add keep the full width whether it is pinned or not.
     const panel = { top: overview ? "64px" : "104px", pos: "absolute", z: drawer ? "30" : "5", reserve: pinned ? "352px" : "0", drawer, home: overview && !inspOpen, glance: !overview && pinned && !inspOpen,
-      bg: drawer ? (glass ? "rgba(21,21,21,0.94)" : t.content) : t.content, shadow: drawer ? (L.light ? "-18px 0 40px rgba(20,22,28,0.16)" : "-18px 0 44px rgba(0,0,0,0.55)") : "none",
-      edge: drawer ? "1px solid " + t.line : "0", radius: drawer ? "12px" : "0",
+      bg: drawer ? (glass ? "#151515" : t.content) : t.content, // Glass: the drawer floats above the window, so it is solid like popovers (KWin cannot blur Libri's own content) shadow: drawer ? (L.light ? "-18px 0 40px rgba(20,22,28,0.16)" : "-18px 0 44px rgba(0,0,0,0.55)") : "none",
+      edge: "0", radius: drawer ? "12px" : "0",
       close: closePanel, pin: togglePin, canPin: !overview, pinned, togglePin,
       pinTip: pinned ? "Unpin the details panel (Ctrl+I)" : "Pin the details panel (Ctrl+I)",
       pinBg: pinned ? (L.light ? "#E9EBEE" : mixWhite(t.content, 0.1)) : "transparent", pinFg: pinned ? t.text : t.sub, pinFill: pinned ? "currentColor" : "none" };
