@@ -352,27 +352,43 @@ pub(super) fn block<'a>(
     view: View,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
-    let looks = rows.iter().map(|row| look(app, row, view, tokens));
+    // Each row is found by its entry's id, so opening or closing the
+    // details pane can keep it in view (`reveal`).
+    let looks = rows.iter().map(|row| {
+        let (look, on_press) = look(app, row, view, tokens);
+        (row_id(&row.lead().id), look, on_press)
+    });
+    let found = |id: String, row: Element<'a, AppMessage>| container(row).id(id).into();
     match view {
-        View::Grid => grid(looks.map(|(look, on_press)| ui::entry_card(look, tokens, on_press)))
-            .fluid(CARD_MAX_WIDTH)
-            .spacing(20)
-            .height(grid::aspect_ratio(CARD_WIDTH, CARD_HEIGHT))
-            .into(),
+        View::Grid => grid(
+            looks.map(|(id, look, on_press)| found(id, ui::entry_card(look, tokens, on_press))),
+        )
+        .fluid(CARD_MAX_WIDTH)
+        .spacing(20)
+        .height(grid::aspect_ratio(CARD_WIDTH, CARD_HEIGHT))
+        .into(),
         View::List => Column::with_children(
-            looks.map(|(look, on_press)| ui::entry_list_row(look, tokens, on_press)),
+            looks.map(|(id, look, on_press)| found(id, ui::entry_list_row(look, tokens, on_press))),
         )
         .spacing(2)
         .into(),
-        View::Text => Column::with_children(looks.map(|(look, on_press)| {
-            column![
-                ui::entry_table_row(look, tokens, on_press),
-                ui::rule(tokens.line.scale_alpha(0.5)),
-            ]
-            .into()
+        View::Text => Column::with_children(looks.map(|(id, look, on_press)| {
+            found(
+                id,
+                column![
+                    ui::entry_table_row(look, tokens, on_press),
+                    ui::rule(tokens.line.scale_alpha(0.5)),
+                ]
+                .into(),
+            )
         }))
         .into(),
     }
+}
+
+/// The widget id of an entry's row or card in the list.
+pub(super) fn row_id(entry: &str) -> String {
+    format!("library-row:{entry}")
 }
 
 /// What the views show of a row, and what a click does: an entry is
@@ -588,5 +604,71 @@ mod tests {
         );
         app.library.scroll.offset = 1500.0;
         assert_eq!(current_group(&app.library), Some(2));
+    }
+
+    /// How far the list is scrolled, read off the laid-out window.
+    struct ListOffset(Option<f32>);
+
+    impl iced::advanced::widget::Operation for ListOffset {
+        fn traverse(
+            &mut self,
+            operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation),
+        ) {
+            operate(self);
+        }
+
+        fn scrollable(
+            &mut self,
+            id: Option<&iced::advanced::widget::Id>,
+            _bounds: iced::Rectangle,
+            _content_bounds: iced::Rectangle,
+            translation: Vector,
+            _state: &mut dyn iced::advanced::widget::operation::Scrollable,
+        ) {
+            if id == Some(&iced::advanced::widget::Id::new(super::super::LIST_ID)) {
+                self.0 = Some(translation.y);
+            }
+        }
+    }
+
+    #[test]
+    fn opening_and_closing_details_keeps_the_list_where_it_was() {
+        use iced::advanced::renderer::Headless;
+        use iced::advanced::widget::operation::scrollable::{AbsoluteOffset, scroll_to};
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+
+        let mut renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as Headless>::new(iced::Font::default(), 14.into(), None),
+        )
+        .expect("a headless renderer");
+        let size = crate::app::WINDOW_SIZE;
+        for view in [View::Grid, View::List, View::Text] {
+            let mut app = grouped_app();
+            let _ = app.update(msg(Message::SetView(view)));
+            let mut ui = UserInterface::build(app.view(), size, Cache::default(), &mut renderer);
+            ui.operate(
+                &renderer,
+                &mut scroll_to(
+                    super::super::LIST_ID.into(),
+                    AbsoluteOffset {
+                        x: None,
+                        y: Some(300.0),
+                    },
+                ),
+            );
+            let mut cache = ui.into_cache();
+            let id = app.library.listing(app.repo.library(), app.today).shown[3]
+                .id
+                .clone();
+            // Open, then close by clicking the same entry again.
+            for _ in 0..2 {
+                let _ = app.update(msg(Message::Select(id.clone())));
+                let mut ui = UserInterface::build(app.view(), size, cache, &mut renderer);
+                let mut offset = ListOffset(None);
+                ui.operate(&renderer, &mut offset);
+                assert_eq!(offset.0, Some(300.0), "{view:?}");
+                cache = ui.into_cache();
+            }
+        }
     }
 }

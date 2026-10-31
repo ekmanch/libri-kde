@@ -1030,6 +1030,14 @@ impl App {
         } else {
             task
         };
+        // The list keeps the entry opened or closed in view, whatever the
+        // pane's coming or going did to the grid's columns.
+        let task = match self.library.selected.as_deref().or(selected.as_deref()) {
+            Some(id) if self.library.selected != selected && self.screen == Screen::Library => {
+                Task::batch([task, library::reveal(&self.library, id)])
+            }
+            _ => task,
+        };
         // Back from a page, the list or Home is where it was left.
         let task = if page && self.library.page.is_none() && self.screen == Screen::Library {
             Task::batch([task, library::restore_scroll(&self.library)])

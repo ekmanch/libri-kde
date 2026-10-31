@@ -5,6 +5,7 @@ mod entries;
 mod music;
 mod overview;
 mod page;
+mod reveal;
 mod tags;
 mod toolbar;
 
@@ -949,10 +950,13 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
         (None, Some(open)) => entry::series::view(app, open),
         (None, None) => None,
     };
-    let main: Element<'_, AppMessage> = match pane {
-        Some(pane) => row![container(content).width(Fill), pane].into(),
-        None => content.into(),
-    };
+    // The list keeps its place in the tree whether the pane is there or
+    // not, so its scroll position survives opening and closing it.
+    let mut main = row![container(content).width(Fill)];
+    if let Some(pane) = pane {
+        main = main.push(pane);
+    }
+    let main: Element<'_, AppMessage> = main.into();
     ui::modal(shell(app, main), picker, close, &tokens)
 }
 
@@ -969,6 +973,18 @@ pub fn restore_scroll<T: Send + 'static>(state: &State) -> iced::Task<T> {
         y: Some(y),
     };
     iced::widget::operation::scroll_to(id, offset)
+}
+
+/// Keeps entry `id` in view in the list once the details pane has opened
+/// or closed beside it: the list keeps its offset, but the grid's columns
+/// change with its width, so the entry may have moved. Scrolls only when
+/// it is partly out of view, just enough to show it clear of the pinned
+/// header.
+pub fn reveal<T: Send + 'static>(state: &State, id: &str) -> iced::Task<T> {
+    if state.is_overview() || state.page.is_some() {
+        return iced::Task::none();
+    }
+    iced::advanced::widget::operate(reveal::Reveal::new(LIST_ID, &entries::row_id(id)))
 }
 
 /// The repository and branch, quietly at the bottom of the content.

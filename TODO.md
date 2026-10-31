@@ -75,6 +75,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Similar-tag warning and new-tag confirmation with a category pick
 - [x] Add to plan
 - [x] Delete confirmation ("plan only or everywhere" when the entry is in a plan; the plan-only choice comes with the plan screen in 1e)
+- [x] Opening or closing the details pane keeps the list where it was (it scrolled to the top), and scrolls just enough to keep the entry in view when the grid's columns change
 
 ### 1d. Music
 - [x] Artists / Albums / Songs, "Various Artists" pinned last, a leading "The" ignored when sorting
