@@ -391,6 +391,22 @@ fn capture_every_screen() {
                 let _ = app.update(Message::Library(library::Message::SetView(View::Text)));
             }),
         ),
+        // Two types grouped in the grid, the first group's header pinned
+        // (the capture cannot scroll, so it sits over the header itself).
+        (
+            Screen::Library,
+            ("library-grouped-pinned", |app| {
+                let _ = app.update(Message::Library(library::Message::ShowType(Some(
+                    MediaType::Movies,
+                ))));
+                let _ = app.update(Message::Library(library::Message::ToggleType(
+                    MediaType::Shows,
+                )));
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                app.library.group_tops = vec![0.0, 2000.0];
+                app.library.scroll.offset = 40.0;
+            }),
+        ),
         // Phase 1h: tags in several categories, the long groups and the
         // dialogs around them.
         (

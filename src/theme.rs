@@ -203,6 +203,9 @@ pub struct Tokens {
     pub shadow: Color,
     /// The outline that marks the view on the grouped list's type rail.
     pub rail_thumb: Color,
+    /// Behind the grouped list's pinned type header: the content pane,
+    /// and on Glass nearly solid, so covers never show through it.
+    pub pinned: Color,
     pub accent: Color,
     /// Accent text, icons and outlines.
     pub ink: Color,
@@ -329,6 +332,14 @@ impl Tokens {
                 Color::from_rgba8(20, 22, 28, 0.75),
                 Color::from_rgba(1.0, 1.0, 1.0, 0.9),
             ),
+            pinned: if glass {
+                Color {
+                    a: 0.94,
+                    ..hex(0x151515)
+                }
+            } else {
+                content
+            },
             accent: accent.fill,
             ink: pick(accent.ink, accent.fill),
             on_accent: pick(hex(0x17181B), hex(0x131416)),
@@ -453,6 +464,8 @@ pub mod size {
     pub const SMALL: f32 = 13.0;
     /// Section headers in small gray caps.
     pub const SECTION: f32 = 12.5;
+    /// The type headers of a grouped list.
+    pub const GROUP: f32 = 24.0;
     pub const MONO: f32 = 12.0;
 }
 
@@ -602,6 +615,8 @@ mod tests {
         assert_eq!(glass.hover, white(0.07));
         assert_eq!(card_background(&glass), white(0.04));
         assert_eq!(glass.popover, hex(0x26292D));
+        assert_eq!(glass.pinned, base(0.94));
+        assert_eq!(Tokens::new(Theme::Mocha, PEACH).pinned, hex(0x1E1E2E));
         assert_eq!(glass.type_color(MediaType::Movies), hex(0xF2B544));
         assert!(!glass.light);
         // The window clears to nothing; the shell paints the surfaces.

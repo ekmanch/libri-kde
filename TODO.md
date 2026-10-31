@@ -67,6 +67,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Type checkboxes in the sidebar (optional, colored, a box adds or removes the type, the name shows only it); the setting itself is in Settings (1f)
 - [x] DNF badge on grid covers
 - [x] Grouped results: a thin type-colored scrollbar (one segment per group, sized by its count; a click jumps to the group; the thumb is an outline) and pinned type headers. `ui::Groups` measures where each group starts; the text view's column header stays above the rows
+- [x] Grouped results' type headers as in the mockup: a 4 px bar and the type in its color (Figtree ExtraBold 24), the count in mono 13; the pinned one hides what scrolls under it (the content color, nearly solid #151515 on Glass, the `pinned` token)
 
 ### 1c. Entry details and editing
 - [x] Entry details as in the mockup: cover spot, status, rating, note, about, tags, plans, Edit, Delete; the same details view is used from Plans (wired with the plan screen, 1e)

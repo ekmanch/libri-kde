@@ -209,20 +209,29 @@ fn section_rail<'a>(
     .into()
 }
 
-/// A type group's heading: the type in its color, caps, and the count.
+/// A type group's heading: a bar and the type in its color, large, and
+/// the count.
 fn group_header<'a>(media: MediaType, count: usize, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let color = tokens.type_color(media);
     container(
         row![
-            text(media.label().to_uppercase())
-                .size(theme::size::SECTION)
-                .font(font::BOLD)
-                .color(tokens.type_color(media)),
-            ui::mono(count.to_string(), 12.0, tokens.sub),
+            container(space())
+                .width(4)
+                .height(22)
+                .style(move |_| container::Style::default()
+                    .background(color)
+                    .border(Border::default().rounded(2))),
+            text(media.label())
+                .size(theme::size::GROUP)
+                .font(font::EXTRABOLD)
+                .line_height(1.0)
+                .color(color),
+            ui::mono(count.to_string(), 13.0, tokens.sub),
         ]
-        .spacing(8)
+        .spacing(10)
         .align_y(iced::Center),
     )
-    .padding(Padding::new(0.0).top(14).bottom(10))
+    .padding(Padding::new(0.0).top(18).bottom(12))
     .into()
 }
 
@@ -236,7 +245,8 @@ fn current_group(state: &super::State) -> Option<usize> {
 }
 
 /// The current group's header, pinned to the top once its own header has
-/// scrolled away, with a soft shadow under it.
+/// scrolled away, with a soft shadow under it. Its background hides
+/// what scrolls under it, on Glass too.
 fn pinned_header<'a>(
     state: &super::State,
     groups: &[(Option<MediaType>, Vec<&Entry>)],
@@ -248,12 +258,12 @@ fn pinned_header<'a>(
     }
     let (media, entries) = groups.get(index)?;
     let header = group_header((*media)?, entries.len(), tokens);
-    let (content, shadow) = (tokens.content, tokens.shadow);
+    let (background, shadow) = (tokens.pinned, tokens.shadow);
     let bar = container(header)
         .width(Fill)
         .padding([0, 24])
         .style(move |_| container::Style {
-            background: Some(Background::Color(content)),
+            background: Some(Background::Color(background)),
             shadow: Shadow {
                 color: shadow.scale_alpha(0.6),
                 offset: Vector::new(0.0, 4.0),
