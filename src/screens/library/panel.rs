@@ -359,11 +359,15 @@ fn glance<'a>(app: &'a App, listing: &Listing<'a>, tokens: &Tokens) -> Element<'
     if !tags.is_empty() {
         let chips = Row::with_children(tags.into_iter().take(TAGS).map(|(tag, n)| {
             button(
-                row![
-                    text(format!("#{tag}")).size(13),
-                    ui::mono(n.to_string(), 11.5, t.sub)
-                ]
-                .spacing(6)
+                container(
+                    row![
+                        text(format!("#{tag}")).size(13),
+                        ui::mono(n.to_string(), 11.5, t.sub)
+                    ]
+                    .spacing(6)
+                    .align_y(Center),
+                )
+                .height(Fill)
                 .align_y(Center),
             )
             .height(28)
