@@ -14,7 +14,7 @@
 //! real answer of no cover is a miss, tried again after fourteen days; a
 //! lookup that did not work out (offline, rate limited, not set up, a
 //! server error) is kept in memory only and asked again a little later.
-//! Image files live under `images/<sha1 of the url>.img`; a failed
+//! Image files live under `images/<sha1 of the url>.<format>`; a failed
 //! download is not retried for six hours (thirty seconds when offline).
 
 use std::collections::{HashMap, HashSet};

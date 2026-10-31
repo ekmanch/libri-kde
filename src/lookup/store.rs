@@ -1,11 +1,14 @@
 //! What the lookups keep on this computer, under `~/.cache/libri/`: the
-//! cover images (`images/<sha1 of the url>.img`), the records of which
+//! cover images (`images/<sha1 of the url>.<jpg, png, webp or gif>`,
+//! named by what the bytes are, since the image decoder goes by the
+//! extension), the records of which
 //! cover an entry got (`artwork.json`), album track lists (`tracks/`), a
 //! season's episodes (`episodes/`) and a series' parts (`series/`), each
 //! in the phone's file formats. Everything here can be fetched again, so
 //! a cleared cache only means asking once more. Without a folder (the
 //! tests) nothing is written and nothing is found.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -316,22 +319,50 @@ impl ImageStore {
         }
     }
 
-    /// The file an image lives in: the SHA-1 of its URL.
-    pub fn path_for(&self, url: &str) -> Option<PathBuf> {
-        Some(self.dir.as_ref()?.join(format!("{}.img", key_for(url))))
+    /// The file an image lives in: the SHA-1 of its URL with the
+    /// extension of its format.
+    fn path_with(&self, url: &str, extension: &str) -> Option<PathBuf> {
+        Some(
+            self.dir
+                .as_ref()?
+                .join(format!("{}.{extension}", key_for(url))),
+        )
     }
 
-    /// The file, when it is on this computer already.
+    /// The file, when it is on this computer already. A file from before
+    /// the images were named by their format (`.img`, which the decoder
+    /// cannot read) is renamed on the way.
     pub fn cached(&self, url: &str) -> Option<PathBuf> {
-        self.path_for(url).filter(|p| p.is_file())
+        for extension in IMAGE_EXTENSIONS {
+            let path = self.path_with(url, extension)?;
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        let old = self.path_with(url, "img")?;
+        if !old.is_file() {
+            return None;
+        }
+        let head = std::fs::read(&old).ok()?;
+        match image_extension(&head) {
+            Some(extension) => {
+                let path = self.path_with(url, extension)?;
+                std::fs::rename(&old, &path).ok()?;
+                Some(path)
+            }
+            None => {
+                let _ = std::fs::remove_file(&old);
+                None
+            }
+        }
     }
 
     /// Downloads the image and writes it, or says why not.
     pub fn fetch(&self, url: &str) -> Result<PathBuf, ImageFailure> {
-        let path = self
-            .path_for(url)
-            .ok_or_else(|| ImageFailure::Other("no cache folder".into()))?;
-        if path.is_file() {
+        if self.dir.is_none() {
+            return Err(ImageFailure::Other("no cache folder".into()));
+        }
+        if let Some(path) = self.cached(url) {
             return Ok(path);
         }
         let response = self
@@ -344,12 +375,15 @@ impl ImageStore {
         if response.status != 200 {
             return Err(ImageFailure::Other(format!("status {}", response.status)));
         }
-        if response.bytes.is_empty() || response.content_type.starts_with("text/") {
+        let Some(extension) = image_extension(&response.bytes) else {
             return Err(ImageFailure::Other(format!(
                 "not an image ({})",
                 response.content_type
             )));
-        }
+        };
+        let path = self
+            .path_with(url, extension)
+            .ok_or_else(|| ImageFailure::Other("no cache folder".into()))?;
         write_bytes(&path, &response.bytes).map_err(|e| ImageFailure::Other(e.to_string()))?;
         Ok(path)
     }
@@ -363,18 +397,42 @@ impl ImageStore {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return 0;
         };
-        let keep: Vec<String> = keep_urls
-            .iter()
-            .map(|u| format!("{}.img", key_for(u)))
-            .collect();
+        let keep: HashSet<String> = keep_urls.iter().map(|u| key_for(u)).collect();
         let mut removed = 0;
         for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if !keep.contains(&name) && std::fs::remove_file(entry.path()).is_ok() {
+            let path = entry.path();
+            let stem = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let known = path
+                .extension()
+                .is_some_and(|e| e == "img" || IMAGE_EXTENSIONS.iter().any(|x| e == *x));
+            if (!known || !keep.contains(&stem)) && std::fs::remove_file(&path).is_ok() {
                 removed += 1;
             }
         }
         removed
+    }
+}
+
+/// The extensions an image file can have, one per format the decoder
+/// reads.
+const IMAGE_EXTENSIONS: [&str; 4] = ["jpg", "png", "webp", "gif"];
+
+/// The extension for the image format `bytes` start with, from the
+/// formats' magic numbers; none when it is not an image the decoder reads.
+fn image_extension(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("jpg")
+    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("png")
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        Some("webp")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("gif")
+    } else {
+        None
     }
 }
 
@@ -495,19 +553,39 @@ mod tests {
     }
 
     #[test]
-    fn images_are_keyed_by_the_urls_sha1_and_pruned() {
+    fn images_are_named_by_their_format_and_pruned() {
+        const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10];
         let dir = storage::TempDir::new("images");
         let store = ImageStore::at(Some(dir.0.clone()));
         assert_eq!(key_for("x").len(), 40);
         assert_ne!(key_for("x"), key_for("y"));
-        let path = store.path_for("https://example.org/a.jpg").unwrap();
-        write_bytes(&path, b"img").unwrap();
-        assert!(store.cached("https://example.org/a.jpg").is_some());
+        assert_eq!(image_extension(JPEG), Some("jpg"));
+        assert_eq!(image_extension(b"\x89PNG\r\n\x1a\n...."), Some("png"));
+        assert_eq!(image_extension(b"RIFF\0\0\0\0WEBPVP8 "), Some("webp"));
+        assert_eq!(image_extension(b"GIF89a"), Some("gif"));
+        assert_eq!(image_extension(b"<html>"), None);
+
+        let a = "https://example.org/a.jpg";
+        let path = store.path_with(a, "jpg").unwrap();
+        write_bytes(&path, JPEG).unwrap();
+        assert_eq!(store.cached(a), Some(path.clone()));
         assert!(store.cached("https://example.org/b.jpg").is_none());
-        assert_eq!(store.prune(&["https://example.org/b.jpg".into()]), 1);
-        assert!(store.cached("https://example.org/a.jpg").is_none());
+
+        // A file from before the names had a format is renamed by its bytes.
+        let c = "https://example.org/c";
+        write_bytes(&store.path_with(c, "img").unwrap(), b"\x89PNG\r\n\x1a\n").unwrap();
+        assert_eq!(store.cached(c), store.path_with(c, "png"));
+        assert!(!store.path_with(c, "img").unwrap().exists());
+        let d = "https://example.org/d";
+        write_bytes(&store.path_with(d, "img").unwrap(), b"<html>").unwrap();
+        assert!(store.cached(d).is_none());
+        assert!(!store.path_with(d, "img").unwrap().exists());
+
+        assert_eq!(store.prune(&[c.into()]), 1);
+        assert!(store.cached(a).is_none());
+        assert!(store.cached(c).is_some());
         assert_eq!(
-            ImageStore::at(None).fetch("https://example.org/a.jpg"),
+            ImageStore::at(None).fetch(a),
             Err(ImageFailure::Other("no cache folder".into()))
         );
     }

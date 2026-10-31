@@ -192,6 +192,7 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [ ] The phone's daily checks (its DESIGN.md 10c: new seasons with the "season no longer listed" dialog, release dates, followed series and creators, Coming soon: everything upcoming) have no desktop counterpart yet; the dropped-season dialog still opens only with `LIBRI_DROPPED`
 - [ ] A first track rating could store the Deezer track id as the phone does (`deezer:track:<id>`); `SetTrackRating` carries the title alone, so ratings are matched to the list by title (case, punctuation and edition notes aside), which the phone also falls back to
 - [ ] The fake lookup paints no images, so no capture shows a real cover; look at them with `cargo run` and a connected library
+- [x] Fetched covers drew nothing (the title went, the tint stayed): the files were `<sha1>.img` and iced's decoder picks the format by the extension. Done 2026-10-31: named by the format the bytes start with, old files renamed on the way
 
 ## Phase 5: Packaging
 
