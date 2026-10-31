@@ -1,41 +1,59 @@
-//! Online lookup, faked for phase 1: a small fixed catalog the Add entry
-//! dialog searches. Phase 4 asks the real providers instead.
+//! The fake lookup: a small fixed catalog the tests and the mock runs
+//! search, with track lists, series parts and episodes for the fixture
+//! library. It answers at once and never touches the network, so the app
+//! asks it on the spot (`Service::is_instant`).
 
-use crate::model::{Date, Entry, EntryKind, MediaType, Season, Series, text};
+use super::{
+    Episode, GamePlatform, Hits, Match, Reply, SeriesPart, SeriesParts, Source, TrackInfo,
+};
+use crate::model::{Entry, EntryKind, MediaType, Released, Season, Series, text};
 
-/// One match a lookup returns.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Match {
-    pub media: MediaType,
-    pub title: &'static str,
-    pub creator: &'static str,
-    pub released: &'static str,
-    pub description: &'static str,
+/// One match of the catalog, as a constant.
+struct Row {
+    media: MediaType,
+    title: &'static str,
+    creator: &'static str,
+    released: &'static str,
+    description: &'static str,
     /// Tag suggestions, already in the library's spelling.
-    pub tags: &'static [&'static str],
-    pub platforms: &'static [&'static str],
-    pub kind: Option<EntryKind>,
-    /// The lookup id, "igdb:1234".
-    pub source: &'static str,
-    /// A book's edition, for the cover picker: "Hardcover", "Ebook".
-    pub edition: Option<&'static str>,
-    /// A book dated only by its ebook edition, so the year may be a
-    /// reprint's.
-    pub ebook_dated: bool,
-    /// The top billed cast of a movie or show, for actor tag suggestions.
-    pub cast: &'static [&'static str],
-    /// The work's language as a tag name ("japanese"), when the lookup
-    /// says and it is not English.
-    pub language: Option<&'static str>,
-    /// A show's first network or a movie's platform as a tag name
-    /// ("netflix"), for the Streaming suggestion.
-    pub network: Option<&'static str>,
+    tags: &'static [&'static str],
+    platforms: &'static [&'static str],
+    kind: Option<EntryKind>,
+    source: &'static str,
+    edition: Option<&'static str>,
+    ebook_dated: bool,
+    cast: &'static [&'static str],
+    /// A language code ("ko"), when the lookup says and it is not English.
+    language: Option<&'static str>,
+    /// A show's first network as TMDB names it ("Netflix").
+    network: Option<&'static str>,
 }
 
-/// The game platforms the lookup knows, A to Z: the name and its other
-/// names (the abbreviation, alternative and own names), which a search
-/// matches too.
-pub const PLATFORMS: &[(&str, &str)] = &[
+impl Row {
+    fn to_match(&self) -> Match {
+        Match {
+            released: Released::parse(self.released),
+            ebook_dated: self.ebook_dated,
+            creator: Some(self.creator.to_owned()),
+            description: self.description.to_owned(),
+            platforms: self.platforms.iter().map(|p| (*p).to_owned()).collect(),
+            cast: self.cast.iter().map(|c| (*c).to_owned()).collect(),
+            tags: self.tags.iter().map(|t| (*t).to_owned()).collect(),
+            kind: self.kind,
+            language: self.language.map(str::to_owned),
+            network: self.network.map(str::to_owned),
+            edition: self.edition.map(str::to_owned),
+            // A made-up image per match, so the cover picker has choices;
+            // nothing is ever fetched for it.
+            cover_url: Some(format!("fake://cover/{}", self.source)),
+            ..Match::new(self.media, self.title, self.source)
+        }
+    }
+}
+
+/// The game platforms the fake knows, A to Z: the name and its other
+/// names, which a search matches too.
+const PLATFORMS: &[(&str, &str)] = &[
     ("Arcade", ""),
     ("Game Boy", "GB"),
     ("Game Boy Advance", "GBA"),
@@ -53,6 +71,23 @@ pub const PLATFORMS: &[(&str, &str)] = &[
     ("Xbox Series X|S", "Xbox"),
 ];
 
+/// The fake's platforms as the picker lists them.
+pub fn platforms() -> Vec<GamePlatform> {
+    PLATFORMS
+        .iter()
+        .enumerate()
+        .map(|(i, (name, others))| GamePlatform {
+            id: i as i64 + 1,
+            name: (*name).to_owned(),
+            aka: others
+                .split(" · ")
+                .filter(|o| !o.is_empty())
+                .map(str::to_owned)
+                .collect(),
+        })
+        .collect()
+}
+
 const fn game(
     title: &'static str,
     creator: &'static str,
@@ -61,8 +96,8 @@ const fn game(
     tags: &'static [&'static str],
     platforms: &'static [&'static str],
     source: &'static str,
-) -> Match {
-    Match {
+) -> Row {
+    Row {
         media: MediaType::Games,
         title,
         creator,
@@ -88,8 +123,8 @@ const fn other(
     description: &'static str,
     tags: &'static [&'static str],
     source: &'static str,
-) -> Match {
-    Match {
+) -> Row {
+    Row {
         media,
         title,
         creator,
@@ -111,7 +146,7 @@ const fn other(
     }
 }
 
-pub const CATALOG: &[Match] = &[
+const CATALOG: &[Row] = &[
     game(
         "Street Fighter II: The World Warrior",
         "Capcom",
@@ -139,7 +174,7 @@ pub const CATALOG: &[Match] = &[
         &["Super Nintendo", "Mega Drive", "Arcade"],
         "igdb:3186",
     ),
-    Match {
+    Row {
         cast: &["Julia Garner", "Josh Brolin", "Alden Ehrenreich"],
         ..other(
             MediaType::Movies,
@@ -160,9 +195,9 @@ pub const CATALOG: &[Match] = &[
         &["comedy"],
         "tmdb:movie:74436",
     ),
-    Match {
+    Row {
         cast: &["Song Kang-ho", "Lee Sun-kyun", "Cho Yeo-jeong"],
-        language: Some("korean"),
+        language: Some("ko"),
         ..other(
             MediaType::Movies,
             "Parasite",
@@ -173,9 +208,9 @@ pub const CATALOG: &[Match] = &[
             "tmdb:movie:496243",
         )
     },
-    Match {
+    Row {
         cast: &["Stephen Graham", "Owen Cooper", "Ashley Walters"],
-        network: Some("netflix"),
+        network: Some("Netflix"),
         ..other(
             MediaType::Shows,
             "Adolescence",
@@ -195,7 +230,7 @@ pub const CATALOG: &[Match] = &[
         &["fantasy"],
         "tmdb:tv:40891",
     ),
-    Match {
+    Row {
         edition: Some("Ebook"),
         ebook_dated: true,
         ..other(
@@ -217,7 +252,7 @@ pub const CATALOG: &[Match] = &[
         &["christmas", "classic"],
         "openlibrary:OL8193416W",
     ),
-    Match {
+    Row {
         edition: Some("Ebook"),
         ebook_dated: true,
         ..other(
@@ -230,7 +265,7 @@ pub const CATALOG: &[Match] = &[
             "itunes:1319049962",
         )
     },
-    Match {
+    Row {
         edition: Some("Hardcover"),
         ..other(
             MediaType::Books,
@@ -242,7 +277,7 @@ pub const CATALOG: &[Match] = &[
             "openlibrary:OL17405W",
         )
     },
-    Match {
+    Row {
         edition: Some("Paperback"),
         ..other(
             MediaType::Books,
@@ -254,7 +289,7 @@ pub const CATALOG: &[Match] = &[
             "openlibrary:OL24241M",
         )
     },
-    Match {
+    Row {
         edition: Some("Ebook"),
         ebook_dated: true,
         ..other(
@@ -387,7 +422,6 @@ pub const CATALOG: &[Match] = &[
 ];
 
 /// Track lists for albums the fixture has, by artist and album title.
-/// Phase 4 fetches them from the album's lookup instead.
 const TRACK_LISTS: &[(&str, &str, &[&str])] = &[
     (
         "Alice in Chains",
@@ -479,91 +513,64 @@ const TRACK_LISTS: &[(&str, &str, &[&str])] = &[
     ),
 ];
 
-/// The album's track list, when the lookup has one.
-pub fn track_list(artist: &str, album: &str) -> Option<&'static [&'static str]> {
+/// The album's track list, when the fake has one, with made-up ids.
+pub fn track_list(artist: &str, album: &str) -> Option<Vec<TrackInfo>> {
     TRACK_LISTS
         .iter()
         .find(|(a, t, _)| a.eq_ignore_ascii_case(artist) && t.eq_ignore_ascii_case(album))
-        .map(|(_, _, tracks)| *tracks)
-}
-
-/// What the lookup is doing, for the Add dialog's left pane. Phase 4 sets
-/// it from the real providers; until then `LIBRI_LOOKUP` fakes it:
-/// "loading", "offline", "not-set-up", "partial", "partial-none".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum LookupState {
-    #[default]
-    Results,
-    Loading,
-    Offline,
-    NotSetUp,
-    /// Some sources failed; the rows are what the others found.
-    Partial,
-    /// Some sources failed and the others found nothing.
-    PartialNone,
-}
-
-impl LookupState {
-    pub fn from_env(value: &str) -> Option<LookupState> {
-        Some(match value {
-            "results" => LookupState::Results,
-            "loading" => LookupState::Loading,
-            "offline" => LookupState::Offline,
-            "not-set-up" => LookupState::NotSetUp,
-            "partial" => LookupState::Partial,
-            "partial-none" => LookupState::PartialNone,
-            _ => return None,
+        .map(|(_, _, tracks)| {
+            tracks
+                .iter()
+                .enumerate()
+                .map(|(i, title)| TrackInfo {
+                    id: format!("fake:track:{}:{}", text::slugify(album), i + 1),
+                    title: (*title).to_owned(),
+                })
+                .collect()
         })
-    }
-
-    /// Whether the pane shows rows in this state.
-    pub fn shows_rows(self) -> bool {
-        matches!(self, LookupState::Results | LookupState::Partial)
-    }
 }
 
-/// One part of a series as the lookup lists it: TMDB's collection, IGDB's
-/// collection or Wikidata's series.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SeriesPart {
-    pub number: Option<u32>,
-    pub title: String,
-    pub year: Option<u16>,
-    /// The lookup id, when the source has one.
-    pub source: Option<String>,
-}
-
-/// The parts of a series of `media`, in series order, when the lookup
-/// knows it. Phase 4 fetches and keeps them; until then two series are
-/// fixed here.
-pub fn series_parts(media: MediaType, name: &str) -> Option<Vec<SeriesPart>> {
+/// The parts of a series of `media`, in series order, when the fake knows
+/// it: The Lord of the Rings and Berserk.
+pub fn series_parts(media: MediaType, name: &str) -> Option<SeriesParts> {
     let part = |number: u32, title: &str, year: u16, source: Option<&str>| SeriesPart {
         number: Some(number),
         title: title.to_owned(),
         year: Some(year),
+        released: Some(Released {
+            year,
+            month: None,
+            day: None,
+        }),
         source: source.map(str::to_owned),
+        creator: None,
+        cover: None,
+        extra: false,
     };
     match (media, Series::display_name(name).to_lowercase().as_str()) {
-        (MediaType::Movies, "the lord of the rings") => Some(vec![
-            part(
-                1,
-                "The Lord of the Rings: The Fellowship of the Ring",
-                2001,
-                Some("tmdb:movie:120"),
-            ),
-            part(
-                2,
-                "The Lord of the Rings: The Two Towers",
-                2002,
-                Some("tmdb:movie:121"),
-            ),
-            part(
-                3,
-                "The Lord of the Rings: The Return of the King",
-                2003,
-                Some("tmdb:movie:122"),
-            ),
-        ]),
+        (MediaType::Movies, "the lord of the rings") => Some(SeriesParts {
+            name: "The Lord of the Rings".into(),
+            parts: vec![
+                part(
+                    1,
+                    "The Lord of the Rings: The Fellowship of the Ring",
+                    2001,
+                    Some("tmdb:movie:120"),
+                ),
+                part(
+                    2,
+                    "The Lord of the Rings: The Two Towers",
+                    2002,
+                    Some("tmdb:movie:121"),
+                ),
+                part(
+                    3,
+                    "The Lord of the Rings: The Return of the King",
+                    2003,
+                    Some("tmdb:movie:122"),
+                ),
+            ],
+        }),
         (MediaType::Books, "berserk") => {
             const YEARS: [u16; 43] = [
                 1990, 1991, 1991, 1992, 1993, 1993, 1994, 1994, 1995, 1995, 1996, 1996, 1997, 1997,
@@ -571,8 +578,9 @@ pub fn series_parts(media: MediaType, name: &str) -> Option<Vec<SeriesPart>> {
                 2005, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2013, 2016, 2017, 2018, 2021, 2021,
                 2025,
             ];
-            Some(
-                YEARS
+            Some(SeriesParts {
+                name: "Berserk".into(),
+                parts: YEARS
                     .iter()
                     .enumerate()
                     .map(|(i, &year)| {
@@ -580,27 +588,15 @@ pub fn series_parts(media: MediaType, name: &str) -> Option<Vec<SeriesPart>> {
                         part(n, &format!("Berserk, Vol. {n}"), year, None)
                     })
                     .collect(),
-            )
+            })
         }
         _ => None,
     }
 }
 
-/// One episode of a season, as TMDB lists it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Episode {
-    pub number: u32,
-    /// None until TMDB has a title (its placeholder "Episode 5" counts as
-    /// none).
-    pub title: Option<String>,
-    pub aired: Option<Date>,
-    /// In minutes.
-    pub runtime: Option<u32>,
-}
-
 /// The episodes of `season`, made up for the fixture: a weekly season
 /// when the season's date is a full day and it is not the first, every
-/// episode on the season's day otherwise. Phase 4 fetches them.
+/// episode on the season's day otherwise.
 pub fn episodes(entry: &Entry, season: &Season) -> Vec<Episode> {
     const FILLER: [&str; 10] = [
         "Pilot",
@@ -642,13 +638,8 @@ pub fn episodes(entry: &Entry, season: &Season) -> Vec<Episode> {
 }
 
 /// The matches for `query` among `media`: titles that contain it, case
-/// ignored. Nothing for an empty query.
-pub fn search(media: MediaType, query: &str) -> Vec<&'static Match> {
-    search_on(media, query, None)
-}
-
-/// [`search`] narrowed to the games that came out on `platform`.
-pub fn search_on(media: MediaType, query: &str, platform: Option<&str>) -> Vec<&'static Match> {
+/// ignored, narrowed to `platform` for games. Nothing for an empty query.
+pub fn search(media: MediaType, query: &str, platform: Option<&str>) -> Vec<Match> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
         return Vec::new();
@@ -663,71 +654,155 @@ pub fn search_on(media: MediaType, query: &str, platform: Option<&str>) -> Vec<&
                     .any(|p| text::normalize_platform(p).eq_ignore_ascii_case(platform))
             })
         })
+        .map(Row::to_match)
         .collect()
 }
 
-/// The other matches for an entry's title, whose covers Pick a cover
-/// offers: one of each lookup id, the entry's own match left out.
-pub fn cover_choices(media: MediaType, title: &str, own: Option<&str>) -> Vec<&'static Match> {
-    search(media, title)
-        .into_iter()
-        .filter(|m| own != Some(m.source))
-        .collect()
-}
-
-/// The platforms whose name or other names contain `query`, case aside.
-pub fn platforms_matching(query: &str) -> Vec<(&'static str, &'static str)> {
-    let query = query.trim().to_lowercase();
-    PLATFORMS
+/// The catalog's match with `source`.
+pub fn by_source(source: &str) -> Option<Match> {
+    CATALOG
         .iter()
-        .copied()
-        .filter(|(name, others)| {
-            query.is_empty() || format!("{name} {others}").to_lowercase().contains(&query)
-        })
-        .collect()
+        .find(|m| m.source == source)
+        .map(Row::to_match)
+}
+
+/// The fake as a source.
+pub struct Fake;
+
+impl Source for Fake {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+
+    fn name(&self) -> &'static str {
+        "Fake"
+    }
+
+    fn types(&self) -> &'static [MediaType] {
+        &MediaType::ALL
+    }
+
+    fn issued(&self, _source: &str) -> bool {
+        true
+    }
+
+    fn search(&self, query: &str, media: MediaType, limit: usize) -> Reply<Hits> {
+        let mut hits = search(media, query, None);
+        hits.truncate(limit);
+        Ok(Hits::of(hits))
+    }
+
+    fn platforms(&self) -> Reply<Vec<GamePlatform>> {
+        Ok(platforms())
+    }
+
+    fn search_on_platform(
+        &self,
+        query: &str,
+        platform: &GamePlatform,
+        limit: usize,
+    ) -> Reply<Hits> {
+        let mut hits = search(MediaType::Games, query, Some(&platform.name));
+        for hit in &mut hits {
+            hit.searched_platform = Some(platform.name.clone());
+        }
+        hits.truncate(limit);
+        Ok(Hits::of(hits))
+    }
+
+    fn match_title(
+        &self,
+        title: &str,
+        media: MediaType,
+        year: Option<u16>,
+        _creator: Option<&str>,
+    ) -> Reply<Option<Match>> {
+        let hits = search(media, title, None);
+        Ok(
+            super::text::pick_by_title_and_year(&hits, title, year, |m| &m.title, Match::year)
+                .map(|i| hits[i].clone()),
+        )
+    }
+
+    fn series_parts(&self, _source: &str, name: Option<&str>) -> Reply<Option<SeriesParts>> {
+        let Some(name) = name else {
+            return Ok(None);
+        };
+        Ok(series_parts(MediaType::Movies, name).or_else(|| series_parts(MediaType::Books, name)))
+    }
+
+    fn cover_url(&self, _source: &str, _media: MediaType) -> Reply<Option<String>> {
+        Ok(None)
+    }
+
+    fn cover_choices(&self, title: &str, media: MediaType, _creator: Option<&str>) -> Reply<Hits> {
+        Ok(Hits::of(search(media, title, None)))
+    }
+
+    fn is_music(&self) -> bool {
+        true
+    }
+
+    fn album_tracks(&self, _album_source: &str) -> Reply<Vec<TrackInfo>> {
+        Ok(Vec::new())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Released;
 
     #[test]
     fn search_finds_titles_of_the_type() {
-        let games = search(MediaType::Games, "castlevania");
+        let games = search(MediaType::Games, "castlevania", None);
         assert_eq!(games.len(), 4);
-        assert!(search(MediaType::Movies, "castlevania").is_empty());
-        assert!(search(MediaType::Games, "  ").is_empty());
+        assert!(search(MediaType::Movies, "castlevania", None).is_empty());
+        assert!(search(MediaType::Games, "  ", None).is_empty());
+        assert_eq!(by_source("tmdb:movie:694").unwrap().title, "The Shining");
     }
 
     #[test]
-    fn the_fixture_series_and_episodes_are_listed() {
+    fn the_fixture_series_and_track_lists_are_listed() {
         let berserk = series_parts(MediaType::Books, "Berserk").unwrap();
-        assert_eq!(berserk.len(), 43);
-        assert_eq!(berserk[42].year, Some(2025));
+        assert_eq!(berserk.parts.len(), 43);
+        assert_eq!(berserk.parts[42].year, Some(2025));
         assert!(series_parts(MediaType::Movies, "The Lord of the Rings Collection").is_some());
         assert!(series_parts(MediaType::Games, "Berserk").is_none());
+        assert_eq!(track_list("Alice in Chains", "Dirt").unwrap().len(), 13);
+        assert!(track_list("Nobody", "Nothing").is_none());
     }
 
     #[test]
-    fn a_platform_narrows_the_games_and_the_cover_choices_leave_out_the_own_match() {
-        assert_eq!(search(MediaType::Games, "street fighter").len(), 3);
+    fn a_platform_narrows_the_games() {
+        assert_eq!(search(MediaType::Games, "street fighter", None).len(), 3);
         assert_eq!(
-            search_on(MediaType::Games, "street fighter", Some("Mega Drive")).len(),
+            search(MediaType::Games, "street fighter", Some("Mega Drive")).len(),
             2
         );
-        assert!(search_on(MediaType::Games, "street fighter", Some("Nintendo 64")).is_empty());
-        let choices = cover_choices(MediaType::Books, "Dracula", Some("openlibrary:OL17405W"));
-        assert_eq!(choices.len(), 2);
-        assert!(choices.iter().all(|m| m.edition.is_some()));
-        assert_eq!(platforms_matching("snes").len(), 1);
-        assert_eq!(platforms_matching("genesis")[0].0, "Mega Drive");
+        assert!(search(MediaType::Games, "street fighter", Some("Nintendo 64")).is_empty());
+        let platforms = platforms();
+        assert_eq!(platforms.iter().filter(|p| p.matches("snes")).count(), 1);
+        assert_eq!(
+            platforms
+                .iter()
+                .find(|p| p.matches("genesis"))
+                .unwrap()
+                .name,
+            "Mega Drive"
+        );
     }
 
     #[test]
-    fn every_match_has_a_valid_release_date() {
-        for m in CATALOG {
-            assert!(Released::parse(m.released).is_some(), "{}", m.title);
+    fn every_match_has_a_valid_release_date_and_a_language_code() {
+        for row in CATALOG {
+            assert!(Released::parse(row.released).is_some(), "{}", row.title);
+            if let Some(code) = row.language {
+                assert!(
+                    super::super::text::language_tag(code).is_some(),
+                    "{}",
+                    row.title
+                );
+            }
         }
     }
 }

@@ -209,6 +209,7 @@ pub fn normalize_platform(name: &str) -> String {
         "xsx" | "xss" | "xboxseries" | "xboxseriesx" | "xboxseriess" | "xboxseriesxs"
         | "xboxseriesx|s" => "Xbox Series X|S",
         "ns" | "switch" | "nintendoswitch" => "Switch",
+        "snes" | "supernintendo" | "supernintendoentertainmentsystem" => "Super Nintendo",
         "ns2" | "switch2" | "nintendoswitch2" => "Switch 2",
         "pc" | "windows" | "win" => "PC",
         "mac" | "macos" => "Mac",
@@ -324,6 +325,7 @@ mod tests {
         assert_eq!(normalize_platform("PS5"), "PlayStation 5");
         assert_eq!(normalize_platform(" nintendo  switch "), "Switch");
         assert_eq!(normalize_platform("Amiga"), "Amiga");
+        assert_eq!(normalize_platform("SNES"), "Super Nintendo");
         assert_eq!(split_platforms(Some("ps5, PC,")), ["PlayStation 5", "PC"]);
     }
 }

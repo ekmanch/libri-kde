@@ -23,6 +23,17 @@ pub fn data_dir() -> Option<PathBuf> {
     )
 }
 
+/// `$XDG_CACHE_HOME/libri`, or `~/.cache/libri`: what can be fetched
+/// again (covers, track lists, episodes, series, the IGDB token) and the
+/// freeze log.
+pub fn cache_dir() -> Option<PathBuf> {
+    xdg_dir(
+        std::env::var_os("XDG_CACHE_HOME"),
+        std::env::var_os("HOME"),
+        &[".cache"],
+    )
+}
+
 /// `$XDG_CONFIG_HOME/libri`, or `~/.config/libri`.
 pub fn config_dir() -> Option<PathBuf> {
     xdg_dir(
