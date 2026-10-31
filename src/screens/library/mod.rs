@@ -245,9 +245,38 @@ pub enum Message {
     PickSeriesCover(String),
 }
 
-/// How many of a long list's covers are asked for at a time; the rest
-/// follow as these resolve.
+/// How many of a long list's covers are asked for at a time: the ones
+/// scrolled to and about a screen either side; the rest follow as the
+/// list scrolls.
 const COVERS_AT_A_TIME: usize = 80;
+
+/// The positions of a list of `count` covers to ask for, scrolled as
+/// `scroll` says: the ones on screen first, then the next screen down,
+/// then the one above, at most `COVERS_AT_A_TIME`. The rows are spread
+/// evenly over the content's height, close enough with the section
+/// headers since a screen's worth either side is asked for too. Before
+/// the list has said how it is scrolled, it is at the top.
+fn covers_on_screen(count: usize, scroll: Scroll) -> Vec<usize> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let (first, last) = if scroll.content > 0.0 && scroll.viewport > 0.0 {
+        let at = |y: f32| ((y / scroll.content).clamp(0.0, 1.0) * count as f32) as usize;
+        let first = at(scroll.offset).min(count - 1);
+        let last = at(scroll.offset + scroll.viewport).clamp(first + 1, count);
+        (first, last)
+    } else {
+        (0, count.min(COVERS_AT_A_TIME))
+    };
+    let screen = (last - first).max(1);
+    let below = last..(last + screen).min(count);
+    let above = first.saturating_sub(screen)..first;
+    (first..last)
+        .chain(below)
+        .chain(above.rev())
+        .take(COVERS_AT_A_TIME)
+        .collect()
+}
 
 /// What the library draws from the lookups now: the inspector's entry,
 /// a page's episodes or series, and the covers or photos of the list on
@@ -289,19 +318,19 @@ pub fn wanted(app: &App, wants: &mut Wants) {
         && state.music_tab == MusicTab::Artists
     {
         let listing = state.listing(library, app.today);
+        let artists = crate::music::artists(&listing.shown);
         wants.artists.extend(
-            crate::music::artists(&listing.shown)
-                .iter()
-                .take(COVERS_AT_A_TIME)
-                .map(|a| a.name.to_owned()),
+            covers_on_screen(artists.len(), state.scroll)
+                .into_iter()
+                .map(|i| artists[i].name.to_owned()),
         );
         return;
     }
+    let order = state.cover_order(library, app.today);
     wants.covers.extend(
-        state
-            .cover_order(library, app.today)
+        covers_on_screen(order.len(), state.scroll)
             .into_iter()
-            .take(COVERS_AT_A_TIME),
+            .map(|i| order[i].clone()),
     );
 }
 
@@ -1128,5 +1157,55 @@ mod tests {
         assert!(state.page.is_some());
         state.update(Message::ShowType(Some(MediaType::Movies)));
         assert!(state.page.is_none());
+    }
+
+    #[test]
+    fn the_covers_asked_for_follow_the_scroll() {
+        let scroll = |offset| Scroll {
+            offset,
+            viewport: 1000.0,
+            content: 10_000.0,
+        };
+        // At the top: the first screen, then the next one down.
+        assert_eq!(
+            covers_on_screen(1000, scroll(0.0)),
+            (0..200).take(80).collect::<Vec<_>>()
+        );
+        // Halfway down a list of 400: the screen on show first, then the
+        // one below, then the one above, nearest first.
+        let wanted = covers_on_screen(400, scroll(5000.0));
+        let expected: Vec<usize> = (200..240).chain(240..280).chain((160..200).rev()).collect();
+        assert_eq!(wanted, expected[..80]);
+        // At the bottom nothing past the end, and the screen above instead.
+        let wanted = covers_on_screen(400, scroll(9000.0));
+        assert_eq!(wanted[..40], (360..400).collect::<Vec<_>>());
+        assert_eq!(wanted[40], 359);
+        // Before the list has measured itself, the top.
+        assert_eq!(
+            covers_on_screen(10, Scroll::default()),
+            (0..10).collect::<Vec<_>>()
+        );
+        assert!(covers_on_screen(0, scroll(0.0)).is_empty());
+    }
+
+    #[test]
+    fn a_scrolled_list_asks_for_the_covers_scrolled_to() {
+        let mut app = App::new(crate::screens::Screen::Library);
+        app.library
+            .update(Message::ShowType(Some(MediaType::Movies)));
+        let order = app.library.cover_order(app.repo.library(), app.today);
+        let last = order.last().unwrap().clone();
+        assert_eq!(order.len(), 13, "the fixture's movies");
+        app.library.update(Message::Scrolled(Scroll {
+            offset: 900.0,
+            viewport: 100.0,
+            content: 1000.0,
+        }));
+        let wants = crate::screens::wanted(&app);
+        // The bottom tenth on screen, then a screen's worth above it; the
+        // top of the list waits for the scroll.
+        assert!(wants.covers.contains(&last));
+        assert!(!wants.covers.contains(&order[0]));
+        assert_eq!(wants.covers.len(), 4);
     }
 }
