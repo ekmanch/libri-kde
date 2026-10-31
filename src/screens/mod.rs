@@ -13,6 +13,7 @@ pub mod token;
 use iced::Element;
 
 use crate::app::{App, Message};
+use crate::artwork::Wants;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Screen {
@@ -53,6 +54,35 @@ impl Screen {
     /// are passed through, not visited.
     pub fn in_history(self) -> bool {
         matches!(self, Screen::Library | Screen::Plans | Screen::Settings)
+    }
+}
+
+/// What the screen on show draws from the lookups right now (covers,
+/// photos, episodes, series, track lists, match thumbnails), so the app
+/// fetches what is missing. A text view wants no covers.
+pub fn wanted(app: &App) -> Wants {
+    let mut wants = Wants::default();
+    match app.screen {
+        Screen::Library => library::wanted(app, &mut wants),
+        Screen::Plans => plans::wanted(app, &mut wants),
+        _ => {}
+    }
+    entry::wanted(app, &mut wants);
+    wants
+}
+
+/// The inspector's wants for the entry it shows: its cover, its series'
+/// parts and, for an album, its track list.
+pub fn details_wants(app: &App, id: &str, wants: &mut Wants) {
+    let Some(entry) = app.repo.library().entry(id) else {
+        return;
+    };
+    wants.covers.push(entry.id.clone());
+    if entry.series.is_some() && entry.can_have_series() {
+        wants.series.push(entry.id.clone());
+    }
+    if entry.media == crate::model::MediaType::Music && !crate::music::is_song(entry) {
+        wants.tracks.push(entry.id.clone());
     }
 }
 

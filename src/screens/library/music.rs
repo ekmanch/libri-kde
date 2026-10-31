@@ -42,15 +42,15 @@ pub fn body<'a>(
                         let children = sections.into_iter().map(|(label, _, artists)| {
                             column![
                                 super::entries::section_header(&label, artists.len(), tokens),
-                                artist_block(artists, view, tokens)
+                                artist_block(app, artists, view, tokens)
                             ]
                             .into()
                         });
                         return super::entries::sectioned_list(app, children, &labels, tokens);
                     }
-                    return artist_block(artist_sections_flat(sections), view, tokens);
+                    return artist_block(app, artist_sections_flat(sections), view, tokens);
                 }
-                artist_block(artists, view, tokens)
+                artist_block(app, artists, view, tokens)
             }
             MusicTab::Albums => {
                 let albums: Vec<&Entry> = listing
@@ -123,6 +123,7 @@ fn artist_sections_flat(
 }
 
 fn artist_block<'a>(
+    app: &'a App,
     artists: Vec<music::Artist<'a>>,
     view: View,
     tokens: &Tokens,
@@ -130,14 +131,15 @@ fn artist_block<'a>(
     let rows = artists.into_iter().map(|artist| {
         let open = msg(Message::OpenArtist(artist.name.to_owned()));
         let summary = artist.summary();
+        let photo = app.artwork.artist_photo(artist.name);
         match view {
             View::Text => column![
                 ui::music::artist_row(artist.name, summary, tokens, open),
                 ui::rule(tokens.line.scale_alpha(0.5))
             ]
             .into(),
-            View::List => ui::music::artist_list_row(artist.name, summary, tokens, open),
-            View::Grid => ui::music::artist_card(artist.name, summary, tokens, open),
+            View::List => ui::music::artist_list_row(photo, artist.name, summary, tokens, open),
+            View::Grid => ui::music::artist_card(photo, artist.name, summary, tokens, open),
         }
     });
     match view {
@@ -182,6 +184,7 @@ fn song_block<'a>(
             subtitle,
             rating: song.rating().map_or("—".into(), |r| format!("{r}/10")),
             cover: theme::cover_color(&entry.id),
+            image: app.artwork.cover(entry),
             type_color: tokens.type_color(MediaType::Music),
             selected: selected == Some(entry.id.as_str()) && matches!(song, Song::Entry(_)),
         };

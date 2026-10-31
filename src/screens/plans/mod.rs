@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use iced::{Element, Task};
 
 use crate::app::{App, Message as AppMessage};
+use crate::artwork::Wants;
 use crate::model::{Date, EntryStatus, MediaType, Plan, PlanItem, Season};
 use crate::plans::{self as rules, PlanState};
 use crate::repo::Operation;
@@ -98,6 +99,46 @@ impl State {
         self.page = page;
         self.selected = None;
         self.close_popovers();
+    }
+}
+
+/// What the Plans screen draws from the lookups now: the details' entry,
+/// the five covers on each plan card, and a plan's rows when its view is
+/// with covers.
+pub fn wanted(app: &App, wants: &mut Wants) {
+    let library = app.repo.library();
+    if let Some(id) = &app.plans.selected {
+        super::details_wants(app, id, wants);
+    }
+    match &app.plans.page {
+        Page::Overview => {
+            for plan in &library.plans {
+                if shown_season(app, plan).is_none() {
+                    wants
+                        .covers
+                        .extend(plan.items.iter().take(5).map(|i| i.entry.clone()));
+                }
+            }
+        }
+        Page::Plan(id) | Page::Collection(id) => {
+            let Some(plan) = library.plan(id) else {
+                return;
+            };
+            if !app.plans.style(id, app.tokens().light).covers {
+                return;
+            }
+            wants
+                .covers
+                .extend(plan.items.iter().map(|i| i.entry.clone()));
+            if matches!(app.plans.page, Page::Plan(_)) {
+                wants.covers.extend(
+                    rules::pool(plan, library)
+                        .iter()
+                        .take(40)
+                        .map(|e| e.id.clone()),
+                );
+            }
+        }
     }
 }
 

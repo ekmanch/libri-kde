@@ -397,6 +397,7 @@ fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryL
                 kind: browse::kind_label(entry),
                 type_color: tokens.type_color(entry.media),
                 cover: theme::cover_color(&entry.id),
+                image: app.artwork.cover(entry),
                 status: entry.status,
                 status_label: browse::status_label(Some(entry.media), entry.status).to_owned(),
                 rating: entry.rating.map_or("—".into(), |r| format!("{r}/10")),
@@ -417,6 +418,7 @@ fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryL
                 kind: "Series",
                 type_color: tokens.type_color(group.media),
                 cover: theme::cover_color(&group.cover_entry().id),
+                image: app.artwork.cover(group.cover_entry()),
                 status: if group.all_done() {
                     crate::model::EntryStatus::Done
                 } else {

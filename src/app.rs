@@ -9,12 +9,13 @@ use iced::widget::{operation, scrollable};
 use iced::window::{self, settings::PlatformSpecific};
 use iced::{Element, Event, Size, Subscription, Task, event, mouse, time};
 
+use crate::artwork::{self, Artwork};
 use crate::clock::Timestamp;
 use crate::connection::{Connection, ConnectionFile, Target};
 use crate::decoration::Decoration;
 use crate::github;
 use crate::history::{Direction, History, Place};
-use crate::lookup;
+use crate::lookup::{self, Service};
 use crate::model::{Date, codec};
 use crate::preferences::{Preferences, PreferencesFile};
 use crate::repo::Operation;
@@ -221,9 +222,15 @@ pub struct App {
     pub history: History,
     /// KWin's title bar, once the window is open on Plasma Wayland.
     pub decoration: Option<Box<Decoration>>,
-    /// What the online lookup is doing, faked until phase 4 asks the real
-    /// providers (`LIBRI_LOOKUP`).
+    /// A lookup state forced for a look (`LIBRI_LOOKUP`, the captures);
+    /// `Results` means the real one shows.
     pub lookup: lookup::LookupState,
+    /// The lookup providers: the real ones with this run's keys, or the
+    /// fixture catalog in a mock run and the tests.
+    pub lookups: Arc<Service>,
+    /// Covers, artist photos, episodes, series parts and track lists as
+    /// fetched for the screens, with the cache under `~/.cache/libri/`.
+    pub artwork: Artwork,
     /// `preferences.json` on this computer; kept nowhere in the tests.
     pub preferences: PreferencesFile,
     /// `connection.json` on this computer and what it holds: the repo,
@@ -276,6 +283,8 @@ pub enum Message {
     Setup(setup::Message),
     Settings(screens::settings::Message),
     Token(token::Message),
+    /// A lookup task came back: a cover, an image, a season's episodes.
+    Lookup(artwork::Message),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -446,6 +455,29 @@ impl App {
         .iter()
         .any(|name| var(name).is_some());
         let token = app.open_files();
+        let mut lookups = Task::none();
+        if !app.mock {
+            let cache = storage::cache_dir();
+            if let Some(dir) = &cache
+                && let Err(error) = std::fs::create_dir_all(dir)
+            {
+                eprintln!("libri: no cache folder at {}: {error}", dir.display());
+            }
+            let keys = lookup::Keys::load();
+            if !keys.any() {
+                eprintln!(
+                    "libri: no API keys (secrets.json), so movies, shows and games cannot be looked up"
+                );
+            }
+            app.lookups = Arc::new(Service::real(&keys, cache.as_deref()));
+            app.artwork = Artwork::at(cache);
+            // Once per session, a little after the start: the records and
+            // files of entries that are gone.
+            lookups = Task::perform(
+                async { tokio::time::sleep(artwork::PRUNE_DELAY).await },
+                |_| Message::Lookup(artwork::Message::Prune),
+            );
+        }
         if var("LIBRI_FIRST_RUN").is_some() {
             app.source = None;
             app.setup = setup::State::at(setup::Step::Welcome, None);
@@ -496,6 +528,7 @@ impl App {
             Decoration::take().map(Message::Decoration),
             iced::system::theme().map(Message::SystemTheme),
             token,
+            lookups,
         ]);
         (app, tasks)
     }
@@ -592,6 +625,8 @@ impl App {
             history: History::default(),
             decoration: None,
             lookup: lookup::LookupState::Results,
+            lookups: Arc::new(Service::fake()),
+            artwork: Artwork::default(),
             preferences: PreferencesFile::default(),
             connection_file: ConnectionFile::default(),
             connection: None,
@@ -996,7 +1031,18 @@ impl App {
             let now = Preferences::of(self);
             self.preferences.save_if_changed(now);
         }
-        task
+        let lookups = self.refresh_lookups();
+        Task::batch([task, lookups])
+    }
+
+    /// What the screens show now that the lookups have not fetched yet
+    /// (covers, photos, episodes, series, track lists), queued and started
+    /// a few at a time; the answers come back as `Message::Lookup`.
+    fn refresh_lookups(&mut self) -> Task<Message> {
+        let wants = screens::wanted(self);
+        self.artwork
+            .refresh(&wants, self.repo.library(), &self.lookups)
+            .map(Message::Lookup)
     }
 
     /// Where the app is, for the history.
@@ -1259,6 +1305,12 @@ impl App {
             Message::Setup(message) => return setup::update(self, message),
             Message::Settings(message) => return screens::settings::update(self, message),
             Message::Token(message) => return token::update(self, message),
+            Message::Lookup(message) => {
+                return self
+                    .artwork
+                    .update(message, self.repo.library())
+                    .map(Message::Lookup);
+            }
         }
         Task::none()
     }
@@ -1346,6 +1398,7 @@ impl App {
         // The splash's bar, and the setup's ring while GitHub is asked.
         if self.screen == Screen::Splash
             || (self.screen == Screen::Setup && self.setup.busy.is_some())
+            || entry::is_busy(self)
         {
             subscriptions.push(time::every(Duration::from_millis(16)).map(|_| Message::Tick));
         }
@@ -1385,9 +1438,9 @@ impl App {
     }
 }
 
-/// Runs a blocking call (GitHub, KDE Wallet) on tokio's blocking pool, so
-/// the window never waits on it.
-async fn blocking<T, F>(call: F) -> Result<T, String>
+/// Runs a blocking call (GitHub, KDE Wallet, a lookup) on tokio's
+/// blocking pool, so the window never waits on it.
+pub(crate) async fn blocking<T, F>(call: F) -> Result<T, String>
 where
     F: FnOnce() -> Result<T, String> + Send + 'static,
     T: Send + 'static,
@@ -1395,6 +1448,33 @@ where
     tokio::task::spawn_blocking(call)
         .await
         .unwrap_or_else(|error| Err(format!("the call did not finish: {error}")))
+}
+
+/// A blocking call that answers in steps (a search's early rows, a stored
+/// list before the fetched one), on the blocking pool; every step becomes
+/// a message as it comes.
+pub(crate) fn steps<T, F>(work: F) -> Task<T>
+where
+    F: FnOnce(&mut dyn FnMut(T)) + Send + 'static,
+    T: Send + 'static,
+{
+    use iced::futures::{SinkExt, StreamExt};
+    Task::stream(iced::stream::channel(
+        16,
+        move |mut output: iced::futures::channel::mpsc::Sender<T>| async move {
+            let (tx, mut rx) = iced::futures::channel::mpsc::unbounded::<T>();
+            let handle = tokio::task::spawn_blocking(move || {
+                let mut send = |step: T| {
+                    let _ = tx.unbounded_send(step);
+                };
+                work(&mut send);
+            });
+            while let Some(step) = rx.next().await {
+                let _ = output.send(step).await;
+            }
+            let _ = handle.await;
+        },
+    ))
 }
 
 /// One of the engine's requests against the real API.

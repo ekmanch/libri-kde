@@ -147,13 +147,10 @@ fn card<'a>(app: &'a App, plan: &'a Plan, tokens: &Tokens) -> Element<'a, AppMes
             };
             let thumbs = Row::with_children(plan.items.iter().take(5).map(|item| {
                 let tint = theme::cover_color(&item.entry);
-                container(space())
-                    .width(30)
-                    .height(45)
-                    .style(move |_| {
-                        container::background(tint).border(Border::default().rounded(4))
-                    })
-                    .into()
+                let handle = library
+                    .entry(&item.entry)
+                    .and_then(|entry| app.artwork.cover(entry));
+                ui::plain_cover(handle, tint, 30.0, 45.0, 4.0)
             }))
             .spacing(6);
             container(thumbs)

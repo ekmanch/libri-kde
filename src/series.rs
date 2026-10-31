@@ -3,7 +3,7 @@
 //! entries, or the library's own entries of the series when the lookup
 //! has no list.
 
-use crate::lookup;
+use crate::lookup::{SeriesPart, SeriesParts};
 use crate::model::{Entry, Library, MediaType, Series};
 
 /// One part in the list: the lookup's part, the library's entry for it
@@ -51,19 +51,24 @@ pub fn entries_in<'a>(library: &'a Library, media: MediaType, name: &str) -> Vec
     crate::browse::in_series_order(parts)
 }
 
-/// Every part of the series, in order. The lookup's parts are matched to
-/// the library's entries by lookup id, then by number, then by title (one
-/// pass per rule, so a weaker rule never takes an entry a stronger one
-/// would give another part); entries the lookup does not list come after.
+/// Every part of the series, in order. The lookup's parts (`fetched`, when
+/// it has a list) are matched to the library's entries by lookup id, then
+/// by number, then by title (one pass per rule, so a weaker rule never
+/// takes an entry a stronger one would give another part); entries the
+/// lookup does not list come after. Parts the automatic rules count as
+/// extras are left out.
 pub fn rows<'a>(
     library: &'a Library,
     media: MediaType,
     name: &str,
     this: Option<&str>,
+    fetched: Option<&SeriesParts>,
 ) -> Vec<SeriesRow<'a>> {
     let owned = entries_in(library, media, name);
     let display = Series::display_name(name);
-    let Some(fetched) = lookup::series_parts(media, name) else {
+    let fetched: Option<Vec<&SeriesPart>> =
+        fetched.map(|parts| parts.parts.iter().filter(|p| !p.extra).collect());
+    let Some(fetched) = fetched else {
         return owned
             .into_iter()
             .map(|entry| SeriesRow {
@@ -77,7 +82,7 @@ pub fn rows<'a>(
     };
     let mut matched: Vec<Option<&Entry>> = vec![None; fetched.len()];
     let mut left: Vec<&Entry> = owned.clone();
-    let mut pass = |test: &dyn Fn(&lookup::SeriesPart, &Entry) -> bool,
+    let mut pass = |test: &dyn Fn(&SeriesPart, &Entry) -> bool,
                     matched: &mut Vec<Option<&'a Entry>>| {
         for (i, part) in fetched.iter().enumerate() {
             if matched[i].is_some() {
@@ -101,7 +106,7 @@ pub fn rows<'a>(
         &mut matched,
     );
     let mut rows: Vec<SeriesRow<'a>> = fetched
-        .iter()
+        .into_iter()
         .zip(matched)
         .map(|(part, entry)| SeriesRow {
             number: part.number,
@@ -144,11 +149,13 @@ mod tests {
     #[test]
     fn the_lookups_parts_are_matched_to_the_librarys_entries() {
         let library = codec::decode(fixtures::LIBRARY_JSON).unwrap();
+        let fetched = crate::lookup::fake::series_parts(MediaType::Movies, "The Lord of the Rings");
         let rows = rows(
             &library,
             MediaType::Movies,
             "The Lord of the Rings",
             Some("movies/the-lord-of-the-rings-the-two-towers-2002"),
+            fetched.as_ref(),
         );
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].title, "The Fellowship of the Ring");
@@ -161,11 +168,19 @@ mod tests {
     #[test]
     fn a_long_series_shows_three_around_this_one() {
         let library = codec::decode(fixtures::LIBRARY_JSON).unwrap();
+        let fetched = crate::lookup::fake::series_parts(MediaType::Books, "Berserk");
         let rows = rows(
             &library,
             MediaType::Books,
             "Berserk",
             Some("books/berserk-vol-43-2025"),
+            fetched.as_ref(),
+        );
+        let own_only = super::rows(&library, MediaType::Books, "Berserk", None, None);
+        assert_eq!(
+            own_only.len(),
+            3,
+            "without a list, the library's own entries"
         );
         assert_eq!(rows.len(), 43);
         assert_eq!(rows.iter().filter(|r| r.owned()).count(), 3);

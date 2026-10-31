@@ -18,6 +18,7 @@ pub use tags::{all_tags_popover, long_group};
 use super::entry;
 use super::shell::shell;
 use crate::app::{App, Message as AppMessage};
+use crate::artwork::Wants;
 use crate::browse::{self, Decade, Filter, Row, Section, Sort};
 use crate::model::{Date, Entry, EntryStatus, Library, MediaType, TagCategory};
 use crate::settings::Source;
@@ -230,6 +231,66 @@ pub enum Message {
     CloseSeriesCover,
     /// A part in the Series cover dialog: its cover stands for the series.
     PickSeriesCover(String),
+}
+
+/// How many of a long list's covers are asked for at a time; the rest
+/// follow as these resolve.
+const COVERS_AT_A_TIME: usize = 80;
+
+/// What the library draws from the lookups now: the inspector's entry,
+/// a page's episodes or series, and the covers or photos of the list on
+/// show in a grid or list view (a text view fetches nothing).
+pub fn wanted(app: &App, wants: &mut Wants) {
+    let library = app.repo.library();
+    let state = &app.library;
+    if let Some(id) = &state.selected {
+        super::details_wants(app, id, wants);
+    }
+    match &state.page {
+        Some(Page::Season { id, number }) => {
+            wants.episodes.push((id.clone(), *number));
+            return;
+        }
+        Some(Page::Series { media, name, .. }) => {
+            let parts = crate::series::entries_in(library, *media, name);
+            if let Some(first) = parts.first() {
+                wants.series.push(first.id.clone());
+            }
+            if state.cover_dialog.is_some() {
+                wants.covers.extend(parts.iter().map(|e| e.id.clone()));
+            }
+            return;
+        }
+        Some(Page::Seasons { .. }) => return,
+        None => {}
+    }
+    let view = state.view_mode();
+    if state.is_overview() {
+        overview::wanted(app, view, wants);
+        return;
+    }
+    if view == View::Text {
+        return;
+    }
+    if state.single() == Some(MediaType::Music)
+        && state.artist.is_none()
+        && state.music_tab == MusicTab::Artists
+    {
+        let listing = state.listing(library, app.today);
+        wants.artists.extend(
+            crate::music::artists(&listing.shown)
+                .iter()
+                .take(COVERS_AT_A_TIME)
+                .map(|a| a.name.to_owned()),
+        );
+        return;
+    }
+    wants.covers.extend(
+        state
+            .display_order(library, app.today)
+            .into_iter()
+            .take(COVERS_AT_A_TIME),
+    );
 }
 
 impl Message {

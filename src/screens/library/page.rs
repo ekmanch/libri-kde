@@ -35,7 +35,13 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, AppMessage> {
             name,
             highlight,
         } => {
-            let rows = series::rows(library, *media, name, highlight.as_deref());
+            let first = series::entries_in(library, *media, name).first().copied();
+            let state = first.and_then(|e| app.artwork.series_for(e));
+            let fetched = state.and_then(|s| match &s.loaded {
+                crate::artwork::Loaded::Ready(parts) => Some(parts),
+                _ => None,
+            });
+            let rows = series::rows(library, *media, name, highlight.as_deref(), fetched);
             let owned = rows.iter().filter(|r| r.owned()).count();
             let line = format!(
                 "{} {} · {owned} in your library",
@@ -99,8 +105,39 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, AppMessage> {
             let Some(season) = entry.season_list().iter().find(|s| s.season == *number) else {
                 return missing(&tokens);
             };
-            let episodes = lookup::episodes(entry, season);
-            let (line, body) = episodes_view(app, entry, season, &episodes, &tokens);
+            use crate::artwork::Loaded;
+            use crate::lookup::FailureKind;
+            let state = app.artwork.episodes_for(entry, *number);
+            let (line, body) = match state.map(|s| &s.loaded) {
+                Some(Loaded::Ready(episodes)) => {
+                    episodes_view(app, entry, season, episodes, &tokens)
+                }
+                other => {
+                    let note = match other {
+                        None | Some(Loaded::Loading) => "Loading episodes…",
+                        Some(Loaded::Failed(FailureKind::Offline)) => {
+                            "The episodes need a connection."
+                        }
+                        Some(Loaded::Failed(FailureKind::NotConfigured)) => {
+                            "The episode lookup is not set up on this build."
+                        }
+                        Some(Loaded::Failed(FailureKind::RateLimited)) => {
+                            "The episode lookup is busy. Try again in a minute."
+                        }
+                        Some(Loaded::Failed(FailureKind::Other)) => {
+                            "The episode lookup did not answer. Try again in a moment."
+                        }
+                        _ => "No episodes were found for this season.",
+                    };
+                    (
+                        text(date_of(season, app.today))
+                            .size(14)
+                            .color(tokens.sub)
+                            .into(),
+                        text(note).size(14).color(tokens.sub).into(),
+                    )
+                }
+            };
             (
                 entry.title.clone(),
                 None,
@@ -350,18 +387,16 @@ pub fn cover_dialog<'a>(app: &'a App, media: MediaType, name: &str) -> Element<'
         let on = picked.as_deref() == Some(part.id.as_str());
         let tint = theme::cover_color(&part.id);
         let (accent, line) = (tokens.accent, tokens.line);
-        let cover = container(
-            text(part.title.clone())
-                .size(13)
-                .font(font::EXTRABOLD)
-                .color(iced::Color::WHITE),
-        )
-        .width(104)
-        .height(156)
-        .padding(10)
-        .align_y(iced::alignment::Vertical::Bottom)
+        let cover = container(ui::titled_cover(
+            app.artwork.cover(part),
+            tint,
+            &part.title,
+            104.0,
+            156.0,
+            13.0,
+        ))
         .style(move |_| {
-            container::background(tint).border(
+            container::Style::default().border(
                 Border::default()
                     .rounded(8)
                     .width(if on { 3.0 } else { 1.0 })

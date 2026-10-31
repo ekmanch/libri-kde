@@ -1,10 +1,10 @@
-//! Music's own rows: artists (with a disc of their initials until photos
-//! come in phase 4) and songs, in the text, list and grid views.
+//! Music's own rows: artists (their photo, or a disc of their initials
+//! until it is fetched) and songs, in the text, list and grid views.
 
-use iced::widget::{Space, button, column, container, row, text};
-use iced::{Border, Center, Color, Element, Fill};
+use iced::widget::{button, column, container, image, row, text};
+use iced::{Center, Color, Element, Fill};
 
-use super::{FocusExt, mono, row_style};
+use super::{FocusExt, cover, mono, row_style};
 use crate::theme::{self, Tokens, font};
 
 /// "AC" for Alice in Chains, "B" for The Beatles: the first letters of
@@ -27,19 +27,26 @@ pub fn initials(name: &str) -> String {
     }
 }
 
-/// A round placeholder for an artist's photo: their initials on a color
-/// picked from the name.
-pub fn artist_disc<'a, Message: 'a>(name: &str, size: f32) -> Element<'a, Message> {
-    let tint = theme::cover_color(name);
-    container(
-        text(initials(name))
-            .size(size * 0.34)
-            .font(font::EXTRABOLD)
-            .color(Color::WHITE),
+/// An artist's round photo, or the placeholder until it is fetched: their
+/// initials on a color picked from the name.
+pub fn artist_disc<'a, Message: 'a>(
+    photo: Option<image::Handle>,
+    name: &str,
+    size: f32,
+) -> Element<'a, Message> {
+    cover::cover(
+        photo,
+        theme::cover_color(name),
+        size,
+        size,
+        size / 2.0,
+        Some(cover::Label {
+            words: initials(name),
+            size: size * 0.34,
+            padding: 0.0,
+            centered: true,
+        }),
     )
-    .center(size)
-    .style(move |_| container::background(tint).border(Border::default().rounded(size / 2.0)))
-    .into()
 }
 
 /// An artist in the text view: the name, then what is saved.
@@ -67,13 +74,14 @@ pub fn artist_row<'a, Message: Clone + 'a>(
 
 /// An artist in the list view: the disc, the name and what is saved.
 pub fn artist_list_row<'a, Message: Clone + 'a>(
+    photo: Option<image::Handle>,
     name: &'a str,
     summary: String,
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
     let content = row![
-        artist_disc(name, 44.0),
+        artist_disc(photo, name, 44.0),
         column![
             text(name).size(15).font(font::SEMIBOLD),
             text(summary).size(13).color(tokens.sub)
@@ -93,13 +101,14 @@ pub fn artist_list_row<'a, Message: Clone + 'a>(
 /// An artist in the grid: a large disc, the name and what is saved,
 /// centered. Fills its grid cell.
 pub fn artist_card<'a, Message: Clone + 'a>(
+    photo: Option<image::Handle>,
     name: &'a str,
     summary: String,
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
     let content = column![
-        artist_disc(name, 150.0),
+        artist_disc(photo, name, 150.0),
         text(name).size(13.5).font(font::SEMIBOLD).center(),
         text(summary).size(12).color(tokens.sub).center(),
     ]
@@ -120,8 +129,10 @@ pub struct SongLook<'a> {
     pub subtitle: String,
     /// "9/10" or "—".
     pub rating: String,
-    /// The color of the song's (or its album's) placeholder cover.
+    /// The color of the song's (or its album's) placeholder cover, and the
+    /// fetched cover once it is on this computer.
     pub cover: Color,
+    pub image: Option<image::Handle>,
     pub type_color: Color,
     pub selected: bool,
 }
@@ -158,12 +169,8 @@ pub fn song_list_row<'a, Message: Clone + 'a>(
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
-    let tint = look.cover;
     let content = row![
-        container(Space::new())
-            .width(44)
-            .height(44)
-            .style(move |_| container::background(tint).border(Border::default().rounded(6))),
+        cover::plain_cover(look.image.clone(), look.cover, 44.0, 44.0, 6.0),
         column![
             text(look.title).size(15).font(font::SEMIBOLD),
             text(look.subtitle).size(13).color(tokens.sub)
@@ -189,18 +196,19 @@ pub fn song_card<'a, Message: Clone + 'a>(
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
-    let tint = look.cover;
-    let cover = container(
-        text(look.title)
-            .size(17)
-            .font(font::EXTRABOLD)
-            .color(Color::WHITE),
-    )
-    .width(Fill)
-    .height(Fill)
-    .padding(14)
-    .align_y(iced::alignment::Vertical::Bottom)
-    .style(move |_| container::background(tint).border(Border::default().rounded(8)));
+    let cover = cover::cover(
+        look.image.clone(),
+        look.cover,
+        Fill,
+        Fill,
+        8.0,
+        Some(cover::Label {
+            words: look.title.to_owned(),
+            size: 17.0,
+            padding: 14.0,
+            centered: false,
+        }),
+    );
     let caption = row![
         container(
             text(look.subtitle)

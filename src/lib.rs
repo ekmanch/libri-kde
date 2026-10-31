@@ -2,6 +2,7 @@
 //! library kept as `library.json` in a GitHub repo.
 
 pub mod app;
+pub mod artwork;
 pub mod browse;
 pub mod clock;
 pub mod connection;

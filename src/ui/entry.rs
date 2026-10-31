@@ -2,10 +2,10 @@
 //! grid, a row with a cover in the list, and a row in the text table.
 
 use iced::widget::svg::{self, Svg};
-use iced::widget::{Space, button, column, container, row, stack, text};
+use iced::widget::{Space, button, column, container, image, row, stack, text};
 use iced::{Background, Border, Center, Color, Element, Fill, FillPortion, Length, Padding};
 
-use super::{FocusExt, Icon, icon, mono, row_style};
+use super::{FocusExt, Icon, cover, icon, mono, row_style};
 use crate::model::EntryStatus;
 use crate::theme::{self, Tokens, font};
 
@@ -21,7 +21,10 @@ pub struct EntryLook {
     /// "Movie", on the cover.
     pub kind: &'static str,
     pub type_color: Color,
+    /// The placeholder's color, and the fetched cover once it is on this
+    /// computer.
     pub cover: Color,
+    pub image: Option<image::Handle>,
     pub status: EntryStatus,
     /// "Watching", "Done"; a series' "2 of 4 done".
     pub status_label: String,
@@ -73,26 +76,31 @@ pub fn entry_card<'a, Message: Clone + 'a>(
     if let Some(badge) = badge {
         top = top.push(Space::new().width(Fill)).push(badge);
     }
-    let on_cover = column![
-        top,
-        Space::new().height(Fill),
-        text(look.title.clone())
-            .size(19)
-            .font(font::EXTRABOLD)
-            .color(white),
-        text(look.creator.clone())
-            .size(12)
-            .color(Color { a: 0.78, ..white }),
-    ]
-    .spacing(4);
-    let cover = container(on_cover)
-        .width(Fill)
-        .height(Fill)
-        .padding(Padding::new(14.0).top(10).right(10))
-        .style({
-            let tint = look.cover;
-            move |_| container::background(tint).border(Border::default().rounded(8))
-        });
+    // On the placeholder the title and creator stand in for the image; on
+    // the image only the badges stay.
+    let mut on_cover = column![top, Space::new().height(Fill)].spacing(4);
+    if look.image.is_none() {
+        on_cover = on_cover
+            .push(
+                text(look.title.clone())
+                    .size(19)
+                    .font(font::EXTRABOLD)
+                    .color(white),
+            )
+            .push(
+                text(look.creator.clone())
+                    .size(12)
+                    .color(Color { a: 0.78, ..white }),
+            );
+    }
+    let face = cover::cover(look.image.clone(), look.cover, Fill, Fill, 8.0, None);
+    let cover = stack![
+        face,
+        container(on_cover)
+            .width(Fill)
+            .height(Fill)
+            .padding(Padding::new(14.0).top(10).right(10))
+    ];
     // A long title is cut off before the year.
     let caption = row![
         container(
@@ -164,11 +172,7 @@ pub fn entry_list_row<'a, Message: Clone + 'a>(
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
-    let tint = look.cover;
-    let cover = container(Space::new())
-        .width(44)
-        .height(66)
-        .style(move |_| container::background(tint).border(Border::default().rounded(6)));
+    let cover = cover::plain_cover(look.image.clone(), look.cover, 44.0, 66.0, 6.0);
     let content = row![
         cover,
         column![

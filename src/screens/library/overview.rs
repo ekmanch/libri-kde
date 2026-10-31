@@ -18,6 +18,39 @@ fn msg(message: Message) -> AppMessage {
     AppMessage::Library(message)
 }
 
+/// The covers the overview shows: the shelves' first seven in the grid,
+/// the lists' rows in the list view, nothing in the text view.
+pub fn wanted(app: &App, view: View, wants: &mut crate::artwork::Wants) {
+    let overview = Overview::of(app.repo.library(), app.today);
+    match view {
+        View::Grid => {
+            for section in [Section::ComingSoon, Section::TopRated, Section::InProgress] {
+                wants
+                    .covers
+                    .extend(overview.list(section).iter().take(7).map(|e| e.id.clone()));
+            }
+        }
+        View::List => {
+            for section in [
+                Section::InProgress,
+                Section::TopRated,
+                Section::ComingSoon,
+                Section::RecentlyAdded,
+            ] {
+                let cap = if section == Section::TopRated { 3 } else { 4 };
+                wants.covers.extend(
+                    overview
+                        .list(section)
+                        .iter()
+                        .take(cap)
+                        .map(|e| e.id.clone()),
+                );
+            }
+        }
+        View::Text => {}
+    }
+}
+
 pub fn body(app: &App) -> Element<'_, AppMessage> {
     let tokens = app.tokens();
     let overview = Overview::of(app.repo.library(), app.today);
@@ -128,7 +161,7 @@ fn shelf<'a>(
     let selected = app.library.selected.as_deref();
     let covers = Row::with_children(list.iter().take(7).map(|entry| {
         let dimmed = selected.is_some_and(|id| id != entry.id);
-        shelf_cover(entry, meta(entry, section, app.today), dimmed, tokens)
+        shelf_cover(app, entry, meta(entry, section, app.today), dimmed, tokens)
     }))
     .spacing(14);
     Some(column![header, covers].spacing(10).into())
@@ -136,23 +169,21 @@ fn shelf<'a>(
 
 /// A 100 × 150 cover with the title on it, the detail under it.
 fn shelf_cover<'a>(
+    app: &'a App,
     entry: &'a Entry,
     meta: String,
     dimmed: bool,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let tint = theme::cover_color(&entry.id);
-    let cover = container(
-        text(&entry.title)
-            .size(14)
-            .font(font::EXTRABOLD)
-            .color(Color::WHITE),
-    )
-    .width(100)
-    .height(150)
-    .padding(10)
-    .align_y(iced::alignment::Vertical::Bottom)
-    .style(move |_| container::background(tint).border(Border::default().rounded(8)));
+    let cover = ui::titled_cover(
+        app.artwork.cover(entry),
+        tint,
+        &entry.title,
+        100.0,
+        150.0,
+        14.0,
+    );
     let content = column![
         cover,
         ui::mono(meta, 12.0, tokens.sub).wrapping(text::Wrapping::None)
@@ -223,6 +254,7 @@ fn list_section<'a>(
     let rows = Column::with_children(list.iter().take(cap).map(|entry| {
         let is_selected = selected == Some(entry.id.as_str());
         overview_row(
+            app,
             entry,
             meta(entry, section, app.today),
             style,
@@ -234,6 +266,7 @@ fn list_section<'a>(
 }
 
 fn overview_row<'a>(
+    app: &'a App,
     entry: &'a Entry,
     meta: String,
     style: RowStyle,
@@ -250,9 +283,13 @@ fn overview_row<'a>(
         RowStyle::Cover => {
             let tint = theme::cover_color(&entry.id);
             content
-                .push(container(space()).width(30).height(45).style(move |_| {
-                    container::background(tint).border(Border::default().rounded(4))
-                }))
+                .push(ui::plain_cover(
+                    app.artwork.cover(entry),
+                    tint,
+                    30.0,
+                    45.0,
+                    4.0,
+                ))
                 .push(
                     column![title, text(browse::kind_label(entry)).size(12).color(color)]
                         .spacing(2)

@@ -5,12 +5,11 @@
 //! whether to remove it from the plan only.
 
 use iced::widget::{Column, button, column, container, row, text};
-use iced::{Background, Border, Color, Element, Fill, Padding};
+use iced::{Background, Border, Element, Fill, Padding};
 
 use super::{Message, seasons};
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
-use crate::lookup;
 use crate::model::{Entry, EntryStatus, MediaType, Plan, Series};
 use crate::music;
 use crate::screens::library::{self, Page};
@@ -32,17 +31,14 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
     let color = tokens.type_color(entry.media);
 
     let tint = theme::cover_color(&entry.id);
-    let cover = container(
-        text(&entry.title)
-            .size(14)
-            .font(font::EXTRABOLD)
-            .color(Color::WHITE),
-    )
-    .width(104)
-    .height(156)
-    .padding(10)
-    .align_y(iced::alignment::Vertical::Bottom)
-    .style(move |_| container::background(tint).border(Border::default().rounded(8)));
+    let cover = ui::titled_cover(
+        app.artwork.cover(entry),
+        tint,
+        &entry.title,
+        104.0,
+        156.0,
+        14.0,
+    );
     let seasons = entry.season_list();
     let today = app.today;
     // A show's kicker carries the years it ran: "SHOW · 2025–2026".
@@ -297,7 +293,18 @@ fn series_section<'a>(
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let library = app.repo.library();
-    let all = series::rows(library, entry.media, &part_of.name, Some(&entry.id));
+    let state = app.artwork.series_for(entry);
+    let fetched = state.and_then(|s| match &s.loaded {
+        crate::artwork::Loaded::Ready(parts) => Some(parts),
+        _ => None,
+    });
+    let all = series::rows(
+        library,
+        entry.media,
+        &part_of.name,
+        Some(&entry.id),
+        fetched,
+    );
     let owned = all.iter().filter(|r| r.owned()).count();
     let mut rows = Column::new().spacing(2).push(
         text(Series::display_name(&part_of.name))
@@ -452,16 +459,28 @@ fn labeled<'a>(
 /// tracks the list lacks after it. Only rated tracks are stored.
 fn tracks<'a>(app: &'a App, album: &'a Entry, tokens: &Tokens) -> Element<'a, AppMessage> {
     let rated = album.tracks.as_deref().unwrap_or_default();
+    // A stored rating is matched to a listed track by its title with case,
+    // punctuation and edition notes set aside.
     let rating_of = |title: &str| {
         rated
             .iter()
-            .find(|t| t.title.eq_ignore_ascii_case(title))
+            .find(|t| {
+                crate::lookup::text::track_title_key(&t.title)
+                    == crate::lookup::text::track_title_key(title)
+            })
             .map(|t| t.rating)
     };
-    let listed = lookup::track_list(music::artist_of(album), &album.title).unwrap_or_default();
+    use crate::artwork::Loaded;
+    use crate::lookup::FailureKind;
+    let state = app.artwork.tracks_for(album);
+    let key = crate::lookup::text::track_title_key;
+    let listed: Vec<&str> = match state.map(|s| &s.loaded) {
+        Some(Loaded::Ready(tracks)) => tracks.iter().map(|t| t.title.as_str()).collect(),
+        _ => Vec::new(),
+    };
     let extra = rated
         .iter()
-        .filter(|t| !listed.iter().any(|l| l.eq_ignore_ascii_case(&t.title)))
+        .filter(|t| !listed.iter().any(|l| key(l) == key(&t.title)))
         .map(|t| t.title.as_str());
     let open = app.library.track_rating_open.as_deref();
 
@@ -498,12 +517,16 @@ fn tracks<'a>(app: &'a App, album: &'a Entry, tokens: &Tokens) -> Element<'a, Ap
             .height(36),
         );
     }
-    let note = if listed.is_empty() {
-        Some("No track list was found for this album.")
-    } else if rated.is_empty() {
-        Some("No tracks rated yet.")
-    } else {
-        None
+    let note = match state.map(|s| &s.loaded) {
+        None | Some(Loaded::Loading) => Some("Loading the track list…"),
+        Some(Loaded::Failed(FailureKind::Offline)) => {
+            Some("The full track list needs a connection.")
+        }
+        Some(Loaded::Failed(_)) | Some(Loaded::None) => {
+            Some("No track list was found for this album.")
+        }
+        Some(Loaded::Ready(_)) if rated.is_empty() => Some("No tracks rated yet."),
+        Some(Loaded::Ready(_)) => None,
     };
     let mut body = Column::new().spacing(6);
     if let Some(note) = note {

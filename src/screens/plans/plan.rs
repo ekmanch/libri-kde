@@ -538,13 +538,9 @@ fn tick<'a>(
         .focusable(size / 2.0, &tokens)
 }
 
-fn cover<'a>(id: &str, width: f32, height: f32) -> Element<'a, AppMessage> {
-    let tint = theme::cover_color(id);
-    container(Space::new())
-        .width(width)
-        .height(height)
-        .style(move |_| container::background(tint).border(Border::default().rounded(5)))
-        .into()
+fn cover<'a>(app: &App, entry: &Entry, width: f32, height: f32) -> Element<'a, AppMessage> {
+    let tint = theme::cover_color(&entry.id);
+    ui::plain_cover(app.artwork.cover(entry), tint, width, height, 5.0)
 }
 
 /// A checklist row: the tick, an optional cover, the title over the year
@@ -568,7 +564,7 @@ fn plan_row<'a>(
         msg(Message::ToggleDone(entry.id.clone())),
     ));
     if covers {
-        content = content.push(cover(&entry.id, 38.0, 57.0));
+        content = content.push(cover(app, entry, 38.0, 57.0));
     }
     content = content.push(
         column![
@@ -687,7 +683,7 @@ fn timeline_item<'a>(
         .unwrap_or_default();
     let mut content = Row::new().spacing(12).align_y(Center);
     if covers {
-        content = content.push(cover(&entry.id, 30.0, 45.0));
+        content = content.push(cover(app, entry, 30.0, 45.0));
     }
     content = content
         .push(ui::dot(tokens.type_color(entry.media), 8.0, 3.0))
@@ -747,7 +743,7 @@ fn collection<'a>(
                 );
                 let mut content = Row::new().spacing(12).align_y(Center);
                 if style.covers {
-                    content = content.push(cover(&entry.id, 38.0, 57.0));
+                    content = content.push(cover(app, entry, 38.0, 57.0));
                 }
                 content = content
                     .push(
@@ -833,7 +829,7 @@ fn pool<'a>(
     let rows = Column::with_children(entries.into_iter().take(40).map(|entry| {
         let mut content = Row::new().spacing(10).align_y(Center);
         if covers {
-            content = content.push(cover(&entry.id, 28.0, 42.0));
+            content = content.push(cover(app, entry, 28.0, 42.0));
         }
         let sub = format!(
             "{} · {}",

@@ -3,6 +3,7 @@
 
 pub mod calendar;
 pub mod chip;
+pub mod cover;
 pub mod dialog;
 pub mod empty;
 pub mod entry;
@@ -31,6 +32,7 @@ use iced::{Background, Border, Color, Element, Fill, Padding, Shadow, Vector};
 use crate::theme::{Tokens, font, size};
 
 pub use chip::{add_chip, filter_chip, removable_chip, status_chip, tag_chip};
+pub use cover::{cover, plain_cover, titled_cover};
 pub use dialog::{dialog, modal, panel};
 pub use empty::empty_state;
 pub use entry::{
