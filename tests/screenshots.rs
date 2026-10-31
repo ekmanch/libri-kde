@@ -212,6 +212,18 @@ fn capture_every_screen() {
                 app.setup.which = Some(Which::Here);
             }),
         ),
+        (
+            Screen::Setup,
+            ("setup-which-library-connected", |app| {
+                // Pick a file from Settings while connected, on another
+                // file than the connected one.
+                setup_at(Step::Existing)(app);
+                app.setup.from = Some((Screen::Settings, Step::File));
+                app.setup.choice = setup::Choice::Existing;
+                app.setup.file = 1;
+                app.setup.which = Some(Which::Here);
+            }),
+        ),
         (Screen::Library, ("library", nothing)),
         (
             Screen::Library,

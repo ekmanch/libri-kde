@@ -13,7 +13,7 @@ use super::setup;
 use super::shell::shell;
 use crate::app::{App, Message as AppMessage};
 use crate::model::MediaType;
-use crate::settings::{PLATFORMS, SyncState, ThemeChoice};
+use crate::settings::{Missing, PLATFORMS, SyncState, ThemeChoice};
 use crate::theme::{self, Accent, Theme, Tokens, font};
 use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
@@ -69,10 +69,6 @@ pub enum Message {
     SidebarTags(SidebarTags),
     TypeBoxes(bool),
     Accent(Accent),
-    Repo(String),
-    Branch(String),
-    File(String),
-    /// Nothing until phase 3.
     SyncNow,
     ReplaceToken,
     /// "Disconnect repository": the first step.
@@ -84,8 +80,13 @@ pub enum Message {
     /// Deletes it from this computer and opens the setup.
     DisconnectDelete,
     CloseDisconnect,
-    /// "Library not found": the setup's file step with the repo kept.
+    /// "Library not found": the setup at the step for what is gone (the
+    /// file, the branch or the repo), with the rest of the connection
+    /// kept.
     PickFile,
+    /// "Change repository or file…": the setup's Connect step with the
+    /// connection and the token kept.
+    Change,
     /// Local mode's "Connect to GitHub".
     Connect,
     OpenLicenses,
@@ -125,21 +126,6 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::SidebarTags(mode) => app.library.sidebar_tags = mode,
         Message::TypeBoxes(on) => app.library.type_boxes = on,
         Message::Accent(accent) => app.settings.accent = accent,
-        Message::Repo(value) => {
-            if let Some(source) = &mut app.source {
-                source.repo = value;
-            }
-        }
-        Message::Branch(value) => {
-            if let Some(source) = &mut app.source {
-                source.branch = value;
-            }
-        }
-        Message::File(value) => {
-            if let Some(source) = &mut app.source {
-                source.file = value;
-            }
-        }
         Message::SyncNow => return app.sync_now(),
         Message::ReplaceToken => return setup::update(app, setup::Message::ReplaceToken),
         Message::Disconnect => page.disconnect = Some(DisconnectStep::Confirm),
@@ -167,26 +153,15 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             return task;
         }
         Message::CloseDisconnect => page.disconnect = None,
-        // "Pick a file" while the library is not found: the file step for
-        // the connected repo and branch, with the token in use.
         Message::PickFile => {
-            app.setup = if app.mock {
-                setup::State::at(setup::Step::File, app.source.as_ref())
-            } else {
-                let mut state = setup::State::real(setup::Step::File, app.connection.as_ref());
-                if let (Some(source), Some(token)) = (&app.source, &app.token) {
-                    state.token = token.clone();
-                    state.branches = vec![setup::Branch {
-                        name: source.branch.clone(),
-                        info: "The connected branch".into(),
-                        default: true,
-                    }];
-                }
-                state.client = app.github.clone().map(setup::ClientHandle);
-                state
+            let step = match app.sync {
+                SyncState::NotFound(Missing::Repo) => setup::Step::Connect,
+                SyncState::NotFound(Missing::Branch) => setup::Step::Branch,
+                _ => setup::Step::File,
             };
-            app.screen = super::Screen::Setup;
+            return reconnect(app, step);
         }
+        Message::Change => return reconnect(app, setup::Step::Connect),
         Message::Connect | Message::SetUp => {
             app.setup = if app.mock {
                 setup::State::at(setup::Step::Connect, None)
@@ -201,6 +176,41 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::Timeline(on) => app.settings.timeline = on,
         Message::Seasonal(on) => app.settings.seasonal = on,
         Message::Platform(platform) => app.settings.platform = platform,
+    }
+    Task::none()
+}
+
+/// The setup from Settings while a repository is connected, at `step`:
+/// the connection, the token and the client in use, so nothing is typed
+/// again, and Back on that step (or at Connect) returns here. Where the
+/// wizard meets another existing file it asks "Which library?", since
+/// this computer's library is one to keep; the queue goes with the
+/// answer (`App::connect`). Opened at Branch, the repo's branches load
+/// at once.
+fn reconnect(app: &mut App, step: setup::Step) -> Task<AppMessage> {
+    let mut state = if app.mock {
+        setup::State::at(step, app.source.as_ref())
+    } else {
+        let mut state = setup::State::real(step, app.connection.as_ref());
+        if let Some(token) = &app.token {
+            state.token = token.clone();
+        }
+        if let Some(source) = &app.source {
+            state.branches = vec![setup::Branch {
+                name: source.branch.clone(),
+                info: "The connected branch".into(),
+                default: true,
+            }];
+        }
+        state.client = app.github.clone().map(setup::ClientHandle);
+        state
+    };
+    state.from = Some((super::Screen::Settings, step));
+    state.choice = setup::Choice::Existing;
+    app.setup = state;
+    app.screen = super::Screen::Setup;
+    if step == setup::Step::Branch && !app.mock {
+        return setup::load_branches(&mut app.setup);
     }
     Task::none()
 }
@@ -687,11 +697,20 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     tokens.danger,
                     "Library not found on GitHub",
                     format!(
-                        "{} Pick the file again, or restore it on GitHub.",
-                        SyncState::missing_text(*missing, Some(source))
+                        "{} {}",
+                        SyncState::missing_text(*missing, Some(source)),
+                        match missing {
+                            Missing::File => "Pick the file again, or restore it on GitHub.",
+                            Missing::Branch => "Pick the branch again, or restore it on GitHub.",
+                            Missing::Repo => "Connect again, or restore it on GitHub.",
+                        }
                     ),
                     ui::sized_button(
-                        "Pick a file",
+                        match missing {
+                            Missing::File => "Pick a file",
+                            Missing::Branch => "Pick a branch",
+                            Missing::Repo => "Reconnect",
+                        },
                         ButtonKind::Outline,
                         32.0,
                         *tokens,
@@ -780,8 +799,8 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             .style(move |_| container::background(fill).border(Border::default().rounded(10)));
 
             // The connection's values come from `connection.json` and
-            // change through the setup (Pick a file, Replace token), so
-            // the fields only show them.
+            // change through the setup (Change repository or file…, Pick
+            // a file, Replace token), so the fields only show them.
             let (field_bg, line) = (tokens.field, tokens.line);
             let shown = |value: String, color| {
                 container(ui::mono(value, 14.0, color))
@@ -827,13 +846,23 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                 text("The token is stored in your KDE Wallet, not in a config file.")
                     .size(12.5)
                     .color(tokens.sub),
-                row![ui::sized_button(
-                    "Disconnect repository",
-                    ButtonKind::Destructive,
-                    34.0,
-                    *tokens,
-                    Some(msg(Message::Disconnect)),
-                )],
+                row![
+                    ui::sized_button(
+                        "Change repository or file…",
+                        ButtonKind::Outline,
+                        34.0,
+                        *tokens,
+                        Some(msg(Message::Change)),
+                    ),
+                    ui::sized_button(
+                        "Disconnect repository",
+                        ButtonKind::Destructive,
+                        34.0,
+                        *tokens,
+                        Some(msg(Message::Disconnect)),
+                    ),
+                ]
+                .spacing(8),
             ]
             .spacing(14)
             .into()
@@ -1480,5 +1509,72 @@ mod tests {
         assert_eq!(thousands(7), "7");
         assert_eq!(thousands(1284), "1,284");
         assert_eq!(thousands(1_000_000), "1,000,000");
+    }
+
+    #[test]
+    fn pick_a_file_asks_which_library_for_another_file_but_not_for_the_same() {
+        use crate::app::KeyPress;
+        use setup::{Choice, Step, Which};
+
+        let mut app = App::new(Screen::Settings);
+        app.sync = SyncState::NotFound(Missing::File);
+        let _ = update(&mut app, Message::PickFile);
+        assert_eq!(app.screen, Screen::Setup);
+        assert_eq!(app.setup.step, Step::File);
+        assert_eq!(app.setup.choice, Choice::Existing);
+        assert_eq!(app.setup.from, Some((Screen::Settings, Step::File)));
+        // Back on the step it opened at leaves the wizard.
+        let _ = setup::update(&mut app, setup::Message::Back);
+        assert_eq!(app.screen, Screen::Settings);
+
+        // The same file, restored on GitHub: no question.
+        let _ = update(&mut app, Message::PickFile);
+        let _ = setup::update(&mut app, setup::Message::Continue);
+        assert_eq!(app.setup.step, Step::Existing);
+        let _ = setup::update(&mut app, setup::Message::Continue);
+        assert_eq!(app.setup.step, Step::Done);
+        assert!(app.setup.which.is_none());
+
+        // Another file: "Which library?", Esc closes it, and GitHub's copy
+        // can be taken.
+        let _ = update(&mut app, Message::PickFile);
+        let _ = setup::update(&mut app, setup::Message::Continue);
+        let _ = setup::update(&mut app, setup::Message::PickFile(1));
+        let _ = setup::update(&mut app, setup::Message::Continue);
+        assert_eq!(app.setup.which, Some(Which::Here));
+        assert_eq!(app.setup.step, Step::Existing);
+        let _ = app.update(AppMessage::Key(KeyPress::Escape));
+        assert!(app.setup.which.is_none());
+        let _ = setup::update(&mut app, setup::Message::Continue);
+        let _ = setup::update(&mut app, setup::Message::PickWhich(Which::GitHub));
+        let _ = setup::update(&mut app, setup::Message::ConfirmWhich);
+        assert_eq!(app.setup.step, Step::Done);
+        let _ = setup::update(&mut app, setup::Message::Open);
+        assert_eq!(app.screen, Screen::Library);
+        assert_eq!(app.source.unwrap().file, "backup/library-2025.json");
+
+        // The branch gone opens at Branch, the repo gone at Connect.
+        let mut app = App::new(Screen::Settings);
+        app.sync = SyncState::NotFound(Missing::Branch);
+        let _ = update(&mut app, Message::PickFile);
+        assert_eq!(app.setup.step, Step::Branch);
+        let _ = setup::update(&mut app, setup::Message::Back);
+        assert_eq!(app.screen, Screen::Settings);
+        app.sync = SyncState::NotFound(Missing::Repo);
+        let _ = update(&mut app, Message::PickFile);
+        assert_eq!(app.setup.step, Step::Connect);
+        assert_eq!(app.setup.repo, "ekmanch/library");
+
+        // Change repository or file…: Connect with the connection kept,
+        // and Back returns to Settings.
+        let mut app = App::new(Screen::Settings);
+        let _ = update(&mut app, Message::Change);
+        assert_eq!(app.screen, Screen::Setup);
+        assert_eq!(app.setup.step, Step::Connect);
+        assert_eq!(app.setup.repo, "ekmanch/library");
+        assert!(!app.setup.token.is_empty(), "the token is kept");
+        let _ = setup::update(&mut app, setup::Message::Back);
+        assert_eq!(app.screen, Screen::Settings);
+        assert!(app.source.is_some(), "still connected");
     }
 }

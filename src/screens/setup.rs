@@ -23,7 +23,7 @@ use crate::connection::{Connection, Target};
 use crate::github::{BranchInfo, Client, Failure, FailureKind, PutResult, RepoInfo};
 use crate::model::{Library, codec};
 use crate::settings::{Source, SyncState};
-use crate::sync::{Base, BaseFile};
+use crate::sync::{Base, BaseFile, Engine};
 use crate::theme::{Tokens, font};
 use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
@@ -239,6 +239,12 @@ pub struct State {
     /// "Which library?": reconnecting a library kept on this computer to
     /// an existing file, and which copy was picked.
     pub which: Option<Which>,
+    /// Opened from Settings while a repository is connected ("Change
+    /// repository or file…", "Pick a file"): the screen to return to and
+    /// the step it opened at, where Back (as at Connect) leaves the
+    /// wizard. This computer's library then counts as one to keep when
+    /// the wizard meets an existing file.
+    pub from: Option<(Screen, Step)>,
     /// The mockup's fixture branches and files, no GitHub: the tests, the
     /// captures and `LIBRI_SETUP`.
     pub mock: bool,
@@ -446,9 +452,16 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::Back => {
             state.busy = None;
             state.error = None;
-            match state.replacing.take() {
-                Some(screen) => app.screen = screen,
-                None => state.step = state.step.back(),
+            match (state.replacing.take(), state.from) {
+                (Some(screen), _) => app.screen = screen,
+                // From Settings: the step it opened at, and Connect, lead
+                // back there instead of to Welcome.
+                (None, Some((screen, opened_at)))
+                    if state.step == opened_at || state.step == Step::Connect =>
+                {
+                    app.screen = screen;
+                }
+                _ => state.step = state.step.back(),
             }
         }
         Message::Continue => {
@@ -489,13 +502,19 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                         }
                     }
                 },
-                // A kept library meeting an existing file asks which to
-                // keep, unless the file is the kept library's own; a new
-                // file is made from the kept library, no question asked.
+                // This computer's library (kept after a Disconnect, or the
+                // connected one on a reconnect from Settings) meeting an
+                // existing file asks which to keep, unless the file is
+                // its own; a new file is made from it, no question asked.
                 Step::Existing
-                    if app.kept_locally
+                    if has_library_here(app.kept_locally, state)
                         && state.which.is_none()
-                        && !is_kept_librarys_own(&state.target()) =>
+                        && !is_this_computers_own(
+                            app.engine.as_ref(),
+                            app.mock,
+                            app.source.as_ref(),
+                            &state.target(),
+                        ) =>
                 {
                     state.which = Some(Which::Here);
                 }
@@ -508,7 +527,8 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                     let Some(client) = state.client.clone() else {
                         return Task::none();
                     };
-                    let kept = app.kept_locally.then(|| app.repo.library().clone());
+                    let kept = has_library_here(app.kept_locally, state)
+                        .then(|| app.repo.library().clone());
                     state.loaded_entries = Some(kept.as_ref().map_or(0, |l| l.entries.len()));
                     let bytes = kept.map_or_else(
                         || codec::EMPTY.as_bytes().to_vec(),
@@ -573,11 +593,12 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             let token = state.token.trim().to_owned();
             let base = state.base.take();
             // A new empty file: the local library matches what was
-            // created. A new file from the kept library, or a replaced
-            // file: the local library is what was pushed. An existing
-            // file without a base: GitHub's copy replaces it on the
-            // first sync.
-            if base.is_some() && !app.kept_locally && state.choice == Choice::New {
+            // created. A new file from this computer's library, or a
+            // replaced file: the local library is what was pushed. An
+            // existing file without a base: GitHub's copy replaces it on
+            // the first sync.
+            let from_here = has_library_here(app.kept_locally, state);
+            if base.is_some() && !from_here && state.choice == Choice::New {
                 app.repo.replace(Library::default());
             }
             crate::trace::line(format_args!("setup: connecting {}", target.key()));
@@ -618,18 +639,14 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                 return Task::none();
             }
             state.default_branch = info.default_branch;
-            let Some(client) = state.client.clone() else {
-                return Task::none();
-            };
-            if let Some(screen) = state.replacing.take() {
+            if let Some(client) = state.client.clone()
+                && let Some(screen) = state.replacing.take()
+            {
                 let token = state.token.trim().to_owned();
                 app.screen = screen;
                 return app.replace_token(token, client.0);
             }
-            state.step = Step::Branch;
-            state.branches.clear();
-            state.busy = Some(Busy::Branches);
-            return github_task(move || client.0.branches(), Message::Branches);
+            return load_branches(state);
         }
         Message::Branches(result) => {
             if state.busy != Some(Busy::Branches) {
@@ -788,13 +805,68 @@ fn library_files(client: &Client, branch: &str) -> Result<Vec<File>, Failure> {
     Ok(files)
 }
 
-/// Whether `target` is the file the library kept on this computer came
-/// from: its base is in `sync.json`, so the sync compares both copies to
-/// it and no question is asked.
-fn is_kept_librarys_own(target: &Target) -> bool {
+/// The Branch step with the repo's branches on their way, from the
+/// client Connect made (or the connected one).
+pub fn load_branches(state: &mut State) -> Task<AppMessage> {
+    let Some(client) = state.client.clone() else {
+        return Task::none();
+    };
+    state.step = Step::Branch;
+    state.branches.clear();
+    state.busy = Some(Busy::Branches);
+    github_task(move || client.0.branches(), Message::Branches)
+}
+
+/// Whether this computer holds a library the wizard has to ask about
+/// when it meets an existing file: one kept after a Disconnect, or the
+/// connected one while the wizard was opened from Settings.
+fn has_library_here(kept_locally: bool, state: &State) -> bool {
+    kept_locally || state.from.is_some()
+}
+
+/// Whether `target` is the file this computer's library came from, so
+/// the sync compares both copies to its base and no question is asked:
+/// the connected file, or, for a library kept after a Disconnect, the one
+/// whose base is in `sync.json`. A mock run compares with its source.
+fn is_this_computers_own(
+    engine: Option<&Engine>,
+    mock: bool,
+    source: Option<&Source>,
+    target: &Target,
+) -> bool {
+    if let Some(engine) = engine {
+        return engine.target() == target;
+    }
+    if mock {
+        return source.is_some_and(|source| {
+            source.repo == target.repository
+                && source.branch == target.branch
+                && source.file == target.file
+        });
+    }
     crate::storage::data_dir()
         .map(|dir| BaseFile::at(dir.join("sync.json")))
         .is_some_and(|file| file.load(&target.key()).is_some())
+}
+
+/// Where this computer's library came from while a repository is
+/// connected, for "Which library?": its file, or the repo and branch when
+/// the file picked has the same name. `None` for a kept library.
+fn library_here_from(app: &App, state: &State) -> Option<String> {
+    let target = match (&app.engine, &app.source) {
+        (Some(engine), _) => engine.target().clone(),
+        (None, Some(source)) if state.from.is_some() => Target {
+            repository: source.repo.clone(),
+            file: source.file.clone(),
+            branch: source.branch.clone(),
+        },
+        _ => return None,
+    };
+    Some(if target.file == state.file_name() {
+        format!("{} on {}", target.repository, target.branch)
+    } else {
+        target.file
+    })
 }
 
 /// "github_pat_••••••a91F": the token's prefix and last four characters.
@@ -856,15 +928,28 @@ fn which_dialog<'a>(app: &'a App, picked: Which, tokens: &Tokens) -> Element<'a,
             "1,279 entries · last commit Oct 13. Replaces the library on this computer.".to_owned()
         }
     };
-    let options = [
-        (
-            Which::Here,
-            "This computer's",
-            format!(
-                "{} entries. Uploaded over {file} on GitHub.",
-                thousands(here)
-            ),
+    let unsaved = app.engine.as_ref().map_or(0, |e| e.status().pending);
+    let mine = match unsaved {
+        0 => format!(
+            "{} entries. Uploaded over {file} on GitHub.",
+            thousands(here)
         ),
+        n => format!(
+            "{} entries with {n} unsaved change{}. Uploaded over {file} on GitHub.",
+            thousands(here),
+            if n == 1 { "" } else { "s" }
+        ),
+    };
+    let lead = match library_here_from(app, state) {
+        Some(from) => format!(
+            "This computer has your library from {from}, and {file} on GitHub has its own. Keep one; the other is replaced."
+        ),
+        None => format!(
+            "This computer still has the library you kept when you disconnected, and {file} on GitHub has its own. Keep one; the other is replaced."
+        ),
+    };
+    let options = [
+        (Which::Here, "This computer's", mine),
         (Which::GitHub, "The one on GitHub", theirs),
     ];
     let rows = options.into_iter().map(|(which, title, sub)| {
@@ -878,11 +963,7 @@ fn which_dialog<'a>(app: &'a App, picked: Which, tokens: &Tokens) -> Element<'a,
         )
     });
     let body = column![
-        text(format!(
-            "This computer still has the library you kept when you disconnected, and {file} on GitHub has its own. Keep one; the other is replaced."
-        ))
-        .size(14)
-        .line_height(1.45),
+        text(lead).size(14).line_height(1.45),
         Column::with_children(rows).spacing(6),
         text("Earlier versions stay in the repo's history either way.")
             .size(12.5)
@@ -1022,7 +1103,7 @@ fn wizard<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     .spacing(22)
     .max_width(680);
     if let Some(line) = state.busy_line() {
-        form = form.push(busy_row(line, tokens));
+        form = form.push(busy_row(line, app.splash_phase, tokens));
     }
     if let Some(error) = &state.error {
         form = form.push(
@@ -1404,7 +1485,7 @@ fn existing<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
 /// "You're all set": a check, the summary and Open Libri.
 fn done<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let state = &app.setup;
-    let kept = app.kept_locally.then(|| app.repo.library().entries.len());
+    let kept = has_library_here(app.kept_locally, state).then(|| app.repo.library().entries.len());
     let tokens = *tokens;
     let disc = container(ui::icon(Icon::Check, 36.0, tokens.success))
         .center(72)
@@ -1413,7 +1494,7 @@ fn done<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
         });
     let words = match (state.choice, kept, state.which) {
         (Choice::New, Some(n), _) => format!(
-            "{} is now in {} on {}, made from the {} entries kept on this computer.",
+            "{} is now in {} on {}, made from the {} entries on this computer.",
             state.file_name(),
             state.repo.trim(),
             state.branch_name(),
@@ -1426,7 +1507,7 @@ fn done<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             state.branch_name()
         ),
         (Choice::Existing, Some(n), Some(Which::Here)) => format!(
-            "Replaced {} with the {} entries kept on this computer.",
+            "Replaced {} with the {} entries from this computer.",
             state.file_name(),
             thousands(n)
         ),
@@ -1521,14 +1602,12 @@ fn label<'a>(name: &'a str, tokens: &Tokens) -> Element<'a, AppMessage> {
         .into()
 }
 
-/// A ring in the accent and the words, while GitHub is asked: the
-/// mockup's "Checking access to ekmanch/library…" (its ring spins; this
-/// one stands still, iced has no animation for a border).
-fn busy_row<'a>(words: String, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let accent = tokens.accent;
-    let ring = container(space()).width(14).height(14).style(move |_| {
-        container::Style::default().border(Border::default().rounded(7).width(2).color(accent))
-    });
+/// A turning ring in the accent and the words, while GitHub is asked:
+/// the mockup's "Checking access to ekmanch/library…". The ring turns on
+/// the splash's tick, which runs while the wizard is busy; `phase` is
+/// the tick's 0-to-1 sweep, and the ring makes two turns per sweep.
+fn busy_row<'a>(words: String, phase: f32, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let ring = ui::spinner(14.0, tokens.accent, phase * 2.0);
     row![ring, text(words).size(13.5).color(tokens.sub)]
         .spacing(10)
         .align_y(Center)

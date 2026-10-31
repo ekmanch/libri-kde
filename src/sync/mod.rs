@@ -296,6 +296,19 @@ impl Engine {
         self.pending.add(operation, summary);
     }
 
+    /// A reconnect to the same file: the round out is forgotten (its
+    /// answer is dropped by the app) and the phase starts over, while the
+    /// queue, a save in flight and the base stay for the next round to
+    /// settle and compare.
+    pub fn restart(&mut self) {
+        self.step = None;
+        self.queued = None;
+        self.phase = Phase::Idle;
+        self.remote_changed_at = None;
+        self.remote_error = None;
+        self.push = true;
+    }
+
     /// Disconnect: the queue goes; the base too unless the library is
     /// kept on this computer, for the comparison on a reconnect.
     pub fn discard(&mut self, keep_library: bool) {

@@ -235,6 +235,10 @@ pub struct App {
     pub github: Option<Arc<github::Client>>,
     /// The sync engine while a repository is connected.
     pub engine: Option<Engine>,
+    /// Counts the connections made, so an answer that comes back for a
+    /// request of an earlier engine (a reconnect while a call was out) is
+    /// dropped instead of taken for the new engine's.
+    pub engine_generation: u64,
     /// When the gathered edits go out as one commit.
     pub save_due: Option<Instant>,
     /// The splash while the first download of a fresh connection runs.
@@ -295,8 +299,8 @@ pub enum SyncMessage {
     TokenLoaded(Result<Option<String>, String>),
     /// The wallet was written or cleared.
     WalletDone(Result<(), String>),
-    /// A GitHub call came back.
-    Answer(Box<Answer>),
+    /// A GitHub call came back, for the engine of that generation.
+    Answer(Box<Answer>, u64),
 }
 
 impl Message {
@@ -594,6 +598,7 @@ impl App {
             token: None,
             github: None,
             engine: None,
+            engine_generation: 0,
             save_due: None,
             loading: false,
             mock: true,
@@ -637,6 +642,14 @@ impl App {
     /// starts. With `base` the local library is what the setup just put
     /// on GitHub; without one GitHub's copy is downloaded behind the
     /// splash.
+    ///
+    /// A reconnect while a repository was connected (Settings › Change
+    /// repository or file…, Pick a file) keeps the engine and its queue
+    /// when the file is the same one, so edits made while it was gone go
+    /// out as before once it is back. For another file the queue goes:
+    /// its edits are in the library this computer uploaded over the file
+    /// ("Which library?" › This computer's) or gave up (The one on
+    /// GitHub), as on the phone.
     pub fn connect(
         &mut self,
         target: Target,
@@ -652,12 +665,32 @@ impl App {
         self.kept_locally = false;
         self.github = Some(client);
         let store = self.store_token(token);
-        let mut engine = Engine::open(storage::data_dir().as_deref(), target);
+        let mut engine = match self.engine.take() {
+            Some(mut engine) if *engine.target() == target => {
+                crate::trace::line("reconnected to the same file; the queue stays");
+                engine.restart();
+                engine
+            }
+            Some(mut engine) => {
+                crate::trace::line(format_args!(
+                    "reconnected from {} to {}; dropping {} queued changes",
+                    engine.target().key(),
+                    target.key(),
+                    engine.status().pending
+                ));
+                engine.discard(true);
+                Engine::open(self.data_dir().as_deref(), target)
+            }
+            None => Engine::open(self.data_dir().as_deref(), target),
+        };
+        self.engine_generation += 1;
         if let Some(base) = base {
             engine.set_base(base);
         }
         self.loading = !engine.has_base();
         self.engine = Some(engine);
+        self.save_due = None;
+        self.conflict_open = false;
         self.refresh_sync_state();
         self.screen = if self.loading {
             Screen::Splash
@@ -682,9 +715,10 @@ impl App {
             target.repository.clone(),
         )));
         self.token = Some(token);
-        let engine = Engine::open(storage::data_dir().as_deref(), target);
+        let engine = Engine::open(self.data_dir().as_deref(), target);
         self.loading = !engine.has_base();
         self.engine = Some(engine);
+        self.engine_generation += 1;
         self.warn_about_the_token();
         self.refresh_sync_state();
         if self.loading {
@@ -708,6 +742,12 @@ impl App {
         }
         let store = self.store_token(token);
         Task::batch([store, self.sync_now()])
+    }
+
+    /// Where the sync files live: next to the library, or nowhere in a
+    /// mock run, whose engine keeps everything in memory.
+    fn data_dir(&self) -> Option<std::path::PathBuf> {
+        if self.mock { None } else { storage::data_dir() }
     }
 
     fn store_token(&mut self, token: String) -> Task<Message> {
@@ -791,13 +831,14 @@ impl App {
             return Task::none();
         };
         let (client, target) = (client.clone(), engine.target().clone());
+        let generation = self.engine_generation;
         Task::perform(
             blocking(move || Ok(perform(&client, &target, request))),
-            |result| {
+            move |result| {
                 let answer = result.unwrap_or_else(|error| {
                     Answer::Raw(Err(github::Failure::new(github::FailureKind::Other, error)))
                 });
-                Message::Sync(SyncMessage::Answer(Box::new(answer)))
+                Message::Sync(SyncMessage::Answer(Box::new(answer), generation))
             },
         )
     }
@@ -1004,7 +1045,8 @@ impl App {
                 }
             }
             Message::SystemTheme(_) => {}
-            // One sweep of the bar takes 1.4 s.
+            // One sweep of the splash's bar takes 1.4 s; the setup's ring
+            // turns twice in that time.
             Message::Tick => self.splash_phase = (self.splash_phase + 0.016 / 1.4) % 1.0,
             Message::Resized(size) => self.window = size,
             Message::Window(event) => return self.window_event(event),
@@ -1066,7 +1108,12 @@ impl App {
                     crate::trace::line(format_args!("wallet: {error}"));
                 }
             }
-            Message::Sync(SyncMessage::Answer(answer)) => {
+            Message::Sync(SyncMessage::Answer(_, generation))
+                if generation != self.engine_generation =>
+            {
+                crate::trace::line("sync: an answer for an earlier connection, dropped");
+            }
+            Message::Sync(SyncMessage::Answer(answer, _)) => {
                 self.record_token_expiry();
                 let Some(engine) = &mut self.engine else {
                     return Task::none();
@@ -1082,6 +1129,7 @@ impl App {
             Message::Key(KeyPress::Escape) => match self.screen {
                 _ if self.token_warning => self.token_warning = false,
                 _ if self.conflict_open => self.conflict_open = false,
+                Screen::Setup => self.setup.which = None,
                 _ => {
                     if !entry::dismiss_top(self)
                         && !plans::dismiss_top(self)
@@ -1290,7 +1338,10 @@ impl App {
         let traced = window::events().map(|(_, event)| Message::Window(event));
         let scheme = iced::system::theme_changes().map(Message::SystemTheme);
         let mut subscriptions = vec![keys, buttons, resizes, traced, scheme];
-        if self.screen == Screen::Splash {
+        // The splash's bar, and the setup's ring while GitHub is asked.
+        if self.screen == Screen::Splash
+            || (self.screen == Screen::Setup && self.setup.busy.is_some())
+        {
             subscriptions.push(time::every(Duration::from_millis(16)).map(|_| Message::Tick));
         }
         // The debounce clock runs only while edits wait; the check every
@@ -1861,5 +1912,84 @@ mod tests {
         let _ = app.disconnect(false);
         assert!(app.connection.is_none());
         assert!(app.repo.library().entries.is_empty());
+    }
+
+    fn scratch(file: &str) -> Target {
+        Target {
+            repository: "ekmanch/libri-scratch".into(),
+            file: file.into(),
+            branch: "main".into(),
+        }
+    }
+
+    fn client() -> Arc<github::Client> {
+        Arc::new(github::Client::new(
+            "github_pat_test",
+            "ekmanch/libri-scratch",
+        ))
+    }
+
+    fn pending(app: &App) -> usize {
+        app.engine.as_ref().map_or(0, |e| e.status().pending)
+    }
+
+    #[test]
+    fn reconnecting_keeps_the_queue_for_the_same_file_and_drops_it_for_another() {
+        let mut app = App::new(Screen::Library);
+        let _ = app.connect(
+            scratch("library.json"),
+            "github_pat_test".into(),
+            client(),
+            None,
+        );
+        let first = app.engine_generation;
+        assert!(app.loading, "no base: GitHub's copy is downloaded");
+        app.apply(Operation::SetRating {
+            id: "movies/the-mummy-1999".into(),
+            rating: Some(7),
+        });
+        assert_eq!(pending(&app), 1);
+
+        // The same file again (restored on GitHub): the queue stays, and
+        // an answer to the first engine's request is dropped, so the new
+        // round goes on.
+        let _ = app.connect(
+            scratch("library.json"),
+            "github_pat_test".into(),
+            client(),
+            None,
+        );
+        assert_eq!(pending(&app), 1);
+        assert!(app.engine_generation > first);
+        assert!(app.engine.as_ref().unwrap().running());
+        let _ = app.update(Message::Sync(SyncMessage::Answer(
+            Box::new(Answer::Raw(Ok(None))),
+            first,
+        )));
+        assert!(
+            app.engine.as_ref().unwrap().running(),
+            "the stale answer changed nothing"
+        );
+        // GitHub's copy is the fixture, without the rating.
+        let bytes = crate::fixtures::LIBRARY_JSON.as_bytes().to_vec();
+        let _ = app.update(Message::Sync(SyncMessage::Answer(
+            Box::new(Answer::Raw(Ok(Some(github::RawFile::new(bytes, None))))),
+            app.engine_generation,
+        )));
+        assert_eq!(
+            app.engine.as_ref().unwrap().status().phase,
+            Phase::Saving,
+            "the queued change goes out on top of GitHub's copy"
+        );
+
+        // Another file: the queue goes with the old engine.
+        let _ = app.connect(
+            scratch("backup.json"),
+            "github_pat_test".into(),
+            client(),
+            None,
+        );
+        assert_eq!(pending(&app), 0);
+        assert_eq!(app.engine.as_ref().unwrap().target().file, "backup.json");
     }
 }
