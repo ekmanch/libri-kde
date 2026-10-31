@@ -195,6 +195,7 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [x] Fetched covers drew nothing (the title went, the tint stayed): the files were `<sha1>.img` and iced's decoder picks the format by the extension. Done 2026-10-31: named by the format the bytes start with, old files renamed on the way
 - [x] The cover viewer: a click on the cover in details opens it large, with Change cover… and Pick a cover beside it, no Edit needed (mockup "Cover viewer"). Done 2026-10-31
 - [x] The sidebar's All reads Home. Done 2026-10-31
+- [x] Home's grid with details open: shelves that scroll sideways (fades, ‹ ›, the selected cover kept in view) and a side column that keeps 340 px. Done 2026-10-31
 - [x] The tag picker's long group: the dialog grew to the window and the letter rail ran past the list. Done 2026-10-31
 
 ## Phase 5: Packaging

@@ -636,7 +636,7 @@ pub fn title_initial(title: &str) -> char {
 pub const TOP_RATED: u8 = 9;
 
 /// The overview's lists, each with a "See all".
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Section {
     InProgress,
     ComingSoon,

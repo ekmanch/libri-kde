@@ -428,6 +428,15 @@ fn capture_every_screen() {
                 )));
             }),
         ),
+        // Home's grid with details open: the shelves scroll sideways at
+        // the start (the fade and › on the right), the side column keeps
+        // its width.
+        (
+            Screen::Library,
+            ("overview-shelves-open", |app| {
+                select(app, "books/project-hail-mary-2021");
+            }),
+        ),
         // The cover viewer from details, and Pick a cover beside it.
         (
             Screen::Library,

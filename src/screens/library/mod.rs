@@ -25,6 +25,8 @@ use crate::settings::Source;
 use crate::tags::{PickerMessage, PickerState};
 use crate::ui;
 
+pub use overview::{ShelfScroll, follow_selection, nudge};
+
 /// The search field's id, for Ctrl+K and Ctrl+F.
 pub const SEARCH_ID: &str = "library-search";
 /// The entry list's scroll area, for the type rail's jumps.
@@ -168,6 +170,9 @@ pub struct State {
     /// how tall the list's visible part is.
     pub group_tops: Vec<f32>,
     pub viewport: f32,
+    /// Home's grid shelves while details are open: how far each one is
+    /// scrolled and how wide it shows, as it last said.
+    pub shelves: HashMap<Section, ShelfScroll>,
     /// `LIBRI_LONG_LISTS=1`: section headers and the rail on every list,
     /// to look at them with the small fixture.
     pub force_long: bool,
@@ -189,6 +194,10 @@ pub enum Message {
     SetView(View),
     /// Selects an entry, or deselects it when it is selected.
     Select(String),
+    /// A Home shelf scrolled, or its width changed.
+    ShelfScrolled(Section, ShelfScroll),
+    /// A Home shelf's ‹ (-1) or › (1).
+    NudgeShelf(Section, i8),
     Toggle(Popup),
     ClosePopup,
     Sort(Sort),
@@ -492,6 +501,11 @@ impl State {
             Message::OpenSeriesCover(media, name) => self.cover_dialog = Some((media, name)),
             Message::CloseSeriesCover => self.cover_dialog = None,
             Message::Scrolled(scroll) => self.scroll = scroll,
+            Message::ShelfScrolled(section, scroll) => {
+                self.shelves.insert(section, scroll);
+            }
+            // The app scrolls the shelf (`overview::nudge`).
+            Message::NudgeShelf(..) => {}
             Message::MusicTab(tab) => {
                 self.music_tab = tab;
                 self.artist = None;

@@ -348,6 +348,8 @@ impl Message {
             Message::Library(message) => !matches!(
                 message,
                 L::Scrolled(_)
+                    | L::ShelfScrolled(..)
+                    | L::NudgeShelf(..)
                     | L::GroupsMeasured(_)
                     | L::Toggle(_)
                     | L::ClosePopup
@@ -1017,7 +1019,14 @@ impl App {
             plans::save_item_note(self);
         }
         let from = (message.navigates() && self.screen.in_history()).then(|| self.place());
+        let selected = self.library.selected.clone();
         let task = self.handle(message);
+        // Home's shelves keep the selected cover in view.
+        let task = if self.library.selected != selected {
+            Task::batch([task, library::follow_selection(self)])
+        } else {
+            task
+        };
         if let Some(from) = from
             && from != self.place()
         {
@@ -1287,6 +1296,9 @@ impl App {
                 };
                 if message.shows_library() {
                     self.screen = Screen::Library;
+                }
+                if let library::Message::NudgeShelf(section, direction) = message {
+                    return library::nudge(self, section, direction);
                 }
                 self.library.update(message);
             }
