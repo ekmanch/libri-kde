@@ -1285,6 +1285,20 @@ impl Form {
                 .all(|b| b.is_ascii_digit())
     }
 
+    /// Whether a bare Enter saves: an edit, or an add after a pick, with no
+    /// lookup, menu or prompt open on top of the form.
+    fn enter_saves(&self) -> bool {
+        (self.editing.is_some() || self.picked.is_some())
+            && !self.searching
+            && !self.choices_loading
+            && !self.rating_open
+            && !self.platform_open
+            && self.season_menu.is_none()
+            && self.other_platform.is_none()
+            && !self.cover_dialog
+            && self.replace.is_none()
+    }
+
     /// Platform chips: the form's own, then any the library uses.
     pub fn platform_options(&self, library: &Library) -> Vec<String> {
         let mut options = self.platforms.clone();
@@ -2351,8 +2365,10 @@ pub fn dismiss_top(app: &mut App) -> bool {
     }
 }
 
-/// Enter: the open dialog's main action. In the form only the tag
-/// picker's layers take Enter; Ctrl+Enter saves.
+/// Enter: the open dialog's main action. In the form the tag picker's
+/// layers and the lookup's pick come first, then Enter saves, as Ctrl+Enter
+/// always does. Not while a lookup is under way or a menu is open, nor in
+/// Add before a match is picked, so a typed search is never saved as it is.
 pub fn confirm(app: &mut App) -> Task<AppMessage> {
     let message = match &app.dialog {
         Some(Dialog::Form(form) | Dialog::Tags(form)) if form.new_tag.is_some() => {
@@ -2366,6 +2382,7 @@ pub fn confirm(app: &mut App) -> Task<AppMessage> {
         Some(Dialog::Form(form)) if form.picked.is_none() && !form.matches().is_empty() => {
             Message::Pick(0)
         }
+        Some(Dialog::Form(form)) if form.enter_saves() => Message::Save,
         Some(Dialog::Delete { .. }) => Message::ConfirmDelete,
         Some(Dialog::AddToPlan { .. }) => Message::Close,
         Some(Dialog::SeasonDropped { .. }) => Message::KeepSeason,
@@ -2944,6 +2961,34 @@ mod tests {
         assert_eq!(saved.kind, Some(EntryKind::Movie));
         assert!(saved.seasons.is_none());
         assert_eq!(saved.series.as_ref().unwrap().name, "Ghibli");
+    }
+
+    #[test]
+    fn enter_saves_an_edit() {
+        let mut app = app();
+        let id = "anime/spirited-away-2001";
+        send(&mut app, Message::Edit(id.into()));
+        send(&mut app, Message::SeriesName("Ghibli".into()));
+        send(&mut app, Message::ToggleRating);
+        let _ = confirm(&mut app);
+        assert!(app.dialog.is_some(), "not with the rating menu open");
+        send(&mut app, Message::ToggleRating);
+        let _ = confirm(&mut app);
+        assert!(app.dialog.is_none());
+        let saved = app.repo.library().entry(id).unwrap();
+        assert_eq!(saved.series.as_ref().unwrap().name, "Ghibli");
+    }
+
+    #[test]
+    fn enter_in_add_picks_then_saves() {
+        let mut app = app();
+        send(&mut app, Message::Add);
+        send(&mut app, Message::Type(MediaType::Games));
+        send(&mut app, Message::Query("castlevania".into()));
+        let _ = confirm(&mut app);
+        assert_eq!(form(&app).picked, Some(0), "the first Enter picks");
+        let _ = confirm(&mut app);
+        assert!(app.dialog.is_none(), "the second saves");
     }
 
     #[test]
