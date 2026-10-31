@@ -13,7 +13,7 @@ use iced::{Background, Border, Center, Color, Element, Fill, Padding, Shadow, Ve
 use super::{CategoriesDialog, Form, Message, NewTag, Replace};
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
-use crate::lookup;
+use crate::lookup::{self, GamePlatform, Match};
 use crate::model::{BookFormat, EntryKind, EntryStatus, MediaType, TagCategory, text as rules};
 use crate::screens::entry::SeasonDraft;
 use crate::tags::PickerState;
@@ -69,7 +69,7 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
     // open, so the tree keeps its shape and the form keeps its state.
     let with_cover = ui::modal(
         panel,
-        form.cover_dialog.then(|| cover_dialog(form, &tokens)),
+        form.cover_dialog.then(|| cover_dialog(app, form, &tokens)),
         msg(Message::CloseCover),
         &tokens,
     );
@@ -265,7 +265,12 @@ fn header<'a>(form: &Form, tokens: &Tokens) -> Element<'a, AppMessage> {
 /// arrow keys move, Enter picks) in whatever state the lookup is in, and
 /// "Fill in the details myself", or Cancel for "Look up again".
 fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let state = app.lookup;
+    // A state forced for a look (`LIBRI_LOOKUP`) wins over the real one.
+    let state = if app.lookup == lookup::LookupState::Results {
+        form.lookup_state()
+    } else {
+        app.lookup
+    };
     let again = form.again;
     let matches = form.matches();
     let query = form.query.trim();
@@ -302,6 +307,10 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         lookup::LookupState::Loading => None,
         lookup::LookupState::Offline => Some((
             "Could not reach the lookup. Check your connection and try again.".into(),
+            true,
+        )),
+        lookup::LookupState::Failed => Some((
+            "The lookup did not answer. Try again in a moment.".into(),
             true,
         )),
         lookup::LookupState::NotSetUp => Some((
@@ -345,7 +354,7 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         list = list.push(container(block).padding([8, 4]));
     } else {
         for (index, found) in matches.iter().enumerate() {
-            list = list.push(match_row(form, index, found, platform, tokens));
+            list = list.push(match_row(app, form, index, found, platform, tokens));
         }
         if state == lookup::LookupState::Partial && !matches.is_empty() {
             list = list.push(
@@ -388,6 +397,15 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         Some(LOOKUP_ID),
         tokens,
     ));
+    // A thin accent line under the search while more rows are on their
+    // way (books: Apple's rows show before Open Library answers).
+    if form.searching && !matches.is_empty() && state.shows_rows() {
+        let accent = tokens.accent;
+        pane =
+            pane.push(container(space()).width(Fill).height(2).style(move |_| {
+                container::background(accent).border(Border::default().rounded(1))
+            }));
+    }
     if form.media == MediaType::Games {
         pane = pane.push(platform_filter(app, form, tokens));
     }
@@ -407,20 +425,21 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
 /// One match: a cover, the title, and the creator, platforms (on a game
 /// lookup narrowed to one) and year.
 fn match_row<'a>(
-    form: &Form,
+    app: &'a App,
+    form: &'a Form,
     index: usize,
-    found: &'static lookup::Match,
+    found: &'a Match,
     platform: Option<&str>,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let picked = form.picked == Some(index);
-    let year = found.released.get(..4).unwrap_or_default();
-    let tint = theme::cover_color(found.source);
-    let cover = container(space())
-        .width(44)
-        .height(62)
-        .style(move |_| container::background(tint).border(Border::default().rounded(5)));
-    let mut parts = vec![found.creator.to_owned()];
+    let tint = theme::cover_color(&found.source);
+    let handle = found
+        .cover_url
+        .as_deref()
+        .and_then(|url| app.artwork.image(url));
+    let cover = ui::plain_cover(handle, tint, 44.0, 62.0, 5.0);
+    let mut parts = vec![found.creator.clone().unwrap_or_default()];
     if let Some(platform) = platform {
         let others = found.platforms.len().saturating_sub(1);
         parts.push(match others {
@@ -429,16 +448,23 @@ fn match_row<'a>(
             n => format!("{platform} and {n} more"),
         });
     }
-    parts.push(year.to_owned());
-    if let Some(edition) = found.edition {
-        parts.push(edition.to_owned());
+    parts.push(found.year_text());
+    if let Some(edition) = &found.edition {
+        parts.push(edition.clone());
     }
+    parts.retain(|p| !p.is_empty());
     let words = column![
-        text(found.title).size(14.5).font(font::SEMIBOLD),
+        text(&found.title).size(14.5).font(font::SEMIBOLD),
         text(parts.join(" · ")).size(12.5).color(tokens.sub),
     ]
-    .spacing(2);
-    button(row![cover, words].spacing(12).align_y(Center))
+    .spacing(2)
+    .width(Fill);
+    let mut content = row![cover, words].spacing(12).align_y(Center);
+    // The details are on their way: a ring at the row's end.
+    if form.fetching.as_deref() == Some(found.source.as_str()) {
+        content = content.push(ui::spinner(14.0, tokens.sub, app.splash_phase));
+    }
+    button(content)
         .width(Fill)
         .padding(8)
         .on_press(msg(Message::Pick(index)))
@@ -503,14 +529,18 @@ fn platform_picker<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element
     let query = form.platform_query.trim().to_lowercase();
     let searching = !query.is_empty();
     let picked = form.platform_filter.as_deref();
-    let found = lookup::platforms_matching(&query);
+    let platforms = app.artwork.platforms();
+    let all: Vec<&GamePlatform> = platforms
+        .and_then(|p| p.as_ref().ok())
+        .map(|list| list.iter().collect())
+        .unwrap_or_default();
+    let found: Vec<&GamePlatform> = all.iter().copied().filter(|p| p.matches(&query)).collect();
     let yours = Form::your_platforms(library, app.settings.platform.as_deref());
     let others_of = |name: &str| {
-        lookup::PLATFORMS
-            .iter()
-            .find(|(n, _)| *n == name)
-            .map_or("", |(_, others)| others)
-            .to_owned()
+        all.iter()
+            .find(|p| p.name == name)
+            .map(|p| p.others())
+            .unwrap_or_default()
     };
     let row_of = |name: String, others: String, on: bool, pick: Option<String>| {
         let mut words = Column::new().spacing(1).push(text(name).size(14));
@@ -575,25 +605,53 @@ fn platform_picker<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element
         if !searching {
             list = list.push(section("All platforms"));
         }
-        for (name, others) in found {
+        for platform in found {
             list = list.push(row_of(
-                name.to_owned(),
-                others.to_owned(),
-                picked == Some(name),
-                Some(name.to_owned()),
+                platform.name.clone(),
+                platform.others(),
+                picked == Some(platform.name.as_str()),
+                Some(platform.name.clone()),
             ));
         }
         any = true;
     }
-    if !any {
-        list = list.push(
-            container(
-                text("No platform called that.")
-                    .size(13.5)
-                    .color(tokens.sub),
-            )
-            .padding(10),
-        );
+    // The list could not be had, or is on its way.
+    match platforms {
+        None => {
+            list = list.push(
+                container(text("Loading the platforms…").size(13.5).color(tokens.sub)).padding(10),
+            );
+        }
+        Some(Err(_)) => {
+            list = list.push(
+                container(
+                    column![
+                        text("Could not load the platforms. Check your connection and try again.")
+                            .size(13.5)
+                            .color(tokens.sub),
+                        ui::labeled_button(
+                            "Try again",
+                            ButtonKind::Outline,
+                            *tokens,
+                            Some(msg(Message::RetryPlatforms)),
+                        ),
+                    ]
+                    .spacing(10),
+                )
+                .padding(10),
+            );
+        }
+        Some(Ok(_)) if !any => {
+            list = list.push(
+                container(
+                    text("No platform called that.")
+                        .size(13.5)
+                        .color(tokens.sub),
+                )
+                .padding(10),
+            );
+        }
+        Some(Ok(_)) => {}
     }
     let search = ui::search_field(
         "Search, e.g. SNES or Genesis",
@@ -629,17 +687,17 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
     } else {
         form.title.as_str()
     };
-    let cover_face = container(
-        text(cover_title)
-            .size(18)
-            .font(font::EXTRABOLD)
-            .color(Color::WHITE),
-    )
-    .width(150)
-    .height(225)
-    .padding(14)
-    .align_y(iced::alignment::Vertical::Bottom)
-    .style(move |_| container::background(tint).border(Border::default().rounded(8)));
+    // The picked cover or the match's own, once fetched; for an entry
+    // edited without a new pick, the cover the library shows.
+    let handle = match form.cover_url() {
+        Some(url) => app.artwork.image(&url),
+        None => form
+            .editing
+            .as_deref()
+            .and_then(|id| library.entry(id))
+            .and_then(|entry| app.artwork.cover(entry)),
+    };
+    let cover_face = ui::titled_cover(handle, tint, cover_title, 150.0, 225.0, 18.0);
     // A click on the cover opens Pick a cover, once there is a match.
     let cover_button = button(cover_face)
         .padding(0)
@@ -893,46 +951,50 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
 /// Pick a cover: the match's own cover first, then the other matches for
 /// the title, each with its year and edition. A click picks at once and
 /// rings the cover; Done closes. Only the cover changes.
-fn cover_dialog<'a>(form: &'a Form, tokens: &Tokens) -> Element<'a, AppMessage> {
+fn cover_dialog<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppMessage> {
     let choices = form.cover_choices();
     let own = form.source.as_deref();
     let tiles = choices.into_iter().map(|found| {
-        let is_own = Some(found.source) == own;
+        let is_own = Some(found.source.as_str()) == own;
+        let id = found.cover_from().to_owned();
         let on = match &form.cover_from {
-            Some(id) => id == found.source,
+            Some(picked) => *picked == id,
             None => is_own,
         };
-        let tint = theme::cover_color(found.source);
+        let tint = theme::cover_color(&found.source);
         let (accent, line) = (tokens.accent, tokens.line);
-        let cover = container(
-            text(found.title)
-                .size(13)
-                .font(font::EXTRABOLD)
-                .color(Color::WHITE),
-        )
-        .width(104)
-        .height(156)
-        .padding(10)
-        .align_y(iced::alignment::Vertical::Bottom)
+        let handle = found
+            .cache_cover_url()
+            .or(found.cover_url.as_deref())
+            .and_then(|url| app.artwork.image(url));
+        let cover = container(ui::titled_cover(
+            handle,
+            tint,
+            &found.title,
+            104.0,
+            156.0,
+            13.0,
+        ))
         .style(move |_| {
-            container::background(tint).border(
+            container::Style::default().border(
                 Border::default()
                     .rounded(8)
                     .width(if on { 3.0 } else { 1.0 })
                     .color(if on { accent } else { line }),
             )
         });
-        let year = found.released.get(..4).unwrap_or_default();
-        let sub = match found.edition {
-            Some(edition) => format!("{year} · {edition}"),
-            None => year.to_owned(),
+        let year = found.year_text();
+        let sub = match &found.edition {
+            Some(edition) if !year.is_empty() => format!("{year} · {edition}"),
+            Some(edition) => edition.clone(),
+            None => year,
         };
         let note = if is_own { "The match's cover" } else { "" };
         button(
             column![
                 cover,
                 container(
-                    text(found.title)
+                    text(found.title.clone())
                         .size(13)
                         .font(font::SEMIBOLD)
                         .wrapping(text::Wrapping::None)
@@ -946,9 +1008,7 @@ fn cover_dialog<'a>(form: &'a Form, tokens: &Tokens) -> Element<'a, AppMessage> 
             .width(104),
         )
         .padding(0)
-        .on_press(msg(Message::PickCover(
-            (!is_own).then(|| found.source.to_owned()),
-        )))
+        .on_press(msg(Message::PickCover((!is_own).then_some(id))))
         .style({
             let text_color = tokens.text;
             move |_, _| button::Style {
@@ -958,7 +1018,7 @@ fn cover_dialog<'a>(form: &'a Form, tokens: &Tokens) -> Element<'a, AppMessage> 
         })
         .focusable(8.0, tokens)
     });
-    let body = column![
+    let mut body = column![
         text(format!(
             "Other matches for \u{201c}{}\u{201d}. Only the cover changes; title, year, description \
              and series stay.",
@@ -969,6 +1029,19 @@ fn cover_dialog<'a>(form: &'a Form, tokens: &Tokens) -> Element<'a, AppMessage> 
         Row::with_children(tiles).spacing(16).wrap().vertical_spacing(16),
     ]
     .spacing(16);
+    if form.choices_loading {
+        body = body.push(text("Looking for other covers…").size(13).color(tokens.sub));
+    } else if form
+        .choices
+        .as_ref()
+        .is_some_and(|c| c.partly_failed() || c.all_failed().is_some())
+    {
+        body = body.push(
+            text("Some lookups could not be reached, so a cover may be missing.")
+                .size(13)
+                .color(tokens.sub),
+        );
+    }
     let footer = row![
         space::horizontal(),
         ui::labeled_button(

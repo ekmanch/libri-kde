@@ -10,12 +10,15 @@ pub mod seasons;
 pub use form::LOOKUP_ID;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+use std::time::Duration;
 
 use iced::widget::text_editor;
 use iced::{Element, Task};
 
 use crate::app::{App, Message as AppMessage};
-use crate::lookup::{self, Match};
+use crate::artwork::Wants;
+use crate::lookup::{self, GamePlatform, Match, SearchResult, Service};
 use crate::model::{
     BookFormat, Date, Entry, EntryKind, EntryStatus, Library, MediaType, PlanItem, Released,
     Season, Series, TagCategory, TagPicks, text,
@@ -58,6 +61,23 @@ pub struct Form {
     pub query: String,
     pub picked: Option<usize>,
     pub source: Option<String>,
+    /// The lookup's answer for the query on the type (and the platform),
+    /// as far as it has come; `searching` while more is on its way.
+    pub results: SearchResult,
+    pub searching: bool,
+    /// Counts the searches started, so a late answer for an earlier query
+    /// is dropped.
+    pub search_generation: u64,
+    /// The match picked, with its details once they came.
+    pub picked_match: Option<Match>,
+    /// The match whose details are being fetched (a spinner on its row).
+    pub fetching: Option<String>,
+    /// Pick a cover's other matches, once asked for.
+    pub choices: Option<SearchResult>,
+    pub choices_loading: bool,
+    /// Work the app starts after this update: the search debounce, the
+    /// details fetch, the cover choices.
+    pub pending: Vec<Pending>,
     pub title: String,
     pub creator: String,
     pub released: String,
@@ -124,6 +144,60 @@ pub struct Form {
     /// The answer, once given: replace (true) or keep both (false).
     pub replace_answer: Option<bool>,
 }
+
+/// Work a form change asks the app to start.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pending {
+    /// Typing paused: the search starts after the debounce, unless more
+    /// typing came.
+    Debounce(u64),
+    Search {
+        generation: u64,
+        query: String,
+        media: MediaType,
+        platform: Option<GamePlatform>,
+    },
+    Details(Box<Match>),
+    CoverChoices {
+        title: String,
+        media: MediaType,
+        creator: Option<String>,
+    },
+}
+
+/// What a form change needs of the app: the library, the day, the default
+/// platform and the lookups.
+pub struct Context<'a> {
+    pub library: &'a Library,
+    pub today: Date,
+    pub platform: Option<&'a str>,
+    pub service: &'a Service,
+    /// IGDB's platforms, once loaded.
+    pub platforms: Option<Vec<GamePlatform>>,
+}
+
+impl Context<'_> {
+    /// The platform a game lookup is narrowed to, as the lookup knows it;
+    /// one by name alone before the list is loaded.
+    fn platform_of(&self, form: &Form) -> Option<GamePlatform> {
+        let name = form.platform_filter.as_deref()?;
+        Some(
+            self.platforms
+                .iter()
+                .flatten()
+                .find(|p| p.name == name)
+                .cloned()
+                .unwrap_or_else(|| GamePlatform {
+                    id: 0,
+                    name: name.to_owned(),
+                    aka: Vec::new(),
+                }),
+        )
+    }
+}
+
+/// Typing pauses this long before the lookup is asked.
+pub const DEBOUNCE: Duration = Duration::from_millis(400);
 
 /// Saving music that overlaps what is saved.
 #[derive(Debug, Clone)]
@@ -251,6 +325,25 @@ pub enum Message {
     PickPlatform(Option<String>),
     /// "Try again" in the lookup pane.
     RetryLookup,
+    /// "Try again" in the platform picker.
+    RetryPlatforms,
+    /// The debounce after typing ran out.
+    Debounce(u64),
+    /// The lookup answered, in part or in full.
+    SearchStep {
+        generation: u64,
+        result: SearchResult,
+    },
+    /// A picked match's details came.
+    Details {
+        source: String,
+        result: Result<Box<Match>, lookup::Failure>,
+    },
+    /// Pick a cover's other matches came.
+    CoverChoices {
+        title: String,
+        result: SearchResult,
+    },
     Edit(String),
     /// The details' "+ Tag": the tag picker alone.
     EditTags(String),
@@ -352,6 +445,17 @@ impl Form {
             query: String::new(),
             picked: None,
             source: None,
+            results: SearchResult {
+                complete: true,
+                ..SearchResult::default()
+            },
+            searching: false,
+            search_generation: 0,
+            picked_match: None,
+            fetching: None,
+            choices: None,
+            choices_loading: false,
+            pending: Vec::new(),
             title: String::new(),
             creator: String::new(),
             released: String::new(),
@@ -449,24 +553,200 @@ impl Form {
     }
 
     /// The lookup's results for the current query and type.
-    pub fn matches(&self) -> Vec<&'static Match> {
-        lookup::search_on(self.media, &self.query, self.platform_filter.as_deref())
+    pub fn matches(&self) -> &[Match] {
+        &self.results.matches
+    }
+
+    /// The match the form was filled from, while its id is the form's.
+    pub fn own_match(&self) -> Option<&Match> {
+        self.picked_match
+            .as_ref()
+            .filter(|m| Some(m.source.as_str()) == self.source.as_deref())
     }
 
     /// The matches whose covers Pick a cover offers: the match's own
-    /// first, then the other matches for the title.
-    pub fn cover_choices(&self) -> Vec<&'static Match> {
-        let own = self
-            .source
-            .as_deref()
-            .and_then(|source| lookup::CATALOG.iter().find(|m| m.source == source));
-        own.into_iter()
-            .chain(lookup::cover_choices(
-                self.media,
+    /// first, then the other matches for the title, one of each image.
+    pub fn cover_choices(&self) -> Vec<Match> {
+        let own = self.own_match().cloned();
+        let own_url = own
+            .as_ref()
+            .and_then(|m| m.cache_cover_url().map(str::to_owned));
+        let others = self
+            .choices
+            .iter()
+            .flat_map(|r| r.matches.iter())
+            .filter(|m| Some(m.source.as_str()) != self.source.as_deref())
+            .filter(|m| m.cache_cover_url().is_none() || m.cache_cover_url() != own_url.as_deref())
+            .cloned();
+        own.into_iter().chain(others).collect()
+    }
+
+    /// The image the cover spot shows: a picked cover's, else the match's
+    /// own; `None` for an entry whose cover comes from the resolver.
+    pub fn cover_url(&self) -> Option<String> {
+        if let Some(cover_from) = &self.cover_from {
+            return self
+                .cover_choices()
+                .iter()
+                .find(|m| m.cover_from() == cover_from)
+                .and_then(|m| m.cache_cover_url().map(str::to_owned));
+        }
+        self.own_match()
+            .and_then(|m| m.cache_cover_url().map(str::to_owned))
+    }
+
+    /// The pane's state from the search's answer: looking up while nothing
+    /// has come, else what the answer says.
+    pub fn lookup_state(&self) -> lookup::LookupState {
+        if self.query.trim().is_empty() {
+            return lookup::LookupState::Results;
+        }
+        if self.searching && self.results.matches.is_empty() {
+            return lookup::LookupState::Loading;
+        }
+        self.results.state()
+    }
+
+    /// Asks the lookups for the query on the type (and the platform): at
+    /// once from the fake, after the debounce from the providers, unless
+    /// the answer is remembered from this session. The rows on screen stay
+    /// while a refined query is on its way.
+    fn search(&mut self, ctx: &Context) {
+        self.search_generation += 1;
+        self.fetching = None;
+        let query = self.query.trim().to_owned();
+        if query.is_empty() {
+            self.results = SearchResult {
+                complete: true,
+                ..SearchResult::default()
+            };
+            self.searching = false;
+            return;
+        }
+        let platform = ctx.platform_of(self);
+        if ctx.service.is_instant() {
+            self.results = ctx.service.search(&query, self.media, platform.as_ref());
+            self.searching = false;
+            return;
+        }
+        let key = Service::key(&query, self.media, platform.as_ref());
+        if let Some(cached) = ctx.service.cached(&key) {
+            self.results = cached;
+            self.searching = false;
+            return;
+        }
+        self.searching = true;
+        self.pending.push(Pending::Debounce(self.search_generation));
+    }
+
+    /// The debounce ran out with the query unchanged: the search starts.
+    fn start_search(&mut self, generation: u64, ctx: &Context) {
+        if generation != self.search_generation || self.query.trim().is_empty() {
+            return;
+        }
+        self.pending.push(Pending::Search {
+            generation,
+            query: self.query.trim().to_owned(),
+            media: self.media,
+            platform: ctx.platform_of(self),
+        });
+    }
+
+    /// An answer for the current search. A match picked from an early step
+    /// (an Apple row before Open Library answered) becomes the complete
+    /// answer's row of the same book.
+    fn searched(&mut self, generation: u64, result: SearchResult, ctx: &Context) {
+        if generation != self.search_generation {
+            return;
+        }
+        self.searching = !result.complete;
+        self.results = result;
+        if let Some(picked) = self.picked_match.clone()
+            && self.results.complete
+            && !self
+                .results
+                .matches
+                .iter()
+                .any(|m| m.source == picked.source)
+            && let Some(source) = ctx.service.source_of(&picked.source)
+            && let Some(same) = source.same_match(&picked, &self.results.matches)
+        {
+            self.picked = self
+                .results
+                .matches
+                .iter()
+                .position(|m| m.source == same.source);
+            self.source = Some(same.source.clone());
+            self.take_lookup_fields(&same, true);
+            self.picked_match = Some(same.clone());
+            self.suggest(&same, ctx.library);
+        } else {
+            self.picked = self.picked_match.as_ref().and_then(|p| {
+                self.results
+                    .matches
+                    .iter()
+                    .position(|m| m.source == p.source)
+            });
+        }
+    }
+
+    /// A match picked: the form takes it, and its details are fetched
+    /// (at once from the fake).
+    fn pick(&mut self, found: Match, ctx: &Context) {
+        if self.editing.is_some() {
+            self.refill(&found, ctx.library);
+        } else {
+            self.fill(&found, ctx.library, ctx.platform);
+        }
+        self.picked_match = Some(found.clone());
+        self.choices = None;
+        self.choices_loading = false;
+        if ctx.service.is_instant() {
+            if let Some(source) = ctx.service.source_of(&found.source)
+                && let Ok(full) = source.details(&found)
+            {
+                self.apply_details(&full, ctx.library);
+            }
+            return;
+        }
+        self.fetching = Some(found.source.clone());
+        self.pending.push(Pending::Details(Box::new(found)));
+    }
+
+    /// The details of the picked match: what the search left out.
+    fn apply_details(&mut self, full: &Match, library: &Library) {
+        if Some(full.source.as_str()) != self.source.as_deref() {
+            return;
+        }
+        self.take_lookup_fields(full, true);
+        self.picked_match = Some(full.clone());
+        self.suggest(full, library);
+    }
+
+    /// Opens Pick a cover and asks for the other matches once.
+    fn open_cover(&mut self, ctx: &Context) {
+        if self.title.trim().is_empty() || self.source.is_none() {
+            return;
+        }
+        self.cover_dialog = true;
+        if self.choices.is_some() || self.choices_loading {
+            return;
+        }
+        let creator = Some(self.creator.trim().to_owned()).filter(|c| !c.is_empty());
+        if ctx.service.is_instant() {
+            self.choices = Some(ctx.service.cover_choices(
                 self.title.trim(),
-                self.source.as_deref(),
-            ))
-            .collect()
+                self.media,
+                creator.as_deref(),
+            ));
+            return;
+        }
+        self.choices_loading = true;
+        self.pending.push(Pending::CoverChoices {
+            title: self.title.trim().to_owned(),
+            media: self.media,
+            creator,
+        });
     }
 
     /// The platforms "Your platforms" lists: the default from Settings,
@@ -492,44 +772,132 @@ impl Form {
     }
 
     /// Replaces the lookup's fields with a match's ("Look up again"): the
-    /// creator, the date, the description, the kind and the platforms;
-    /// the title, note, status, tags and formats stay. New tags are
-    /// offered, and a show whose seasons are all manual gets the match's.
+    /// creator, the date, the description, the pages, the kind and the
+    /// platforms, where the match has them; the title, note, status, tags
+    /// and formats stay. New tags are offered, and a show whose seasons
+    /// are all manual gets the match's.
     fn refill(&mut self, found: &Match, library: &Library) {
-        self.source = Some(found.source.to_owned());
-        self.creator = found.creator.to_owned();
-        self.released = found.released.to_owned();
-        self.description = text_editor::Content::with_text(found.description);
-        if self.media == MediaType::Music {
-            self.kind = found.kind.unwrap_or(EntryKind::Album);
+        self.source = Some(found.source.clone());
+        self.take_lookup_fields(found, true);
+        self.suggest(found, library);
+        self.fetched = true;
+    }
+
+    /// The fields a match fills: with `keep`, a field the match has
+    /// nothing for keeps the form's value (Look up again, the details
+    /// after a pick); without, it is cleared (a new entry from a pick).
+    fn take_lookup_fields(&mut self, found: &Match, keep: bool) {
+        match &found.creator {
+            Some(creator) => self.creator = creator.clone(),
+            None if !keep => self.creator.clear(),
+            None => {}
         }
-        for platform in found.platforms {
+        match found.released {
+            Some(released) => self.released = released.to_string(),
+            None if !keep => self.released.clear(),
+            None => {}
+        }
+        if !found.description.is_empty() || !keep {
+            self.description = text_editor::Content::with_text(&found.description);
+        }
+        if self.media == MediaType::Music {
+            if let Some(kind @ (EntryKind::Album | EntryKind::Song)) = found.kind {
+                self.kind = kind;
+            }
+            if let Some(album) = &found.album {
+                self.album = album.clone();
+            }
+        }
+        if self.media == MediaType::Anime
+            && let Some(kind @ (EntryKind::Series | EntryKind::Movie)) = found.kind
+        {
+            self.anime_kind = Some(kind);
+        }
+        if !keep {
+            self.platforms.clear();
+        }
+        for platform in &found.platforms {
             let platform = text::normalize_platform(platform);
             if !self.platforms.contains(&platform) {
                 self.platforms.push(platform);
             }
         }
-        if self.media == MediaType::Shows && self.seasons.iter().all(|s| s.manual == Some(true)) {
-            self.seasons = vec![SeasonDraft {
-                released: found.released.to_owned(),
-                manual: None,
-                ..SeasonDraft::new(1)
-            }];
+        match found.pages {
+            Some(pages) => self.pages = pages.to_string(),
+            None if !keep => self.pages.clear(),
+            None => {}
         }
-        self.suggest(found, library);
-        self.fetched = true;
+        match &found.series {
+            Some(series) => {
+                self.series_name = series.name.clone();
+                self.series_number = series.number.map(|n| n.to_string()).unwrap_or_default();
+            }
+            None if !keep => {
+                self.series_name.clear();
+                self.series_number.clear();
+            }
+            None => {}
+        }
+        // A show's seasons from the lookup, with their dates: every one
+        // when the entry is new or its seasons are all by hand; else
+        // Season 1 on the match's date for a show filled in from the
+        // search alone.
+        if self.uses_seasons() {
+            let listed = Form::listable(&found.seasons);
+            let by_hand = self.seasons.iter().all(|s| s.manual == Some(true));
+            if !listed.is_empty() && (!keep || by_hand || self.seasons.is_empty()) {
+                self.seasons = listed
+                    .iter()
+                    .map(|season| SeasonDraft {
+                        released: season.released.map(|r| r.to_string()).unwrap_or_default(),
+                        manual: None,
+                        ..SeasonDraft::new(season.season)
+                    })
+                    .collect();
+            } else if listed.is_empty() && (!keep || by_hand) && found.released.is_some() {
+                self.seasons = vec![SeasonDraft {
+                    released: found.released.map(|r| r.to_string()).unwrap_or_default(),
+                    manual: None,
+                    ..SeasonDraft::new(1)
+                }];
+            }
+        }
+    }
+
+    /// The seasons of a lookup's list a form keeps: every numbered season
+    /// with a date, in number order, without status or marks. Specials
+    /// (season 0) and seasons not dated yet are left out.
+    pub fn listable(fetched: &[Season]) -> Vec<Season> {
+        let mut seasons: Vec<Season> = fetched
+            .iter()
+            .filter(|s| s.season > 0 && s.released.is_some())
+            .map(|s| Season {
+                season: s.season,
+                released: s.released,
+                status: None,
+                fresh: None,
+                manual: None,
+            })
+            .collect();
+        seasons.sort_by_key(|s| s.season);
+        seasons
     }
 
     /// Ticks the match's tags the library has and offers the rest: the
-    /// genres, the top billed cast as actors (a person the library has
-    /// under another people category is offered with the new role), the
-    /// language (never English, never Japanese on an anime) and the
-    /// streaming platform (movies and shows; a show's network only when
-    /// the library has its tag).
+    /// genres in the library's spelling, the creator (an author, a
+    /// director, a studio; a brand studio over its director), the top
+    /// billed cast as actors (a person the library has under another
+    /// people category is offered with the new role), the language (never
+    /// English, never Japanese on an anime) and the streaming platform
+    /// (movies and shows; a show's network only when the library has its
+    /// tag).
     fn suggest(&mut self, found: &Match, library: &Library) {
         self.suggested.clear();
         let offer = |form: &mut Form, tag: String, category: Option<TagCategory>| {
-            if form.tags.contains(&tag) || form.suggested.iter().any(|s| s.tag == tag) {
+            if tag.is_empty()
+                || form.tags.contains(&tag)
+                || form.suggested.iter().any(|s| s.tag == tag)
+            {
                 return;
             }
             let categories = library.categories_of(&tag);
@@ -544,28 +912,47 @@ impl Form {
                 _ => form.suggested.push(Suggestion { tag, category }),
             }
         };
-        for tag in found.tags {
-            offer(self, (*tag).to_owned(), None);
+        for tag in found.tags.iter().take(lookup::text::MAX_BOOK_TAGS) {
+            offer(self, lookup::text::canonical_tag(tag), None);
         }
-        for name in found.cast {
-            offer(self, text::slugify(name), Some(TagCategory::Actors));
+        if matches!(self.media, MediaType::Movies | MediaType::Shows) {
+            for name in found.cast.iter().take(MAX_ACTOR_TAGS) {
+                offer(self, text::slugify(name), Some(TagCategory::Actors));
+            }
         }
-        if let Some(language) = found.language
-            && language != "english"
-            && !(self.media == MediaType::Anime && language == "japanese")
+        for (tag, category) in creator_tags(self.media, found.creator.as_deref(), &found.companies)
+        {
+            offer(self, tag, Some(category));
+        }
+        if let Some(language) =
+            lookup::text::language_suggestion(self.media, found.language.as_deref())
         {
             offer(self, language.to_owned(), Some(TagCategory::Languages));
         }
-        if let Some(network) = found.network
-            && TagCategory::Streaming.used_for(self.media)
-        {
-            let known = library
-                .categories_of(network)
-                .contains(&TagCategory::Streaming);
-            if known {
-                self.tick(network, Some(TagCategory::Streaming), library);
-            } else if self.media == MediaType::Movies {
-                offer(self, network.to_owned(), Some(TagCategory::Streaming));
+        if TagCategory::Streaming.used_for(self.media) {
+            let streaming = library
+                .tags
+                .get(&TagCategory::Streaming)
+                .cloned()
+                .unwrap_or_default();
+            let tag = match self.media {
+                MediaType::Shows => found
+                    .network
+                    .as_deref()
+                    .and_then(|n| lookup::text::streaming_tag(n, &streaming))
+                    .filter(|t| streaming.contains(t)),
+                MediaType::Movies => found
+                    .companies
+                    .iter()
+                    .find_map(|c| lookup::text::streaming_tag(c, &streaming)),
+                _ => None,
+            };
+            if let Some(tag) = tag {
+                if streaming.contains(&tag) {
+                    self.tick(&tag, Some(TagCategory::Streaming), library);
+                } else {
+                    offer(self, tag, Some(TagCategory::Streaming));
+                }
             }
         }
     }
@@ -608,26 +995,10 @@ impl Form {
     /// starts with the default platform picked when it came out on it,
     /// and with every platform otherwise.
     fn fill(&mut self, found: &Match, library: &Library, default_platform: Option<&str>) {
-        self.source = Some(found.source.to_owned());
-        self.title = found.title.to_owned();
-        self.creator = found.creator.to_owned();
-        self.released = found.released.to_owned();
-        self.description = text_editor::Content::with_text(found.description);
-        self.kind = found.kind.unwrap_or(EntryKind::Album);
-        // A show from the lookup starts with Season 1 on the match's date
-        // (phase 4 lists its TMDB seasons here).
-        if self.media == MediaType::Shows {
-            self.seasons = vec![SeasonDraft {
-                released: found.released.to_owned(),
-                manual: None,
-                ..SeasonDraft::new(1)
-            }];
-        }
-        self.platforms = found
-            .platforms
-            .iter()
-            .map(|p| text::normalize_platform(p))
-            .collect();
+        self.source = Some(found.source.clone());
+        self.title = found.title.clone();
+        self.kind = EntryKind::Album;
+        self.take_lookup_fields(found, false);
         // The platform the lookup was narrowed to is picked; else the
         // default from Settings when the game came out on it; else all.
         let searched = self
@@ -1095,7 +1466,11 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                 today: app.today,
             });
         }
-        Message::RetryLookup => app.lookup = lookup::LookupState::Results,
+        Message::RetryLookup => {
+            app.lookup = lookup::LookupState::Results;
+            return form_update(app, Message::RetryLookup);
+        }
+        Message::RetryPlatforms => app.artwork.retry_platforms(),
         Message::KeepSeason => {
             if let Some(Dialog::SeasonDropped { id, season }) = app.dialog.take() {
                 app.apply(Operation::KeepSeason { id, season });
@@ -1164,37 +1539,199 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                 app.apply(operation);
             }
         }
-        message => {
-            let library = app.repo.library().clone();
-            let today = app.today;
-            let platform = app.settings.platform.clone();
-            // The details' picker takes the picker's messages the same way;
-            // it never saves from here.
-            let Some(Dialog::Form(form) | Dialog::Tags(form)) = &mut app.dialog else {
-                return Task::none();
-            };
-            if let Some(operations) =
-                update_form(form, message, &library, today, platform.as_deref())
-            {
-                let selected = operations.iter().find_map(|op| match op {
-                    Operation::AddEntry(entry) | Operation::UpdateEntry(entry) => {
-                        Some(entry.id.clone())
-                    }
-                    _ => None,
-                });
-                app.dialog = None;
-                for operation in operations {
-                    app.apply(operation);
-                }
-                app.library.selected = selected;
-            }
-        }
+        message => return form_update(app, message),
     }
     // Popovers draw above everything, so none stays open under a dialog.
     if app.dialog.is_some() {
         app.library.close_popovers();
     }
     Task::none()
+}
+
+/// A message for the open form (or the details' picker, which takes the
+/// picker's messages the same way and never saves from here): the change,
+/// then the work it asked for as tasks. Saving an entry filled from a pick
+/// forgets its cover record, so the next look resolves through the source.
+fn form_update(app: &mut App, message: Message) -> Task<AppMessage> {
+    let library = app.repo.library().clone();
+    let platform = app.settings.platform.clone();
+    let platforms = app
+        .artwork
+        .platforms()
+        .and_then(|p| p.as_ref().ok())
+        .cloned();
+    let service = app.lookups.clone();
+    let ctx = Context {
+        library: &library,
+        today: app.today,
+        platform: platform.as_deref(),
+        service: &service,
+        platforms,
+    };
+    let Some(Dialog::Form(form) | Dialog::Tags(form)) = &mut app.dialog else {
+        return Task::none();
+    };
+    let outcome = update_form(form, message, &ctx);
+    let pending = std::mem::take(&mut form.pending);
+    let picked = form.picked_match.is_some() || form.fetched;
+    if let Some(operations) = outcome {
+        let selected = operations.iter().find_map(|op| match op {
+            Operation::AddEntry(entry) | Operation::UpdateEntry(entry) => Some(entry.id.clone()),
+            _ => None,
+        });
+        app.dialog = None;
+        for operation in operations {
+            app.apply(operation);
+        }
+        if picked && let Some(id) = &selected {
+            app.artwork.forget(id);
+        }
+        app.library.selected = selected;
+    }
+    if app.dialog.is_some() {
+        app.library.close_popovers();
+    }
+    start_pending(&service, pending)
+}
+
+/// The tasks for the work a form change asked for.
+fn start_pending(service: &Arc<Service>, pending: Vec<Pending>) -> Task<AppMessage> {
+    let tasks = pending.into_iter().map(|work| match work {
+        Pending::Debounce(generation) => {
+            Task::perform(async { tokio::time::sleep(DEBOUNCE).await }, move |_| {
+                AppMessage::Entry(Message::Debounce(generation))
+            })
+        }
+        Pending::Search {
+            generation,
+            query,
+            media,
+            platform,
+        } => {
+            let service = service.clone();
+            crate::app::steps(move |step: &mut dyn FnMut(SearchResult)| {
+                service.search_steps(&query, media, platform.as_ref(), step);
+            })
+            .map(move |result| AppMessage::Entry(Message::SearchStep { generation, result }))
+        }
+        Pending::Details(found) => {
+            let service = service.clone();
+            let source = found.source.clone();
+            Task::perform(
+                crate::app::blocking(move || {
+                    Ok(match service.source_of(&found.source) {
+                        Some(provider) => provider.details(&found).map(Box::new),
+                        None => Ok(found),
+                    })
+                }),
+                move |result| {
+                    AppMessage::Entry(Message::Details {
+                        source: source.clone(),
+                        result: result.unwrap_or_else(|e| Err(lookup::Failure::other(e))),
+                    })
+                },
+            )
+        }
+        Pending::CoverChoices {
+            title,
+            media,
+            creator,
+        } => {
+            let service = service.clone();
+            let asked = title.clone();
+            Task::perform(
+                crate::app::blocking(move || {
+                    Ok(service.cover_choices(&title, media, creator.as_deref()))
+                }),
+                move |result| {
+                    AppMessage::Entry(Message::CoverChoices {
+                        title: asked.clone(),
+                        result: result.unwrap_or_default(),
+                    })
+                },
+            )
+        }
+    });
+    Task::batch(tasks)
+}
+
+/// How many of the billed cast the form suggests, at most.
+const MAX_ACTOR_TAGS: usize = 3;
+
+/// The tags for an entry of `media` whose creator field reads `creator`,
+/// found through a lookup that named `companies`: the author, director or
+/// studio in its group, or the brand studio whose films carry its tag
+/// rather than the director's (#pixar). Nothing for music, since an artist
+/// is not a tag.
+fn creator_tags(
+    media: MediaType,
+    creator: Option<&str>,
+    companies: &[String],
+) -> Vec<(String, TagCategory)> {
+    let group = match media {
+        MediaType::Books => TagCategory::Authors,
+        MediaType::Movies | MediaType::Shows => TagCategory::Directors,
+        MediaType::Games | MediaType::Anime => TagCategory::Studios,
+        MediaType::Music => return Vec::new(),
+    };
+    if let Some(brand) = lookup::text::brand_studio_of(companies.iter().map(String::as_str)) {
+        return vec![(brand.to_owned(), TagCategory::Studios)];
+    }
+    let mut tags: Vec<(String, TagCategory)> = Vec::new();
+    for name in lookup::text::split_creators(creator.unwrap_or_default()) {
+        let house = lookup::text::house_of(&name);
+        let tag = house.map_or_else(|| text::slugify(&name), str::to_owned);
+        if tag.is_empty() || tags.iter().any(|(t, _)| *t == tag) {
+            continue;
+        }
+        tags.push((
+            tag,
+            if house.is_some() {
+                TagCategory::Studios
+            } else {
+                group
+            },
+        ));
+    }
+    tags
+}
+
+/// What the open form draws from the lookups: the matches' thumbnails,
+/// the cover spot's image, Pick a cover's thumbnails and, with a game's
+/// platform in play, IGDB's platform list.
+pub fn wanted(app: &App, wants: &mut Wants) {
+    let Some(Dialog::Form(form)) = &app.dialog else {
+        return;
+    };
+    for found in form.matches() {
+        if let Some(url) = &found.cover_url {
+            wants.images.push(url.clone());
+        }
+    }
+    match form.cover_url() {
+        Some(url) => wants.images.push(url),
+        None => {
+            if let Some(id) = &form.editing {
+                wants.covers.push(id.clone());
+            }
+        }
+    }
+    if form.cover_dialog {
+        for found in form.cover_choices() {
+            if let Some(url) = found.cover_url.as_deref().or(found.cache_cover_url()) {
+                wants.images.push(url.to_owned());
+            }
+        }
+    }
+    if form.media == MediaType::Games && (form.platform_open || form.platform_filter.is_some()) {
+        wants.platforms = true;
+    }
+}
+
+/// Whether the form waits on a lookup, so the window ticks for its
+/// spinner.
+pub fn is_busy(app: &App) -> bool {
+    matches!(&app.dialog, Some(Dialog::Form(form)) if form.fetching.is_some() || form.searching || form.choices_loading)
 }
 
 /// The details' picker's Done: the tags the form holds go on the entry
@@ -1254,18 +1791,17 @@ fn new_item(entry: String, done: bool) -> PlanItem {
 }
 
 /// Changes the form; on Save, returns the operations that make the change.
-/// `platform` is the default platform from Settings → Games.
-fn update_form(
-    form: &mut Form,
-    message: Message,
-    library: &Library,
-    today: crate::model::Date,
-    platform: Option<&str>,
-) -> Option<Vec<Operation>> {
+fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<Operation>> {
+    let library = ctx.library;
+    let today = ctx.today;
     match message {
         Message::Type(media) => {
             form.media = media;
             form.picked = None;
+            form.picked_match = None;
+            form.fetching = None;
+            form.choices = None;
+            form.choices_loading = false;
             // The lookup id, a picked cover and the platform go with the
             // type.
             form.cover_from = None;
@@ -1273,18 +1809,27 @@ fn update_form(
             form.platform_open = false;
             form.ebook_note = false;
             form.ensure_season();
+            form.search(ctx);
         }
         Message::Query(query) => {
             form.query = query;
             form.picked = None;
+            form.search(ctx);
         }
+        Message::Debounce(generation) => form.start_search(generation, ctx),
+        Message::SearchStep { generation, result } => form.searched(generation, result, ctx),
+        Message::RetryLookup => form.search(ctx),
         Message::Pick(index) => {
-            if let Some(found) = form.matches().get(index).copied() {
+            if let Some(found) = form.matches().get(index).cloned() {
                 form.picked = Some(index);
-                if form.editing.is_some() {
-                    form.refill(found, library);
-                } else {
-                    form.fill(found, library, platform);
+                form.pick(found, ctx);
+            }
+        }
+        Message::Details { source, result } => {
+            if form.fetching.as_deref() == Some(source.as_str()) {
+                form.fetching = None;
+                if let Ok(full) = result {
+                    form.apply_details(&full, library);
                 }
             }
         }
@@ -1297,15 +1842,18 @@ fn update_form(
                 .iter()
                 .find(|p| form.platforms_on.contains(*p))
                 .cloned();
+            form.search(ctx);
         }
         Message::CancelLookAgain => {
             form.again = false;
             form.picked = None;
             form.platform_open = false;
         }
-        Message::OpenCover => {
-            if !form.title.trim().is_empty() && form.source.is_some() {
-                form.cover_dialog = true;
+        Message::OpenCover => form.open_cover(ctx),
+        Message::CoverChoices { title, result } => {
+            form.choices_loading = false;
+            if title == form.title.trim() {
+                form.choices = Some(result);
             }
         }
         Message::CloseCover => form.cover_dialog = false,
@@ -1320,6 +1868,7 @@ fn update_form(
             form.platform_open = false;
             form.platform_query.clear();
             form.picked = None;
+            form.search(ctx);
         }
         Message::MovePick(step) => {
             let count = form.matches().len();
@@ -1327,13 +1876,16 @@ fn update_form(
                 let next = form.picked.map_or(0, |i| {
                     (i as isize + step).rem_euclid(count as isize) as usize
                 });
-                return update_form(form, Message::Pick(next), library, today, platform);
+                return update_form(form, Message::Pick(next), ctx);
             }
         }
         Message::Manual => {
             form.query.clear();
             form.picked = None;
+            form.picked_match = None;
+            form.fetching = None;
             form.source = None;
+            form.search(ctx);
         }
         Message::Title(title) => form.title = title,
         Message::Creator(creator) => form.creator = creator,
@@ -1575,7 +2127,7 @@ fn update_form(
         Message::ReplaceKeepBoth | Message::ReplaceConfirm => {
             form.replace = None;
             form.replace_answer = Some(matches!(message, Message::ReplaceConfirm));
-            return update_form(form, Message::Save, library, today, platform);
+            return update_form(form, Message::Save, ctx);
         }
         Message::ReplaceCancel => {
             form.replace = None;
@@ -2627,5 +3179,144 @@ mod tests {
         send(&mut app, draft("Rewatch in October."));
         send(&mut app, Message::SaveNote);
         assert_eq!(*app.repo.library(), before);
+    }
+
+    use crate::lookup::Source as _;
+
+    /// A source that answers as the real ones do, from a task: nothing is
+    /// instant, so the form goes through the debounce and the messages.
+    struct Slow;
+
+    impl lookup::Source for Slow {
+        fn id(&self) -> &'static str {
+            "slow"
+        }
+        fn name(&self) -> &'static str {
+            "Slow"
+        }
+        fn types(&self) -> &'static [MediaType] {
+            &[MediaType::Movies]
+        }
+        fn search(&self, query: &str, media: MediaType, _: usize) -> lookup::Reply<lookup::Hits> {
+            Ok(lookup::Hits::of(lookup::fake::search(media, query, None)))
+        }
+        fn match_title(
+            &self,
+            _: &str,
+            _: MediaType,
+            _: Option<u16>,
+            _: Option<&str>,
+        ) -> lookup::Reply<Option<Match>> {
+            Ok(None)
+        }
+        fn details(&self, found: &Match) -> lookup::Reply<Match> {
+            Ok(Match {
+                creator: Some("Someone Else".into()),
+                tags: vec!["Science Fiction".into()],
+                ..found.clone()
+            })
+        }
+        fn cover_url(&self, _: &str, _: MediaType) -> lookup::Reply<Option<String>> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn a_real_lookup_waits_for_the_debounce_and_takes_the_answers_in_order() {
+        let mut app = app();
+        app.lookups = Arc::new(Service::with(vec![Arc::new(Slow)], false));
+        send(&mut app, Message::Add);
+        send(&mut app, Message::Query("du".into()));
+        send(&mut app, Message::Query("dune".into()));
+        let f = form(&app);
+        assert!(f.searching && f.matches().is_empty());
+        assert_eq!(f.lookup_state(), lookup::LookupState::Loading);
+        let generation = f.search_generation;
+        assert_eq!(generation, 2, "one search per keystroke, each debounced");
+
+        // The first debounce ran out after more typing: nothing starts.
+        send(&mut app, Message::Debounce(1));
+        assert!(form(&app).pending.is_empty());
+        // An answer for an earlier search is dropped; the current one shows.
+        let stale = lookup::fake::Fake
+            .search("castlevania", MediaType::Games, 10)
+            .unwrap();
+        send(
+            &mut app,
+            Message::SearchStep {
+                generation: 1,
+                result: SearchResult {
+                    matches: stale.matches,
+                    asked: 1,
+                    complete: true,
+                    ..SearchResult::default()
+                },
+            },
+        );
+        assert!(form(&app).matches().is_empty());
+        let hits = lookup::fake::search(MediaType::Movies, "dune", None);
+        send(
+            &mut app,
+            Message::SearchStep {
+                generation,
+                result: SearchResult {
+                    matches: hits,
+                    asked: 1,
+                    complete: true,
+                    ..SearchResult::default()
+                },
+            },
+        );
+        let f = form(&app);
+        assert_eq!(f.matches().len(), 2);
+        assert!(!f.searching);
+        assert_eq!(f.lookup_state(), lookup::LookupState::Results);
+
+        // A pick fills the form at once and fetches the details; they
+        // replace the lookup's fields when they come.
+        send(&mut app, Message::Pick(0));
+        let f = form(&app);
+        assert_eq!(f.title, "Dune");
+        assert_eq!(f.creator, "Denis Villeneuve");
+        assert_eq!(f.fetching.as_deref(), Some("tmdb:movie:438631"));
+        let full = Slow.details(&f.picked_match.clone().unwrap()).unwrap();
+        send(
+            &mut app,
+            Message::Details {
+                source: "tmdb:movie:438631".into(),
+                result: Ok(Box::new(full)),
+            },
+        );
+        let f = form(&app);
+        assert!(f.fetching.is_none());
+        assert_eq!(f.creator, "Someone Else");
+        assert!(
+            f.tags.contains(&"scifi".to_owned()),
+            "the genre takes the library's spelling"
+        );
+        assert_eq!(f.title, "Dune", "the details never change the title");
+    }
+
+    #[test]
+    fn the_wants_follow_the_form_and_the_inspector() {
+        let mut app = app();
+        send(&mut app, Message::Add);
+        send(&mut app, Message::Type(MediaType::Games));
+        send(&mut app, Message::Query("castlevania".into()));
+        let wants = crate::screens::wanted(&app);
+        assert_eq!(wants.images.len(), 4, "a thumbnail per match");
+        assert!(!wants.platforms);
+        send(&mut app, Message::TogglePlatformPicker);
+        assert!(crate::screens::wanted(&app).platforms);
+        send(&mut app, Message::Close);
+
+        app.library.selected = Some("music/dirt-alice-in-chains".into());
+        let wants = crate::screens::wanted(&app);
+        assert_eq!(wants.tracks, ["music/dirt-alice-in-chains"]);
+        assert!(
+            wants
+                .covers
+                .contains(&"music/dirt-alice-in-chains".to_owned())
+        );
     }
 }

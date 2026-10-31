@@ -27,6 +27,8 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 - `preferences`: the display preferences file, what it holds and when it is written.
 - `connection`: `connection.json`, the repo, branch, file, local mode and the token's expiry.
 - `github`: the REST client (blocking `ureq`, run on tokio's blocking pool from a Task) and the git blob sha.
+- `lookup`: the providers (`tmdb`, `igdb`, `anilist`, `deezer`, `books` for Open Library with Apple Books and Google Books, `wikidata`), one `Source` each behind the `Service` that asks the right ones for a type and merges their answers; `http` (one client and rate limiter per provider), `text` (the phone's title, book and tag rules), `keys` (`secrets.json`), `store` (the cache files) and `fake` (the fixture catalog for the tests and mock runs).
+- `artwork`: covers, artist photos, episodes, series parts and track lists as the app keeps them between frames: the screens say what they show (`screens::wanted`), it queues what is missing, runs a few lookups at a time and remembers the answers (`artwork.json`, the image files).
 - `sync`: the three-way sync engine (pure: requests out, answers in), `pending.json` and `sync.json`.
 - `wallet`: the token in KDE Wallet over kwalletd's D-Bus interface.
 - `clock`: timestamps as GitHub and the sync files write them, local dates, "5 minutes ago".
@@ -41,7 +43,8 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 
 - Tick off items in `TODO.md` as they are completed. Add new items there when you find missing work, instead of doing unplanned work silently.
 - The files on this computer, all written atomically through `storage`: the library `~/.local/share/libri/library.json` with `connection.json`, `pending.json` and `sync.json` beside it, and the preferences `~/.config/libri/preferences.json`. The token is in KDE Wallet only. The tests never touch any of them: `App::new` keeps everything in memory, and file tests use `storage::TempDir`.
-- Networking is GitHub's REST API alone, through `github::Client`, and only from the sync engine's requests and the setup. The sync logic lives in `sync::Engine` and is tested with scripted answers, never against GitHub; the live checks run by hand against `ekmanch/libri-scratch`, never `ekmanch/library`.
+- The lookup keys come from `secrets.json` (the phone's file: `TMDB_READ_TOKEN`, `IGDB_CLIENT_ID`, `IGDB_CLIENT_SECRET`, optional `GOOGLE_BOOKS_KEY`), read at start from `~/.config/libri/secrets.json`, else the checkout's `secrets.json` (git-ignored), each overridable by the environment variable of the same name. Without a key that provider is "not set up"; AniList, Open Library, Apple Books, Deezer and Wikidata need none. What the lookups fetch lives under `~/.cache/libri/`: `images/`, `artwork.json`, `tracks/`, `episodes/`, `series/`, `igdb_token.json`, `igdb_platforms.json`, `anime_links.json`; a cleared cache only means asking again. A mock run and the tests use the fake and never touch the network.
+- Networking is GitHub's REST API through `github::Client` (the sync engine's requests and the setup) and the lookup providers through `lookup::http` (`src/lookup/`), run on tokio's blocking pool from Tasks; `artwork::Artwork` queues what the screens show (`screens::wanted`) a few at a time. The sync logic lives in `sync::Engine` and is tested with scripted answers, never against GitHub; the live checks run by hand against `ekmanch/libri-scratch`, never `ekmanch/library`.
 - UI text uses American spelling ("color", "favorite") and sentence case.
 - All `library.json` text goes through `model::codec`, which writes the same bytes as the phone's `lib/data/library_codec.dart`. Keep `assets/fixtures/library.json` byte-identical to the phone's copy; the round-trip test checks it is canonical.
 - Ask before adding a crate. Say what it is for and what the alternative is.
@@ -60,7 +63,8 @@ LIBRI_FIRST_RUN=1 cargo run        # no repository yet (the splash's first-run l
 LIBRI_SETUP=branch cargo run       # with LIBRI_SCREEN=setup: welcome, connect, branch, file, create, existing, done
 LIBRI_LONG_LISTS=1 cargo run       # section headers and the jump rail on every list, and tag groups of four or more as long groups, since the fixture is short
 LIBRI_DROPPED=shows/stranger-things-2016:1 cargo run  # the "season no longer listed" dialog for a show's season
-LIBRI_LOOKUP=offline cargo run     # the Add dialog's lookup state: loading, offline, not-set-up, partial, partial-none
+LIBRI_LOOKUP=offline cargo run     # forces the Add dialog's lookup state for a look: loading, offline, not-set-up, failed, partial, partial-none (a mock run searches the fixture catalog in src/lookup/fake.rs; a real run asks the providers)
+cargo test --test lookup_live -- --ignored --nocapture --test-threads=1   # asks the real providers once each (AniList, Open Library, Apple Books, Deezer, Wikidata; TMDB and IGDB with their keys); serial, since Wikidata rate-limits bursts
 ICED_BACKEND=tiny-skia cargo run   # software renderer
 ICED_PRESENT_MODE=fifo cargo run   # iced's FIFO default instead of the app's mailbox; reproduces the 2026-10-24 desktop freeze on KWin 6.8 with NVIDIA (DESIGN.md "Presentation mode")
 WGPU_BACKEND=gl cargo run          # OpenGL through EGL instead of Vulkan
