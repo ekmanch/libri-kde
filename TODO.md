@@ -183,7 +183,7 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [x] Settings › Library source shows the repository, branch and file but no longer edits them: a change goes through the setup (Pick a file from the not-found card, Disconnect and connect again). Decided 2026-10-31: the values stay read-only, and "Change repository or file…" opens the setup's Connect step with the connection and the token kept; Back returns to Settings (DESIGN.md "Reconnecting from Settings")
 - [x] "Pick a file" from Library not found drops the queue with the old engine, so edits queued for the missing file stay only in the local file and are lost when the new file's copy replaces it. Match the phone's "Different file: which library?" there. Done 2026-10-31: another file asks "Which library?" (this computer's uploaded over it, with the unsaved count, or GitHub's), the same file keeps the queue, a gone branch or repo opens at that step (`App::connect`, `settings::reconnect`)
 - [x] A spinning ring for the setup's busy line; iced 0.14 has no animation for a border, so it stands still (a canvas, or the splash's tick). Done 2026-10-31: `ui::spinner`, 24 SVG frames turned by the splash's tick while the wizard is busy
-- [ ] The daily token warning is checked only at start; Libri left open past midnight waits for the next start
+- [x] The daily token warning is checked only at start; Libri left open past midnight waits for the next start. Done 2026-10-31: checked with every sync round (the five-minute check, Sync now, the window coming back), never over the setup
 
 ## Phase 4: Lookups and images
 

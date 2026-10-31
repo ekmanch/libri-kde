@@ -701,8 +701,8 @@ impl App {
     }
 
     /// The token from KDE Wallet at the start: the client and the engine
-    /// for the saved connection, the token warning if it is due, and the
-    /// first check. A fresh connection without a base downloads GitHub's
+    /// for the saved connection, and the first check (which warns about
+    /// the token if that is due). A fresh connection without a base downloads GitHub's
     /// copy behind the splash.
     fn connect_with(&mut self, token: String) -> Task<Message> {
         let Some(connection) = &self.connection else {
@@ -719,7 +719,6 @@ impl App {
         self.loading = !engine.has_base();
         self.engine = Some(engine);
         self.engine_generation += 1;
-        self.warn_about_the_token();
         self.refresh_sync_state();
         if self.loading {
             self.screen = Screen::Splash;
@@ -798,9 +797,15 @@ impl App {
     }
 
     /// Sync now, Retry, the check every five minutes and the window coming
-    /// back: a round without waiting for the debounce.
+    /// back: a round without waiting for the debounce. The token warning
+    /// is checked with every round, so a Libri left open past midnight
+    /// warns on the day's first check instead of waiting for the next
+    /// start; not over the setup, where a token may be on its way in.
     pub fn sync_now(&mut self) -> Task<Message> {
         self.save_due = None;
+        if self.screen != Screen::Setup {
+            self.warn_about_the_token();
+        }
         self.begin(Kind::Sync)
     }
 
@@ -1991,5 +1996,39 @@ mod tests {
         );
         assert_eq!(pending(&app), 0);
         assert_eq!(app.engine.as_ref().unwrap().target().file, "backup.json");
+    }
+
+    #[test]
+    fn the_token_warning_is_checked_with_every_round_not_only_at_start() {
+        let mut app = App::new(Screen::Library);
+        let _ = app.connect(
+            scratch("library.json"),
+            "github_pat_test".into(),
+            client(),
+            None,
+        );
+        app.screen = Screen::Library;
+        app.connection.as_mut().unwrap().token_expires =
+            Some(Timestamp(Timestamp::now().0 + 3 * 24 * 3600));
+        assert!(!app.token_warning);
+        let _ = app.update(Message::Sync(SyncMessage::Now));
+        assert!(app.token_warning, "the five-minute check warns");
+        let today = Timestamp::now().local_date();
+        assert_eq!(
+            app.connection.as_ref().unwrap().token_warned_on,
+            Some(today)
+        );
+        // Later: closed for the rest of the day.
+        app.token_warning = false;
+        let _ = app.update(Message::Sync(SyncMessage::Now));
+        assert!(!app.token_warning);
+        // Over the setup it waits, with a token perhaps on its way in.
+        app.connection.as_mut().unwrap().token_warned_on = None;
+        app.screen = Screen::Setup;
+        let _ = app.update(Message::Sync(SyncMessage::Now));
+        assert!(!app.token_warning);
+        app.screen = Screen::Plans;
+        let _ = app.update(Message::Sync(SyncMessage::Now));
+        assert!(app.token_warning);
     }
 }
