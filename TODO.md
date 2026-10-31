@@ -193,6 +193,7 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [ ] A first track rating could store the Deezer track id as the phone does (`deezer:track:<id>`); `SetTrackRating` carries the title alone, so ratings are matched to the list by title (case, punctuation and edition notes aside), which the phone also falls back to
 - [ ] The fake lookup paints no images, so no capture shows a real cover; look at them with `cargo run` and a connected library
 - [x] Fetched covers drew nothing (the title went, the tint stayed): the files were `<sha1>.img` and iced's decoder picks the format by the extension. Done 2026-10-31: named by the format the bytes start with, old files renamed on the way
+- [x] The sidebar's All reads Home. Done 2026-10-31
 - [x] The tag picker's long group: the dialog grew to the window and the letter rail ran past the list. Done 2026-10-31
 
 ## Phase 5: Packaging

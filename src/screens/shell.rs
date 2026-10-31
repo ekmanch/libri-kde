@@ -133,7 +133,7 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
     for media in kinds {
         let (label, color) = match media {
             Some(media) => (media.label(), tokens.type_color(media)),
-            None => ("All", tokens.sub),
+            None => ("Home", tokens.sub),
         };
         let state = &app.library;
         let selected = on_library
@@ -329,7 +329,7 @@ fn item_label<'a>(label: &'a str, selected: bool, tokens: &Tokens) -> Element<'a
         .into()
 }
 
-/// One sidebar row: 34 px for types, 32 px for tags and the "All" rows.
+/// One sidebar row: 34 px for types, 32 px for tags and the "All plans" and "All tags" rows.
 fn item<'a>(
     content: iced::widget::Row<'a, Message>,
     height: f32,
