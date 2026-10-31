@@ -299,7 +299,7 @@ pub fn wanted(app: &App, wants: &mut Wants) {
     }
     wants.covers.extend(
         state
-            .display_order(library, app.today)
+            .cover_order(library, app.today)
             .into_iter()
             .take(COVERS_AT_A_TIME),
     );
@@ -661,6 +661,27 @@ impl State {
             && browse::groups_series_for(self.status)
             && self.query.trim().is_empty()
             && long
+    }
+
+    /// The covers the list draws, in its order: as [`Self::display_order`],
+    /// but a series folded into one row wants only the part whose cover
+    /// stands for it (the one picked, else the first in the series).
+    pub fn cover_order(&self, library: &Library, today: Date) -> Vec<String> {
+        if self.page.is_none()
+            && !self.is_overview()
+            && self.single().is_some_and(|m| m != MediaType::Music)
+        {
+            let listing = self.listing(library, today);
+            return listing
+                .rows
+                .iter()
+                .map(|row| match row {
+                    Row::Entry(entry) => entry.id.clone(),
+                    Row::Series(group) => group.cover_entry().id.clone(),
+                })
+                .collect();
+        }
+        self.display_order(library, today)
     }
 
     /// The ids in the order the list shows them, for the arrow keys: one
@@ -1035,6 +1056,27 @@ mod tests {
         );
         state.update(Message::ClearTags);
         assert!(state.filter.tag_categories.is_empty());
+    }
+
+    #[test]
+    fn a_folded_series_wants_the_cover_that_stands_for_it() {
+        let library = library();
+        let mut state = State {
+            force_long: true,
+            ..State::default()
+        };
+        state.update(Message::ShowType(Some(MediaType::Movies)));
+        let listing = state.listing(&library, today());
+        let Some(Row::Series(group)) = listing.rows.iter().find(|r| matches!(r, Row::Series(_)))
+        else {
+            panic!("no series row");
+        };
+        let order = state.cover_order(&library, today());
+        assert_eq!(order.len(), listing.rows.len());
+        assert!(order.contains(&group.parts[0].id));
+        for part in &group.parts[1..] {
+            assert!(!order.contains(&part.id));
+        }
     }
 
     #[test]
