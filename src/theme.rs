@@ -206,6 +206,10 @@ pub struct Tokens {
     /// Behind the grouped list's pinned type header: the content pane,
     /// and on Glass nearly solid, so covers never show through it.
     pub pinned: Color,
+    /// The unpinned details panel, a drawer over the list: the content
+    /// pane (nearly solid on Glass), with a shadow to its left.
+    pub drawer: Color,
+    pub drawer_shadow: Color,
     pub accent: Color,
     /// Accent text, icons and outlines.
     pub ink: Color,
@@ -340,6 +344,18 @@ impl Tokens {
             } else {
                 content
             },
+            drawer: if glass {
+                Color {
+                    a: 0.94,
+                    ..hex(0x151515)
+                }
+            } else {
+                content
+            },
+            drawer_shadow: pick(
+                Color::from_rgba8(20, 22, 28, 0.16),
+                Color::from_rgba8(0, 0, 0, 0.55),
+            ),
             accent: accent.fill,
             ink: pick(accent.ink, accent.fill),
             on_accent: pick(hex(0x17181B), hex(0x131416)),

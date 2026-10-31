@@ -17,7 +17,12 @@ fn msg(message: Message) -> AppMessage {
     AppMessage::Library(message)
 }
 
-pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, AppMessage> {
+/// The page's back row, which sits over the list and the details panel
+/// at the content's full width like the toolbar, and its body.
+pub fn view<'a>(
+    app: &'a App,
+    page: &'a Page,
+) -> (Element<'a, AppMessage>, Element<'a, AppMessage>) {
     let tokens = app.tokens();
     let library = app.repo.library();
     let state = &app.library;
@@ -31,7 +36,7 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, AppMessage> {
     let (back_label, kicker, kicker_color, title, line, body): Head<'a> = match page {
         Page::Seasons { id } => {
             let Some(entry) = entry_of(id) else {
-                return missing(&tokens);
+                return (iced::widget::space().into(), missing(&tokens));
             };
             let list = Column::with_children(
                 entry
@@ -55,10 +60,10 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, AppMessage> {
         }
         Page::Season { id, number } => {
             let Some(entry) = entry_of(id) else {
-                return missing(&tokens);
+                return (iced::widget::space().into(), missing(&tokens));
             };
             let Some(season) = entry.season_list().iter().find(|s| s.season == *number) else {
-                return missing(&tokens);
+                return (iced::widget::space().into(), missing(&tokens));
             };
             use crate::artwork::Loaded;
             use crate::lookup::FailureKind;
@@ -135,12 +140,14 @@ pub fn view<'a>(app: &'a App, page: &'a Page) -> Element<'a, AppMessage> {
     ]
     .spacing(6);
     let content = column![header, body].spacing(18).max_width(760);
-    column![
-        container(top).padding(Padding::new(0.0).top(14).left(24).right(24)),
-        ui::scroll(container(content).padding(Padding::new(24.0).top(16))).height(Fill),
-    ]
-    .height(Fill)
-    .into()
+    (
+        container(top)
+            .padding(Padding::new(0.0).top(14).left(24).right(24))
+            .into(),
+        ui::scroll(container(content).padding(Padding::new(24.0).top(16)))
+            .height(Fill)
+            .into(),
+    )
 }
 
 /// A page's parts: the back label, the kicker and its color, the title,

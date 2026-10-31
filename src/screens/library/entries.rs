@@ -630,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_and_closing_details_keeps_the_list_where_it_was() {
+    fn opening_and_closing_details_never_moves_the_list() {
         use iced::advanced::renderer::Headless;
         use iced::advanced::widget::operation::scrollable::{AbsoluteOffset, scroll_to};
         use iced_test::runtime::user_interface::{Cache, UserInterface};
@@ -640,9 +640,13 @@ mod tests {
         )
         .expect("a headless renderer");
         let size = crate::app::WINDOW_SIZE;
-        for view in [View::Grid, View::List, View::Text] {
+        let views = [View::Grid, View::List, View::Text];
+        for (view, pinned) in views.into_iter().flat_map(|v| [(v, true), (v, false)]) {
             let mut app = grouped_app();
             let _ = app.update(msg(Message::SetView(view)));
+            if !pinned {
+                let _ = app.update(msg(Message::TogglePanel));
+            }
             let mut ui = UserInterface::build(app.view(), size, Cache::default(), &mut renderer);
             ui.operate(
                 &renderer,
@@ -664,7 +668,7 @@ mod tests {
                 let mut ui = UserInterface::build(app.view(), size, cache, &mut renderer);
                 let mut offset = ListOffset(None);
                 ui.operate(&renderer, &mut offset);
-                assert_eq!(offset.0, Some(300.0), "{view:?}");
+                assert_eq!(offset.0, Some(300.0), "{view:?}, pinned {pinned}");
                 cache = ui.into_cache();
             }
         }

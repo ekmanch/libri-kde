@@ -351,6 +351,28 @@ fn capture_every_screen() {
                 ));
             }),
         ),
+        // Keyboard and mouse: waiting for a shortcut's new keys, and
+        // keys another shortcut has.
+        (
+            Screen::Settings,
+            ("settings-keys-recording", |app| {
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::Record(libri::keymap::Action::Panel),
+                ));
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-keys-clash", |app| {
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::Record(libri::keymap::Action::Panel),
+                ));
+                let _ = app.update(Message::KeyPressed(
+                    iced::keyboard::Key::Character("k".into()),
+                    iced::keyboard::Modifiers::CTRL,
+                ));
+            }),
+        ),
         (
             Screen::Settings,
             ("settings-licenses", |app| {
@@ -454,13 +476,46 @@ fn capture_every_screen() {
                 )));
             }),
         ),
-        // Home's grid with details open: the shelves scroll sideways at
-        // the start (the fade and › on the right), the side column keeps
-        // its width.
+        // Home with a title selected: its details in the side column where
+        // the plan and Recently added were; nothing else moves. In the list
+        // view they take the right column.
         (
             Screen::Library,
-            ("overview-shelves-open", |app| {
+            ("home-selected", |app| {
                 select(app, "books/project-hail-mary-2021");
+            }),
+        ),
+        (
+            Screen::Library,
+            ("home-list-selected", |app| {
+                let _ = app.update(Message::Library(library::Message::SetView(View::List)));
+                select(app, "books/project-hail-mary-2021");
+            }),
+        ),
+        // The details panel elsewhere: pinned with nothing selected (At a
+        // glance), unpinned with nothing selected (the list at full
+        // width), and the drawer over the grid.
+        (
+            Screen::Library,
+            ("panel-glance", |app| {
+                show_type(app, MediaType::Movies);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("panel-unpinned", |app| {
+                show_type(app, MediaType::Movies);
+                let _ = app.update(Message::Library(library::Message::TogglePanel));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("panel-drawer", |app| {
+                show_type(app, MediaType::Movies);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                let _ = app.update(Message::Library(library::Message::TogglePanel));
+                select(app, BABY);
             }),
         ),
         // The cover viewer from details, and Pick a cover beside it.
@@ -965,7 +1020,7 @@ fn capture_every_screen() {
             change(&mut app);
             // Settings is taller than the window; capture all of it.
             let size = if screen == Screen::Settings {
-                iced::Size::new(app::WINDOW_SIZE.width, 2500.0)
+                iced::Size::new(app::WINDOW_SIZE.width, 3200.0)
             } else {
                 app::WINDOW_SIZE
             };

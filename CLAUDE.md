@@ -30,6 +30,7 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 - `lookup`: the providers (`tmdb`, `igdb`, `anilist`, `deezer`, `books` for Open Library with Apple Books and Google Books, `wikidata`), one `Source` each behind the `Service` that asks the right ones for a type and merges their answers; `http` (one client and rate limiter per provider), `text` (the phone's title, book and tag rules), `keys` (`secrets.json`), `store` (the cache files) and `fake` (the fixture catalog for the tests and mock runs).
 - `artwork`: covers, artist photos, episodes, series parts and track lists as the app keeps them between frames: the screens say what they show (`screens::wanted`), it queues what is missing, runs a few lookups at a time and remembers the answers (`artwork.json`, the image files).
 - `sync`: the three-way sync engine (pure: requests out, answers in), `pending.json` and `sync.json`.
+- `keymap`: the keyboard shortcuts Settings can change, their defaults and the fixed keys.
 - `wallet`: the token in KDE Wallet over kwalletd's D-Bus interface.
 - `clock`: timestamps as GitHub and the sync files write them, local dates, "5 minutes ago".
 - `fixtures`: the bundled fixture library.

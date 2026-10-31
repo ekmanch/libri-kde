@@ -63,7 +63,11 @@ pub fn view<'a>(app: &'a App, plan: &'a Plan) -> Element<'a, AppMessage> {
         .as_deref()
         .and_then(|id| app.repo.library().entry(id))
     {
-        Some(selected) => Some(entry::details::view(app, selected, Some(plan))),
+        Some(selected) => Some(
+            container(entry::details::view(app, selected, Some(plan)))
+                .width(entry::details::WIDTH)
+                .into(),
+        ),
         None if !on_collection => Some(pool(app, plan, style.covers, &tokens)),
         None => None,
     };
@@ -856,7 +860,6 @@ fn pool<'a>(
         ]
         .into()
     }));
-    let content_bg = tokens.content;
     container(
         column![
             column![
@@ -879,6 +882,5 @@ fn pool<'a>(
     .width(entry::details::WIDTH)
     .height(Fill)
     .padding([22, 20])
-    .style(move |_| container::background(content_bg))
     .into()
 }

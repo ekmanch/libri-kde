@@ -1,5 +1,5 @@
-//! Settings (docs/DESIGN.md 4.5): Appearance, Library source, Plans, Games
-//! and About, with an "On this page" rail. Changes apply right away; they
+//! Settings (docs/DESIGN.md 4.5): Appearance, Library source, Plans,
+//! Games, Keyboard and mouse, and About, with an "On this page" rail. Changes apply right away; they
 //! are app state until phase 2 saves them.
 
 use iced::alignment::Vertical;
@@ -12,6 +12,7 @@ use super::library::SidebarTags;
 use super::setup;
 use super::shell::shell;
 use crate::app::{App, Message as AppMessage};
+use crate::keymap::{Action, Combo};
 use crate::model::MediaType;
 use crate::settings::{Missing, PLATFORMS, SyncState, ThemeChoice};
 use crate::theme::{self, Accent, Theme, Tokens, font};
@@ -19,7 +20,14 @@ use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
 /// The settings' scroll area, for the rail's jumps.
 pub const SCROLL_ID: &str = "settings-scroll";
-pub const SECTIONS: [&str; 5] = ["Appearance", "Library source", "Plans", "Games", "About"];
+pub const SECTIONS: [&str; 6] = [
+    "Appearance",
+    "Library source",
+    "Plans",
+    "Games",
+    "Keyboard and mouse",
+    "About",
+];
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct State {
@@ -33,6 +41,10 @@ pub struct State {
     pub disconnect: Option<DisconnectStep>,
     /// The open-source licenses dialog.
     pub licenses_open: bool,
+    /// The shortcut waiting for its new keys, and why the last keys
+    /// pressed for it were refused.
+    pub recording: Option<Action>,
+    pub key_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +110,11 @@ pub enum Message {
     Timeline(bool),
     Seasonal(bool),
     Platform(Option<String>),
+    /// A shortcut's keys clicked: waits for new ones, or stops waiting.
+    Record(Action),
+    /// The keys pressed while waiting: Esc alone cancels.
+    Recorded(Combo),
+    ResetKeys,
 }
 
 fn msg(message: Message) -> AppMessage {
@@ -176,6 +193,33 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::Timeline(on) => app.settings.timeline = on,
         Message::Seasonal(on) => app.settings.seasonal = on,
         Message::Platform(platform) => app.settings.platform = platform,
+        Message::Record(action) => {
+            page.recording = (page.recording != Some(action)).then_some(action);
+            page.key_warning = None;
+        }
+        Message::Recorded(combo) => {
+            let Some(action) = page.recording else {
+                return Task::none();
+            };
+            let cancel = combo.key == "Esc" && !combo.ctrl && !combo.alt && !combo.shift;
+            if cancel {
+                page.recording = None;
+                page.key_warning = None;
+                return Task::none();
+            }
+            match app.keymap.bind(action, combo) {
+                Ok(()) => {
+                    page.recording = None;
+                    page.key_warning = None;
+                }
+                Err(why) => page.key_warning = Some(why),
+            }
+        }
+        Message::ResetKeys => {
+            app.keymap.reset();
+            page.recording = None;
+            page.key_warning = None;
+        }
     }
     Task::none()
 }
@@ -215,11 +259,14 @@ fn reconnect(app: &mut App, step: setup::Step) -> Task<AppMessage> {
     Task::none()
 }
 
-/// Esc: closes the licenses or the Disconnect dialog. False when neither
-/// was open.
+/// Esc: closes the licenses or the Disconnect dialog, or stops waiting
+/// for a shortcut's keys. False when none of them was open.
 pub fn dismiss_top(app: &mut App) -> bool {
     let page = &mut app.settings_page;
-    std::mem::take(&mut page.licenses_open) || page.disconnect.take().is_some()
+    page.key_warning = None;
+    std::mem::take(&mut page.licenses_open)
+        || page.disconnect.take().is_some()
+        || page.recording.take().is_some()
 }
 
 pub fn view(app: &App) -> Element<'_, AppMessage> {
@@ -241,6 +288,7 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
             source(app, &tokens),
             plans(app, &tokens),
             games(app, &tokens),
+            keys(app, &tokens),
             about(app, &tokens),
         ],
         |measure| msg(Message::Measured(measure.tops)),
@@ -1027,6 +1075,130 @@ fn games<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
         0.0,
         44.0,
     )
+}
+
+/// The mouse's actions, which follow KDE's conventions and stay as they
+/// are.
+const MOUSE: [(&str, &str); 7] = [
+    ("Show only this type", "Click"),
+    ("Add or remove a type from the list", "Ctrl+click"),
+    ("Check or uncheck a plan item", "Ctrl+click"),
+    ("Close details: click the open title again", "Click"),
+    ("Tag menu (categories, move to group)", "Right-click"),
+    ("Back", "Mouse back button"),
+    ("Forward", "Mouse forward button"),
+];
+
+/// Keyboard and mouse: every shortcut, changed by clicking its keys and
+/// pressing new ones; the mouse's actions read-only.
+fn keys<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let page = &app.settings_page;
+    let t = *tokens;
+    let line = move || ui::rule(t.line);
+    let shortcuts = Column::with_children(Action::ALL.into_iter().map(|action| {
+        let recording = page.recording == Some(action);
+        let shown = if recording {
+            "Press keys…".to_owned()
+        } else {
+            app.keymap.combo(action).to_string()
+        };
+        let mut words = column![text(action.label()).size(14)]
+            .spacing(2)
+            .width(Fill);
+        if recording && let Some(why) = &page.key_warning {
+            words = words.push(text(why.clone()).size(12.5).color(t.danger));
+        }
+        let keys = button(
+            container(ui::mono(shown, 12.5, t.text))
+                .center_y(Fill)
+                .align_x(Center)
+                .width(Fill),
+        )
+        .width(iced::Shrink)
+        .height(30)
+        .padding([0, 10])
+        .on_press(msg(Message::Record(action)))
+        .style(move |_, status| button::Style {
+            background: if recording {
+                Some(Background::Color(t.accent.scale_alpha(0.12)))
+            } else if matches!(status, button::Status::Hovered) {
+                Some(Background::Color(t.hover))
+            } else {
+                None
+            },
+            border: Border::default().rounded(7).width(1).color(if recording {
+                t.accent
+            } else {
+                t.line
+            }),
+            text_color: t.text,
+            ..button::Style::default()
+        })
+        .focusable(7.0, tokens);
+        column![
+            row![words, container(keys).width(iced::Shrink).padding([6, 0])]
+                .spacing(12)
+                .align_y(Center)
+                .height(iced::Length::Shrink),
+            line()
+        ]
+        .into()
+    }));
+    let mouse = Column::with_children(MOUSE.into_iter().map(|(what, how)| {
+        let how = container(ui::mono(how, 12.0, t.sub))
+            .padding([3, 8])
+            .style(move |_| {
+                container::Style::default()
+                    .border(Border::default().rounded(6).width(1).color(t.line))
+            });
+        column![
+            row![text(what).size(14).width(Fill), how]
+                .spacing(12)
+                .align_y(Center)
+                .height(42),
+            line()
+        ]
+        .into()
+    }));
+    let reset: Element<'a, AppMessage> = if app.keymap.is_changed() {
+        button(text("Reset to defaults").size(13).font(font::SEMIBOLD))
+            .padding(0)
+            .on_press(msg(Message::ResetKeys))
+            .style(move |_, _| button::Style {
+                text_color: t.ink,
+                ..button::Style::default()
+            })
+            .focusable(6.0, tokens)
+    } else {
+        space().into()
+    };
+    let title = row![
+        text("Keyboard and mouse").size(20).font(font::EXTRABOLD),
+        space::horizontal(),
+        reset
+    ]
+    .align_y(Center);
+    container(
+        column![
+            title,
+            setting(
+                "Keyboard",
+                "Click a shortcut, then press the new keys. Esc cancels.".into(),
+                container(shortcuts.width(Fill)).width(Fill),
+                tokens,
+            ),
+            setting(
+                "Mouse",
+                "These follow the usual KDE conventions and can’t be changed.".into(),
+                container(mouse.width(Fill)).width(Fill),
+                tokens,
+            ),
+        ]
+        .spacing(18),
+    )
+    .width(Fill)
+    .padding(Padding::new(0.0).bottom(44))
+    .into()
 }
 
 /// A 32 px pill: the accent when picked, an outline otherwise.

@@ -8,7 +8,7 @@ use super::{Listing, Message, MusicTab, Popup, SEARCH_ID, TOP_TAGS, View};
 use crate::app::{App, Message as AppMessage};
 use crate::browse::{self, Decade, Sort};
 use crate::model::{Entry, MediaType};
-use crate::screens::{entry, shell};
+use crate::screens::shell;
 use crate::theme::{Tokens, font};
 use crate::ui::{self, Align, ButtonKind, FocusExt, Icon, Popover};
 
@@ -26,14 +26,12 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         Some(media) => search_hint(media),
         None => "Search everything",
     };
-    // With the details pane open on a small window the toolbar gives way:
-    // a shorter search, then icons and short labels alone.
-    let side = if app.library.selected.is_some() {
-        entry::details::WIDTH
-    } else {
-        0.0
-    };
-    let density = Density::for_width(shell::content_width(app, side));
+    // The toolbar spans the content's full width whatever the details
+    // panel does; on a small window it gives way: a shorter search, then
+    // icons and short labels alone. The panel button takes 48 px.
+    let toggle = super::panel::toggle(app);
+    let room = if toggle.is_some() { 48.0 } else { 0.0 };
+    let density = Density::for_width(shell::content_width(app, 0.0) - room);
     let search = container(ui::search_field(
         placeholder,
         &state.query,
@@ -127,6 +125,7 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         filter,
         sort,
         views,
+        row(toggle),
         ui::add_button(
             if density == Density::Tight { "" } else { "Add" },
             &tokens,

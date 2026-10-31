@@ -204,6 +204,10 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 - [x] The cover viewer blew the cached cover up past its size (TMDB's w342, IGDB's 264 × 374 at 800 × 1200 pixels). Done 2026-10-31: the viewer opens with the cached cover in a frame of the image's own shape and fetches a sharper copy of the same image (TMDB w780, IGDB 1080p else the 2× cover, Deezer 1000², Apple 1200²) when it opens or the pointer goes over the cover in details; a copy that does not come leaves the cached cover
 - [x] A long list fetched only its first 80 covers, so scrolling down showed tinted tiles until an entry was opened. Done 2026-10-31: the list asks for the covers on screen first, then a screen below and above (at most 80), and the rest follow the scroll; the music artist list too
 
+- [x] Canvas revision (2026-10-31): the details panel pinned or as a drawer, Keyboard and mouse in Settings (Home's layout stays as it was, against the canvas)
+- [x] Details panel: Home keeps its layout, a selection's details taking the place of its right column (the shelves no longer scroll sideways); elsewhere pinned with At a glance, or unpinned with a drawer over the list, per view key, by the panel button or Ctrl+I; Esc and Back close it first; a narrow window unpins it. Done 2026-10-31
+- [x] Settings › Keyboard and mouse: shortcuts changed by pressing new keys, clashes refused, Reset to defaults, saved in `preferences.json`; the mouse's actions read-only. Done 2026-10-31
+
 ## Phase 5: Packaging
 
 - [ ] `.desktop` file and app icon from `assets/logos/libri`; a local PKGBUILD so Shelly can install it

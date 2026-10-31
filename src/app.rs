@@ -15,6 +15,7 @@ use crate::connection::{Connection, ConnectionFile, Target};
 use crate::decoration::Decoration;
 use crate::github;
 use crate::history::{Direction, History, Place};
+use crate::keymap::{Action, Combo, Keymap};
 use crate::lookup::{self, Service};
 use crate::model::{Date, codec};
 use crate::preferences::{Preferences, PreferencesFile};
@@ -201,6 +202,8 @@ pub struct App {
     pub today: Date,
     /// The keyboard modifiers held now, for Ctrl+click.
     pub modifiers: keyboard::Modifiers,
+    /// The keyboard shortcuts, as Settings › Keyboard and mouse set them.
+    pub keymap: Keymap,
     pub repo: Box<dyn LibraryRepository>,
     pub library: library::State,
     /// The entry dialog open over the window: Add or Edit, Delete, Add to
@@ -265,6 +268,10 @@ pub enum Message {
     /// at the start, then on every change.
     SystemTheme(ThemeMode),
     Key(KeyPress),
+    /// A key press no widget took, turned into a shortcut by the keymap
+    /// (`App::shortcut`), or into a new shortcut while Settings records
+    /// one.
+    KeyPressed(Key, keyboard::Modifiers),
     Modifiers(keyboard::Modifiers),
     /// The mouse's Back or Forward button, or Alt+Left and Alt+Right.
     History(Direction),
@@ -349,9 +356,9 @@ impl Message {
                 message,
                 L::Scrolled(_)
                     | L::HomeScrolled(_)
-                    | L::ShelfScrolled(..)
-                    | L::NudgeShelf(..)
                     | L::GroupsMeasured(_)
+                    | L::TogglePanel
+                    | L::AnotherPick
                     | L::Toggle(_)
                     | L::ClosePopup
                     | L::SeasonMenu(_)
@@ -616,6 +623,7 @@ impl App {
             token_warning: false,
             today: Date::today(),
             modifiers: keyboard::Modifiers::default(),
+            keymap: Keymap::default(),
             repo: Box::new(repo),
             library: library::State::default(),
             dialog: None,
@@ -1013,6 +1021,13 @@ impl App {
     /// new one. The splash and the setup are not places to come back to.
     /// The title bar follows the theme.
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let message = match message {
+            Message::KeyPressed(key, modifiers) => match self.shortcut(&key, modifiers) {
+                Some(message) => message,
+                None => return Task::none(),
+            },
+            message => message,
+        };
         if self.library.note_draft.is_some() && message.leaves_note() {
             entry::save_note(self);
         }
@@ -1023,21 +1038,9 @@ impl App {
         let selected = self.library.selected.clone();
         let page = self.library.page.is_some();
         let task = self.handle(message);
-        // Home's shelves keep the selected cover in view.
-        let task = if self.library.selected != selected {
+        if self.library.selected != selected {
             self.library.selection_moved();
-            Task::batch([task, library::follow_selection(self)])
-        } else {
-            task
-        };
-        // The list keeps the entry opened or closed in view, whatever the
-        // pane's coming or going did to the grid's columns.
-        let task = match self.library.selected.as_deref().or(selected.as_deref()) {
-            Some(id) if self.library.selected != selected && self.screen == Screen::Library => {
-                Task::batch([task, library::reveal(&self.library, id)])
-            }
-            _ => task,
-        };
+        }
         // Back from a page, the list or Home is where it was left.
         let task = if page && self.library.page.is_none() && self.screen == Screen::Library {
             Task::batch([task, library::restore_scroll(&self.library)])
@@ -1071,6 +1074,66 @@ impl App {
             .map(Message::Lookup)
     }
 
+    /// What a key press does: a shortcut from the keymap, else one of the
+    /// fixed keys (Enter, Ctrl+Enter, Tab, the arrow keys). While Settings
+    /// records a shortcut, the press is the new one.
+    fn shortcut(&self, key: &Key, modifiers: keyboard::Modifiers) -> Option<Message> {
+        let combo = Combo::of(key, modifiers)?;
+        if self.screen == Screen::Settings && self.settings_page.recording.is_some() {
+            return Some(Message::Settings(screens::settings::Message::Recorded(
+                combo,
+            )));
+        }
+        let free = self.dialog.is_none() && self.plan_dialog.is_none() && !self.token_warning;
+        if let Some(action) = self.keymap.action_for(&combo) {
+            return match action {
+                Action::Search => Some(Message::Key(KeyPress::Search)),
+                Action::Add => Some(Message::Key(KeyPress::New)),
+                Action::Edit => Some(Message::Key(KeyPress::Edit)),
+                Action::Close => Some(Message::Key(KeyPress::Escape)),
+                Action::Back => Some(Message::History(Direction::Back)),
+                Action::Forward => Some(Message::History(Direction::Forward)),
+                Action::Panel => (free && self.screen == Screen::Library)
+                    .then_some(Message::Library(library::Message::TogglePanel)),
+                Action::Settings => (free
+                    && matches!(
+                        self.screen,
+                        Screen::Library | Screen::Plans | Screen::Settings
+                    ))
+                .then_some(Message::Show(Screen::Settings)),
+            };
+        }
+        let press = match key {
+            Key::Named(Named::Enter) if modifiers.command() => KeyPress::Save,
+            Key::Named(Named::Enter) => KeyPress::Enter,
+            Key::Named(Named::ArrowUp) => KeyPress::Up,
+            Key::Named(Named::ArrowDown) => KeyPress::Down,
+            Key::Named(Named::Tab) => KeyPress::Tab {
+                back: modifiers.shift(),
+            },
+            _ => return None,
+        };
+        Some(Message::Key(press))
+    }
+
+    /// Esc and Back on the library close the details panel first: a part
+    /// picked from a series goes back to the series, anything else in the
+    /// panel closes (the drawer goes, Home's plan comes back). None when
+    /// the panel holds nothing.
+    fn close_panel(&mut self) -> Option<Task<Message>> {
+        if self.screen != Screen::Library {
+            return None;
+        }
+        if self.library.back_series().is_some() {
+            return Some(self.handle(Message::Library(library::Message::BackToSeries)));
+        }
+        if self.library.pane_open() {
+            self.library.update(library::Message::ClosePanel);
+            return Some(Task::none());
+        }
+        None
+    }
+
     /// Where the app is, for the history.
     pub fn place(&self) -> Place {
         Place {
@@ -1095,6 +1158,11 @@ impl App {
                 }
             }
             _ => {
+                if direction == Direction::Back
+                    && let Some(task) = self.close_panel()
+                {
+                    return task;
+                }
                 if let Some(place) = self.history.go(direction, self.place()) {
                     self.screen = place.screen;
                     self.library.go_to(place.library);
@@ -1107,7 +1175,13 @@ impl App {
 
     fn handle(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Show(screen) => self.screen = screen,
+            Message::Show(screen) => {
+                if screen != Screen::Settings {
+                    self.settings_page.recording = None;
+                    self.settings_page.key_warning = None;
+                }
+                self.screen = screen;
+            }
             Message::History(direction) => return self.travel(direction),
             Message::SetTheme(choice) => self.settings.theme = choice,
             Message::SetAccent(accent) => self.settings.accent = accent,
@@ -1211,8 +1285,10 @@ impl App {
                     if !entry::dismiss_top(self)
                         && !plans::dismiss_top(self)
                         && !screens::settings::dismiss_top(self)
+                        && !self.library.dismiss_top()
+                        && let Some(task) = self.close_panel()
                     {
-                        self.library.dismiss_top();
+                        return task;
                     }
                 }
             },
@@ -1288,6 +1364,8 @@ impl App {
                 }
             }
             Message::Modifiers(modifiers) => self.modifiers = modifiers,
+            // Turned into what it does at the top of `update`.
+            Message::KeyPressed(..) => {}
             Message::Library(library::Message::JumpToGroup(index)) => {
                 if let Some(&top) = self.library.group_tops.get(index) {
                     let offset = scrollable::AbsoluteOffset {
@@ -1331,8 +1409,18 @@ impl App {
                 if message.shows_library() {
                     self.screen = Screen::Library;
                 }
-                if let library::Message::NudgeShelf(section, direction) = message {
-                    return library::nudge(self, section, direction);
+                // Pinning or unpinning changes the list's width; the
+                // selected entry stays in view. A narrow window has no
+                // choice to make.
+                if matches!(message, library::Message::TogglePanel) {
+                    if library::panel(self) == library::Panel::Home || library::narrow(self) {
+                        return Task::none();
+                    }
+                    self.library.update(message);
+                    return match self.library.selected.as_deref() {
+                        Some(id) => library::reveal(&self.library, id),
+                        None => Task::none(),
+                    };
                 }
                 self.library.update(message);
             }
@@ -1374,6 +1462,11 @@ impl App {
             Screen::Library => {
                 let order = self.library.display_order(self.repo.library(), self.today);
                 self.library.selected = next_in(&order, self.library.selected.as_deref(), step);
+                // The arrow keys keep the selection in view; a click never
+                // moves the list.
+                if let Some(id) = self.library.selected.as_deref() {
+                    return library::reveal(&self.library, id);
+                }
             }
             Screen::Plans => plans::step_selection(self, step),
             _ => {}
@@ -1401,29 +1494,7 @@ impl App {
         let keys = keyboard::listen().filter_map(|event| match event {
             keyboard::Event::ModifiersChanged(modifiers) => Some(Message::Modifiers(modifiers)),
             keyboard::Event::KeyPressed { key, modifiers, .. } => {
-                let press = match key {
-                    Key::Named(Named::ArrowLeft) if modifiers.alt() => {
-                        return Some(Message::History(Direction::Back));
-                    }
-                    Key::Named(Named::ArrowRight) if modifiers.alt() => {
-                        return Some(Message::History(Direction::Forward));
-                    }
-                    Key::Named(Named::Escape) => KeyPress::Escape,
-                    Key::Named(Named::Enter) if modifiers.command() => KeyPress::Save,
-                    Key::Named(Named::Enter) => KeyPress::Enter,
-                    Key::Named(Named::ArrowUp) => KeyPress::Up,
-                    Key::Named(Named::ArrowDown) => KeyPress::Down,
-                    Key::Character(c) if c == "e" && modifiers.is_empty() => KeyPress::Edit,
-                    Key::Named(Named::Tab) => KeyPress::Tab {
-                        back: modifiers.shift(),
-                    },
-                    Key::Character(c) if modifiers.command() && (c == "k" || c == "f") => {
-                        KeyPress::Search
-                    }
-                    Key::Character(c) if modifiers.command() && c == "n" => KeyPress::New,
-                    _ => return None,
-                };
-                Some(Message::Key(press))
+                Some(Message::KeyPressed(key, modifiers))
             }
             _ => None,
         });
@@ -1840,6 +1911,54 @@ mod tests {
         let _ = app.update(Message::Modifiers(keyboard::Modifiers::empty()));
         let _ = app.update(click());
         assert!(!done(&app) && app.plans.selected.as_deref() == Some(id));
+    }
+
+    #[test]
+    fn a_shortcut_changed_in_settings_works_at_once() {
+        use crate::keymap::Action;
+        use screens::settings::Message as S;
+        let press = |app: &mut App, c: &str, modifiers: keyboard::Modifiers| {
+            let _ = app.update(Message::KeyPressed(Key::Character(c.into()), modifiers));
+        };
+        let mut app = App::new(Screen::Settings);
+        let _ = app.update(Message::Settings(S::Record(Action::Panel)));
+        // Ctrl+K belongs to Search: refused with a note, still waiting.
+        press(&mut app, "k", keyboard::Modifiers::CTRL);
+        assert_eq!(
+            app.settings_page.key_warning.as_deref(),
+            Some("Ctrl+K is already used by “Search”.")
+        );
+        assert_eq!(app.settings_page.recording, Some(Action::Panel));
+        press(&mut app, "p", keyboard::Modifiers::CTRL);
+        assert_eq!(app.settings_page.recording, None);
+        assert_eq!(app.keymap.combo(Action::Panel).to_string(), "Ctrl+P");
+
+        // Esc alone stops waiting and changes nothing.
+        let _ = app.update(Message::Settings(S::Record(Action::Edit)));
+        let _ = app.update(Message::KeyPressed(
+            Key::Named(Named::Escape),
+            keyboard::Modifiers::empty(),
+        ));
+        assert_eq!(app.settings_page.recording, None);
+        assert_eq!(app.keymap.combo(Action::Edit).to_string(), "E");
+
+        // Ctrl+, opens Settings; on the library Ctrl+P now pins and
+        // unpins, Ctrl+I does nothing.
+        let _ = app.update(Message::Show(Screen::Library));
+        let _ = app.update(Message::Library(library::Message::ShowType(Some(
+            crate::model::MediaType::Movies,
+        ))));
+        press(&mut app, "i", keyboard::Modifiers::CTRL);
+        assert!(app.library.pinned());
+        press(&mut app, "p", keyboard::Modifiers::CTRL);
+        assert!(!app.library.pinned());
+        press(&mut app, ",", keyboard::Modifiers::CTRL);
+        assert_eq!(app.screen, Screen::Settings);
+        let _ = app.update(Message::History(Direction::Back));
+        assert_eq!(app.screen, Screen::Library, "a place the history keeps");
+
+        let _ = app.update(Message::Settings(S::ResetKeys));
+        assert!(!app.keymap.is_changed());
     }
 
     #[test]

@@ -181,7 +181,7 @@ pub fn view<'a>(app: &'a App, open: &OpenSeries) -> Option<Element<'a, AppMessag
     .spacing(HEADING_GAP);
 
     let body = column![header, progress, parts_list].spacing(GAP);
-    Some(details::pane(body.into(), None, &tokens))
+    Some(details::pane(body.into(), None))
 }
 
 /// Series cover: the covers of the parts in the library, the picked one

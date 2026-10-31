@@ -10,6 +10,7 @@ pub mod decoration;
 pub mod fixtures;
 pub mod github;
 pub mod history;
+pub mod keymap;
 pub mod lookup;
 pub mod model;
 pub mod music;

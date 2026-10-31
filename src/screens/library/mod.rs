@@ -5,6 +5,7 @@ mod entries;
 mod music;
 mod overview;
 mod page;
+mod panel;
 mod reveal;
 mod tags;
 mod toolbar;
@@ -26,7 +27,7 @@ use crate::settings::Source;
 use crate::tags::{PickerMessage, PickerState};
 use crate::ui;
 
-pub use overview::{ShelfScroll, follow_selection, nudge};
+pub use panel::{Panel, narrow, panel};
 
 /// The search field's id, for Ctrl+K and Ctrl+F.
 pub const SEARCH_ID: &str = "library-search";
@@ -151,6 +152,11 @@ pub struct State {
     pub sort: Sort,
     pub query: String,
     pub views: HashMap<ViewKey, View>,
+    /// The details panel unpinned (`false`), per view key like the view;
+    /// a key not in it is pinned. Home always has the panel.
+    pub panels: HashMap<ViewKey, bool>,
+    /// Turns At a glance's "Pick something": "Another" moves it on.
+    pub pick: u64,
     /// The selected entry's id.
     pub selected: Option<String>,
     pub popup: Option<Popup>,
@@ -190,9 +196,6 @@ pub struct State {
     /// how tall the list's visible part is.
     pub group_tops: Vec<f32>,
     pub viewport: f32,
-    /// Home's grid shelves while details are open: how far each one is
-    /// scrolled and how wide it shows, as it last said.
-    pub shelves: HashMap<Section, ShelfScroll>,
     /// `LIBRI_LONG_LISTS=1`: section headers and the rail on every list,
     /// to look at them with the small fixture.
     pub force_long: bool,
@@ -214,10 +217,13 @@ pub enum Message {
     SetView(View),
     /// Selects an entry, or deselects it when it is selected.
     Select(String),
-    /// A Home shelf scrolled, or its width changed.
-    ShelfScrolled(Section, ShelfScroll),
-    /// A Home shelf's ‹ (-1) or › (1).
-    NudgeShelf(Section, i8),
+    /// The panel button by the view switch, the drawer's pin or Ctrl+I:
+    /// pins or unpins the details panel for this view.
+    TogglePanel,
+    /// The drawer's ✕: nothing selected, the drawer gone.
+    ClosePanel,
+    /// At a glance's "Another": a different pick from Want.
+    AnotherPick,
     Toggle(Popup),
     ClosePopup,
     Sort(Sort),
@@ -339,6 +345,13 @@ pub fn wanted(app: &App, wants: &mut Wants) {
     if state.is_overview() {
         overview::wanted(app, view, wants);
         return;
+    }
+    // At a glance's pick, while the pinned panel shows it.
+    if !state.pane_open() && panel(app) == Panel::Pinned {
+        let listing = state.listing(library, app.today);
+        if let Some(entry) = panel::pick(&listing, state.pick) {
+            wants.covers.push(entry.id.clone());
+        }
     }
     if view == View::Text {
         return;
@@ -466,6 +479,15 @@ impl State {
             Message::SetView(view) => {
                 self.views.insert(self.view_key(), view);
             }
+            Message::TogglePanel => {
+                let pinned = self.pinned();
+                self.panels.insert(self.view_key(), !pinned);
+            }
+            Message::ClosePanel => {
+                self.deselect();
+                self.close_popovers();
+            }
+            Message::AnotherPick => self.pick = self.pick.wrapping_add(1),
             Message::Select(id) => {
                 self.series = None;
                 self.details_rating_open = false;
@@ -588,11 +610,6 @@ impl State {
             Message::OpenSeriesCover(media, name) => self.cover_dialog = Some((media, name)),
             Message::CloseSeriesCover => self.cover_dialog = None,
             Message::Scrolled(scroll) => self.scroll = scroll,
-            Message::ShelfScrolled(section, scroll) => {
-                self.shelves.insert(section, scroll);
-            }
-            // The app scrolls the shelf (`overview::nudge`).
-            Message::NudgeShelf(..) => {}
             Message::MusicTab(tab) => {
                 self.music_tab = tab;
                 self.artist = None;
@@ -709,6 +726,12 @@ impl State {
         }
         let names: Vec<&str> = self.types.iter().map(|m| m.label()).collect();
         names.join(" + ")
+    }
+
+    /// Whether the details panel is pinned for this view (the owner's
+    /// choice; a narrow window unpins it anyway, see [`panel`]).
+    pub fn pinned(&self) -> bool {
+        self.panels.get(&self.view_key()).copied().unwrap_or(true)
     }
 
     fn view_key(&self) -> ViewKey {
@@ -910,28 +933,46 @@ pub struct Listing<'a> {
     pub in_type: usize,
 }
 
-pub fn view(app: &App) -> Element<'_, AppMessage> {
+pub fn view<'a>(app: &'a App) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
     let state = &app.library;
     let library = app.repo.library();
     let listing = state.listing(library, app.today);
 
-    let content = if let Some(page) = &state.page {
-        column![page::view(app, page), footer(app)]
-    } else if state.is_overview() {
-        column![
-            toolbar::toolbar(app, &listing),
-            overview::body(app),
-            footer(app)
-        ]
-    } else {
-        column![
-            toolbar::toolbar(app, &listing),
-            toolbar::chips(app, &listing),
-            entries::body(app, &listing),
-            footer(app),
-        ]
+    let mode = panel(app);
+    // The toolbar and the chips (or a page's back row) span the content's
+    // full width and never move; the details panel starts under them.
+    let (top, body): (Element<'a, AppMessage>, Element<'a, AppMessage>) =
+        if let Some(page) = &state.page {
+            page::view(app, page)
+        } else if state.is_overview() {
+            (toolbar::toolbar(app, &listing), overview::body(app))
+        } else {
+            (
+                column![
+                    toolbar::toolbar(app, &listing),
+                    toolbar::chips(app, &listing)
+                ]
+                .into(),
+                entries::body(app, &listing),
+            )
+        };
+    // Unpinned, the details slide in as a drawer over the list's right
+    // side; the layer is there either way, so the list keeps its place in
+    // the tree. Pinned, only the list and the footer narrow for the panel.
+    let drawer = match mode {
+        Panel::Drawer => panel::drawer(app),
+        _ => None,
     };
+    let under = iced::widget::stack![
+        column![body, footer(app)],
+        drawer.unwrap_or_else(|| iced::widget::space().into())
+    ];
+    let mut lower = row![container(under).width(Fill)];
+    if mode == Panel::Pinned {
+        lower = lower.push(panel::side(app, &listing));
+    }
+    let main: Element<'a, AppMessage> = column![top, lower].into();
     let picker = match (&state.picker, &state.cover_dialog) {
         (_, Some((media, name))) => Some(entry::series::cover_dialog(app, *media, name)),
         (Some(picker), None) => Some(tags::picker(app, picker, &listing)),
@@ -942,21 +983,6 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
     } else {
         AppMessage::Library(Message::ClosePicker)
     };
-    // The details pane shows beside the list while an entry is selected,
-    // or a series is open.
-    let selected = state.selected.as_deref().and_then(|id| library.entry(id));
-    let pane = match (selected, state.open_series()) {
-        (Some(entry), _) => Some(entry::details::view(app, entry, None)),
-        (None, Some(open)) => entry::series::view(app, open),
-        (None, None) => None,
-    };
-    // The list keeps its place in the tree whether the pane is there or
-    // not, so its scroll position survives opening and closing it.
-    let mut main = row![container(content).width(Fill)];
-    if let Some(pane) = pane {
-        main = main.push(pane);
-    }
-    let main: Element<'_, AppMessage> = main.into();
     ui::modal(shell(app, main), picker, close, &tokens)
 }
 
@@ -975,9 +1001,10 @@ pub fn restore_scroll<T: Send + 'static>(state: &State) -> iced::Task<T> {
     iced::widget::operation::scroll_to(id, offset)
 }
 
-/// Keeps entry `id` in view in the list once the details pane has opened
-/// or closed beside it: the list keeps its offset, but the grid's columns
-/// change with its width, so the entry may have moved. Scrolls only when
+/// Keeps entry `id` in view in the list after the arrow keys moved the
+/// selection, or the panel was pinned or unpinned: the list keeps its
+/// offset, but the grid's columns change with its width, so the entry may
+/// have moved. Scrolls only when
 /// it is partly out of view, just enough to show it clear of the pinned
 /// header.
 pub fn reveal<T: Send + 'static>(state: &State, id: &str) -> iced::Task<T> {
@@ -1386,6 +1413,8 @@ mod tests {
         let mut app = App::new(crate::screens::Screen::Library);
         app.library
             .update(Message::ShowType(Some(MediaType::Movies)));
+        // Unpinned, so At a glance's pick adds no cover of its own.
+        app.library.update(Message::TogglePanel);
         let order = app.library.cover_order(app.repo.library(), app.today);
         let last = order.last().unwrap().clone();
         assert_eq!(order.len(), 13, "the fixture's movies");

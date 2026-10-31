@@ -2,8 +2,8 @@
 //! `storage::config_dir()`, never synced (docs/DESIGN.md section 10,
 //! phase 2). What is kept: Settings' choices (theme, background style,
 //! accent, timeline default, seasonal touches, default platform), the
-//! sidebar's tag mode, pins and type checkboxes, the view per type and
-//! each plan's look. The file is written whenever one of them changes.
+//! sidebar's tag mode, pins and type checkboxes, the view and the details
+//! panel's pin per type, each plan's look and the changed shortcuts. The file is written whenever one of them changes.
 //!
 //! The file is plain JSON with readable words, so a hand edit or an
 //! older file reads back: a key that is missing or holds a value Libri
@@ -44,8 +44,13 @@ pub struct Preferences {
     /// The view ("grid", "list", "text") per list: "all", "several" or a
     /// type ("movies").
     pub views: BTreeMap<String, String>,
+    /// Whether the details panel is pinned, per list as `views`; a list
+    /// not in it is pinned.
+    pub panels: BTreeMap<String, bool>,
     /// Each plan's look, by plan id.
     pub plans: BTreeMap<String, PlanLook>,
+    /// The shortcuts changed in Settings: "panel": "Ctrl+P".
+    pub keys: BTreeMap<String, String>,
 }
 
 /// How a plan's sections look on this device (`plans::Style`).
@@ -70,7 +75,9 @@ impl Default for Preferences {
             pins: Vec::new(),
             type_boxes: false,
             views: BTreeMap::new(),
+            panels: BTreeMap::new(),
             plans: BTreeMap::new(),
+            keys: BTreeMap::new(),
         }
     }
 }
@@ -96,6 +103,13 @@ impl Preferences {
                 .iter()
                 .map(|(key, view)| (view_key(*key).to_owned(), view_name(*view).to_owned()))
                 .collect(),
+            panels: app
+                .library
+                .panels
+                .iter()
+                .map(|(key, pinned)| (view_key(*key).to_owned(), *pinned))
+                .collect(),
+            keys: app.keymap.to_prefs(),
             plans: app
                 .plans
                 .styles
@@ -137,6 +151,12 @@ impl Preferences {
             .iter()
             .filter_map(|(key, view)| Some((view_key_from(key)?, view_from_name(view)?)))
             .collect();
+        app.library.panels = self
+            .panels
+            .iter()
+            .filter_map(|(key, pinned)| Some((view_key_from(key)?, *pinned)))
+            .collect();
+        app.keymap = crate::keymap::Keymap::from_prefs(&self.keys);
         app.plans.styles = self
             .plans
             .iter()
@@ -341,6 +361,15 @@ mod tests {
             .views
             .insert(ViewKey::Type(MediaType::Books), View::Text);
         app.library.views.insert(ViewKey::All, View::List);
+        app.library
+            .panels
+            .insert(ViewKey::Type(MediaType::Movies), false);
+        app.keymap
+            .bind(
+                crate::keymap::Action::Panel,
+                crate::keymap::Combo::parse("Ctrl+P").unwrap(),
+            )
+            .unwrap();
         app.plans.styles.insert(
             "halloween-2026".into(),
             Style {
@@ -362,6 +391,9 @@ mod tests {
         assert_eq!(again.settings, app.settings);
         assert_eq!(again.library.pins, app.library.pins);
         assert_eq!(again.library.views, app.library.views);
+        assert_eq!(again.library.panels, app.library.panels);
+        assert_eq!(again.keymap, app.keymap);
+        assert!(text.contains("\"panel\": \"Ctrl+P\""));
         assert_eq!(again.library.sidebar_tags, SidebarTags::MostUsed);
         assert!(again.library.type_boxes);
         assert_eq!(again.plans.styles, app.plans.styles);

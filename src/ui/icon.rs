@@ -21,6 +21,9 @@ pub enum Icon {
     MarkerGhost,
     MarkerStar,
     More,
+    /// The details panel, unpinned and pinned.
+    Panel,
+    PanelPinned,
     Pin,
     Plus,
     Search,
@@ -33,7 +36,7 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Icon; 23] = [
+    pub const ALL: [Icon; 25] = [
         Icon::Calendar,
         Icon::Check,
         Icon::ChevronDown,
@@ -48,6 +51,8 @@ impl Icon {
         Icon::MarkerGhost,
         Icon::MarkerStar,
         Icon::More,
+        Icon::Panel,
+        Icon::PanelPinned,
         Icon::Pin,
         Icon::Plus,
         Icon::Search,
@@ -80,6 +85,8 @@ impl Icon {
             Icon::MarkerGhost => file!("marker-ghost"),
             Icon::MarkerStar => file!("marker-star"),
             Icon::More => file!("more"),
+            Icon::Panel => file!("panel"),
+            Icon::PanelPinned => file!("panel-pinned"),
             Icon::Pin => file!("pin"),
             Icon::Plus => file!("plus"),
             Icon::Search => file!("search"),

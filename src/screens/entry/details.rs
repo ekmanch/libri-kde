@@ -256,16 +256,18 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
     ]
     .spacing(8);
 
-    pane(sections.into(), Some(actions.into()), &tokens)
+    pane(sections.into(), Some(actions.into()))
 }
 
 /// The pane around `body`: it scrolls, with `actions` kept at the bottom.
+/// As wide as its place: `WIDTH` beside a list, Home's right column. It
+/// paints no background: the content pane's surface is already under it,
+/// and a second coat of a see-through content color (Glass) would make
+/// the panel darker than the content.
 pub fn pane<'a>(
     body: Element<'a, AppMessage>,
     actions: Option<Element<'a, AppMessage>>,
-    tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
-    let content_bg = tokens.content;
     let bottom = if actions.is_some() { 8 } else { 18 };
     let mut column = Column::new().height(Fill).push(
         ui::scroll(container(body).padding(Padding::new(22.0).bottom(bottom)))
@@ -275,11 +277,7 @@ pub fn pane<'a>(
     if let Some(actions) = actions {
         column = column.push(container(actions).padding(Padding::new(22.0).top(6).bottom(18)));
     }
-    container(column)
-        .width(WIDTH)
-        .height(Fill)
-        .style(move |_| container::background(content_bg))
-        .into()
+    container(column).width(Fill).height(Fill).into()
 }
 
 /// "‹ Kung Fu Panda" above a part's details, back to its series.
