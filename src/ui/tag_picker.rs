@@ -437,6 +437,9 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
             list.into()
         };
 
+        // The 26 letters share the list's height, at most 16 px each, so
+        // the rail never runs past the list.
+        let letter_height = (self.height / 26.0).min(16.0);
         let rail = Column::with_children(('A'..='Z').map(|letter| {
             let present = offsets.get(&letter).copied();
             let color = if present.is_some() {
@@ -445,11 +448,16 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
                 tokens.line
             };
             button(
-                text(letter.to_string())
-                    .size(10.5)
-                    .font(font::SEMIBOLD)
-                    .color(color),
+                container(
+                    text(letter.to_string())
+                        .size(10.5)
+                        .line_height(1.2)
+                        .font(font::SEMIBOLD)
+                        .color(color),
+                )
+                .center_y(Fill),
             )
+            .height(letter_height)
             .padding([0, 5])
             .on_press_maybe(present.map(|offset| self.send(PickerMessage::Jump(offset))))
             .style(row_style(tokens, false, 4.0))
@@ -473,7 +481,15 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
             .width(Fill);
         column![
             search,
-            row![scroll, container(rail).height(self.height).center_y(Fill)].spacing(6)
+            // `height` before `align_y`: `center_y(Fill)` would make the
+            // rail as tall as the window and the dialog with it.
+            row![
+                scroll,
+                container(rail)
+                    .height(self.height)
+                    .align_y(iced::alignment::Vertical::Center)
+            ]
+            .spacing(6)
         ]
         .spacing(12)
         .into()
