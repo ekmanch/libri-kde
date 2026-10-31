@@ -136,6 +136,16 @@ impl Match {
     pub fn year_text(&self) -> String {
         self.year().map(|y| y.to_string()).unwrap_or_default()
     }
+
+    /// "2004 · Special edition", as Pick a cover captions a choice.
+    pub fn year_and_edition(&self) -> String {
+        let year = self.year_text();
+        match &self.edition {
+            Some(edition) if !year.is_empty() => format!("{year} · {edition}"),
+            Some(edition) => edition.clone(),
+            None => year,
+        }
+    }
 }
 
 /// Why a lookup gave no answer. The screen words each one; no provider

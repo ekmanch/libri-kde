@@ -4,7 +4,7 @@
 //! entry's place in it (when, and the plan's note), and Delete asks
 //! whether to remove it from the plan only.
 
-use iced::widget::{Column, button, column, container, row, text};
+use iced::widget::{Column, button, column, container, mouse_area, row, text};
 use iced::{Background, Border, Element, Fill, Padding};
 
 use super::{Message, seasons};
@@ -31,14 +31,22 @@ pub fn view<'a>(app: &'a App, entry: &'a Entry, plan: Option<&'a Plan>) -> Eleme
     let color = tokens.type_color(entry.media);
 
     let tint = theme::cover_color(&entry.id);
-    let cover = ui::titled_cover(
-        app.artwork.cover(entry),
-        tint,
-        &entry.title,
-        104.0,
-        156.0,
-        14.0,
-    );
+    // A click opens the cover viewer, where the cover can be changed.
+    let cover = mouse_area(
+        button(ui::titled_cover(
+            app.artwork.cover(entry),
+            tint,
+            &entry.title,
+            104.0,
+            156.0,
+            14.0,
+        ))
+        .padding(0)
+        .on_press(msg(Message::ViewCover(entry.id.clone())))
+        .style(|_, _| button::Style::default())
+        .focusable(8.0, &tokens),
+    )
+    .interaction(iced::mouse::Interaction::ZoomIn);
     let seasons = entry.season_list();
     let today = app.today;
     // A show's kicker carries the years it ran: "SHOW · 2025–2026".

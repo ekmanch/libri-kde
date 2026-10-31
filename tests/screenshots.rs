@@ -428,6 +428,29 @@ fn capture_every_screen() {
                 )));
             }),
         ),
+        // The cover viewer from details, and Pick a cover beside it.
+        (
+            Screen::Library,
+            ("cover-viewer", |app| {
+                movies(app);
+                select(app, BABY);
+                let _ = app.update(Message::Entry(entry::Message::ViewCover(BABY.into())));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("cover-viewer-change", |app| {
+                show_type(app, MediaType::Books);
+                select(app, "books/dracula-1897");
+                let _ = app.update(Message::Entry(entry::Message::ViewCover(
+                    "books/dracula-1897".into(),
+                )));
+                let _ = app.update(Message::Entry(entry::Message::ChangeCover));
+                let _ = app.update(Message::Entry(entry::Message::SetCover(Some(
+                    "itunes:498187584".into(),
+                ))));
+            }),
+        ),
         (Screen::Library, ("edit-tag-picker", edit_baby_tags)),
         (Screen::Library, ("details-tag-picker", details_baby_tags)),
         (

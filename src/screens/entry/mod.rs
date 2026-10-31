@@ -2,6 +2,7 @@
 //! beside the list, the Add and Edit dialog with its tag picker, Add to
 //! plan and the delete confirmation.
 
+mod cover;
 pub mod details;
 mod dialogs;
 mod form;
@@ -48,6 +49,20 @@ pub enum Dialog {
         id: String,
         season: u32,
     },
+    /// The details' cover, large in the middle of the window, with Pick a
+    /// cover beside it once Change cover… is pressed.
+    Cover(Box<CoverView>),
+}
+
+/// The cover viewer: the entry, and Pick a cover's state.
+#[derive(Debug, Default)]
+pub struct CoverView {
+    pub id: String,
+    /// Pick a cover is open beside the cover.
+    pub changing: bool,
+    /// The other matches for the title, once asked for.
+    pub choices: Option<SearchResult>,
+    pub loading: bool,
 }
 
 /// The Add and Edit dialog's fields. Nothing reaches the library until
@@ -359,6 +374,20 @@ pub enum Message {
     Delete(String),
     AddToPlan(String),
     Close,
+    // The cover viewer.
+    ViewCover(String),
+    /// Change cover…: opens Pick a cover beside the cover.
+    ChangeCover,
+    /// Pick a cover's Done: back to the cover alone.
+    DoneChangingCover,
+    /// A choice in the viewer: another match's cover, or `None` for the
+    /// match's own. Saved at once.
+    SetCover(Option<String>),
+    /// The viewer's other matches came.
+    ViewerChoices {
+        id: String,
+        result: SearchResult,
+    },
     // The form.
     Type(MediaType),
     Query(String),
@@ -1510,6 +1539,39 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::Delete(id) => app.dialog = Some(Dialog::Delete { id }),
         Message::AddToPlan(id) => app.dialog = Some(Dialog::AddToPlan { id }),
         Message::Close => app.dialog = None,
+        Message::ViewCover(id) => {
+            app.library.details_rating_open = false;
+            app.dialog = Some(Dialog::Cover(Box::new(CoverView {
+                id,
+                ..CoverView::default()
+            })));
+        }
+        Message::ChangeCover => return change_cover(app),
+        Message::DoneChangingCover => {
+            if let Some(Dialog::Cover(view)) = &mut app.dialog {
+                view.changing = false;
+            }
+        }
+        Message::SetCover(cover_from) => {
+            if let Some(Dialog::Cover(view)) = &app.dialog
+                && let Some(entry) = app.repo.library().entry(&view.id)
+                && entry.cover_from != cover_from
+            {
+                let entry = Entry {
+                    cover_from,
+                    ..entry.clone()
+                };
+                app.apply(Operation::UpdateEntry(entry));
+            }
+        }
+        Message::ViewerChoices { id, result } => {
+            if let Some(Dialog::Cover(view)) = &mut app.dialog
+                && view.id == id
+            {
+                view.loading = false;
+                view.choices = Some(result);
+            }
+        }
         Message::ConfirmDelete => {
             if let Some(Dialog::Delete { id }) = app.dialog.take() {
                 if app.library.selected.as_deref() == Some(id.as_str()) {
@@ -1700,6 +1762,10 @@ fn creator_tags(
 /// the cover spot's image, Pick a cover's thumbnails and, with a game's
 /// platform in play, IGDB's platform list.
 pub fn wanted(app: &App, wants: &mut Wants) {
+    if let Some(Dialog::Cover(view)) = &app.dialog {
+        cover::wanted(app, view, wants);
+        return;
+    }
     let Some(Dialog::Form(form)) = &app.dialog else {
         return;
     };
@@ -1726,6 +1792,39 @@ pub fn wanted(app: &App, wants: &mut Wants) {
     if form.media == MediaType::Games && (form.platform_open || form.platform_filter.is_some()) {
         wants.platforms = true;
     }
+}
+
+/// Change cover…: Pick a cover opens beside the cover and asks for the
+/// other matches for the title once.
+fn change_cover(app: &mut App) -> Task<AppMessage> {
+    let service = app.lookups.clone();
+    let Some(Dialog::Cover(view)) = &mut app.dialog else {
+        return Task::none();
+    };
+    let Some(entry) = app.repo.library().entry(&view.id) else {
+        return Task::none();
+    };
+    view.changing = true;
+    if view.choices.is_some() || view.loading {
+        return Task::none();
+    }
+    let (title, media) = (entry.title.trim().to_owned(), entry.media);
+    let creator = entry.creator.clone().filter(|c| !c.trim().is_empty());
+    if service.is_instant() {
+        view.choices = Some(service.cover_choices(&title, media, creator.as_deref()));
+        return Task::none();
+    }
+    view.loading = true;
+    let id = view.id.clone();
+    Task::perform(
+        crate::app::blocking(move || Ok(service.cover_choices(&title, media, creator.as_deref()))),
+        move |result| {
+            AppMessage::Entry(Message::ViewerChoices {
+                id: id.clone(),
+                result: result.unwrap_or_default(),
+            })
+        },
+    )
 }
 
 /// Whether the form waits on a lookup, so the window ticks for its
@@ -2217,6 +2316,12 @@ pub fn dismiss_top(app: &mut App) -> bool {
             }
             true
         }
+        Some(Dialog::Cover(view)) => {
+            if !std::mem::take(&mut view.changing) {
+                app.dialog = None;
+            }
+            true
+        }
         Some(Dialog::Form(form)) => {
             if form.replace.take().is_none()
                 && form.new_tag.take().is_none()
@@ -2272,6 +2377,7 @@ pub fn overlay<'a>(app: &'a App, base: Element<'a, AppMessage>) -> Element<'a, A
         Dialog::Delete { id } => dialogs::delete(app, id),
         Dialog::AddToPlan { id } => dialogs::add_to_plan(app, id),
         Dialog::SeasonDropped { id, season } => dialogs::season_dropped(app, id, *season),
+        Dialog::Cover(view) => cover::view(app, view),
     });
     ui::modal(base, dialog, AppMessage::Entry(Message::Close), &tokens)
 }
@@ -2931,6 +3037,34 @@ mod tests {
         );
         send(&mut app, Message::Type(MediaType::Movies));
         assert!(form(&app).cover_from.is_none(), "cleared with the type");
+    }
+
+    #[test]
+    fn the_cover_viewer_changes_the_cover_without_edit() {
+        let mut app = app();
+        let id = "books/dracula-1897";
+        send(&mut app, Message::ViewCover(id.into()));
+        let viewer = |app: &App| match &app.dialog {
+            Some(Dialog::Cover(view)) => (view.changing, view.choices.is_some()),
+            other => panic!("no viewer: {other:?}"),
+        };
+        assert_eq!(viewer(&app), (false, false), "the cover alone at first");
+        send(&mut app, Message::ChangeCover);
+        assert_eq!(viewer(&app), (true, true), "the fake answers at once");
+
+        send(&mut app, Message::SetCover(Some("itunes:498187584".into())));
+        let saved = app.repo.library().entry(id).unwrap();
+        assert_eq!(saved.cover_from.as_deref(), Some("itunes:498187584"));
+        assert!(matches!(app.dialog, Some(Dialog::Cover(_))), "stays open");
+
+        send(&mut app, Message::SetCover(None));
+        assert!(app.repo.library().entry(id).unwrap().cover_from.is_none());
+
+        // Esc closes Pick a cover first, then the viewer.
+        assert!(dismiss_top(&mut app));
+        assert_eq!(viewer(&app), (false, true));
+        assert!(dismiss_top(&mut app));
+        assert!(app.dialog.is_none());
     }
 
     #[test]

@@ -110,3 +110,77 @@ pub fn titled_cover<'a, Message: 'a>(
         }),
     )
 }
+
+/// One choice in Pick a cover: the cover ringed in the accent when it is
+/// the one in use, the title, the year and edition, and a note ("The
+/// match's cover"). The form's dialog and the cover viewer both list
+/// them; `width` sets the tile, the cover 2:3 under it.
+pub struct Choice<'a> {
+    pub handle: Option<image::Handle>,
+    pub tint: Color,
+    pub title: &'a str,
+    pub sub: String,
+    pub note: &'a str,
+    pub on: bool,
+}
+
+/// The accent ring around the chosen cover.
+const RING: f32 = 3.0;
+
+pub fn choice_tile<'a, Message: Clone + 'a>(
+    choice: Choice<'_>,
+    width: f32,
+    on_press: Message,
+    tokens: &crate::theme::Tokens,
+) -> Element<'a, Message> {
+    use super::FocusExt;
+    use iced::widget::{button, column};
+
+    let on = choice.on;
+    let (accent, text_color) = (tokens.accent, tokens.text);
+    let label_size = if width >= 150.0 { 15.0 } else { 13.0 };
+    // The ring sits around the cover, 3 px in the accent on the one in
+    // use; the cover would draw over a border of its own container.
+    let inner = width - 2.0 * RING;
+    let face = container(titled_cover(
+        choice.handle,
+        choice.tint,
+        choice.title,
+        inner,
+        inner * 1.5,
+        label_size,
+    ))
+    .padding(RING)
+    .style(move |_| {
+        container::Style::default().border(
+            Border::default()
+                .rounded(8.0 + RING)
+                .width(if on { RING } else { 0.0 })
+                .color(accent),
+        )
+    });
+    button(
+        column![
+            face,
+            container(
+                text(choice.title.to_owned())
+                    .size(13)
+                    .font(font::SEMIBOLD)
+                    .wrapping(text::Wrapping::None)
+            )
+            .width(width)
+            .clip(true),
+            text(choice.sub).size(12).color(tokens.sub),
+            text(choice.note.to_owned()).size(12).color(tokens.sub),
+        ]
+        .spacing(3)
+        .width(width),
+    )
+    .padding(0)
+    .on_press(on_press)
+    .style(move |_, _| button::Style {
+        text_color,
+        ..button::Style::default()
+    })
+    .focusable(8.0, tokens)
+}

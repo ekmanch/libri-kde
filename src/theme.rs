@@ -145,6 +145,22 @@ pub const BADGE_MARK: Color = hex(0x5EE08A);
 /// The DNF badge's mark.
 pub const BADGE_DNF: Color = hex(0xA3A8AE);
 
+/// The cover viewer, dark on every theme as in the mockup: its text,
+/// the second line, the round close button's fill and Change cover…'s
+/// outline and fill.
+pub const VIEWER_TEXT: Color = hex(0xEEF0F2);
+pub const VIEWER_SUB: Color = hex(0xA3A8AE);
+pub const VIEWER_CLOSE: Color = white(0.08);
+pub const VIEWER_LINE: Color = white(0.18);
+pub const VIEWER_FILL: Color = white(0.06);
+
+/// The cover viewer's backdrop over the dialog scrim `under`, so the two
+/// together are the mockup's near-black at 82 %.
+pub fn viewer_scrim(under: Color) -> Color {
+    let alpha = 1.0 - 0.18 / (1.0 - under.a).max(0.18);
+    Color::from_rgba8(8, 9, 10, alpha.clamp(0.0, 1.0))
+}
+
 /// The sync row's dot: in sync, and failing (the token expired).
 pub const SYNC_OK: Color = hex(0xA6E3A1);
 pub const SYNC_ERROR: Color = hex(0xF38BA8);

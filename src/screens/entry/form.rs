@@ -961,62 +961,24 @@ fn cover_dialog<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a
             Some(picked) => *picked == id,
             None => is_own,
         };
-        let tint = theme::cover_color(&found.source);
-        let (accent, line) = (tokens.accent, tokens.line);
         let handle = found
             .cache_cover_url()
             .or(found.cover_url.as_deref())
             .and_then(|url| app.artwork.image(url));
-        let cover = container(ui::titled_cover(
+        let choice = ui::cover::Choice {
             handle,
-            tint,
-            &found.title,
-            104.0,
-            156.0,
-            13.0,
-        ))
-        .style(move |_| {
-            container::Style::default().border(
-                Border::default()
-                    .rounded(8)
-                    .width(if on { 3.0 } else { 1.0 })
-                    .color(if on { accent } else { line }),
-            )
-        });
-        let year = found.year_text();
-        let sub = match &found.edition {
-            Some(edition) if !year.is_empty() => format!("{year} · {edition}"),
-            Some(edition) => edition.clone(),
-            None => year,
+            tint: theme::cover_color(&found.source),
+            title: &found.title,
+            sub: found.year_and_edition(),
+            note: if is_own { "The match's cover" } else { "" },
+            on,
         };
-        let note = if is_own { "The match's cover" } else { "" };
-        button(
-            column![
-                cover,
-                container(
-                    text(found.title.clone())
-                        .size(13)
-                        .font(font::SEMIBOLD)
-                        .wrapping(text::Wrapping::None)
-                )
-                .width(104)
-                .clip(true),
-                text(sub).size(12).color(tokens.sub),
-                text(note).size(12).color(tokens.sub),
-            ]
-            .spacing(3)
-            .width(104),
+        ui::cover::choice_tile(
+            choice,
+            104.0,
+            msg(Message::PickCover((!is_own).then_some(id))),
+            tokens,
         )
-        .padding(0)
-        .on_press(msg(Message::PickCover((!is_own).then_some(id))))
-        .style({
-            let text_color = tokens.text;
-            move |_, _| button::Style {
-                text_color,
-                ..button::Style::default()
-            }
-        })
-        .focusable(8.0, tokens)
     });
     let mut body = column![
         text(format!(
