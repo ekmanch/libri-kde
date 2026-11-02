@@ -1,8 +1,8 @@
-//! The phone app's text rules for ids, tags and platforms
-//! (`entry_id.dart`, `similar_tags.dart`, `platform_names.dart`), so both
-//! apps name things the same way.
+//! The phone app's text rules for ids, tags, platforms and spellings
+//! (`entry_id.dart`, `similar_tags.dart`, `platform_names.dart`,
+//! `library_spellings.dart`), so both apps name things the same way.
 
-use super::MediaType;
+use super::{Entry, EntryKind, MediaType};
 
 /// Lowercases, drops apostrophes and folds common Latin diacritics to
 /// ASCII; every other character is kept.
@@ -231,9 +231,138 @@ pub fn split_platforms(text: Option<&str>) -> Vec<String> {
         .collect()
 }
 
+/// `entry` with its creator, a song's album and its series name written as
+/// the library already spells them (the phone's DESIGN.md section 2,
+/// Spellings), so a lookup's "deafheaven" is saved as the "Deafheaven"
+/// already there and the data repo's lists keep one heading per artist.
+///
+/// A name matches when it is the same with case and spacing aside, in an
+/// entry of the same type (for an album, by the same artist); the first such
+/// entry in `entries` gives the spelling. `before` is the entry as saved,
+/// when it is an edit: a field whose name did not change apart from its case
+/// keeps what was typed, since re-casing it is a correction.
+pub fn with_library_spellings(
+    mut entry: Entry,
+    entries: &[Entry],
+    before: Option<&Entry>,
+) -> Entry {
+    let others: Vec<&Entry> = entries
+        .iter()
+        .filter(|e| e.id != entry.id && e.media == entry.media)
+        .collect();
+    fn spelled<'a>(
+        typed: Option<String>,
+        was: Option<&str>,
+        known: impl Iterator<Item = Option<&'a str>>,
+    ) -> Option<String> {
+        let key = spelling_key(typed.as_deref());
+        if key.is_empty() || key == spelling_key(was) {
+            return typed;
+        }
+        known
+            .flatten()
+            .find(|name| spelling_key(Some(name)) == key)
+            .map(str::to_owned)
+            .or(typed)
+    }
+
+    entry.creator = spelled(
+        entry.creator.take(),
+        before.and_then(|b| b.creator.as_deref()),
+        others.iter().map(|e| e.creator.as_deref()),
+    );
+    let artist = spelling_key(entry.creator.as_deref());
+    if entry.album.is_some() {
+        let music = entry.media == MediaType::Music;
+        entry.album = spelled(
+            entry.album.take(),
+            before.and_then(|b| b.album.as_deref()),
+            others
+                .iter()
+                .filter(|e| music && spelling_key(e.creator.as_deref()) == artist)
+                .map(|e| match e.kind {
+                    Some(EntryKind::Album) => Some(e.title.as_str()),
+                    _ => e.album.as_deref(),
+                }),
+        );
+    }
+    if let Some(series) = entry.series.as_mut() {
+        let name = std::mem::take(&mut series.name);
+        series.name = spelled(
+            Some(name),
+            before
+                .and_then(|b| b.series.as_ref())
+                .map(|s| s.name.as_str()),
+            others
+                .iter()
+                .map(|e| e.series.as_ref().map(|s| s.name.as_str())),
+        )
+        .unwrap_or_default();
+    }
+    entry
+}
+
+/// A name as the spellings compare it: case and runs of spaces aside.
+pub fn spelling_key(name: Option<&str>) -> String {
+    name.unwrap_or_default()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saves_take_the_library_spellings() {
+        let library: crate::model::Library =
+            crate::model::codec::decode(crate::fixtures::LIBRARY_JSON).unwrap();
+        let entries = &library.entries;
+        let dirt = library.entry("music/dirt-alice-in-chains").unwrap();
+
+        // A new album by a known artist takes the artist's spelling.
+        let mut added = dirt.clone();
+        added.id = "music/facelift-alice-in-chains".into();
+        added.creator = Some(" alice  IN chains".into());
+        let saved = with_library_spellings(added.clone(), entries, None);
+        assert_eq!(saved.creator.as_deref(), Some("Alice in Chains"));
+
+        // A song takes the album title by the same artist, not another's.
+        let mut song = added.clone();
+        song.kind = Some(EntryKind::Song);
+        song.album = Some("DIRT".into());
+        let saved = with_library_spellings(song.clone(), entries, None);
+        assert_eq!(saved.album.as_deref(), Some("Dirt"));
+        song.creator = Some("Nirvana".into());
+        let saved = with_library_spellings(song, entries, None);
+        assert_eq!(saved.album.as_deref(), Some("DIRT"));
+
+        // A name only re-cased in an edit keeps the new casing.
+        let mut fixed = dirt.clone();
+        fixed.creator = Some("Alice In Chains".into());
+        let saved = with_library_spellings(fixed, entries, Some(dirt));
+        assert_eq!(saved.creator.as_deref(), Some("Alice In Chains"));
+
+        // A series takes the spelling within its type.
+        let two_towers = library
+            .entry("movies/the-lord-of-the-rings-the-two-towers-2002")
+            .unwrap();
+        let mut king = two_towers.clone();
+        king.id = "movies/the-return-of-the-king-2003".into();
+        king.series.as_mut().unwrap().name = "the lord of the rings".into();
+        let saved = with_library_spellings(king.clone(), entries, None);
+        assert_eq!(saved.series.unwrap().name, "The Lord of the Rings");
+        king.media = MediaType::Games;
+        let saved = with_library_spellings(king, entries, None);
+        assert_eq!(saved.series.unwrap().name, "the lord of the rings");
+
+        // A name nothing else has is kept as typed.
+        added.creator = Some("deafheaven".into());
+        let saved = with_library_spellings(added, entries, None);
+        assert_eq!(saved.creator.as_deref(), Some("deafheaven"));
+    }
 
     #[test]
     fn slugs_fold_and_drop_apostrophes() {

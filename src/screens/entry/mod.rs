@@ -2257,7 +2257,13 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
                 return None;
             }
             let base = form.editing.as_deref().and_then(|id| library.entry(id));
-            let mut entry = form.entry(base, library, today);
+            // The library's spellings of the creator, album and series
+            // (the phone's DESIGN.md section 2, Spellings).
+            let mut entry = text::with_library_spellings(
+                form.entry(base, library, today),
+                &library.entries,
+                base,
+            );
 
             // Music that overlaps what is saved asks first.
             let songs = if music::is_song(&entry) {
