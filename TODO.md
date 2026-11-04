@@ -217,4 +217,5 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 
 ## Later
 
+- [ ] Drop the remaining decorative outlines: a border on a surface is only there when it does work (a focus ring, an Outline button), since unnecessary borders cause artifacts (decided 2026-11-04 with the dialogs' outline, DESIGN.md section 10; on Glass a translucent `line` border on a filled quad shows what is behind the quad through the ring, as iced mixes the border in place of the fill). Go through the `tokens.line` borders on filled surfaces and remove the ones that are only the canvas's 1 px line
 - [ ] Drop `vendor/iced_wgpu` and the `[patch.crates-io]` lines in `Cargo.toml` with the upgrade to the next iced: iced master already skips 2-bit-alpha surface formats (DESIGN.md section 10, Glass), and Cargo warns that the patch is unused once iced_wgpu moves past 0.14.0

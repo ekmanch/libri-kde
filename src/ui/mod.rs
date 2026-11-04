@@ -106,10 +106,7 @@ pub fn panel_style(tokens: &Tokens, radius: f32) -> container::Style {
     container::Style {
         text_color: Some(tokens.text),
         background: Some(Background::Color(tokens.popover)),
-        border: Border::default()
-            .rounded(radius)
-            .width(1)
-            .color(tokens.line),
+        border: Border::default().rounded(radius),
         shadow: Shadow {
             color: tokens.shadow,
             offset: Vector::new(0.0, 12.0),
@@ -335,5 +332,28 @@ pub fn button_style(kind: ButtonKind, tokens: &Tokens, status: button::Status) -
             radius: 8.0.into(),
         },
         ..button::Style::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::{PEACH, Theme, Tokens};
+
+    /// Dialogs and popovers have no outline (decided 2026-11-04). iced's
+    /// quad shader puts the border color in place of the fill inside the
+    /// border ring, not over it, so a see-through line such as Glass's 14 %
+    /// white showed the scrimmed screen through the ring: a light fringe
+    /// over bright covers, nothing over dark ones.
+    #[test]
+    fn panels_have_no_outline_on_any_theme() {
+        for theme in Theme::ALL {
+            for flat in [false, true] {
+                let tokens = Tokens::styled(theme, PEACH, flat);
+                let style = panel_style(&tokens, 12.0);
+                assert_eq!(style.border.width, 0.0, "{} (flat: {flat})", theme.label());
+                assert_eq!(style.background, Some(Background::Color(tokens.popover)));
+            }
+        }
     }
 }
