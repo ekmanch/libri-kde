@@ -147,13 +147,17 @@ pub fn series_row<'a>(
             .font(font::SEMIBOLD)
             .color(title_color)
             .wrapping(text::Wrapping::None),
-        text(part.subtitle()).size(12.5).color(tokens.sub),
+        text(part.subtitle())
+            .size(12.5)
+            .color(tokens.sub)
+            .wrapping(text::Wrapping::None),
     ]
     .spacing(2)
     .width(Fill);
+    // A long title or subtitle is cut off before the status pill.
     let mut content = row![
         container(ui::mono(number, 12.5, tokens.sub)).width(26),
-        words
+        container(words).width(Fill).clip(true),
     ]
     .spacing(10)
     .align_y(Center)

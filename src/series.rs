@@ -23,15 +23,15 @@ impl SeriesRow<'_> {
         self.entry.is_some()
     }
 
-    /// "2001", or "2003 · Not in your library".
+    /// "2001", or "2003 · Not in your library". Without a year: "Release
+    /// date not set" for a part in the library (its entry has no date),
+    /// just "Not in your library" for one that is not.
     pub fn subtitle(&self) -> String {
-        let year = self.year.map(|y| y.to_string()).unwrap_or_default();
-        if self.owned() {
-            year
-        } else if year.is_empty() {
-            "Not in your library".into()
-        } else {
-            format!("{year} · Not in your library")
+        match (self.year, self.owned()) {
+            (Some(year), true) => year.to_string(),
+            (Some(year), false) => format!("{year} · Not in your library"),
+            (None, true) => "Release date not set".into(),
+            (None, false) => "Not in your library".into(),
         }
     }
 }
@@ -173,6 +173,22 @@ mod tests {
         assert!(rows[1].is_this);
         assert_eq!(rows[2].subtitle(), "2003 · Not in your library");
         assert_eq!(window(&rows).len(), 3);
+    }
+
+    #[test]
+    fn a_part_without_a_year_says_so_instead_of_an_empty_line() {
+        let library = codec::decode(fixtures::LIBRARY_JSON).unwrap();
+        let entry = library.entries.first().unwrap();
+        let row = SeriesRow {
+            number: Some(8),
+            title: "Untitled sequel".into(),
+            year: None,
+            entry: Some(entry),
+            is_this: false,
+        };
+        assert_eq!(row.subtitle(), "Release date not set");
+        let row = SeriesRow { entry: None, ..row };
+        assert_eq!(row.subtitle(), "Not in your library");
     }
 
     #[test]
