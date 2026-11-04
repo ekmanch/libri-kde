@@ -27,7 +27,7 @@ use crate::settings::Source;
 use crate::tags::{PickerMessage, PickerState};
 use crate::ui;
 
-pub use panel::{Panel, narrow, panel};
+pub use panel::{Motion, Panel, Shown, closes_drawer, drawer_state, narrow, panel, slide_drawer};
 
 /// The search field's id, for Ctrl+K and Ctrl+F.
 pub const SEARCH_ID: &str = "library-search";
@@ -159,6 +159,8 @@ pub struct State {
     pub pick: u64,
     /// The selected entry's id.
     pub selected: Option<String>,
+    /// The unpinned drawer sliding in or out.
+    pub motion: Motion,
     pub popup: Option<Popup>,
     /// The tag picker dialog, opened from the Filter popover's "All tags…".
     pub picker: Option<PickerState>,

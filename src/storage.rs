@@ -43,19 +43,34 @@ pub fn config_dir() -> Option<PathBuf> {
     )
 }
 
+/// `$XDG_CONFIG_HOME`, or `~/.config`: the desktop's own files, such as
+/// Plasma's `kdeglobals`.
+pub fn config_home() -> Option<PathBuf> {
+    xdg_base(
+        std::env::var_os("XDG_CONFIG_HOME"),
+        std::env::var_os("HOME"),
+        &[".config"],
+    )
+}
+
 /// The `libri` folder under the XDG base `var` names, or under `home`
 /// plus `under_home` when the variable is unset or empty, as the base
 /// directory specification says.
 fn xdg_dir(var: Option<OsString>, home: Option<OsString>, under_home: &[&str]) -> Option<PathBuf> {
-    let base = match var.filter(|value| !value.is_empty()) {
-        Some(dir) => PathBuf::from(dir),
+    Some(xdg_base(var, home, under_home)?.join("libri"))
+}
+
+/// The XDG base folder `var` names, or `home` plus `under_home` when the
+/// variable is unset or empty.
+fn xdg_base(var: Option<OsString>, home: Option<OsString>, under_home: &[&str]) -> Option<PathBuf> {
+    match var.filter(|value| !value.is_empty()) {
+        Some(dir) => Some(PathBuf::from(dir)),
         None => {
             let mut dir = PathBuf::from(home?);
             dir.extend(under_home);
-            dir
+            Some(dir)
         }
-    };
-    Some(base.join("libri"))
+    }
 }
 
 /// Writes `text` to `path` so that a crash or a full disk never leaves a

@@ -33,6 +33,7 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 - `keymap`: the keyboard shortcuts Settings can change, their defaults and the fixed keys.
 - `wallet`: the token in KDE Wallet over kwalletd's D-Bus interface.
 - `clock`: timestamps as GitHub and the sync files write them, local dates, "5 minutes ago".
+- `animation`: Plasma's animation speed (`AnimationDurationFactor` in `kdeglobals`, 0 is instant) and the timing of a slide; `ui::slide` moves a widget sideways for the details drawer.
 - `fixtures`: the bundled fixture library.
 
 ## Git rules

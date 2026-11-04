@@ -6,15 +6,19 @@
 //! slides a drawer over the list's right side), remembered per view key
 //! like the view. A narrow window unpins it.
 
+use std::time::{Duration, Instant};
+
 use iced::widget::{
     Column, Row, button, column, container, opaque, progress_bar, row, space, text,
 };
-use iced::{Background, Border, Center, Element, Fill, Padding, Shadow, Vector};
+use iced::{Background, Border, Center, Color, Element, Fill, Padding, Shadow, Vector};
 
 use super::overview::{self, RowStyle};
-use super::{Listing, Message};
-use crate::app::{App, Message as AppMessage};
+use super::{Listing, Message, OpenSeries};
+use crate::animation::{Easing, Slide};
+use crate::app::{App, KeyPress, Message as AppMessage};
 use crate::browse;
+use crate::history::Direction;
 use crate::model::EntryStatus;
 use crate::screens::{entry, shell};
 use crate::theme::{self, Tokens, font};
@@ -57,6 +61,102 @@ pub fn panel(app: &App) -> Panel {
     }
 }
 
+/// How long the drawer slides in and out at Plasma's normal speed.
+pub const OPEN: Duration = Duration::from_millis(200);
+pub const CLOSE: Duration = Duration::from_millis(150);
+
+/// What the drawer shows, kept while it slides out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Shown {
+    Entry(String),
+    Series(OpenSeries),
+}
+
+/// The drawer's slide (2026-11-04): in from the window's right edge when
+/// a selection opens it, out to the edge when it closes. Only the drawer
+/// moves; nothing in the list resizes.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum Motion {
+    #[default]
+    Still,
+    Opening(Slide),
+    /// Sliding out, with what the drawer showed.
+    Closing(Slide, Shown),
+}
+
+impl Motion {
+    pub fn running(&self) -> bool {
+        !matches!(self, Motion::Still)
+    }
+
+    /// Still once the slide is over.
+    pub fn settle(&mut self, now: Instant) {
+        let done = match self {
+            Motion::Still => false,
+            Motion::Opening(slide) | Motion::Closing(slide, _) => slide.done(now),
+        };
+        if done {
+            *self = Motion::Still;
+        }
+    }
+}
+
+/// What the drawer shows: a selection's details or a series, while the
+/// panel is a drawer.
+fn shown(app: &App) -> Option<Shown> {
+    if panel(app) != Panel::Drawer {
+        return None;
+    }
+    let state = &app.library;
+    match &state.selected {
+        Some(id) => Some(Shown::Entry(id.clone())),
+        None => state.open_series().cloned().map(Shown::Series),
+    }
+}
+
+/// Before a message: the panel's mode and what the drawer shows, for
+/// `slide_drawer` after it.
+pub fn drawer_state(app: &App) -> (Panel, Option<Shown>) {
+    (panel(app), shown(app))
+}
+
+/// Whether a message is one of the drawer's closing actions: its ✕, a
+/// click on the open title, Esc, or Back (the mouse's button, Alt+Left).
+pub fn closes_drawer(message: &AppMessage) -> bool {
+    matches!(
+        message,
+        AppMessage::Library(Message::ClosePanel | Message::Select(_))
+            | AppMessage::Key(KeyPress::Escape)
+            | AppMessage::History(Direction::Back)
+    )
+}
+
+/// After a message moved the library from `before`: starts the slide in
+/// when a selection opened the drawer, or out when one of the closing
+/// actions (`closes`) closed it. Another title while it is open changes
+/// its content alone, and pinning, unpinning or a resize never slides:
+/// the mode has to be the drawer before and after, and leaving it ends
+/// any slide. At Plasma's "Instant" nothing moves.
+pub fn slide_drawer(app: &mut App, closes: bool, before: (Panel, Option<Shown>), now: Instant) {
+    if app.speed.instant() {
+        app.library.motion = Motion::Still;
+        return;
+    }
+    let after = shown(app);
+    let motion = match (before, after) {
+        ((Panel::Drawer, None), Some(_)) => {
+            Motion::Opening(Slide::start(now, app.speed.scale(OPEN), Easing::Out))
+        }
+        ((Panel::Drawer, Some(was)), None) if closes && panel(app) == Panel::Drawer => {
+            Motion::Closing(Slide::start(now, app.speed.scale(CLOSE), Easing::In), was)
+        }
+        // Pinned, or on Home, there is no drawer to slide.
+        _ if panel(app) != Panel::Drawer => Motion::Still,
+        _ => return,
+    };
+    app.library.motion = motion;
+}
+
 /// How many recently added titles At a glance lists, and how many tags.
 const RECENT: usize = 5;
 const TAGS: usize = 6;
@@ -84,11 +184,29 @@ pub fn side<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> 
     container(content).width(entry::details::WIDTH).into()
 }
 
+/// What a closing drawer still shows.
+fn show<'a>(app: &'a App, shown: &'a Shown) -> Option<Element<'a, AppMessage>> {
+    match shown {
+        Shown::Entry(id) => {
+            let entry = app.repo.library().entry(id)?;
+            Some(entry::details::view(app, entry, None))
+        }
+        Shown::Series(open) => entry::series::view(app, open),
+    }
+}
+
 /// The drawer over the list while something is selected: the details
 /// with a pin and a close button above them, a shadow to the left and no
-/// scrim. It takes the clicks over it, never the list under it.
+/// scrim. It takes the clicks over it, never the list under it. While it
+/// slides it sits `progress` of the way in from the window's right edge,
+/// its shadow fading with it.
 pub fn drawer<'a>(app: &'a App) -> Option<Element<'a, AppMessage>> {
-    let details = details(app)?;
+    let now = Instant::now();
+    let (details, progress) = match &app.library.motion {
+        Motion::Still => (details(app)?, 1.0),
+        Motion::Opening(slide) => (details(app)?, slide.progress(now)),
+        Motion::Closing(slide, shown) => (show(app, shown)?, 1.0 - slide.progress(now)),
+    };
     let tokens = app.tokens();
     let mut buttons = Row::new().spacing(4);
     if !narrow(app) {
@@ -115,14 +233,18 @@ pub fn drawer<'a>(app: &'a App) -> Option<Element<'a, AppMessage>> {
                 ..Border::default()
             },
             shadow: Shadow {
-                color: t.drawer_shadow,
+                color: Color {
+                    a: t.drawer_shadow.a * progress,
+                    ..t.drawer_shadow
+                },
                 offset: Vector::new(-18.0, 0.0),
                 blur_radius: 44.0,
             },
             ..container::Style::default()
         });
+    let offset = entry::details::WIDTH * (1.0 - progress);
     Some(
-        container(opaque(face))
+        container(ui::slide(opaque(face), offset))
             .width(Fill)
             .height(Fill)
             .align_x(iced::Right)
@@ -536,6 +658,116 @@ mod tests {
         assert_eq!(click(size.width - 40.0, size.height - 60.0), 0);
         assert_eq!(click(size.width - 200.0, row_y), 0);
         assert_eq!(click(shell::SIDEBAR_WIDTH + 200.0, row_y), 1);
+    }
+
+    #[test]
+    fn the_drawer_slides_in_on_a_selection_and_out_on_its_closing_actions() {
+        use std::time::Duration;
+
+        use crate::animation::Speed;
+
+        let mut app = app();
+        let ids = movies(&mut app);
+        app.speed = Speed::factor(0.5);
+        let start = std::time::Instant::now();
+        let at = |app: &mut App, message: AppMessage, ms: u64| {
+            let _ = app.update_at(message, start + Duration::from_millis(ms));
+        };
+        // Pinned: a selection never slides.
+        at(&mut app, msg(Message::Select(ids[0].clone())), 0);
+        assert_eq!(app.library.motion, Motion::Still);
+        // Unpinning shows the drawer without a slide.
+        at(&mut app, msg(Message::TogglePanel), 0);
+        assert_eq!(panel(&app), Panel::Drawer);
+        assert_eq!(app.library.motion, Motion::Still);
+        // The open title closes it: out, at half of 150 ms.
+        at(&mut app, msg(Message::Select(ids[0].clone())), 10);
+        let Motion::Closing(slide, Shown::Entry(id)) = app.library.motion.clone() else {
+            panic!("closing, got {:?}", app.library.motion);
+        };
+        assert_eq!(id, ids[0]);
+        assert!(slide.done(start + Duration::from_millis(85)));
+        assert!(!slide.done(start + Duration::from_millis(84)));
+        // A frame after it is over settles it.
+        at(&mut app, AppMessage::Frame(start), 100);
+        assert_eq!(app.library.motion, Motion::Still);
+
+        // A selection opens it: in, at half of 200 ms.
+        at(&mut app, msg(Message::Select(ids[1].clone())), 200);
+        let Motion::Opening(slide) = app.library.motion else {
+            panic!("opening, got {:?}", app.library.motion);
+        };
+        assert!(slide.done(start + Duration::from_millis(300)));
+        assert!(!slide.done(start + Duration::from_millis(299)));
+        // Another title while it is open: the content changes, no slide.
+        at(&mut app, msg(Message::Select(ids[2].clone())), 400);
+        assert_eq!(app.library.motion, Motion::Still);
+        assert_eq!(app.library.selected.as_deref(), Some(ids[2].as_str()));
+        // Esc and the ✕ close it; Back too.
+        at(&mut app, AppMessage::Key(KeyPress::Escape), 400);
+        assert!(matches!(app.library.motion, Motion::Closing(..)));
+        at(&mut app, msg(Message::Select(ids[2].clone())), 1000);
+        at(&mut app, msg(Message::ClosePanel), 2000);
+        assert!(matches!(app.library.motion, Motion::Closing(..)));
+        at(&mut app, msg(Message::Select(ids[2].clone())), 3000);
+        at(&mut app, AppMessage::History(Direction::Back), 4000);
+        assert!(matches!(app.library.motion, Motion::Closing(..)));
+        assert_eq!(app.library.selected, None);
+
+        // Pinning with the drawer open: no slide, the panel is just there.
+        at(&mut app, msg(Message::Select(ids[2].clone())), 5000);
+        at(&mut app, msg(Message::TogglePanel), 5000);
+        assert_eq!(panel(&app), Panel::Pinned);
+        assert_eq!(app.library.motion, Motion::Still);
+        // A type change with the drawer open is not a closing action.
+        at(&mut app, msg(Message::TogglePanel), 6000);
+        at(&mut app, msg(Message::Select(ids[2].clone())), 6000);
+        at(
+            &mut app,
+            msg(Message::ShowType(Some(MediaType::Books))),
+            7000,
+        );
+        assert_eq!(app.library.motion, Motion::Still);
+
+        // Plasma's "Instant": nothing moves.
+        app.speed = Speed::INSTANT;
+        let _ = app.update(msg(Message::ShowType(Some(MediaType::Movies))));
+        let _ = app.update(msg(Message::Select(ids[0].clone())));
+        assert_eq!(app.library.motion, Motion::Still);
+    }
+
+    #[test]
+    fn a_sliding_drawer_starts_off_the_window_and_the_list_stays_put() {
+        use std::time::Duration;
+
+        use crate::animation::{Easing, Slide};
+
+        let mut app = app();
+        let ids = movies(&mut app);
+        let _ = app.update(msg(Message::SetView(View::List)));
+        let _ = app.update(msg(Message::TogglePanel));
+        let _ = app.update(msg(Message::Select(ids[0].clone())));
+        let size = crate::app::WINDOW_SIZE;
+        app.window = size;
+        let place = |app: &App, label: &str| {
+            let mut ui = iced_test::Simulator::with_size(crate::app::settings(), size, app.view());
+            ui.find(label).ok().map(|target| target.bounds())
+        };
+        let still = place(&app, "Add").unwrap();
+        let shown = place(&app, "RATING").expect("the details' Rating section");
+        assert!(shown.x + shown.width <= size.width);
+        // A slide not started yet (set in the future) sits at the edge.
+        app.library.motion = Motion::Opening(Slide::start(
+            std::time::Instant::now() + Duration::from_secs(60),
+            Duration::from_millis(200),
+            Easing::Out,
+        ));
+        let start = place(&app, "RATING").expect("still in the tree");
+        assert!(
+            start.x >= size.width,
+            "off the window at the start: {start:?} in {size:?}"
+        );
+        assert_eq!(place(&app, "Add"), Some(still), "the toolbar never moves");
     }
 
     #[test]

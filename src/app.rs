@@ -9,6 +9,7 @@ use iced::widget::{operation, scrollable};
 use iced::window::{self, settings::PlatformSpecific};
 use iced::{Element, Event, Size, Subscription, Task, event, mouse, time};
 
+use crate::animation;
 use crate::artwork::{self, Artwork};
 use crate::clock::Timestamp;
 use crate::connection::{Connection, ConnectionFile, Target};
@@ -217,6 +218,9 @@ pub struct App {
     pub settings_page: screens::settings::State,
     /// Where the splash's bar is in its sweep, 0 to 1.
     pub splash_phase: f32,
+    /// Plasma's animation speed, read from `kdeglobals` at the start;
+    /// instant in the tests and `App::new`.
+    pub speed: animation::Speed,
     /// The window's logical size, for layouts that give way when narrow.
     pub window: Size,
     /// The redraw counter of the freeze trace.
@@ -277,6 +281,8 @@ pub enum Message {
     History(Direction),
     /// A frame of the splash's bar.
     Tick,
+    /// A frame while the details drawer slides.
+    Frame(Instant),
     Resized(Size),
     /// The window's events, for the freeze trace.
     Window(window::Event),
@@ -452,6 +458,7 @@ impl App {
             .and_then(|name| Screen::from_name(&name))
             .unwrap_or_default();
         let mut app = App::new(screen);
+        app.speed = animation::Speed::from_plasma();
         // A run that looks at a screen or a state keeps the fixture and
         // the fake states; otherwise the connection on this computer is
         // real.
@@ -631,6 +638,7 @@ impl App {
             plan_dialog: None,
             settings_page: screens::settings::State::default(),
             splash_phase: 0.0,
+            speed: animation::Speed::INSTANT,
             window: WINDOW_SIZE,
             frames: crate::trace::Frames::new(std::time::Instant::now()),
             history: History::default(),
@@ -1021,6 +1029,12 @@ impl App {
     /// new one. The splash and the setup are not places to come back to.
     /// The title bar follows the theme.
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        self.update_at(message, Instant::now())
+    }
+
+    /// `update` at a given time: the drawer's slide is timed from `now`.
+    pub fn update_at(&mut self, message: Message, now: Instant) -> Task<Message> {
+        self.library.motion.settle(now);
         let message = match message {
             Message::KeyPressed(key, modifiers) => match self.shortcut(&key, modifiers) {
                 Some(message) => message,
@@ -1037,10 +1051,13 @@ impl App {
         let from = (message.navigates() && self.screen.in_history()).then(|| self.place());
         let selected = self.library.selected.clone();
         let page = self.library.page.is_some();
+        let drawer = library::drawer_state(self);
+        let closes = library::closes_drawer(&message);
         let task = self.handle(message);
         if self.library.selected != selected {
             self.library.selection_moved();
         }
+        library::slide_drawer(self, closes, drawer, now);
         // Back from a page, the list or Home is where it was left.
         let task = if page && self.library.page.is_none() && self.screen == Screen::Library {
             Task::batch([task, library::restore_scroll(&self.library)])
@@ -1199,6 +1216,8 @@ impl App {
             // One sweep of the splash's bar takes 1.4 s; the setup's ring
             // turns twice in that time.
             Message::Tick => self.splash_phase = (self.splash_phase + 0.016 / 1.4) % 1.0,
+            // The slide is timed in `update_at`; the frame only redraws.
+            Message::Frame(_) => {}
             Message::Resized(size) => self.window = size,
             Message::Window(event) => return self.window_event(event),
             Message::Decoration(decoration) => self.decoration = decoration,
@@ -1518,6 +1537,10 @@ impl App {
             || entry::is_busy(self)
         {
             subscriptions.push(time::every(Duration::from_millis(16)).map(|_| Message::Tick));
+        }
+        // The drawer's slide draws every frame while it runs.
+        if self.library.motion.running() {
+            subscriptions.push(window::frames().map(Message::Frame));
         }
         // The debounce clock runs only while edits wait; the check every
         // five minutes while a repository is connected.

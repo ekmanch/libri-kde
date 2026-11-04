@@ -1,6 +1,7 @@
 //! Libri for the desktop (KDE Plasma): the front end for a personal media
 //! library kept as `library.json` in a GitHub repo.
 
+pub mod animation;
 pub mod app;
 pub mod artwork;
 pub mod browse;
