@@ -339,7 +339,8 @@ fn round_button<'a>(
         .focusable(size / 2.0, tokens)
 }
 
-/// Change cover…, outlined in white on the dark backdrop.
+/// Change cover…, an opaque dark button with a lighter outline, so it
+/// reads over whatever the backdrop lets through.
 fn change_button<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
     button(
         container(
@@ -356,16 +357,16 @@ fn change_button<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
     .style(|_, status| button::Style {
         background: Some(
             if matches!(status, button::Status::Hovered) {
-                theme::VIEWER_CLOSE
+                theme::VIEWER_BUTTON_HOVER
             } else {
-                theme::VIEWER_FILL
+                theme::VIEWER_BUTTON
             }
             .into(),
         ),
         border: Border::default()
             .rounded(8)
             .width(1)
-            .color(theme::VIEWER_LINE),
+            .color(theme::VIEWER_BUTTON_LINE),
         ..button::Style::default()
     })
     .focusable(8.0, tokens)

@@ -146,13 +146,17 @@ pub const BADGE_MARK: Color = hex(0x5EE08A);
 pub const BADGE_DNF: Color = hex(0xA3A8AE);
 
 /// The cover viewer, dark on every theme as in the mockup: its text,
-/// the second line, the round close button's fill and Change cover…'s
-/// outline and fill.
+/// the second line, and the round buttons' fill and hover.
 pub const VIEWER_TEXT: Color = hex(0xEEF0F2);
 pub const VIEWER_SUB: Color = hex(0xA3A8AE);
 pub const VIEWER_CLOSE: Color = white(0.08);
 pub const VIEWER_LINE: Color = white(0.18);
-pub const VIEWER_FILL: Color = white(0.06);
+/// Change cover…, opaque where the mockup has white veils, since the
+/// library's covers show through the backdrop behind it: its fill (the
+/// solid surface Glass gives its dialogs), hover and outline.
+pub const VIEWER_BUTTON: Color = hex(0x26292D);
+pub const VIEWER_BUTTON_HOVER: Color = hex(0x32353A);
+pub const VIEWER_BUTTON_LINE: Color = hex(0x4D5053);
 
 /// A mid gray, about what a blurred wallpaper averages: behind Glass in
 /// the Settings theme card, and what the contrast check lays under it.
@@ -516,6 +520,18 @@ mod tests {
             lay(color.g, backdrop.g),
             lay(color.b, backdrop.b),
         )
+    }
+
+    /// Change cover… sits on a see-through backdrop with the library's
+    /// covers behind it, so nothing of it lets them through, and its
+    /// label reads on it.
+    #[test]
+    fn the_cover_viewers_button_is_opaque() {
+        for color in [VIEWER_BUTTON, VIEWER_BUTTON_HOVER, VIEWER_BUTTON_LINE] {
+            assert_eq!(color.a, 1.0);
+        }
+        assert!(contrast(VIEWER_TEXT, VIEWER_BUTTON) >= 4.5);
+        assert!(contrast(VIEWER_TEXT, VIEWER_BUTTON_HOVER) >= 4.5);
     }
 
     /// The contrast check of phase 1g (docs/DESIGN.md section 10): body

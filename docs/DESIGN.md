@@ -308,6 +308,8 @@ Add decisions here as they are made during phases 0 and 1, with the date.
 
   What stays, since each does work: the outline that is a control's whole shape (Outline buttons, chips, status pills, check boxes, radios, the segmented groups, key caps, the type rail's thumb), the fields' line that turns to the ink on focus, the rings that mark a choice (cover tiles, the setup's cards, today in the calendar, a shortcut being recorded), and the focus ring. Three edges stay as judgment calls: the summary card of "You're all set" and the accent swatches on Light alone (white on near white, and pale swatches on white), and the sync banner's red-tinted outline. The plan list under "Start with" and the Create-tag offer are boxes of outline alone, with no fill to bleed through.
 
+- **Change cover… is opaque** (2026-11-05, phase 4): the canvas draws the cover viewer's button as white veils (a 6 % fill and an 18 % outline) on the backdrop. The backdrop is 82 % dark, so the library's covers show faintly behind it, and the button sits low enough to land on one: a see-through button over a see-through backdrop, hard to read (reported 2026-11-05). It is solid now, as the dialogs are: `theme::VIEWER_BUTTON` (#26292D, the fill Glass gives its dialogs), a step lighter on hover, with an opaque outline (#4D5053), which stays because a bright cover behind the backdrop comes close to the fill. The same on every theme, like the rest of the viewer. The round ×, ‹ and › keep their veils: a single large glyph reads over anything.
+
 ## 11. Open
 
 Nothing at the moment.
