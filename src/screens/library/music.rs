@@ -2,9 +2,9 @@
 //! their albums and songs.
 
 use iced::widget::{Column, column, container, grid, row, text};
-use iced::{Element, Fill, Padding};
+use iced::{Element, Padding};
 
-use super::{Listing, Message, MusicTab, View};
+use super::{Listing, Message, MusicTab, View, rail};
 use crate::app::{App, Message as AppMessage};
 use crate::model::{Entry, MediaType};
 use crate::music::{self, Song};
@@ -18,6 +18,9 @@ fn msg(message: Message) -> AppMessage {
 /// Grid cells, as for covers: at most this wide.
 const CELL_MAX_WIDTH: f32 = 190.0;
 const CELL_WIDTH: f32 = 173.0;
+const CELL_SPACING: f32 = 20.0;
+/// An artist's card: the photo and two lines under it.
+const ARTIST_HEIGHT: f32 = CELL_WIDTH + 70.0;
 
 pub fn body<'a>(
     app: &'a App,
@@ -34,11 +37,32 @@ pub fn body<'a>(
                 if artists.is_empty() {
                     return empty("No artists here", tokens);
                 }
-                // A long list gets letter sections and the jump rail.
-                if state.is_long(artists.len(), view) {
+                // A long list gets letter sections and the section rail;
+                // a long grid the rail alone.
+                if view == View::Grid {
+                    let sections = artist_sections(artists);
+                    let names = sections.iter().map(|s| s.1.clone()).collect();
+                    let on_rail = rail::Sections::new(names, true);
+                    let room = on_rail.room();
+                    let rows = rail::GridRows::new(
+                        state.list_width - rail::LEFT - room,
+                        CELL_MAX_WIDTH,
+                        CELL_SPACING,
+                        CELL_WIDTH / ARTIST_HEIGHT,
+                    );
+                    let counts: Vec<usize> = sections.iter().map(|s| s.2.len()).collect();
+                    let long = state.is_tall(rows.height(counts.iter().sum()));
+                    let cards = artist_block(app, artist_sections_flat(sections), view, tokens);
+                    if counts.len() >= 2 && long {
+                        let on_rail = on_rail.in_grid(state, &counts, rows);
+                        let rail = on_rail.view(state, tokens);
+                        return super::entries::scrolling([cards], vec![rail], room);
+                    }
+                    cards
+                } else if state.is_long(artists.len(), view) {
                     let sections = artist_sections(artists);
                     if sections.len() >= 2 {
-                        let labels: Vec<String> = sections.iter().map(|s| s.1.clone()).collect();
+                        let names: Vec<String> = sections.iter().map(|s| s.1.clone()).collect();
                         let children = sections.into_iter().map(|(label, _, artists)| {
                             column![
                                 super::entries::section_header(&label, artists.len(), tokens),
@@ -46,11 +70,12 @@ pub fn body<'a>(
                             ]
                             .into()
                         });
-                        return super::entries::sectioned_list(app, children, &labels, tokens);
+                        return super::entries::sectioned_list(app, children, names, true, tokens);
                     }
-                    return artist_block(app, artist_sections_flat(sections), view, tokens);
+                    artist_block(app, artist_sections_flat(sections), view, tokens)
+                } else {
+                    artist_block(app, artists, view, tokens)
                 }
-                artist_block(app, artists, view, tokens)
             }
             MusicTab::Albums => {
                 let albums: Vec<&Entry> = listing
@@ -73,9 +98,9 @@ pub fn body<'a>(
             }
         },
     };
-    ui::scroll(container(content).padding(Padding::new(24.0).top(4)))
-        .height(Fill)
-        .into()
+    // The same scroll area as the other types' lists, so it reports its
+    // size and where it is scrolled: the long-list rule goes by them.
+    super::entries::scrolling([content], Vec::new(), rail::LEFT)
 }
 
 /// A tab with nothing in it while Music has entries elsewhere.
@@ -145,8 +170,8 @@ fn artist_block<'a>(
     match view {
         View::Grid => grid(rows)
             .fluid(CELL_MAX_WIDTH)
-            .spacing(20)
-            .height(grid::aspect_ratio(CELL_WIDTH, CELL_WIDTH + 70.0))
+            .spacing(CELL_SPACING)
+            .height(grid::aspect_ratio(CELL_WIDTH, ARTIST_HEIGHT))
             .into(),
         View::List => Column::with_children(rows).spacing(2).into(),
         View::Text => Column::with_children(rows).into(),

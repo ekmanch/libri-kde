@@ -7,12 +7,14 @@ use iced::advanced::widget::{self, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell, overlay, renderer};
 use iced::{Element, Event, Length, Point, Rectangle, Size, Vector, mouse};
 
-/// What `Groups` reports: where each child starts, and how tall the
-/// visible part of the column is.
+/// What `Groups` reports: where each child starts, and how tall and how
+/// wide the visible part of the column is (the scroll area it sits in,
+/// its padding included).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Measure {
     pub tops: Vec<f32>,
     pub viewport: f32,
+    pub width: f32,
 }
 
 pub struct Groups<'a, Message, Theme, Renderer> {
@@ -22,7 +24,7 @@ pub struct Groups<'a, Message, Theme, Renderer> {
 
 impl<'a, Message, Theme, Renderer> Groups<'a, Message, Theme, Renderer> {
     /// `on_measure` gets the top of every child, from the column's top,
-    /// and the viewport's height, each time they change.
+    /// and the viewport's height and width, each time they change.
     pub fn new(
         children: impl IntoIterator<Item = Element<'a, Message, Theme, Renderer>>,
         on_measure: impl Fn(Measure) -> Message + 'a,
@@ -124,6 +126,7 @@ where
         }
         let state = tree.state.downcast_mut::<State>();
         state.measure.viewport = viewport.height;
+        state.measure.width = viewport.width;
         if state.sent.as_ref() != Some(&state.measure) {
             state.sent = Some(state.measure.clone());
             shell.publish((self.on_measure)(state.measure.clone()));

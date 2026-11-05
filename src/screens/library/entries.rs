@@ -4,12 +4,12 @@
 use iced::widget::{Column, button, column, container, grid, row, scrollable, space, stack, text};
 use iced::{Background, Border, Element, Fill, FillPortion, Padding, Shadow, Vector};
 
-use super::{Listing, Message, View};
+use super::{Listing, Message, View, rail};
 use crate::app::{App, Message as AppMessage};
-use crate::browse::{self, Row};
+use crate::browse::{self, Row, Sort};
 use crate::model::{Entry, MediaType};
 use crate::theme::{self, Tokens, font};
-use crate::ui::{self, EntryLook, FocusExt, Icon};
+use crate::ui::{self, EntryLook, Icon};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Library(message)
@@ -19,6 +19,7 @@ fn msg(message: Message) -> AppMessage {
 const CARD_MAX_WIDTH: f32 = 190.0;
 const CARD_WIDTH: f32 = 173.0;
 const CARD_HEIGHT: f32 = CARD_WIDTH * 1.5 + 28.0;
+const CARD_SPACING: f32 = 20.0;
 
 pub fn body<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
@@ -31,84 +32,143 @@ pub fn body<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> 
         return super::music::body(app, listing, view, &tokens);
     }
 
-    // One type is one block, or the phone's long-list sections with a jump
-    // rail; All or several types get one group per type, in type order,
-    // each in the current sort.
-    let sections = (state.single().is_some() && state.is_long(listing.shown.len(), view))
-        .then(|| browse::row_sections(state.sort, &listing.rows, app.today))
-        .filter(|sections| sections.len() >= 2);
-    let list: Element<'a, AppMessage> = if let Some(sections) = sections {
-        let labels: Vec<String> = sections.iter().map(|s| s.short.clone()).collect();
-        let children = sections.iter().map(|section| {
-            // The count line counts entries, not rows.
-            let entries: usize = section
-                .rows
-                .iter()
-                .map(|row| match row {
-                    Row::Entry(_) => 1,
-                    Row::Series(group) => group.parts.len(),
-                })
-                .sum();
-            column![
-                section_header(&section.label, entries, &tokens),
-                block(app, &section.rows, view, &tokens)
-            ]
-            .into()
-        });
-        sectioned_list(app, children, &labels, &tokens)
-    } else {
-        let groups: Vec<(Option<MediaType>, Vec<Row<'a>>)> = match state.single() {
-            Some(_) => vec![(None, listing.rows.clone())],
-            None => MediaType::ALL
-                .into_iter()
-                .map(|media| {
-                    let rows = listing
-                        .rows
-                        .iter()
-                        .filter(|row| row.lead().media == media)
-                        .cloned()
-                        .collect();
-                    (Some(media), rows)
-                })
-                .filter(|(_, rows): &(_, Vec<Row<'a>>)| !rows.is_empty())
-                .collect(),
-        };
-        let children = groups.iter().map(|(media, rows)| {
-            let mut group = Column::new();
-            if let Some(media) = media {
-                group = group.push(group_header(*media, rows.len(), &tokens));
-            }
-            group.push(block(app, rows, view, &tokens)).into()
-        });
-        // The type-colored rail replaces the scrollbar.
-        let mut overlays = Vec::new();
-        if groups.len() > 1 {
-            let counted: Vec<(Option<MediaType>, Vec<&Entry>)> = groups
-                .iter()
-                .map(|(media, rows)| (*media, rows.iter().map(Row::lead).collect()))
-                .collect();
-            overlays.extend(pinned_header(state, &counted, &tokens));
-            overlays.push(rail(state, &counted, &tokens));
-        }
-        scrolling(children, overlays, 24.0)
+    // One type is one block, or in sections with the section rail once
+    // the list is long; All or several types get one group per type.
+    let (list, right) = match sectioned(app, listing, view, &tokens) {
+        Some(sectioned) => sectioned,
+        None => (grouped(app, listing, view, &tokens), SIDE),
     };
     if view == View::Text {
-        // The table header stays above the scrolling rows.
+        // The table header stays above the scrolling rows, as wide as
+        // they are.
         let creator = browse::creator_label(state.single());
         let header = ui::entry_table_header(
             ["Title", creator, "Released", "Status", "Rating", "Tags"],
             &tokens,
         );
-        column![container(header).padding([0, 24]), list].into()
+        column![
+            container(header).padding(Padding::new(0.0).left(SIDE).right(right)),
+            list
+        ]
+        .into()
     } else {
         list
     }
 }
 
+/// The list's padding left and right of its rows; the right is wider
+/// beside the section rail.
+const SIDE: f32 = rail::LEFT;
+
+/// A long list of one type in the phone's sections, which follow the sort
+/// (`browse::sections`), with the section rail and the room the list
+/// leaves for it at its right. The text and list views get a header per
+/// section; the grid has the rail alone, its cards in one block.
+fn sectioned<'a>(
+    app: &'a App,
+    listing: &Listing<'a>,
+    view: View,
+    tokens: &Tokens,
+) -> Option<(Element<'a, AppMessage>, f32)> {
+    let state = &app.library;
+    state.single()?;
+    let sections = browse::row_sections(state.sort, &listing.rows, app.today);
+    if sections.len() < 2 {
+        return None;
+    }
+    let names = sections.iter().map(|s| s.short.clone()).collect();
+    let on_rail = rail::Sections::new(names, state.sort == Sort::TitleAz);
+    let room = on_rail.room();
+    if view == View::Grid {
+        let rows = rail::GridRows::new(
+            state.list_width - SIDE - room,
+            CARD_MAX_WIDTH,
+            CARD_SPACING,
+            CARD_WIDTH / CARD_HEIGHT,
+        );
+        if !state.is_tall(rows.height(listing.rows.len())) {
+            return None;
+        }
+        let counts: Vec<usize> = sections.iter().map(|s| s.rows.len()).collect();
+        let on_rail = on_rail.in_grid(state, &counts, rows);
+        let cards = block(app, &listing.rows, view, tokens);
+        let list = scrolling([cards], vec![on_rail.view(state, tokens)], room);
+        return Some((list, room));
+    }
+    if !state.is_long(listing.shown.len(), view) {
+        return None;
+    }
+    let children = sections.iter().map(|section| {
+        // The count line counts entries, not rows.
+        let entries: usize = section
+            .rows
+            .iter()
+            .map(|row| match row {
+                Row::Entry(_) => 1,
+                Row::Series(group) => group.parts.len(),
+            })
+            .sum();
+        column![
+            section_header(&section.label, entries, tokens),
+            block(app, &section.rows, view, tokens)
+        ]
+        .into()
+    });
+    let on_rail = on_rail.in_list(state);
+    let list = scrolling(children, vec![on_rail.view(state, tokens)], room);
+    Some((list, room))
+}
+
+/// One type in one block, or All and several types grouped by type, in
+/// type order, each in the current sort.
+fn grouped<'a>(
+    app: &'a App,
+    listing: &Listing<'a>,
+    view: View,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let state = &app.library;
+    let groups: Vec<(Option<MediaType>, Vec<Row<'a>>)> = match state.single() {
+        Some(_) => vec![(None, listing.rows.clone())],
+        None => MediaType::ALL
+            .into_iter()
+            .map(|media| {
+                let rows = listing
+                    .rows
+                    .iter()
+                    .filter(|row| row.lead().media == media)
+                    .cloned()
+                    .collect();
+                (Some(media), rows)
+            })
+            .filter(|(_, rows): &(_, Vec<Row<'a>>)| !rows.is_empty())
+            .collect(),
+    };
+    let children = groups.iter().map(|(media, rows)| {
+        let mut group = Column::new();
+        if let Some(media) = media {
+            group = group.push(group_header(*media, rows.len(), tokens));
+        }
+        group.push(block(app, rows, view, tokens)).into()
+    });
+    // The type-colored rail replaces the scrollbar.
+    let mut overlays = Vec::new();
+    if groups.len() > 1 {
+        let counted: Vec<(Option<MediaType>, Vec<&Entry>)> = groups
+            .iter()
+            .map(|(media, rows)| (*media, rows.iter().map(Row::lead).collect()))
+            .collect();
+        overlays.extend(pinned_header(state, &counted, tokens));
+        overlays.push(rail(state, &counted, tokens));
+    }
+    scrolling(children, overlays, SIDE)
+}
+
 /// A scrolling list of `children`, measured by `Groups` for the rails and
-/// the pinned header, with `overlays` laid over it. The scrollbar gives
-/// way to a rail when there is one.
-fn scrolling<'a>(
+/// the pinned header, with `overlays` laid over it and `right` px kept
+/// free at its right. The scrollbar gives way to a rail when there is
+/// one.
+pub(super) fn scrolling<'a>(
     children: impl IntoIterator<Item = Element<'a, AppMessage>>,
     overlays: Vec<Element<'a, AppMessage>>,
     right: f32,
@@ -119,7 +179,7 @@ fn scrolling<'a>(
     } else {
         scrollable::Scrollbar::hidden()
     };
-    let scroll = ui::scroll(container(list).padding(Padding::new(24.0).top(4).right(right)))
+    let scroll = ui::scroll(container(list).padding(Padding::new(SIDE).top(4).right(right)))
         .direction(scrollable::Direction::Vertical(scrollbar))
         .id(super::LIST_ID)
         .on_scroll(|viewport| {
@@ -137,20 +197,21 @@ fn scrolling<'a>(
     layers.into()
 }
 
-/// A long list in sections: `children` are the sections, each with its
-/// header, and `labels` the rail's short labels, one per section.
+/// A long list in sections with the section rail: `children` are the
+/// sections, each with its header, and `names` their short labels;
+/// `alphabet` when they are letters, so the rail lists the whole
+/// alphabet.
 pub(super) fn sectioned_list<'a>(
     app: &'a App,
     children: impl IntoIterator<Item = Element<'a, AppMessage>>,
-    labels: &[String],
+    names: Vec<String>,
+    alphabet: bool,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
-    // The rail's labels need room beside the rows.
-    scrolling(
-        children,
-        vec![section_rail(&app.library, labels, tokens)],
-        64.0,
-    )
+    let state = &app.library;
+    let on_rail = rail::Sections::new(names, alphabet).in_list(state);
+    let room = on_rail.room();
+    scrolling(children, vec![on_rail.view(state, tokens)], room)
 }
 
 /// A long-list section's heading: the decade, letter or rating in gray
@@ -172,40 +233,6 @@ pub(super) fn section_header<'a>(
         .align_y(iced::Center),
     )
     .padding(Padding::new(0.0).top(14).bottom(8))
-    .into()
-}
-
-/// The jump rail of a long list: one short label per section down the
-/// right edge, the one being scrolled through marked; a click jumps there.
-fn section_rail<'a>(
-    state: &super::State,
-    labels: &[String],
-    tokens: &Tokens,
-) -> Element<'a, AppMessage> {
-    let current = current_group(state);
-    let items = labels.iter().enumerate().map(|(index, label)| {
-        let on = current == Some(index);
-        let (color, weight) = if on {
-            (tokens.text, font::BOLD)
-        } else {
-            (tokens.sub, font::SEMIBOLD)
-        };
-        button(text(label.clone()).size(10.5).font(weight).color(color))
-            .padding([1, 5])
-            .on_press(msg(Message::JumpToGroup(index)))
-            .style(ui::row_style(tokens, on, 5.0))
-            .focusable(5.0, tokens)
-    });
-    container(
-        Column::with_children(items)
-            .spacing(1)
-            .align_x(iced::Center),
-    )
-    .width(Fill)
-    .height(Fill)
-    .align_right(Fill)
-    .align_y(iced::Center)
-    .padding(Padding::new(0.0).right(6))
     .into()
 }
 
@@ -364,7 +391,7 @@ pub(super) fn block<'a>(
             looks.map(|(id, look, on_press)| found(id, ui::entry_card(look, tokens, on_press))),
         )
         .fluid(CARD_MAX_WIDTH)
-        .spacing(20)
+        .spacing(CARD_SPACING)
         .height(grid::aspect_ratio(CARD_WIDTH, CARD_HEIGHT))
         .into(),
         View::List => Column::with_children(
@@ -602,6 +629,188 @@ mod tests {
         );
         app.library.scroll.offset = 1500.0;
         assert_eq!(current_group(&app.library), Some(2));
+    }
+
+    /// The movies in the grid in title order, long enough for the section
+    /// rail, the list measured as on the window's first redraw.
+    fn long_grid() -> App {
+        let mut app = App::new(Screen::Library);
+        app.today = Date::parse("2026-10-19").unwrap();
+        app.library.force_long = true;
+        for message in [
+            Message::ShowType(Some(MediaType::Movies)),
+            Message::SetView(View::Grid),
+            Message::Sort(Sort::TitleAz),
+        ] {
+            let _ = app.update(msg(message));
+        }
+        let messages: Vec<_> = {
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            let redraw = iced::window::Event::RedrawRequested(std::time::Instant::now());
+            let _ = ui.simulate([iced::Event::Window(redraw)]);
+            ui.into_messages().collect()
+        };
+        for message in messages {
+            let _ = app.update(message);
+        }
+        app
+    }
+
+    #[test]
+    fn the_music_lists_measure_themselves_too() {
+        let mut app = App::new(Screen::Library);
+        let _ = app.update(msg(Message::ShowType(Some(MediaType::Music))));
+        let messages: Vec<_> = {
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            let redraw = iced::window::Event::RedrawRequested(std::time::Instant::now());
+            let _ = ui.simulate([iced::Event::Window(redraw)]);
+            ui.into_messages().collect()
+        };
+        for message in messages {
+            let _ = app.update(message);
+        }
+        // Music may be the first list shown: without its own measure no
+        // artist list would ever count as long.
+        assert!(app.library.viewport > 0.0 && app.library.list_width > 0.0);
+    }
+
+    #[test]
+    fn the_grids_rail_finds_the_rows_the_cards_are_in() {
+        let app = long_grid();
+        let listing = app.library.listing(app.repo.library(), app.today);
+        let names = vec!["A".to_owned(), "Z".to_owned()];
+        let room = rail::Sections::new(names, true).room();
+        let rows = rail::GridRows::new(
+            app.library.list_width - SIDE - room,
+            CARD_MAX_WIDTH,
+            CARD_SPACING,
+            CARD_WIDTH / CARD_HEIGHT,
+        );
+        assert!(rows.columns > 1 && listing.rows.len() > rows.columns);
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        let mut card = |index: usize| {
+            let id = row_id(&listing.rows[index].lead().id);
+            ui.find(iced::advanced::widget::Id::from(id))
+                .expect("the card")
+                .bounds()
+        };
+        let first = card(0);
+        assert!((first.height - rows.cell).abs() < 0.01);
+        for index in 0..listing.rows.len() {
+            let top = card(index).y - first.y;
+            assert!((top - rows.top(index)).abs() < 0.01, "card {index}");
+        }
+    }
+
+    #[test]
+    fn a_press_on_the_rail_jumps_and_holds_until_the_release() {
+        use iced::mouse::{Button, Event as Mouse};
+
+        let app = long_grid();
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        let mut label = |text: &str| ui.find(text).expect("on the rail").bounds().center();
+        let (d, p, b) = (label("D"), label("P"), label("B"));
+        ui.point_at(d);
+        let _ = ui.simulate([iced::Event::Mouse(Mouse::ButtonPressed(Button::Left))]);
+        // Held, the pointer wanders off the rail: over B, which no movie
+        // starts with, within D, and level with P.
+        for position in [b, d, iced::Point::new(p.x - 300.0, p.y)] {
+            ui.point_at(position);
+            let _ = ui.simulate([iced::Event::Mouse(Mouse::CursorMoved { position })]);
+        }
+        let _ = ui.simulate([iced::Event::Mouse(Mouse::ButtonReleased(Button::Left))]);
+        // Let go, the pointer over a label does nothing.
+        ui.point_at(d);
+        let _ = ui.simulate([iced::Event::Mouse(Mouse::CursorMoved { position: d })]);
+        let sent: Vec<String> = ui
+            .into_messages()
+            .filter_map(|message| match message {
+                AppMessage::Library(Message::JumpToSection {
+                    label,
+                    offset,
+                    held,
+                }) => Some(format!("{label} {held} {}", offset > 0.0)),
+                AppMessage::Library(Message::RailReleased) => Some("released".into()),
+                _ => None,
+            })
+            .collect();
+        // D is in the first row, P in the second.
+        assert_eq!(sent, ["D true false", "P true true", "released"]);
+    }
+
+    /// The heights of the texts reading `0` in the laid-out window.
+    struct Texts(&'static str, Vec<f32>);
+
+    impl iced::advanced::widget::Operation for Texts {
+        fn traverse(
+            &mut self,
+            operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation),
+        ) {
+            operate(self);
+        }
+
+        fn text(
+            &mut self,
+            _id: Option<&iced::advanced::widget::Id>,
+            bounds: iced::Rectangle,
+            text: &str,
+        ) {
+            if text == self.0 {
+                self.1.push(bounds.height);
+            }
+        }
+    }
+
+    #[test]
+    fn the_bubble_names_the_section_while_the_button_is_held() {
+        use iced::advanced::renderer::Headless;
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+
+        let mut renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as Headless>::new(iced::Font::default(), 14.into(), None),
+        )
+        .expect("a headless renderer");
+        let mut app = long_grid();
+        let mut texts = |app: &App| {
+            let size = crate::app::WINDOW_SIZE;
+            let mut ui = UserInterface::build(app.view(), size, Cache::default(), &mut renderer);
+            let mut texts = Texts("P", Vec::new());
+            ui.operate(&renderer, &mut texts);
+            texts.1
+        };
+        let jump = |held| {
+            msg(Message::JumpToSection {
+                label: "P".into(),
+                offset: 0.0,
+                held,
+            })
+        };
+        // Enter on the label: the rail's own P, small.
+        let _ = app.update(jump(false));
+        let plain = texts(&app);
+        assert!(matches!(plain[..], [label] if label < 20.0));
+        // Held: the bubble's P as well, large.
+        let _ = app.update(jump(true));
+        let held = texts(&app);
+        assert!(matches!(held[..], [label, bubble] if label < 20.0 && bubble >= 40.0));
+        let _ = app.update(msg(Message::RailReleased));
+        assert_eq!(texts(&app), plain, "gone at the release");
     }
 
     /// How far the list is scrolled, read off the laid-out window.

@@ -78,6 +78,29 @@ fn select(app: &mut App, id: &str) {
     let _ = app.update(Message::Library(library::Message::Select(id.into())));
 }
 
+/// Lets the list measure itself, as on the window's first redraw: a
+/// grid's section rail goes by the list's width.
+fn measure(app: &mut App) {
+    let messages: Vec<Message> = {
+        let mut ui = iced_test::Simulator::with_size(app::settings(), app::WINDOW_SIZE, app.view());
+        let redraw = iced::window::Event::RedrawRequested(std::time::Instant::now());
+        let _ = ui.simulate([iced::Event::Window(redraw)]);
+        ui.into_messages().collect()
+    };
+    for message in messages {
+        let _ = app.update(message);
+    }
+}
+
+/// The movies in the grid, in title order, long enough for the section
+/// rail.
+fn movie_grid(app: &mut App) {
+    app.library.force_long = true;
+    show_type(app, MediaType::Movies);
+    let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+    let _ = app.update(Message::Library(library::Message::Sort(Sort::TitleAz)));
+}
+
 fn open_page(app: &mut App, page: Page) {
     let _ = app.update(Message::Library(library::Message::OpenPage(page)));
 }
@@ -390,6 +413,7 @@ fn capture_every_screen() {
                 ))));
                 let _ = app.update(Message::Library(library::Message::SetView(View::Text)));
                 let _ = app.update(Message::Library(library::Message::Sort(Sort::TitleAz)));
+                measure(app);
             }),
         ),
         (
@@ -401,6 +425,49 @@ fn capture_every_screen() {
                 ))));
                 let _ = app.update(Message::Library(library::Message::SetView(View::List)));
                 let _ = app.update(Message::Library(library::Message::Sort(Sort::YearNewest)));
+                measure(app);
+            }),
+        ),
+        // The grid's section rail (mockup "Grid: section rail, dragging"):
+        // beside the pinned panel, by decade, and with the button held on
+        // K, the bubble beside it.
+        (
+            Screen::Library,
+            ("library-grid-rail", |app| {
+                movie_grid(app);
+                measure(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("library-grid-rail-decades", |app| {
+                movie_grid(app);
+                let _ = app.update(Message::Library(library::Message::Sort(Sort::YearNewest)));
+                measure(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("library-grid-rail-drag", |app| {
+                movie_grid(app);
+                let _ = app.update(Message::Library(library::Message::TogglePanel));
+                measure(app);
+                let _ = app.update(Message::Library(library::Message::JumpToSection {
+                    label: "K".into(),
+                    offset: 0.0,
+                    held: true,
+                }));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("music-artists-grid-rail", |app| {
+                app.library.force_long = true;
+                let _ = app.update(Message::Library(library::Message::ShowType(Some(
+                    MediaType::Music,
+                ))));
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                measure(app);
             }),
         ),
         (
@@ -411,6 +478,7 @@ fn capture_every_screen() {
                     MediaType::Music,
                 ))));
                 let _ = app.update(Message::Library(library::Message::SetView(View::Text)));
+                measure(app);
             }),
         ),
         // Two types grouped in the grid, the first group's header pinned

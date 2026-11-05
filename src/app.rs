@@ -371,6 +371,8 @@ impl Message {
                     | L::Picker(_)
                     | L::Search(_)
                     | L::JumpToGroup(_)
+                    | L::JumpToSection { .. }
+                    | L::RailReleased
             ),
             Message::Key(key) => matches!(
                 key,
@@ -1447,6 +1449,22 @@ impl App {
                     };
                     return operation::scroll_to(library::LIST_ID, offset);
                 }
+            }
+            Message::Library(library::Message::JumpToSection {
+                label,
+                offset,
+                held,
+            }) => {
+                self.library.update(library::Message::JumpToSection {
+                    label,
+                    offset,
+                    held,
+                });
+                let offset = scrollable::AbsoluteOffset {
+                    x: None,
+                    y: Some(offset),
+                };
+                return operation::scroll_to(library::LIST_ID, offset);
             }
             Message::Library(library::Message::Picker(tags::PickerMessage::Jump(offset))) => {
                 return tags::jump(offset);

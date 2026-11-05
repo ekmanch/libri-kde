@@ -618,6 +618,55 @@ fn section_key(sort: Sort, entry: &Entry, today: Date) -> (String, String) {
     }
 }
 
+/// The rail's alphabet in the title order: "#" for digits, then A to Z.
+const RAIL_ALPHABET: &str = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/// The section rail's labels for a list whose sections have the short
+/// labels `sections`, in the list's order: each with its section, or
+/// `None` for a letter the list has nothing under. With `alphabet` (the
+/// title order, the artists) the rail always shows "#" and A to Z, the
+/// missing letters filled in where they belong; a section outside the
+/// alphabet ("VA", "Å") keeps its place in the list, after Z when no
+/// letter follows it. The other orders list their sections alone.
+pub fn rail_labels(sections: &[String], alphabet: bool) -> Vec<(String, Option<usize>)> {
+    let present = sections
+        .iter()
+        .enumerate()
+        .map(|(index, label)| (label.clone(), Some(index)));
+    if !alphabet {
+        return present.collect();
+    }
+    let letter = |label: &str| {
+        let mut chars = label.chars();
+        match (chars.next(), chars.next()) {
+            (Some(c), None) => RAIL_ALPHABET.find(c),
+            _ => None,
+        }
+    };
+    let missing: Vec<(usize, char)> = RAIL_ALPHABET
+        .char_indices()
+        .filter(|&(at, _)| !sections.iter().any(|label| letter(label) == Some(at)))
+        .collect();
+    let mut missing = missing.into_iter().peekable();
+    let mut labels = Vec::with_capacity(RAIL_ALPHABET.len() + sections.len());
+    for (index, (label, section)) in present.enumerate() {
+        // The missing letters up to this one; all that are left before a
+        // section that no letter follows.
+        let upto = letter(&label).or_else(|| {
+            let letters_follow = sections[index + 1..].iter().any(|l| letter(l).is_some());
+            (!letters_follow).then_some(RAIL_ALPHABET.len())
+        });
+        if let Some(upto) = upto {
+            while let Some((_, c)) = missing.next_if(|&(at, _)| at < upto) {
+                labels.push((c.to_string(), None));
+            }
+        }
+        labels.push((label, section));
+    }
+    labels.extend(missing.map(|(_, c)| (c.to_string(), None)));
+    labels
+}
+
 /// The letter a title files under: its first letter or digit, in capitals,
 /// with "#" for a digit; punctuation in front is skipped.
 pub fn title_initial(title: &str) -> char {
@@ -906,6 +955,44 @@ mod tests {
             filter.no_matches_text(&BTreeSet::new(), None),
             "No entries are both from before 1960 or from the 1990s and tagged #christmas. \
              Remove a filter to see more."
+        );
+    }
+
+    #[test]
+    fn the_rail_fills_in_the_alphabet() {
+        let names = |labels: &[&str]| -> Vec<String> {
+            labels.iter().map(|&label| label.to_owned()).collect()
+        };
+        let rail = |labels: &[&str], alphabet| {
+            rail_labels(&names(labels), alphabet)
+                .into_iter()
+                .map(|(label, section)| match section {
+                    Some(index) => format!("{label}{index}"),
+                    None => label.to_lowercase(),
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        // The other orders list their sections alone.
+        assert_eq!(
+            rail(&["2020s", "1990s", "None"], false),
+            "2020s0 1990s1 None2"
+        );
+        // The title order: every letter, the missing ones without a
+        // section.
+        assert_eq!(
+            rail(&["#", "B", "D", "Z"], true),
+            "#0 a B1 c D2 e f g h i j k l m n o p q r s t u v w x y Z3"
+        );
+        // A section outside the alphabet at the end comes after Z; one
+        // between two letters keeps its place.
+        assert_eq!(
+            rail(&["A", "T", "VA"], true),
+            "# A0 b c d e f g h i j k l m n o p q r s T1 u v w x y z VA2"
+        );
+        assert_eq!(
+            rail(&["E", "É", "F"], true),
+            "# a b c d E0 É1 F2 g h i j k l m n o p q r s t u v w x y z"
         );
     }
 

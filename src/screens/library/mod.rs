@@ -6,6 +6,7 @@ mod music;
 mod overview;
 mod page;
 mod panel;
+mod rail;
 mod reveal;
 mod tags;
 mod toolbar;
@@ -198,6 +199,13 @@ pub struct State {
     /// how tall the list's visible part is.
     pub group_tops: Vec<f32>,
     pub viewport: f32,
+    /// How wide the list's scroll area is, for the rows of a grid.
+    pub list_width: f32,
+    /// The section last jumped to from the section rail, by its label:
+    /// the rail marks it while the list rests where the jump left it.
+    pub rail_pick: Option<String>,
+    /// The mouse button is held on the section rail: the bubble shows.
+    pub rail_drag: bool,
     /// `LIBRI_LONG_LISTS=1`: section headers and the rail on every list,
     /// to look at them with the small fixture.
     pub force_long: bool,
@@ -261,6 +269,15 @@ pub enum Message {
     GroupsMeasured(ui::Measure),
     /// A click on the type rail: the app scrolls the list there.
     JumpToGroup(usize),
+    /// A label of the section rail, by a press, the held button moving
+    /// onto it (`held`) or Enter: the app scrolls the list to `offset`.
+    JumpToSection {
+        label: String,
+        offset: f32,
+        held: bool,
+    },
+    /// The button let go after a press on the section rail.
+    RailReleased,
     OpenPage(Page),
     ClosePage,
     /// A series row, or an entry's "All N volumes" with that entry to
@@ -427,6 +444,15 @@ impl State {
     }
 
     pub fn update(&mut self, message: Message) {
+        // The rail's bubble is there while the button is held on it:
+        // anything but the list following along ends it, should the
+        // release never arrive.
+        if !matches!(
+            message,
+            Message::JumpToSection { .. } | Message::Scrolled(_) | Message::GroupsMeasured(_)
+        ) {
+            self.rail_drag = false;
+        }
         match message {
             Message::ShowType(media) => {
                 self.types = media.into_iter().collect();
@@ -563,7 +589,21 @@ impl State {
                 None => {}
             },
             Message::UnpinAll => self.pins.clear(),
-            Message::Add | Message::JumpToGroup(_) | Message::PickSeriesCover(_) => {}
+            Message::Add
+            | Message::JumpToGroup(_)
+            | Message::PickSeriesCover(_)
+            | Message::RailReleased => {}
+            Message::JumpToSection {
+                label,
+                offset,
+                held,
+            } => {
+                self.rail_pick = Some(label);
+                self.rail_drag = held;
+                // Where the list will rest, so the rail marks the section
+                // before the list reports back.
+                self.scroll.offset = self.resting(offset);
+            }
             Message::OpenPage(page) => {
                 // A page keeps the entry it was opened from selected.
                 self.close_popovers();
@@ -624,6 +664,7 @@ impl State {
             Message::GroupsMeasured(measure) => {
                 self.group_tops = measure.tops;
                 self.viewport = measure.viewport;
+                self.list_width = measure.width;
             }
         }
     }
@@ -789,6 +830,27 @@ impl State {
             View::Text => 43.0,
         };
         self.force_long || (self.viewport > 0.0 && rows as f32 * row_height >= 3.0 * self.viewport)
+    }
+
+    /// The long-list rule for a grid `height` px tall, which has no row
+    /// height to go by: three screens or more.
+    pub fn is_tall(&self, height: f32) -> bool {
+        self.force_long || (self.viewport > 0.0 && height >= 3.0 * self.viewport)
+    }
+
+    /// Where the list rests when asked to scroll to `offset`: there, or
+    /// at its end when that comes first.
+    fn resting(&self, offset: f32) -> f32 {
+        if self.scroll.content > 0.0 {
+            offset.min((self.scroll.content - self.scroll.viewport).max(0.0))
+        } else {
+            offset
+        }
+    }
+
+    /// Whether the list rests where a jump to `offset` leaves it.
+    fn rests_at(&self, offset: f32) -> bool {
+        (self.resting(offset) - self.scroll.offset).abs() < 1.0
     }
 
     /// Whether the list folds the parts of a series into one row: one
