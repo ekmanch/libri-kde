@@ -327,9 +327,9 @@ fn round_button<'a>(
         .style(move |_, status| button::Style {
             background: Some(
                 if matches!(status, button::Status::Hovered) {
-                    theme::VIEWER_LINE
+                    theme::VIEWER_ROUND_HOVER
                 } else {
-                    theme::VIEWER_CLOSE
+                    theme::VIEWER_ROUND
                 }
                 .into(),
             ),

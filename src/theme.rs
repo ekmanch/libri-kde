@@ -145,12 +145,15 @@ pub const BADGE_MARK: Color = hex(0x5EE08A);
 /// The DNF badge's mark.
 pub const BADGE_DNF: Color = hex(0xA3A8AE);
 
-/// The cover viewer, dark on every theme as in the mockup: its text,
-/// the second line, and the round buttons' fill and hover.
+/// The cover viewer, dark on every theme as in the mockup: its text and
+/// the second line.
 pub const VIEWER_TEXT: Color = hex(0xEEF0F2);
 pub const VIEWER_SUB: Color = hex(0xA3A8AE);
-pub const VIEWER_CLOSE: Color = white(0.08);
-pub const VIEWER_LINE: Color = white(0.18);
+/// Its round buttons (×, ‹ and ›) and their hover: a gray that hides
+/// most of what is behind, where the mockup has white veils, which let
+/// a colorful cover behind the backdrop through at full strength.
+pub const VIEWER_ROUND: Color = Color::from_rgba8(0x3A, 0x3D, 0x42, 0.65);
+pub const VIEWER_ROUND_HOVER: Color = Color::from_rgba8(0x56, 0x5A, 0x60, 0.65);
 /// Change cover…, opaque where the mockup has white veils, since the
 /// library's covers show through the backdrop behind it: its fill (the
 /// solid surface Glass gives its dialogs), hover and outline.
@@ -537,6 +540,28 @@ mod tests {
             let shows = (1.0 - under.a) * (1.0 - viewer_scrim(under).a);
             assert!((shows - VIEWER_SHOWS).abs() < 1e-4, "{theme:?}: {shows}");
         }
+    }
+
+    /// The viewer's round buttons stand out from the backdrop over a
+    /// black screen and over a white one, and the screen's own contrast
+    /// behind them drops to a third or less.
+    #[test]
+    fn the_cover_viewers_round_buttons_read_over_any_screen() {
+        let backdrop = |screen: Color| {
+            let under = Tokens::styled(Theme::Graphite, PEACH, false).scrim;
+            over(viewer_scrim(under), over(under, screen))
+        };
+        let (dark, bright) = (backdrop(Color::BLACK), backdrop(Color::WHITE));
+        for fill in [VIEWER_ROUND, VIEWER_ROUND_HOVER] {
+            assert!(fill.a < 1.0 && fill.a >= 0.6);
+            for behind in [dark, bright] {
+                let disc = over(fill, behind);
+                assert!(disc.r - behind.r > 0.05, "{disc:?} on {behind:?}");
+                assert!(contrast(VIEWER_TEXT, disc) >= 4.5);
+            }
+        }
+        let spread = over(VIEWER_ROUND, bright).r - over(VIEWER_ROUND, dark).r;
+        assert!(spread <= (bright.r - dark.r) * 0.4);
     }
 
     /// Change cover… sits on a see-through backdrop with the library's
