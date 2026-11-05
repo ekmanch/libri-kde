@@ -162,10 +162,16 @@ pub const VIEWER_BUTTON_LINE: Color = hex(0x4D5053);
 /// the Settings theme card, and what the contrast check lays under it.
 pub const WALLPAPER: Color = hex(0x808080);
 
+/// How much of the screen the cover viewer's backdrop lets through: a
+/// tenth, where the mockup has 18 %, at which a list's text behind the
+/// title under the cover ran through it.
+const VIEWER_SHOWS: f32 = 0.10;
+
 /// The cover viewer's backdrop over the dialog scrim `under`, so the two
-/// together are the mockup's near-black at 82 %.
+/// together are a near-black that hides all but `VIEWER_SHOWS` of the
+/// screen.
 pub fn viewer_scrim(under: Color) -> Color {
-    let alpha = 1.0 - 0.18 / (1.0 - under.a).max(0.18);
+    let alpha = 1.0 - VIEWER_SHOWS / (1.0 - under.a).max(VIEWER_SHOWS);
     Color::from_rgba8(8, 9, 10, alpha.clamp(0.0, 1.0))
 }
 
@@ -520,6 +526,17 @@ mod tests {
             lay(color.g, backdrop.g),
             lay(color.b, backdrop.b),
         )
+    }
+
+    /// The viewer's backdrop and the dialog scrim under it together let
+    /// a tenth of the screen through, on every theme.
+    #[test]
+    fn the_cover_viewers_backdrop_hides_nine_tenths() {
+        for theme in Theme::ALL {
+            let under = Tokens::styled(theme, PEACH, false).scrim;
+            let shows = (1.0 - under.a) * (1.0 - viewer_scrim(under).a);
+            assert!((shows - VIEWER_SHOWS).abs() < 1e-4, "{theme:?}: {shows}");
+        }
     }
 
     /// Change cover… sits on a see-through backdrop with the library's
