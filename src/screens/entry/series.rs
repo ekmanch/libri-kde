@@ -198,60 +198,26 @@ pub fn cover_dialog<'a>(app: &'a App, media: MediaType, name: &str) -> Element<'
         .map(|p| p.id.clone());
     let tiles = parts.iter().enumerate().map(|(index, part)| {
         let on = picked.as_deref() == Some(part.id.as_str());
-        let tint = theme::cover_color(&part.id);
-        let (accent, line) = (tokens.accent, tokens.line);
-        let cover = container(ui::titled_cover(
-            app.artwork.cover(part),
-            tint,
-            &part.title,
-            104.0,
-            156.0,
-            13.0,
-        ))
-        .style(move |_| {
-            container::Style::default().border(
-                Border::default()
-                    .rounded(8)
-                    .width(if on { 3.0 } else { 1.0 })
-                    .color(if on { accent } else { line }),
-            )
-        });
-        let note = if !on {
-            String::new()
-        } else if index == 0 {
-            "First in the series".into()
-        } else {
-            "Your pick".into()
+        let note = match (on, index) {
+            (false, _) => "",
+            (true, 0) => "First in the series",
+            (true, _) => "Your pick",
         };
-        let year = part.year().map(|y| y.to_string()).unwrap_or_default();
         let title = Series::part_title(&part.title, &Series::display_name(name));
-        button(
-            column![
-                cover,
-                container(
-                    text(title)
-                        .size(13)
-                        .font(font::SEMIBOLD)
-                        .wrapping(text::Wrapping::None)
-                )
-                .width(104)
-                .clip(true),
-                ui::mono(year, 12.0, tokens.sub),
-                text(note).size(12).color(tokens.sub),
-            ]
-            .spacing(3)
-            .width(104),
+        let choice = ui::cover::Choice {
+            handle: app.artwork.cover(part),
+            tint: theme::cover_color(&part.id),
+            title: &title,
+            sub: part.year().map(|y| y.to_string()).unwrap_or_default(),
+            note,
+            on,
+        };
+        ui::cover::choice_tile(
+            choice,
+            104.0,
+            msg(Message::PickSeriesCover(part.id.clone())),
+            &tokens,
         )
-        .padding(0)
-        .on_press(msg(Message::PickSeriesCover(part.id.clone())))
-        .style({
-            let text_color = tokens.text;
-            move |_, _| button::Style {
-                text_color,
-                ..button::Style::default()
-            }
-        })
-        .focusable(8.0, &tokens)
     });
     let body = column![
         text(format!(

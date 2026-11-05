@@ -1396,7 +1396,7 @@ fn file<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
 }
 
 fn create<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let (chrome, line) = (tokens.chrome, tokens.line);
+    let chrome = tokens.chrome;
     let preview = container(
         text(codec::EMPTY.trim_end())
             .size(13)
@@ -1405,9 +1405,7 @@ fn create<'a>(state: &'a State, tokens: &Tokens) -> Element<'a, AppMessage> {
     )
     .width(Fill)
     .padding([14, 16])
-    .style(move |_| {
-        container::background(chrome).border(Border::default().rounded(10).width(1).color(line))
-    });
+    .style(move |_| container::background(chrome).border(Border::default().rounded(10)));
     column![
         intro(
             "Create a new library",

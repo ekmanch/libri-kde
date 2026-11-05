@@ -8,7 +8,7 @@ use std::rc::Rc;
 use iced::widget::{
     Column, Row, button, column, container, pick_list, row, space, text, text_editor,
 };
-use iced::{Background, Border, Center, Color, Element, Fill, Padding, Shadow, Vector};
+use iced::{Background, Border, Center, Color, Element, Fill, Padding};
 
 use super::{CategoriesDialog, Form, Message, NewTag, Replace};
 use crate::app::{App, Message as AppMessage};
@@ -50,16 +50,11 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
         .max_height(800)
         .height(Fill)
         .clip(true)
+        // The dialogs' surface (no outline, their shadow) in the opaque
+        // dialog color.
         .style(move |_| container::Style {
-            text_color: Some(tokens.text),
             background: Some(Background::Color(tokens.dialog)),
-            border: Border::default().rounded(14).width(1).color(tokens.line),
-            shadow: Shadow {
-                color: tokens.shadow,
-                offset: Vector::new(0.0, 12.0),
-                blur_radius: 32.0,
-            },
-            ..container::Style::default()
+            ..ui::panel_style(&tokens, 14.0)
         })
         .into();
     // Keep the dialog inside a small window.
@@ -1382,12 +1377,13 @@ fn footer<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
     .menu_style({
         let tokens = *tokens;
         move |_| iced::overlay::menu::Style {
+            // A popover: its fill and shadow, no outline.
             background: Background::Color(tokens.popover),
-            border: Border::default().rounded(8).width(1).color(tokens.line),
+            border: Border::default().rounded(8),
             text_color: tokens.text,
             selected_text_color: tokens.text,
             selected_background: Background::Color(tokens.selection),
-            shadow: Shadow::default(),
+            shadow: ui::panel_style(&tokens, 8.0).shadow,
         }
     });
     let save = if form.editing.is_some() {

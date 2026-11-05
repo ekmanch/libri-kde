@@ -154,6 +154,10 @@ pub const VIEWER_CLOSE: Color = white(0.08);
 pub const VIEWER_LINE: Color = white(0.18);
 pub const VIEWER_FILL: Color = white(0.06);
 
+/// A mid gray, about what a blurred wallpaper averages: behind Glass in
+/// the Settings theme card, and what the contrast check lays under it.
+pub const WALLPAPER: Color = hex(0x808080);
+
 /// The cover viewer's backdrop over the dialog scrim `under`, so the two
 /// together are the mockup's near-black at 82 %.
 pub fn viewer_scrim(under: Color) -> Color {
@@ -537,7 +541,7 @@ mod tests {
                 let tokens = Tokens::styled(theme, PEACH, flat);
                 let name = format!("{}{}", theme.label(), if flat { " flat" } else { "" });
                 for (surface, bg) in [("content", tokens.content), ("chrome", tokens.chrome)] {
-                    let bg = over(bg, hex(0x808080));
+                    let bg = over(bg, WALLPAPER);
                     check(format!("{name} text on {surface}"), tokens.text, bg, 4.5);
                     check(format!("{name} sub on {surface}"), tokens.sub, bg, 4.5);
                     for media in MediaType::ALL {

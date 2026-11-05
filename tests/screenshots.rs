@@ -960,6 +960,15 @@ fn capture_every_screen() {
             }),
         ),
         (Screen::Plans, ("plans", nothing)),
+        // Halloween 2026 is the fixture's timeline plan.
+        (
+            Screen::Plans,
+            ("plan-timeline", |app| {
+                let _ = app.update(Message::Plans(plans::Message::ShowPlan(
+                    "halloween-2026".into(),
+                )));
+            }),
+        ),
         (
             Screen::Plans,
             ("plan-note-draft", |app| {

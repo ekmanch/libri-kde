@@ -510,7 +510,7 @@ fn theme_card<'a>(choice: ThemeChoice, app: &App, tokens: &Tokens) -> Element<'a
     ]
     .spacing(2)
     .padding([0, 2]);
-    button(column![theme_preview(choice, &tokens), words].spacing(9))
+    button(column![theme_preview(choice), words].spacing(9))
         .width(Fill)
         .padding(8)
         .on_press(msg(Message::Theme(choice)))
@@ -539,12 +539,7 @@ enum Part {
 /// An 86 px miniature of the window in the theme: a sidebar with three
 /// bars and a content pane with three covers. System is Graphite on the
 /// left and Light on the right.
-fn theme_preview<'a>(choice: ThemeChoice, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let ring = if tokens.light {
-        Color::from_rgb8(0xE2, 0xE4, 0xE8)
-    } else {
-        tokens.line
-    };
+fn theme_preview<'a>(choice: ThemeChoice) -> Element<'a, AppMessage> {
     let inner: Element<'a, AppMessage> = match choice {
         ThemeChoice::Fixed(theme) => miniature(Tokens::new(theme, theme::PEACH), Part::Whole),
         ThemeChoice::System => row![
@@ -553,12 +548,19 @@ fn theme_preview<'a>(choice: ThemeChoice, tokens: &Tokens) -> Element<'a, AppMes
         ]
         .into(),
     };
+    // No outline: the miniature fills the preview and draws over it, and
+    // Glass's see-through one showed it as a rounded line inside its
+    // square corners. Glass sits on a stand-in for the wallpaper instead,
+    // so it reads the same on every theme's page.
+    let backdrop = matches!(choice, ThemeChoice::Fixed(theme) if theme.is_glass())
+        .then_some(Background::Color(theme::WALLPAPER));
     container(inner)
         .width(Fill)
         .height(86)
         .clip(true)
-        .style(move |_| {
-            container::Style::default().border(Border::default().rounded(10).width(1).color(ring))
+        .style(move |_| container::Style {
+            background: backdrop,
+            ..container::Style::default()
         })
         .into()
 }

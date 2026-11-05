@@ -639,26 +639,24 @@ fn timeline<'a>(
         .align_x(iced::alignment::Horizontal::Right)
         .width(120)
         .padding(Padding::new(0.0).top(12));
-        let content = tokens.content;
-        let line = container(Space::new())
-            .width(3)
-            .height(Fill)
-            .style(move |_| container::background(rail));
-        let marker = container(Space::new())
-            .width(13)
-            .height(13)
-            .style(move |_| {
-                container::background(dot)
-                    .border(Border::default().rounded(7).width(3).color(content))
-            });
-        let track = stack![
-            container(line).center_x(22),
-            container(marker)
-                .center_x(22)
-                .padding(Padding::new(0.0).top(14)),
-        ]
-        .width(22)
-        .height(Fill);
+        // The rail stops 3 px short of the marker on both sides. A ring in
+        // the content color over an unbroken rail did the same on the
+        // opaque themes, but Glass's see-through content drew it as a
+        // dark ring with the rail showing through.
+        let line = |height: iced::Length| {
+            container(
+                container(Space::new())
+                    .width(3)
+                    .height(Fill)
+                    .style(move |_| container::background(rail)),
+            )
+            .center_x(22)
+            .height(height)
+        };
+        let marker = container(ui::dot(dot, 7.0, 3.5)).center_x(22).center_y(13);
+        let track = column![line(14.into()), marker, line(Fill)]
+            .width(22)
+            .height(Fill);
         let items = Column::with_children(group.items.iter().filter_map(|item| {
             let entry = library.entry(&item.entry)?;
             Some(timeline_item(app, item, entry, covers, tokens))
