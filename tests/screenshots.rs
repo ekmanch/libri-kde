@@ -541,6 +541,16 @@ fn capture_every_screen() {
                 ))));
             }),
         ),
+        // A part of a series: ‹ and › through the parts' covers.
+        (
+            Screen::Library,
+            ("cover-viewer-series", |app| {
+                show_type(app, MediaType::Books);
+                let _ = app.update(Message::Entry(entry::Message::ViewCover(
+                    "books/berserk-vol-42-2021".into(),
+                )));
+            }),
+        ),
         (Screen::Library, ("edit-tag-picker", edit_baby_tags)),
         (Screen::Library, ("details-tag-picker", details_baby_tags)),
         (

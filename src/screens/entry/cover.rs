@@ -10,7 +10,14 @@
 //! image's own shape, and a sharper copy of the same image
 //! (`lookup::viewer_urls`) is fetched and drawn over it once it is here;
 //! a copy that does not come leaves the cached cover, without a word.
-//! Hovering the cover in details starts that fetch already.
+//! Hovering the cover in details starts that fetch already. Ctrl+click on
+//! a title in the library opens the viewer too, without selecting it.
+//!
+//! A title in a series with other parts in the library gets ‹ and ›
+//! beside its cover (and the Left and Right keys), which step through the
+//! parts' covers in series order, from the one it opened on: Ctrl+click
+//! on a series' row opens on the cover the row shows. The covers and the
+//! sharper copies of the parts on either side are fetched ahead.
 
 use iced::widget::image::{Handle, Image};
 use iced::widget::{Column, Row, button, column, container, mouse_area, opaque, row, stack, text};
@@ -21,7 +28,8 @@ use crate::app::{App, Message as AppMessage};
 use crate::artwork::Wants;
 use crate::browse;
 use crate::lookup::{self, Match};
-use crate::model::{Entry, MediaType};
+use crate::model::{Entry, MediaType, Series};
+use crate::series;
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
@@ -34,6 +42,9 @@ fn msg(message: Message) -> AppMessage {
 const MAX_SIDE: f32 = 600.0;
 const MARGIN: f32 = 240.0;
 const RADIUS: f32 = 12.0;
+/// The round ‹ and › beside the cover, and their gap to it.
+const ARROW: f32 = 44.0;
+const ARROW_GAP: f32 = 28.0;
 /// The shapes a cover's frame keeps within, width over height.
 const NARROWEST: f32 = 0.5;
 const WIDEST: f32 = 1.5;
@@ -106,6 +117,25 @@ fn shown_url<'a>(app: &'a App, view: &'a CoverView, entry: &Entry) -> Option<&'a
         return Some(url);
     }
     app.artwork.cover_url(entry)
+}
+
+/// The parts of the entry's series in the library, in series order, and
+/// where the entry is among them: the covers ‹ and › step through. None
+/// for a title on its own.
+fn in_series<'a>(app: &'a App, entry: &Entry) -> Option<(Vec<&'a Entry>, usize)> {
+    let part_of = entry.series.as_ref().filter(|_| entry.can_have_series())?;
+    let parts = series::entries_in(app.repo.library(), entry.media, &part_of.name);
+    let at = parts.iter().position(|part| part.id == entry.id)?;
+    (parts.len() > 1).then_some((parts, at))
+}
+
+/// The part `step` covers on from the entry `id` in its series; none past
+/// either end.
+pub fn neighbor(app: &App, id: &str, step: isize) -> Option<String> {
+    let entry = app.repo.library().entry(id)?;
+    let (parts, at) = in_series(app, entry)?;
+    let to = at.checked_add_signed(step)?;
+    parts.get(to).map(|part| part.id.clone())
 }
 
 /// The sharper copy of the cached cover `url` that is here, best first.
@@ -191,33 +221,69 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
             .flat_map(|r| r.matches.iter())
             .find(|m| m.cover_from() == cover_from)
     });
+    // Where the cover comes from is only said when it is another match's.
     let from = match (&entry.cover_from, picked) {
-        (None, _) => "From the match".to_owned(),
+        (None, _) => None,
         (Some(_), Some(found)) if !found.year_and_edition().is_empty() => {
-            format!("From another match: {}", found.year_and_edition())
+            Some(format!("From another match: {}", found.year_and_edition()))
         }
-        (Some(_), _) => "From another match".to_owned(),
+        (Some(_), _) => Some("From another match".to_owned()),
     };
     let mut kind = browse::kind_label(entry).to_owned();
     if let Some(years) = entry.years(app.today) {
         kind = format!("{kind} · {years}");
     }
-    let mut cover = column![
-        face,
-        column![
-            text(entry.title.clone())
-                .size(16)
-                .font(font::SEMIBOLD)
-                .color(theme::VIEWER_TEXT),
-            text(format!("{kind} · {from}"))
-                .size(13)
-                .color(theme::VIEWER_SUB),
-        ]
-        .spacing(3)
-        .align_x(Center),
+    if let Some(from) = from {
+        kind = format!("{kind} · {from}");
+    }
+    let mut words = column![
+        text(entry.title.clone())
+            .size(16)
+            .font(font::SEMIBOLD)
+            .color(theme::VIEWER_TEXT),
+        text(kind).size(13).color(theme::VIEWER_SUB),
     ]
-    .spacing(14)
+    .spacing(3)
     .align_x(Center);
+
+    // ‹ and › through the series' covers, each gone at its end with its
+    // place kept, and both while Pick a cover is open on this one.
+    let parts = in_series(app, entry);
+    let face: Element<'_, AppMessage> = match &parts {
+        Some((parts, at)) if !view.changing => {
+            let arrow = |icon: Icon, step: isize| -> Element<'_, AppMessage> {
+                let there = at
+                    .checked_add_signed(step)
+                    .is_some_and(|to| to < parts.len());
+                if there {
+                    round_button(icon, ARROW, 22.0, Message::StepCover(step), &tokens)
+                } else {
+                    iced::widget::space().width(ARROW).height(ARROW).into()
+                }
+            };
+            row![
+                arrow(Icon::ChevronLeft, -1),
+                face,
+                arrow(Icon::ChevronRight, 1)
+            ]
+            .spacing(ARROW_GAP)
+            .align_y(Center)
+            .into()
+        }
+        _ => face,
+    };
+    if let Some((parts, at)) = &parts
+        && let Some(part_of) = &entry.series
+    {
+        let place = format!(
+            "{} · {} of {}",
+            Series::display_name(&part_of.name),
+            at + 1,
+            parts.len()
+        );
+        words = words.push(text(place).size(13).color(theme::VIEWER_SUB));
+    }
+    let mut cover = column![face, words].spacing(14).align_x(Center);
     if !view.changing {
         cover = cover.push(change_button(&tokens));
     }
@@ -227,17 +293,7 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
         content = content.push(opaque(picker(app, view, entry, &tokens)));
     }
 
-    let close = button(container(ui::icon(Icon::Close, 18.0, theme::VIEWER_TEXT)).center(Fill))
-        .width(40)
-        .height(40)
-        .padding(0)
-        .on_press(msg(Message::Close))
-        .style(|_, _| button::Style {
-            background: Some(theme::VIEWER_CLOSE.into()),
-            border: Border::default().rounded(20),
-            ..button::Style::default()
-        })
-        .focusable(20.0, &tokens);
+    let close = round_button(Icon::Close, 40.0, 18.0, Message::Close, &tokens);
     let scrim = theme::viewer_scrim(tokens.scrim);
     mouse_area(
         container(stack![
@@ -253,6 +309,34 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
     )
     .on_press(msg(Message::Close))
     .into()
+}
+
+/// A round button on the dark backdrop: ×, and ‹ › beside the cover.
+fn round_button<'a>(
+    icon: Icon,
+    size: f32,
+    icon_size: f32,
+    message: Message,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    button(container(ui::icon(icon, icon_size, theme::VIEWER_TEXT)).center(Fill))
+        .width(size)
+        .height(size)
+        .padding(0)
+        .on_press(msg(message))
+        .style(move |_, status| button::Style {
+            background: Some(
+                if matches!(status, button::Status::Hovered) {
+                    theme::VIEWER_LINE
+                } else {
+                    theme::VIEWER_CLOSE
+                }
+                .into(),
+            ),
+            border: Border::default().rounded(size / 2.0),
+            ..button::Style::default()
+        })
+        .focusable(size / 2.0, tokens)
 }
 
 /// Change cover…, outlined in white on the dark backdrop.
@@ -405,6 +489,19 @@ pub fn wanted(app: &App, view: &CoverView, wants: &mut Wants) {
         want_large(app, url, wants);
     }
     if !view.changing {
+        // The parts ‹ and › lead to, so a step shows its cover at once
+        // and sharp.
+        for step in [1, -1] {
+            let next = neighbor(app, &view.id, step);
+            let Some(next) = next.and_then(|id| app.repo.library().entry(&id)) else {
+                continue;
+            };
+            wants.covers.push(next.id.clone());
+            if let Some(url) = app.artwork.cover_url(next) {
+                wants.sizes.push(url.to_owned());
+                want_large(app, url, wants);
+            }
+        }
         return;
     }
     for choice in choices(app, view, entry) {

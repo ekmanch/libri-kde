@@ -381,6 +381,9 @@ pub enum Message {
     /// viewer is fetched already.
     WarmCover(String),
     ViewCover(String),
+    /// ‹ or › beside the cover, or the Left and Right keys: the cover of
+    /// the part before or after in the series.
+    StepCover(isize),
     /// Change cover…: opens Pick a cover beside the cover.
     ChangeCover,
     /// Pick a cover's Done: back to the cover alone.
@@ -1565,6 +1568,17 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                 id,
                 ..CoverView::default()
             })));
+        }
+        Message::StepCover(step) => {
+            if let Some(Dialog::Cover(view)) = &app.dialog
+                && !view.changing
+                && let Some(id) = cover::neighbor(app, &view.id, step)
+            {
+                app.dialog = Some(Dialog::Cover(Box::new(CoverView {
+                    id,
+                    ..CoverView::default()
+                })));
+            }
         }
         Message::ChangeCover => return change_cover(app),
         Message::DoneChangingCover => {

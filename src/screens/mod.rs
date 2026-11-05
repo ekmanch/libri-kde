@@ -62,12 +62,14 @@ impl Screen {
 /// fetches what is missing. A text view wants no covers.
 pub fn wanted(app: &App) -> Wants {
     let mut wants = Wants::default();
+    // The dialog on top first (the cover viewer, the form), so its cover
+    // is not behind the list's.
+    entry::wanted(app, &mut wants);
     match app.screen {
         Screen::Library => library::wanted(app, &mut wants),
         Screen::Plans => plans::wanted(app, &mut wants),
         _ => {}
     }
-    entry::wanted(app, &mut wants);
     wants
 }
 

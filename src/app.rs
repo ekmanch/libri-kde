@@ -439,6 +439,10 @@ pub enum KeyPress {
     /// library's list and the plan's checklist.
     Up,
     Down,
+    /// The Left and Right keys: the cover viewer's ‹ and › through a
+    /// series' covers.
+    Left,
+    Right,
     /// E: edits the selected entry.
     Edit,
 }
@@ -1040,7 +1044,7 @@ impl App {
                 Some(message) => message,
                 None => return Task::none(),
             },
-            message => message,
+            message => self.click_with_modifiers(message),
         };
         if self.library.note_draft.is_some() && message.leaves_note() {
             entry::save_note(self);
@@ -1091,6 +1095,48 @@ impl App {
             .map(Message::Lookup)
     }
 
+    /// What a click does with Ctrl held, from the modifiers the keyboard
+    /// subscription tracks. On a title in the library (a row, a card, a
+    /// shelf's cover, a part of a series) Ctrl+click opens its cover in
+    /// the viewer and Ctrl+Shift+click its Edit dialog, both without
+    /// selecting it. On a series' row in a list Ctrl+click opens the cover
+    /// the row shows (the part that stands for the series), where the
+    /// viewer steps through the other parts' covers. On a sidebar type
+    /// Ctrl+click adds or removes it. On a plan's row Ctrl+click ticks it
+    /// or unticks it, instead of selecting it, and Ctrl+Shift+click edits
+    /// it.
+    fn click_with_modifiers(&self, message: Message) -> Message {
+        use library::Message as L;
+        use plans::Message as P;
+        if !self.modifiers.command() {
+            return message;
+        }
+        let shift = self.modifiers.shift();
+        if !shift
+            && let Message::Library(L::OpenSeries(open)) = &message
+            && open.highlight.is_none()
+        {
+            let parts = crate::series::entries_in(self.repo.library(), open.media, &open.name);
+            if let Some(cover) = crate::series::cover_entry(&parts) {
+                return Message::Entry(entry::Message::ViewCover(cover.id.clone()));
+            }
+        }
+        match message {
+            Message::Library(L::Select(id) | L::OpenSeriesPart(id))
+            | Message::Plans(P::Select(id))
+                if shift =>
+            {
+                Message::Entry(entry::Message::Edit(id))
+            }
+            Message::Library(L::Select(id) | L::OpenSeriesPart(id)) => {
+                Message::Entry(entry::Message::ViewCover(id))
+            }
+            Message::Library(L::ShowType(Some(media))) => Message::Library(L::ToggleType(media)),
+            Message::Plans(P::Select(id)) => Message::Plans(P::ToggleDone(id)),
+            message => message,
+        }
+    }
+
     /// What a key press does: a shortcut from the keymap, else one of the
     /// fixed keys (Enter, Ctrl+Enter, Tab, the arrow keys). While Settings
     /// records a shortcut, the press is the new one.
@@ -1125,6 +1171,8 @@ impl App {
             Key::Named(Named::Enter) => KeyPress::Enter,
             Key::Named(Named::ArrowUp) => KeyPress::Up,
             Key::Named(Named::ArrowDown) => KeyPress::Down,
+            Key::Named(Named::ArrowLeft) if modifiers.is_empty() => KeyPress::Left,
+            Key::Named(Named::ArrowRight) if modifiers.is_empty() => KeyPress::Right,
             Key::Named(Named::Tab) => KeyPress::Tab {
                 back: modifiers.shift(),
             },
@@ -1342,6 +1390,12 @@ impl App {
             Message::Key(KeyPress::Save) => return entry::update(self, entry::Message::Save),
             Message::Key(KeyPress::Up) => return self.step(-1),
             Message::Key(KeyPress::Down) => return self.step(1),
+            Message::Key(key @ (KeyPress::Left | KeyPress::Right)) => {
+                if matches!(self.dialog, Some(entry::Dialog::Cover(_))) {
+                    let step = if key == KeyPress::Left { -1 } else { 1 };
+                    return entry::update(self, entry::Message::StepCover(step));
+                }
+            }
             Message::Key(KeyPress::New) => {
                 if matches!(self.screen, Screen::Library | Screen::Plans)
                     && self.dialog.is_none()
@@ -1418,13 +1472,6 @@ impl App {
                 self.apply(Operation::SetSeriesCover { id });
             }
             Message::Library(message) => {
-                // Ctrl+click on a sidebar type adds or removes it.
-                let message = match message {
-                    library::Message::ShowType(Some(media)) if self.modifiers.command() => {
-                        library::Message::ToggleType(media)
-                    }
-                    message => message,
-                };
                 if message.shows_library() {
                     self.screen = Screen::Library;
                 }
@@ -1444,14 +1491,6 @@ impl App {
                 self.library.update(message);
             }
             Message::Plans(message) => {
-                // Ctrl+click on a checklist or timeline row ticks it or
-                // unticks it, instead of selecting it.
-                let message = match message {
-                    plans::Message::Select(id) if self.modifiers.command() => {
-                        plans::Message::ToggleDone(id)
-                    }
-                    message => message,
-                };
                 self.screen = Screen::Plans;
                 return plans::update(self, message);
             }
@@ -1934,6 +1973,111 @@ mod tests {
         let _ = app.update(Message::Modifiers(keyboard::Modifiers::empty()));
         let _ = app.update(click());
         assert!(!done(&app) && app.plans.selected.as_deref() == Some(id));
+    }
+
+    #[test]
+    fn ctrl_click_on_a_title_opens_its_cover_and_with_shift_its_edit_dialog() {
+        use crate::screens::entry::Dialog;
+        let mut app = App::new(Screen::Library);
+        let (open, other) = ("movies/the-mummy-1999", "movies/die-hard-1988");
+        let click = |id: &str| Message::Library(library::Message::Select(id.into()));
+        let editing = |app: &App, id: &str| matches!(&app.dialog, Some(Dialog::Form(form)) if form.editing.as_deref() == Some(id));
+        let _ = app.update(click(open));
+
+        // The cover viewer, on another title and on the selected one,
+        // whose details stay open; the selection never moves, and the
+        // viewer's cover is asked for before the list's.
+        let _ = app.update(Message::Modifiers(keyboard::Modifiers::CTRL));
+        for id in [other, open] {
+            let _ = app.update(click(id));
+            assert!(matches!(&app.dialog, Some(Dialog::Cover(view)) if view.id == id));
+            assert_eq!(app.library.selected.as_deref(), Some(open));
+            assert_eq!(crate::screens::wanted(&app).covers.first().unwrap(), id);
+            let _ = app.update(Message::Key(KeyPress::Escape));
+            assert!(app.dialog.is_none());
+        }
+
+        // Edit, from the library and from a plan's row, which Ctrl alone
+        // still ticks.
+        let _ = app.update(Message::Modifiers(
+            keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT,
+        ));
+        let _ = app.update(click(other));
+        assert!(editing(&app, other));
+        assert_eq!(app.library.selected.as_deref(), Some(open));
+        let _ = app.update(Message::Key(KeyPress::Escape));
+        assert!(app.dialog.is_none());
+        let _ = app.update(Message::Plans(plans::Message::ShowPlan(
+            "christmas-2026".into(),
+        )));
+        let _ = app.update(Message::Plans(plans::Message::Select(other.into())));
+        assert!(editing(&app, other));
+        assert!(app.plans.selected.is_none());
+    }
+
+    #[test]
+    fn ctrl_click_on_a_series_row_opens_the_cover_it_shows_and_steps_through_the_parts() {
+        use crate::screens::entry::Dialog;
+        let mut app = App::new(Screen::Library);
+        let part = |n: &str| format!("books/berserk-vol-{n}");
+        let (first, middle, last) = (part("1-1990"), part("42-2021"), part("43-2025"));
+        let row = |highlight: Option<String>| {
+            Message::Library(library::Message::OpenSeries(library::OpenSeries {
+                media: MediaType::Books,
+                name: "Berserk".into(),
+                highlight,
+            }))
+        };
+        let shown = |app: &App| match &app.dialog {
+            Some(Dialog::Cover(view)) => view.id.clone(),
+            other => panic!("no viewer: {other:?}"),
+        };
+        let key = |app: &mut App, key: KeyPress| {
+            let _ = app.update(Message::Key(key));
+        };
+
+        // The first part stands for the series until another is picked.
+        let _ = app.update(Message::Modifiers(keyboard::Modifiers::CTRL));
+        let _ = app.update(row(None));
+        assert_eq!(shown(&app), first);
+        assert!(app.library.open_series().is_none(), "the pane stays");
+        key(&mut app, KeyPress::Escape);
+        app.apply(Operation::SetSeriesCover { id: middle.clone() });
+        let _ = app.update(row(None));
+        assert_eq!(shown(&app), middle);
+
+        // The parts on either side are fetched ahead; the arrows and the
+        // keys stop at the ends.
+        let wants = crate::screens::wanted(&app);
+        assert_eq!(
+            wants.covers[..3],
+            [middle.clone(), last.clone(), first.clone()]
+        );
+        let _ = app.update(Message::Entry(entry::Message::StepCover(1)));
+        assert_eq!(shown(&app), last);
+        key(&mut app, KeyPress::Right);
+        assert_eq!(shown(&app), last);
+        key(&mut app, KeyPress::Left);
+        key(&mut app, KeyPress::Left);
+        key(&mut app, KeyPress::Left);
+        assert_eq!(shown(&app), first);
+        // Not while Pick a cover is open on this part.
+        let _ = app.update(Message::Entry(entry::Message::ChangeCover));
+        key(&mut app, KeyPress::Right);
+        assert_eq!(shown(&app), first);
+        key(&mut app, KeyPress::Escape);
+        key(&mut app, KeyPress::Escape);
+        assert!(app.dialog.is_none());
+
+        // "All 43 volumes" in details and Ctrl+Shift+click open the series.
+        let _ = app.update(row(Some(last.clone())));
+        assert!(app.dialog.is_none() && app.library.open_series().is_some());
+        key(&mut app, KeyPress::Escape);
+        let _ = app.update(Message::Modifiers(
+            keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT,
+        ));
+        let _ = app.update(row(None));
+        assert!(app.dialog.is_none() && app.library.open_series().is_some());
     }
 
     #[test]

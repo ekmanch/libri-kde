@@ -37,7 +37,8 @@ use crate::model::{Entry, EntryKind, Library, MediaType, Season};
 
 /// How many cover and photo lookups run at once.
 const CONCURRENCY: usize = 2;
-/// How many image downloads run at once.
+/// How many image downloads run at once; the cover viewer's sharper copy
+/// starts over that.
 const DOWNLOADS: usize = 4;
 /// How long a miss stands before the cover is looked for again.
 const MISS_RETRY: i64 = 14 * 86_400;
@@ -61,8 +62,9 @@ pub const PRUNE_DELAY: Duration = Duration::from_secs(15);
 /// entries whose covers are on screen, artists whose photos are, image
 /// URLs the form shows (match thumbnails), and the entries whose series,
 /// season or track list is open. `large` are the cover viewer's sharper
-/// copies, fetched ahead of everything else; `sizes` the images whose
-/// width and height are read from the file once it is here.
+/// copies, fetched ahead of everything else and without waiting for a
+/// free download; `sizes` the images whose width and height are read
+/// from the file once it is here.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Wants {
     pub large: Vec<String>,
@@ -475,6 +477,9 @@ impl Artwork {
         for url in &wants.large {
             self.want_image(url);
         }
+        // The viewer is open on them: they start whatever else is
+        // downloading.
+        let urgent = self.image_queue.len();
         for id in &wants.covers {
             if let Some(entry) = library.entry(id) {
                 self.want_cover(entry);
@@ -515,7 +520,7 @@ impl Artwork {
         if wants.platforms {
             tasks.extend(self.want_platforms(service));
         }
-        tasks.extend(self.start(service));
+        tasks.extend(self.start(service, urgent));
         self.flush(false);
         Task::batch(tasks)
     }
@@ -590,8 +595,9 @@ impl Artwork {
         }
     }
 
-    /// Starts the queued lookups and downloads, within the limits.
-    fn start(&mut self, service: &Arc<Service>) -> Vec<Task<Message>> {
+    /// Starts the queued lookups and downloads, within the limits; the
+    /// first `urgent` downloads of the queue start over the limit.
+    fn start(&mut self, service: &Arc<Service>, urgent: usize) -> Vec<Task<Message>> {
         let mut tasks = Vec::new();
         while self.resolving.len() < CONCURRENCY && !self.queue.is_empty() {
             let job = self.queue.remove(0);
@@ -642,7 +648,9 @@ impl Artwork {
         if service.is_instant() {
             self.image_queue.clear();
         }
-        while self.downloading.len() < DOWNLOADS && !self.image_queue.is_empty() {
+        let mut urgent = urgent;
+        while !self.image_queue.is_empty() && (urgent > 0 || self.downloading.len() < DOWNLOADS) {
+            urgent = urgent.saturating_sub(1);
             let url = self.image_queue.remove(0);
             self.downloading.insert(url.clone());
             let images = self.images.clone();
@@ -1372,6 +1380,30 @@ mod tests {
         );
         let _ = artwork.refresh(&wants, &library, &service);
         assert_eq!(artwork.image_size(cached), Some((342, 513)));
+    }
+
+    #[test]
+    fn the_viewers_copy_starts_over_the_download_limit() {
+        let library = Library::default();
+        // Not the fake, whose images are never fetched; the tasks are
+        // dropped unrun.
+        let service = Arc::new(Service::with(Vec::new(), false));
+        let mut artwork = Artwork::at(None);
+        let cover = |n: usize| format!("https://image.tmdb.org/t/p/w342/{n}.jpg");
+        let mut wants = Wants {
+            images: (0..6).map(cover).collect(),
+            ..Wants::default()
+        };
+        let _ = artwork.refresh(&wants, &library, &service);
+        assert_eq!(artwork.downloading.len(), DOWNLOADS);
+        assert_eq!(artwork.image_queue, [cover(4), cover(5)]);
+
+        let large = "https://image.tmdb.org/t/p/w780/0.jpg";
+        wants.large.push(large.into());
+        let _ = artwork.refresh(&wants, &library, &service);
+        assert!(artwork.downloading.contains(large));
+        assert_eq!(artwork.downloading.len(), DOWNLOADS + 1);
+        assert_eq!(artwork.image_queue, [cover(4), cover(5)], "the rest wait");
     }
 
     #[test]

@@ -1081,9 +1081,11 @@ fn games<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
 
 /// The mouse's actions, which follow KDE's conventions and stay as they
 /// are.
-const MOUSE: [(&str, &str); 7] = [
+const MOUSE: [(&str, &str); 9] = [
     ("Show only this type", "Click"),
     ("Add or remove a type from the list", "Ctrl+click"),
+    ("Open a title’s cover large", "Ctrl+click"),
+    ("Edit a title", "Ctrl+Shift+click"),
     ("Check or uncheck a plan item", "Ctrl+click"),
     ("Close details: click the open title again", "Click"),
     ("Tag menu (categories, move to group)", "Right-click"),
