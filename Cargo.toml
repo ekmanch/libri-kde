@@ -38,3 +38,11 @@ iced_test = "0.14.0"
 # unused, and the folder and these lines go.
 [patch.crates-io]
 iced_wgpu = { path = "vendor/iced_wgpu" }
+
+# A debug build (`cargo run`) with its dependencies optimized: iced, wgpu
+# and the text shaping are where a frame's time goes, and unoptimized they
+# drew a slide at a fraction of the display's rate (docs/DESIGN.md "Frame
+# pacing"). Libri's own code stays a quick debug build; the dependencies
+# build once and are kept.
+[profile.dev.package."*"]
+opt-level = 3
