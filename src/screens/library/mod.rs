@@ -14,7 +14,7 @@ mod toolbar;
 
 use std::collections::{BTreeSet, HashMap};
 
-use iced::widget::{column, container, row};
+use iced::widget::{column, container, mouse_area, row};
 use iced::{Element, Fill};
 
 pub use overview::short_release;
@@ -273,7 +273,8 @@ pub enum Message {
     /// The panel button by the view switch, the drawer's pin or Ctrl+I:
     /// pins or unpins the details panel for this view.
     TogglePanel,
-    /// The drawer's ✕: nothing selected, the drawer gone.
+    /// The drawer's ✕ or a click on the list's empty space: nothing
+    /// selected, the drawer gone.
     ClosePanel,
     /// At a glance's "Another": a different pick from Want.
     AnotherPick,
@@ -967,6 +968,19 @@ impl State {
         self.season_menu = None;
     }
 
+    /// Whether a click on the list's empty space closes the details:
+    /// something is selected, and no popover is open, since the first click
+    /// away only closes the popover.
+    fn click_away_closes(&self) -> bool {
+        let popover = self.popup.is_some()
+            || self.type_pop
+            || self.details_rating_open
+            || self.details_pop.is_some()
+            || self.track_rating_open.is_some()
+            || self.season_menu.is_some();
+        !popover && self.pane_open()
+    }
+
     /// Enter: the tag picker's Done.
     pub fn confirm(&mut self) {
         self.picker = None;
@@ -1277,10 +1291,12 @@ pub fn view<'a>(app: &'a App) -> Element<'a, AppMessage> {
         Panel::Drawer => panel::drawer(app),
         _ => None,
     };
-    let under = iced::widget::stack![
-        column![body, footer(app)],
-        drawer.unwrap_or_else(|| iced::widget::space().into())
-    ];
+    // Buttons take their own clicks; what reaches this is empty space.
+    let mut list = mouse_area(column![body, footer(app)]);
+    if state.click_away_closes() {
+        list = list.on_press(AppMessage::Library(Message::ClosePanel));
+    }
+    let under = iced::widget::stack![list, drawer.unwrap_or_else(|| iced::widget::space().into())];
     let mut lower = row![container(under).width(Fill)];
     if mode == Panel::Pinned {
         lower = lower.push(panel::side(app));

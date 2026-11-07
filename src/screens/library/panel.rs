@@ -126,7 +126,8 @@ pub fn drawer_state(app: &App) -> (Panel, Option<Shown>) {
 }
 
 /// Whether a message is one of the drawer's closing actions: its ✕, a
-/// click on the open title, Esc, or Back (the mouse's button, Alt+Left).
+/// click on the open title or the list's empty space, Esc, or Back (the
+/// mouse's button, Alt+Left).
 pub fn closes_drawer(message: &AppMessage) -> bool {
     matches!(
         message,
@@ -1188,6 +1189,66 @@ mod tests {
         assert_eq!(click(shell::SIDEBAR_WIDTH + 200.0, row_y), 1);
     }
 
+    /// Whether a click at the point asks to close the details.
+    fn click_closes(app: &App, x: f32, y: f32) -> bool {
+        let mut ui =
+            iced_test::Simulator::with_size(crate::app::settings(), app.window, app.view());
+        ui.point_at(iced::Point::new(x, y));
+        let _ = ui.simulate(iced_test::simulator::click());
+        ui.into_messages()
+            .any(|m| matches!(m, AppMessage::Library(Message::ClosePanel)))
+    }
+
+    #[test]
+    fn a_click_on_the_lists_empty_space_closes_the_details() {
+        let mut app = app();
+        let ids = movies(&mut app);
+        let _ = app.update(msg(Message::SetView(View::List)));
+        let _ = app.update(msg(Message::TogglePanel));
+        let size = app.window;
+        // The list's left padding, and a row beside it.
+        let empty = shell::SIDEBAR_WIDTH + 6.0;
+        let row_x = shell::SIDEBAR_WIDTH + 200.0;
+        let row_y = 250.0;
+
+        assert_eq!(panel(&app), Panel::Drawer);
+        assert!(!click_closes(&app, empty, row_y), "nothing selected");
+        let _ = app.update(msg(Message::Select(ids[0].clone())));
+        assert!(click_closes(&app, empty, row_y));
+        assert!(!click_closes(&app, row_x, row_y), "a row");
+        assert!(!click_closes(&app, size.width - 40.0, size.height - 60.0));
+
+        // The first click away from a popover only closes the popover.
+        let _ = app.update(msg(Message::Toggle(super::super::Popup::Sort)));
+        assert!(!click_closes(&app, empty, row_y));
+        let _ = app.update(msg(Message::ClosePopup));
+
+        // The same pinned, where the panel is beside the list.
+        let _ = app.update(msg(Message::TogglePanel));
+        assert_eq!(panel(&app), Panel::Pinned);
+        assert!(click_closes(&app, empty, row_y));
+        assert!(!click_closes(&app, size.width - 40.0, size.height - 60.0));
+
+        let _ = app.update(msg(Message::ClosePanel));
+        assert_eq!(app.library.selected, None);
+    }
+
+    #[test]
+    fn a_click_on_homes_details_never_closes_them() {
+        let mut app = app();
+        let id = movies(&mut app)[0].clone();
+        let _ = app.update(msg(Message::ShowType(None)));
+        let _ = app.update(msg(Message::Select(id)));
+        assert_eq!(panel(&app), Panel::Home);
+        let size = app.window;
+        assert!(!click_closes(&app, size.width - 60.0, size.height - 100.0));
+        assert!(click_closes(
+            &app,
+            shell::SIDEBAR_WIDTH + 8.0,
+            size.height - 100.0
+        ));
+    }
+
     #[test]
     fn the_drawer_slides_in_on_a_selection_and_out_on_its_closing_actions() {
         use std::time::Duration;
@@ -1233,7 +1294,7 @@ mod tests {
         at(&mut app, msg(Message::Select(ids[2].clone())), 600);
         assert_eq!(app.library.motion, Motion::Still);
         assert_eq!(app.library.selected.as_deref(), Some(ids[2].as_str()));
-        // Esc and the ✕ close it; Back too.
+        // Esc, the ✕ and a click on the list's empty space close it; Back too.
         at(&mut app, AppMessage::Key(KeyPress::Escape), 600);
         assert!(matches!(app.library.motion, Motion::Closing(..)));
         at(&mut app, msg(Message::Select(ids[2].clone())), 1000);
