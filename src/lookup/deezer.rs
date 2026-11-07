@@ -241,14 +241,54 @@ impl Source for Deezer {
     }
 
     fn artist_photo_url(&self, name: &str) -> Reply<Option<String>> {
+        Ok(self
+            .artist(name)?
+            .and_then(|hit| str_at(&hit, "picture_big").map(str::to_owned)))
+    }
+
+    /// The artist's albums and EPs (`/artist/{id}/albums`) whose release
+    /// is still ahead; the list has no artist on its items, so the name
+    /// asked for is the creator.
+    fn creator_releases(&self, name: &str, media: MediaType) -> Reply<Vec<Match>> {
+        if media != MediaType::Music {
+            return Ok(Vec::new());
+        }
+        let Some(artist) = self.artist(name)? else {
+            return Ok(Vec::new());
+        };
+        let Some(id) = int_at(&artist, "id") else {
+            return Ok(Vec::new());
+        };
+        let today = crate::model::Date::today();
+        let albums = self.list(&format!("/artist/{id}/albums"), &[("limit", "50")])?;
+        Ok(albums
+            .iter()
+            .filter(|item| matches!(str_at(item, "record_type"), Some("album" | "ep") | None))
+            .filter_map(|item| {
+                let released = Deezer::released(item)?;
+                if released.is_released_on(today) {
+                    return None;
+                }
+                let mut found = Deezer::album(item)?;
+                found.released = Some(released);
+                found.creator = Some(name.to_owned());
+                Some(found)
+            })
+            .collect())
+    }
+}
+
+impl Deezer {
+    /// Deezer's record of the artist called exactly `name` (case aside);
+    /// none for "Various Artists" and "Unknown artist".
+    fn artist(&self, name: &str) -> Reply<Option<Value>> {
         if NO_PHOTO.contains(&name.trim().to_lowercase().as_str()) {
             return Ok(None);
         }
         let hits = self.list("/search/artist", &[("q", name), ("limit", "5")])?;
         Ok(hits
-            .iter()
-            .find(|hit| str_at(hit, "name").is_some_and(|n| same_title(n, name)))
-            .and_then(|hit| str_at(hit, "picture_big").map(str::to_owned)))
+            .into_iter()
+            .find(|hit| str_at(hit, "name").is_some_and(|n| same_title(n, name))))
     }
 }
 

@@ -157,6 +157,21 @@ impl OpenLibrary {
         }
     }
 
+    /// The author called exactly `name` in the authors index
+    /// (`/search/authors.json`), as an author key ("OL2162284A").
+    fn author_key(&self, name: &str) -> Reply<Option<String>> {
+        let json = self.get("/search/authors.json", &[("q", name), ("limit", "5")])?;
+        Ok(objects_at(&json, "docs")
+            .find(|doc| str_at(doc, "name").is_some_and(|n| same_title(n, name)))
+            .and_then(|doc| str_at(doc, "key"))
+            .map(|key| key.rsplit('/').next().unwrap_or(key).to_owned()))
+    }
+
+    /// The author's newest works (`/search.json?author_key=…&sort=new`).
+    fn newest_by(&self, author_key: &str, limit: usize) -> Reply<Vec<Match>> {
+        self.search(&[("author_key", author_key), ("sort", "new")], limit)
+    }
+
     /// The work record: its description and its first cover id.
     fn work(&self, source: &str) -> Reply<Work> {
         let json = self.get(&format!("/works/{}.json", work_id(source)?), &[])?;
@@ -796,9 +811,47 @@ impl Books {
     }
 }
 
+impl Books {
+    /// An author's works still to come (the phone's "new book by an
+    /// author in your library"): the newest works of the author called
+    /// exactly `name`, those first published this year or later, since
+    /// Open Library dates a work by its year alone; Apple Books gives the
+    /// day, the cover and the description where it knows the book.
+    fn author_releases(&self, name: &str) -> Reply<Vec<Match>> {
+        let Some(key) = self.open_library.author_key(name)? else {
+            return Ok(Vec::new());
+        };
+        let today = Date::today();
+        let works = self.open_library.newest_by(&key, 20)?;
+        Ok(works
+            .into_iter()
+            .filter(|work| work.released.is_some_and(|r| !r.is_released_on(today)))
+            .take(AUTHOR_RELEASES)
+            .map(|work| {
+                let apple = self.apple_fill(&work.title, Some(name));
+                let mut found = Books::with_apple(work, apple.as_ref());
+                if let Some(date) = apple.as_ref().and_then(|a| a.released) {
+                    found.released = Some(date);
+                }
+                found
+            })
+            .collect())
+    }
+}
+
+/// How many of an author's coming works Discover lists at most.
+const AUTHOR_RELEASES: usize = 5;
+
 impl Source for Books {
     fn id(&self) -> &'static str {
         "openlibrary"
+    }
+
+    fn creator_releases(&self, name: &str, media: MediaType) -> Reply<Vec<Match>> {
+        if media != MediaType::Books {
+            return Ok(Vec::new());
+        }
+        self.author_releases(name)
     }
 
     fn name(&self) -> &'static str {

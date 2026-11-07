@@ -450,6 +450,14 @@ pub trait Source: Send + Sync {
     fn artist_photo_url(&self, _name: &str) -> Reply<Option<String>> {
         Ok(None)
     }
+
+    /// What a creator in the library has on the way, for Discover (the
+    /// daily check): an author's new books, an album artist's new albums,
+    /// each with its release as precise as the provider has it. Empty
+    /// from a source that knows no creators.
+    fn creator_releases(&self, _name: &str, _media: MediaType) -> Reply<Vec<Match>> {
+        Ok(Vec::new())
+    }
 }
 
 /// What a search came back with: the matches, and which asks failed.

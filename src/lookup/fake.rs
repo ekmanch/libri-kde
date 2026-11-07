@@ -411,6 +411,24 @@ const CATALOG: &[Row] = &[
         "deezer:album:302127",
     ),
     other(
+        MediaType::Shows,
+        "Severance",
+        "Dan Erickson",
+        "2022-02-18",
+        "Mark leads a team whose memories are split between their work and their outside lives.",
+        &["scifi", "dark", "mystery"],
+        "fake:show:severance",
+    ),
+    other(
+        MediaType::Movies,
+        "The Lord of the Rings: The Hunt for Gollum",
+        "Andy Serkis",
+        "2027-12-17",
+        "Andy Serkis directs and stars in a return to Middle-earth, following Gollum in the years before the Fellowship.",
+        &["fantasy", "epic"],
+        "fake:movie:hunt-for-gollum",
+    ),
+    other(
         MediaType::Anime,
         "Mushishi",
         "Hiroshi Nagahama",
@@ -569,6 +587,17 @@ pub fn series_parts(media: MediaType, name: &str) -> Option<SeriesParts> {
                     2003,
                     Some("tmdb:movie:122"),
                 ),
+                // Still to come, for Discover (the phone's fake has it too).
+                SeriesPart {
+                    number: Some(4),
+                    title: "The Lord of the Rings: The Hunt for Gollum".into(),
+                    year: Some(2027),
+                    released: Released::parse("2027-12-17"),
+                    source: Some("fake:movie:hunt-for-gollum".into()),
+                    creator: Some("Andy Serkis".into()),
+                    cover: None,
+                    extra: false,
+                },
             ],
         }),
         (MediaType::Books, "berserk") => {
@@ -578,16 +607,28 @@ pub fn series_parts(media: MediaType, name: &str) -> Option<SeriesParts> {
                 2005, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2013, 2016, 2017, 2018, 2021, 2021,
                 2025,
             ];
+            let mut parts: Vec<SeriesPart> = YEARS
+                .iter()
+                .enumerate()
+                .map(|(i, &year)| {
+                    let n = i as u32 + 1;
+                    part(n, &format!("Berserk, Vol. {n}"), year, None)
+                })
+                .collect();
+            // Volume 44, announced for a month, for Discover.
+            parts.push(SeriesPart {
+                number: Some(44),
+                title: "Berserk, Vol. 44".into(),
+                year: Some(2027),
+                released: Released::parse("2027-03"),
+                source: None,
+                creator: Some("Kentaro Miura, Kouji Mori".into()),
+                cover: None,
+                extra: false,
+            });
             Some(SeriesParts {
                 name: "Berserk".into(),
-                parts: YEARS
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &year)| {
-                        let n = i as u32 + 1;
-                        part(n, &format!("Berserk, Vol. {n}"), year, None)
-                    })
-                    .collect(),
+                parts,
             })
         }
         _ => None,
@@ -658,6 +699,85 @@ pub fn search(media: MediaType, query: &str, platform: Option<&str>) -> Vec<Matc
         .collect()
 }
 
+/// What the creators of the fixture library have on the way, for
+/// Discover: the type, the creator as the library spells them, the
+/// title, the release ("" for none yet), the description and the id.
+const CREATOR_RELEASES: &[(MediaType, &str, &str, &str, &str, &str)] = &[
+    (
+        MediaType::Books,
+        "Stephen King",
+        "Stephen King: new novel",
+        "2027-05",
+        "Announced for spring 2027; title and details to follow.",
+        "fake:book:king-2027",
+    ),
+    (
+        MediaType::Books,
+        "Patrick Rothfuss",
+        "The Doors of Stone",
+        "",
+        "The third book of The Kingkiller Chronicle. No date yet.",
+        "fake:book:doors-of-stone",
+    ),
+    (
+        MediaType::Music,
+        "Radiohead",
+        "Radiohead: new album",
+        "2027-02",
+        "The band's first record since A Moon Shaped Pool.",
+        "fake:album:radiohead-2027",
+    ),
+    (
+        MediaType::Music,
+        "Alice in Chains",
+        "Alice in Chains: new album",
+        "",
+        "The band has confirmed a new record is in the works. No date yet.",
+        "fake:album:alice-in-chains",
+    ),
+];
+
+/// The coming releases of the creator called `name` among `media`.
+pub fn creator_releases(name: &str, media: MediaType) -> Vec<Match> {
+    CREATOR_RELEASES
+        .iter()
+        .filter(|(m, creator, ..)| *m == media && creator.eq_ignore_ascii_case(name.trim()))
+        .map(
+            |(media, creator, title, released, description, source)| Match {
+                released: Released::parse(released),
+                creator: Some((*creator).to_owned()),
+                description: (*description).to_owned(),
+                kind: (*media == MediaType::Music).then_some(EntryKind::Album),
+                ..Match::new(*media, *title, *source)
+            },
+        )
+        .collect()
+}
+
+/// The seasons of a fixture show as the fake lists them: Severance with
+/// its third season announced, for Discover.
+pub fn seasons(source: &str) -> Option<super::ShowSeasons> {
+    let season = |n: u32, released: &str| Season {
+        season: n,
+        released: Released::parse(released),
+        status: None,
+        fresh: None,
+        manual: None,
+    };
+    match source {
+        "fake:show:severance" => Some(super::ShowSeasons {
+            seasons: vec![
+                season(1, "2022-02-18"),
+                season(2, "2025-01-17"),
+                season(3, "2027"),
+            ],
+            canceled: false,
+            kind: None,
+        }),
+        _ => None,
+    }
+}
+
 /// The catalog's match with `source`.
 pub fn by_source(source: &str) -> Option<Match> {
     CATALOG
@@ -724,11 +844,23 @@ impl Source for Fake {
         )
     }
 
+    fn details(&self, found: &Match) -> Reply<Match> {
+        Ok(by_source(&found.source).unwrap_or_else(|| found.clone()))
+    }
+
+    fn seasons(&self, source: &str) -> Reply<Option<super::ShowSeasons>> {
+        Ok(seasons(source))
+    }
+
     fn series_parts(&self, _source: &str, name: Option<&str>) -> Reply<Option<SeriesParts>> {
         let Some(name) = name else {
             return Ok(None);
         };
         Ok(series_parts(MediaType::Movies, name).or_else(|| series_parts(MediaType::Books, name)))
+    }
+
+    fn creator_releases(&self, name: &str, media: MediaType) -> Reply<Vec<Match>> {
+        Ok(creator_releases(name, media))
     }
 
     fn cover_url(&self, _source: &str, _media: MediaType) -> Reply<Option<String>> {
@@ -764,8 +896,9 @@ mod tests {
     #[test]
     fn the_fixture_series_and_track_lists_are_listed() {
         let berserk = series_parts(MediaType::Books, "Berserk").unwrap();
-        assert_eq!(berserk.parts.len(), 43);
+        assert_eq!(berserk.parts.len(), 44);
         assert_eq!(berserk.parts[42].year, Some(2025));
+        assert_eq!(berserk.parts[43].released, Released::parse("2027-03"));
         assert!(series_parts(MediaType::Movies, "The Lord of the Rings Collection").is_some());
         assert!(series_parts(MediaType::Games, "Berserk").is_none());
         assert_eq!(track_list("Alice in Chains", "Dirt").unwrap().len(), 13);

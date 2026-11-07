@@ -171,7 +171,8 @@ mod tests {
             Some("movies/the-lord-of-the-rings-the-two-towers-2002"),
             fetched.as_ref(),
         );
-        assert_eq!(rows.len(), 3);
+        // The fake lists The Hunt for Gollum (2027) as a fourth part.
+        assert_eq!(rows.len(), 4);
         assert_eq!(rows[0].title, "The Fellowship of the Ring");
         assert!(rows[0].owned() && !rows[0].is_this);
         assert!(rows[1].is_this);
@@ -212,15 +213,15 @@ mod tests {
             3,
             "without a list, the library's own entries"
         );
-        assert_eq!(rows.len(), 43);
+        assert_eq!(rows.len(), 44, "volume 44 is on the way");
         assert_eq!(rows.iter().filter(|r| r.owned()).count(), 3);
         let shown = window(&rows);
         assert_eq!(
             shown.iter().map(|r| r.number).collect::<Vec<_>>(),
-            [Some(41), Some(42), Some(43)],
-            "the last three when this is the last"
+            [Some(42), Some(43), Some(44)],
+            "this one in the middle, with the volume on its way after it"
         );
-        assert_eq!(shown[2].title, "Vol. 43");
+        assert_eq!(shown[1].title, "Vol. 43");
         let first = rows
             .iter()
             .cloned()

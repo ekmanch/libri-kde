@@ -1471,7 +1471,7 @@ mod tests {
         let berserk = library.entry("books/berserk-vol-43-2025").unwrap();
         assert!(matches!(
             &artwork.series_for(berserk).unwrap().loaded,
-            Loaded::Ready(parts) if parts.parts.len() == 43
+            Loaded::Ready(parts) if parts.parts.len() == 44
         ));
         let dirt = library.entry("music/dirt-alice-in-chains").unwrap();
         assert!(matches!(
