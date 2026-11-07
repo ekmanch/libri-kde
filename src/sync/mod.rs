@@ -39,9 +39,16 @@ pub use pending::{InFlight, Pending, PendingQueue};
 
 /// How long edits are gathered before they go out as one commit.
 pub const DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(2500);
-/// How often GitHub is asked for changes while Libri runs, and how old
-/// a check may be when the window comes back before it is repeated.
-pub const CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+/// How often GitHub is asked for changes while the window has focus: a
+/// change made on the phone shows within this long. Conditional requests,
+/// so an unchanged file costs a 304 and a few bytes.
+pub const FOCUSED_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+/// How often GitHub is asked while the window is in the background; the
+/// phone's cadence. Coming back to the window catches up at once.
+pub const UNFOCUSED_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+/// How recent a check may be for the window coming back to skip asking
+/// again, so switching to and fro does not ask on every switch.
+pub const FOCUS_CHECK_GUARD: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// What a round does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

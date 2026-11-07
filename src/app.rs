@@ -260,6 +260,9 @@ pub struct App {
     pub engine_generation: u64,
     /// When the gathered edits go out as one commit.
     pub save_due: Option<Instant>,
+    /// Whether the window has keyboard focus: GitHub is asked for changes
+    /// more often while it does.
+    pub focused: bool,
     /// The splash while the first download of a fresh connection runs.
     pub loading: bool,
     /// Fake sync states and fixture lists in place of GitHub: every test,
@@ -670,6 +673,7 @@ impl App {
             engine: None,
             engine_generation: 0,
             save_due: None,
+            focused: true,
             loading: false,
             mock: true,
         }
@@ -1020,14 +1024,14 @@ impl App {
         }
     }
 
-    /// Whether the last check is older than the interval, so the window
-    /// coming back asks again.
+    /// Whether the last check is old enough for the window coming back
+    /// to ask again: anything but one made in the last few seconds.
     fn check_is_stale(&self) -> bool {
         let Some(engine) = &self.engine else {
             return false;
         };
         match engine.status().last_checked {
-            Some(at) => Timestamp::now().0 - at.0 >= sync::CHECK_INTERVAL.as_secs() as i64,
+            Some(at) => Timestamp::now().0 - at.0 >= sync::FOCUS_CHECK_GUARD.as_secs() as i64,
             None => true,
         }
     }
@@ -1648,23 +1652,29 @@ impl App {
         if self.library.motion.running() {
             subscriptions.push(window::frames().map(Message::Frame));
         }
-        // The debounce clock runs only while edits wait; the check every
-        // five minutes while a repository is connected.
+        // The debounce clock runs only while edits wait; while a
+        // repository is connected GitHub is asked for changes every half
+        // minute with the window focused and every five minutes without.
         if self.save_due.is_some() {
             subscriptions.push(
                 time::every(Duration::from_millis(250)).map(|_| Message::Sync(SyncMessage::Tick)),
             );
         }
         if self.engine.is_some() {
-            subscriptions
-                .push(time::every(sync::CHECK_INTERVAL).map(|_| Message::Sync(SyncMessage::Now)));
+            let interval = if self.focused {
+                sync::FOCUSED_CHECK_INTERVAL
+            } else {
+                sync::UNFOCUSED_CHECK_INTERVAL
+            };
+            subscriptions.push(time::every(interval).map(|_| Message::Sync(SyncMessage::Now)));
         }
         Subscription::batch(subscriptions)
     }
 
     /// A window event into the freeze trace: redraws as a rate and
-    /// gaps, everything else as it comes. The window coming back asks
-    /// GitHub for changes when the last check is old.
+    /// gaps, everything else as it comes. Focus is remembered for the
+    /// check interval, and the window coming back asks GitHub for
+    /// changes unless a check was made moments ago.
     fn window_event(&mut self, event: window::Event) -> Task<Message> {
         match event {
             window::Event::RedrawRequested(now) => {
@@ -1675,8 +1685,15 @@ impl App {
             window::Event::Moved(_) => {}
             event => {
                 crate::trace::line(format_args!("window {event:?}"));
-                if event == window::Event::Focused && self.check_is_stale() {
-                    return self.sync_now();
+                match event {
+                    window::Event::Focused => {
+                        self.focused = true;
+                        if self.check_is_stale() {
+                            return self.sync_now();
+                        }
+                    }
+                    window::Event::Unfocused => self.focused = false,
+                    _ => {}
                 }
             }
         }
@@ -2376,6 +2393,33 @@ mod tests {
         app.save_due = Some(Instant::now() - Duration::from_secs(1));
         let _ = app.update(Message::Sync(SyncMessage::Tick));
         assert!(app.save_due.is_none());
+        assert!(app.engine.as_ref().unwrap().running());
+    }
+
+    #[test]
+    fn the_window_coming_back_asks_github_unless_a_check_was_made_moments_ago() {
+        let mut app = App::new(Screen::Library);
+        connected(&mut app);
+        // Checked just now: the focus is noted and GitHub is left alone.
+        let _ = app.update(Message::Window(window::Event::Unfocused));
+        assert!(!app.focused);
+        let _ = app.update(Message::Window(window::Event::Focused));
+        assert!(app.focused);
+        assert!(!app.engine.as_ref().unwrap().running());
+        // Checked longer ago than the guard: the window coming back asks.
+        let text = codec::encode(app.repo.library());
+        let sha = github::blob_sha(text.as_bytes());
+        let old = Timestamp(Timestamp::now().0 - sync::FOCUS_CHECK_GUARD.as_secs() as i64);
+        app.engine.as_mut().unwrap().set_base(Base {
+            target: target().key(),
+            etag: Some(format!("\"{sha}\"")),
+            remote_sha: sha.clone(),
+            canonical_sha: sha,
+            commit_sha: None,
+            last_synced: Some(old),
+            last_checked: Some(old),
+        });
+        let _ = app.update(Message::Window(window::Event::Focused));
         assert!(app.engine.as_ref().unwrap().running());
     }
 
