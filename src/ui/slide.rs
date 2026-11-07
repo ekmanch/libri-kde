@@ -1,8 +1,9 @@
-//! Moves its content sideways by an offset, without changing its size or
-//! anything around it: the details drawer slides in from the window's
-//! edge through it. The content is laid out as it is and then placed
-//! `offset` px to the right, so drawing and the mouse follow it there,
-//! and what runs past the edge is simply off the window.
+//! Moves its content by an offset, without changing its size or anything
+//! around it: the details drawer slides in from the window's edge through
+//! it, and the Coming soon page's list slides sideways between its
+//! slices. The content is laid out as it is and then placed `offset` px
+//! away, so drawing and the mouse follow it there, and what runs past the
+//! edge is simply off the window (or clipped by a container around it).
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Tree, Widget, tree};
@@ -11,7 +12,7 @@ use iced::{Element, Event, Length, Point, Rectangle, Size, Vector, mouse};
 
 pub struct Slide<'a, Message, Theme, Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
-    offset: f32,
+    offset: Vector,
 }
 
 /// `content` placed `offset` px to the right of where it would be.
@@ -19,9 +20,17 @@ pub fn slide<'a, Message, Theme, Renderer>(
     content: impl Into<Element<'a, Message, Theme, Renderer>>,
     offset: f32,
 ) -> Slide<'a, Message, Theme, Renderer> {
+    slide_by(content, Vector::new(offset.max(0.0), 0.0))
+}
+
+/// `content` moved by `offset`, in either direction on both axes.
+pub fn slide_by<'a, Message, Theme, Renderer>(
+    content: impl Into<Element<'a, Message, Theme, Renderer>>,
+    offset: Vector,
+) -> Slide<'a, Message, Theme, Renderer> {
     Slide {
         content: content.into(),
-        offset: offset.max(0.0),
+        offset,
     }
 }
 
@@ -58,7 +67,10 @@ where
     ) -> layout::Node {
         let node = self.content.as_widget_mut().layout(tree, renderer, limits);
         let size = node.size();
-        layout::Node::with_children(size, vec![node.move_to(Point::new(self.offset, 0.0))])
+        layout::Node::with_children(
+            size,
+            vec![node.move_to(Point::new(self.offset.x, self.offset.y))],
+        )
     }
 
     fn update(

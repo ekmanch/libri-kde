@@ -486,7 +486,7 @@ pub(super) fn short_day(date: Date, today: Date) -> String {
 }
 
 /// A release at its own precision: "Nov 19", "Oct 2027" or "2027".
-pub(super) fn short_release(released: Released, today: Date) -> String {
+pub fn short_release(released: Released, today: Date) -> String {
     match (released.month, released.day) {
         (Some(month), Some(day)) => short_day(
             Date {

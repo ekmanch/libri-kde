@@ -90,6 +90,22 @@ impl Timestamp {
         )
     }
 
+    /// "today 09:12", "yesterday 18:40", or "Nov 3, 09:12", in local time:
+    /// when the daily check last ran.
+    pub fn day_and_time(self, now: Timestamp) -> String {
+        let (date, secs) = self.split(crate::trace::utc_offset());
+        let time = format!("{:02}:{:02}", secs / 3600, secs % 3600 / 60);
+        match self.days_from(now) {
+            0 => format!("today {time}"),
+            -1 => format!("yesterday {time}"),
+            _ => format!(
+                "{} {}, {time}",
+                MONTHS[usize::from(date.month) - 1],
+                date.day
+            ),
+        }
+    }
+
     /// How long ago this was, in the phone's words: "just now", "1 minute
     /// ago", "5 minutes ago", "2 hours ago", "yesterday", "3 days ago",
     /// and from 30 days "Mar 14, 2026".
@@ -195,6 +211,17 @@ mod tests {
         assert_eq!(at("2026-10-24T12:00:00Z").ago(now), "3 days ago");
         assert_eq!(at("2026-03-14T12:00:00Z").ago(now), "Mar 14, 2026");
         assert_eq!(at("2026-10-27T12:00:05Z").ago(now), "just now");
+    }
+
+    #[test]
+    fn the_check_time_names_the_day() {
+        let now = Timestamp::parse("2026-11-07T12:00:00Z").unwrap();
+        let at = |s: &str| Timestamp::parse(s).unwrap();
+        // The offset is this computer's; the hour is checked only for its shape.
+        let today = at("2026-11-07T09:12:00Z").day_and_time(now);
+        assert!(today.starts_with("today ") && today.len() == "today 09:12".len());
+        let gone = at("2026-11-03T09:12:00Z").day_and_time(now);
+        assert!(gone.starts_with("Nov 3, ") || gone.starts_with("Nov 2, "));
     }
 
     #[test]

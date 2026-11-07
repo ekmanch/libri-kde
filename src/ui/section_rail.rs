@@ -61,9 +61,21 @@ fn wide(labels: &[RailLabel]) -> bool {
     labels.iter().any(|label| label.text.chars().count() > 2)
 }
 
+/// Whether any label is longer than five ("Mar ’27", the Coming soon
+/// page's months of another year): the rail is wider still.
+fn widest(labels: &[RailLabel]) -> bool {
+    labels.iter().any(|label| label.text.chars().count() > 5)
+}
+
 /// The rail's width for these labels.
 pub fn width(labels: &[RailLabel]) -> f32 {
-    if wide(labels) { 36.0 } else { 24.0 }
+    if widest(labels) {
+        46.0
+    } else if wide(labels) {
+        36.0
+    } else {
+        24.0
+    }
 }
 
 /// The room a list leaves at its right for the rail of these labels.
