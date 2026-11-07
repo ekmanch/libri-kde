@@ -28,6 +28,7 @@ use crate::model::{
 };
 use crate::music;
 use crate::repo::Operation;
+use crate::screens::library::DetailsPop;
 use crate::tags::{self, PickerMessage, PickerState};
 use crate::ui;
 
@@ -215,6 +216,10 @@ impl Context<'_> {
 
 /// Typing pauses this long before the lookup is asked.
 pub const DEBOUNCE: Duration = Duration::from_millis(400);
+/// How long after the last keystroke in the note popover the note is
+/// saved (2026-11-07): the note saves as it is typed, one change per
+/// pause rather than one per key.
+pub const NOTE_DEBOUNCE: Duration = Duration::from_millis(800);
 
 /// Saving music that overlaps what is saved.
 #[derive(Debug, Clone)]
@@ -366,12 +371,16 @@ pub enum Message {
     EditTags(String),
     /// The details' picker's Done: the tags as one change.
     SaveTags,
-    /// The details' note as typed.
-    NoteDraft {
-        id: String,
-        note: String,
-    },
-    /// Enter in the details' note.
+    /// A popover of the details pane: opens it, or closes it when it is
+    /// the open one.
+    TogglePop(DetailsPop),
+    /// The open popover's X, a click outside it, or Esc.
+    ClosePop,
+    /// Typing in the note popover.
+    NoteEdit(text_editor::Action),
+    /// The pause after typing in the note ran out: the note is saved.
+    NoteDebounce(u64),
+    /// Saves the note as typed, when it changed.
     SaveNote,
     Delete(String),
     AddToPlan(String),
@@ -1472,7 +1481,12 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         return tags::jump(*offset);
     }
     match message {
-        Message::SetStatus(id, status) => app.apply(Operation::SetStatus { id, status }),
+        Message::SetStatus(id, status) => {
+            app.apply(Operation::SetStatus { id, status });
+            if app.library.details_pop == Some(DetailsPop::Status) {
+                app.library.details_pop = None;
+            }
+        }
         Message::SetRating(id, rating) => {
             app.apply(Operation::SetRating { id, rating });
             app.library.details_rating_open = false;
@@ -1566,7 +1580,45 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::Save if matches!(app.dialog, Some(Dialog::Tags(_))) => {
             return update(app, Message::SaveTags);
         }
-        Message::NoteDraft { id, note } => app.library.note_draft = Some((id, note)),
+        Message::TogglePop(pop) => {
+            if app.library.details_pop.as_ref() == Some(&pop) {
+                close_pop(app);
+            } else {
+                close_pop(app);
+                app.library.details_rating_open = false;
+                app.library.season_menu = None;
+                if let DetailsPop::Note(id) = &pop {
+                    let note = app.repo.library().entry(id).map(|e| e.note.as_str());
+                    app.note_editor = text_editor::Content::with_text(note.unwrap_or_default());
+                }
+                app.library.details_pop = Some(pop);
+            }
+        }
+        Message::ClosePop => {
+            close_pop(app);
+        }
+        Message::NoteEdit(action) => {
+            let Some(DetailsPop::Note(id)) = &app.library.details_pop else {
+                return Task::none();
+            };
+            let id = id.clone();
+            let edits = action.is_edit();
+            app.note_editor.perform(action);
+            if edits {
+                app.library.note_draft = Some((id, app.note_editor.text()));
+                app.note_generation = app.note_generation.wrapping_add(1);
+                let generation = app.note_generation;
+                return Task::perform(
+                    async { tokio::time::sleep(NOTE_DEBOUNCE).await },
+                    move |_| AppMessage::Entry(Message::NoteDebounce(generation)),
+                );
+            }
+        }
+        Message::NoteDebounce(generation) => {
+            if generation == app.note_generation {
+                save_note(app);
+            }
+        }
         Message::SaveNote => save_note(app),
         Message::Delete(id) => app.dialog = Some(Dialog::Delete { id }),
         Message::AddToPlan(id) => app.dialog = Some(Dialog::AddToPlan { id }),
@@ -2391,7 +2443,20 @@ pub fn dismiss_top(app: &mut App) -> bool {
             app.dialog = None;
             true
         }
-        None => std::mem::take(&mut app.library.details_rating_open),
+        None => std::mem::take(&mut app.library.details_rating_open) || close_pop(app),
+    }
+}
+
+/// Closes the details pane's popover, saving the note when it was the
+/// note editor. Whether one was open.
+pub fn close_pop(app: &mut App) -> bool {
+    match app.library.details_pop.take() {
+        Some(DetailsPop::Note(_)) => {
+            save_note(app);
+            true
+        }
+        Some(_) => true,
+        None => false,
     }
 }
 
@@ -3049,7 +3114,8 @@ mod tests {
                 app.view(),
             );
             assert!(ui.find("· from seasons").is_ok());
-            assert!(ui.find("2 seasons").is_ok());
+            assert!(ui.find("SEASONS").is_ok());
+            assert!(ui.find("Season 2").is_ok());
         }
 
         let _ = app.update(AppMessage::Library(
@@ -3504,29 +3570,37 @@ mod tests {
         );
     }
 
-    /// The note is typed in the details pane: Enter saves it as one change,
-    /// Esc puts the saved note back.
+    fn typed(words: &str) -> Message {
+        use iced::widget::text_editor::{Action, Edit};
+        Message::NoteEdit(Action::Edit(Edit::Paste(Arc::new(words.into()))))
+    }
+
+    /// The note is typed in its popover and saves as it is typed: after a
+    /// pause, and when the popover closes (its X, a click outside, Esc).
     #[test]
-    fn the_details_note_saves_on_enter_and_esc_restores_it() {
+    fn the_note_popover_saves_after_a_pause_and_when_it_closes() {
         let mut app = app();
-        let draft = |note: &str| Message::NoteDraft {
-            id: BABY.into(),
-            note: note.into(),
-        };
-        let saved = app.repo.library().entry(BABY).unwrap().note.clone();
-        send(&mut app, draft("Rewatch in "));
-        assert_eq!(
-            app.repo.library().entry(BABY).unwrap().note,
-            saved,
-            "not before Enter"
-        );
-        send(&mut app, draft("Rewatch in October. "));
-        send(&mut app, Message::SaveNote);
-        assert_eq!(
-            app.repo.library().entry(BABY).unwrap().note,
-            "Rewatch in October."
-        );
+        let note = |app: &App| app.repo.library().entry(BABY).unwrap().note.clone();
+        let saved = note(&app);
+        send(&mut app, Message::TogglePop(DetailsPop::Note(BABY.into())));
+        assert_eq!(app.library.details_pop, Some(DetailsPop::Note(BABY.into())));
+        assert_eq!(app.note_editor.text().trim(), saved);
+
+        send(&mut app, typed("Rewatch in "));
+        assert_eq!(note(&app), saved, "not before the pause");
+        assert!(app.library.note_draft.is_some());
+        // A pause that older typing started does nothing; the latest saves.
+        let latest = app.note_generation;
+        send(&mut app, Message::NoteDebounce(latest.wrapping_sub(1)));
+        assert_eq!(note(&app), saved);
+        send(&mut app, Message::NoteDebounce(latest));
+        assert!(note(&app).starts_with("Rewatch in"));
         assert!(app.library.note_draft.is_none());
+        assert_eq!(
+            app.library.details_pop,
+            Some(DetailsPop::Note(BABY.into())),
+            "the popover stays open"
+        );
         let change = Operation::SetNote {
             id: BABY.into(),
             note: String::new(),
@@ -3536,19 +3610,52 @@ mod tests {
             "Clear the note on Million Dollar Baby"
         );
 
-        send(&mut app, draft("Something else"));
-        assert!(app.library.dismiss_top());
+        // Closing saves what was typed since.
+        send(&mut app, typed("October. "));
+        send(&mut app, Message::ClosePop);
+        assert_eq!(app.library.details_pop, None);
+        assert!(note(&app).contains("October."));
         assert!(app.library.note_draft.is_none());
-        assert_eq!(
-            app.repo.library().entry(BABY).unwrap().note,
-            "Rewatch in October."
-        );
 
-        // Enter with the saved note typed again writes nothing.
+        // Esc closes and saves too, through the topmost-first dismiss.
+        send(&mut app, Message::TogglePop(DetailsPop::Note(BABY.into())));
+        send(&mut app, typed(" Again."));
+        assert!(dismiss_top(&mut app));
+        assert_eq!(app.library.details_pop, None);
+        assert!(note(&app).contains("Again."));
+
+        // The saved note typed again writes nothing.
         let before = app.repo.library().clone();
-        send(&mut app, draft("Rewatch in October."));
-        send(&mut app, Message::SaveNote);
+        send(&mut app, Message::TogglePop(DetailsPop::Note(BABY.into())));
+        send(&mut app, Message::ClosePop);
         assert_eq!(*app.repo.library(), before);
+    }
+
+    /// The details' popovers: one at a time, a pick in the status menu
+    /// closes it, and Esc closes the open one before anything else.
+    #[test]
+    fn the_details_popovers_open_one_at_a_time_and_a_status_pick_closes_the_menu() {
+        let mut app = app();
+        send(&mut app, Message::TogglePop(DetailsPop::Status));
+        assert_eq!(app.library.details_pop, Some(DetailsPop::Status));
+        send(&mut app, Message::TogglePop(DetailsPop::About));
+        assert_eq!(app.library.details_pop, Some(DetailsPop::About));
+        send(&mut app, Message::TogglePop(DetailsPop::About));
+        assert_eq!(app.library.details_pop, None, "the same again closes it");
+        send(&mut app, Message::ToggleDetailsRating);
+        send(&mut app, Message::TogglePop(DetailsPop::Tags));
+        assert!(!app.library.details_rating_open, "the rating picker closes");
+        assert!(dismiss_top(&mut app));
+        assert_eq!(app.library.details_pop, None);
+        assert!(!dismiss_top(&mut app));
+
+        send(&mut app, Message::TogglePop(DetailsPop::Status));
+        send(&mut app, Message::SetStatus(BABY.into(), EntryStatus::Want));
+        assert_eq!(app.library.details_pop, None);
+        assert_eq!(
+            app.repo.library().entry(BABY).unwrap().status,
+            EntryStatus::Want
+        );
     }
 
     use crate::lookup::Source as _;

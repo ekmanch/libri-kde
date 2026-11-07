@@ -138,11 +138,15 @@ pub fn rows<'a>(
     rows
 }
 
-/// The window the inspector shows: every part up to five, else the one
+/// How many parts the inspector's Series section lists at most
+/// (2026-11-07, three as the Seasons section; it was five).
+pub const WINDOW: usize = 3;
+
+/// The window the inspector shows: every part up to three, else the one
 /// before, this one and the one after (the first three when this is the
 /// first, the last three when it is the last).
 pub fn window<'a>(rows: &[SeriesRow<'a>]) -> Vec<SeriesRow<'a>> {
-    if rows.len() <= 5 {
+    if rows.len() <= WINDOW {
         return rows.to_vec();
     }
     let this = rows.iter().position(|r| r.is_this).unwrap_or(0);

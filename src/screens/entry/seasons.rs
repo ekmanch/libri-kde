@@ -1,5 +1,5 @@
 //! The rows shared by the inspector and the content-pane pages: a season
-//! with its status pill, a part of a series, and the "All N seasons" row.
+//! with its status pill, and a part of a series.
 
 use iced::widget::{button, column, container, row, text};
 use iced::{Center, Element, Fill, Padding};
@@ -204,28 +204,6 @@ pub fn series_row<'a>(
         .on_press_maybe(on_press)
         .style(ui::row_style(tokens, selected, 8.0))
         .focusable(8.0, tokens)
-}
-
-/// "All 29 seasons ›", "All 43 volumes ›".
-pub fn all_row<'a>(
-    label: String,
-    on_press: AppMessage,
-    tokens: &Tokens,
-) -> Element<'a, AppMessage> {
-    button(
-        row![
-            text(label).size(14).font(font::SEMIBOLD).width(Fill),
-            ui::icon(Icon::ChevronRight, 14.0, tokens.sub),
-        ]
-        .align_y(Center)
-        .height(Fill),
-    )
-    .width(Fill)
-    .height(44)
-    .padding([0, 10])
-    .on_press(on_press)
-    .style(ui::row_style(tokens, false, 8.0))
-    .focusable(8.0, tokens)
 }
 
 /// A read-only status pill, as a part's status shows in a series list.

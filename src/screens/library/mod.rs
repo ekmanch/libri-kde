@@ -113,6 +113,18 @@ pub struct SeasonMenu {
     pub in_page: bool,
 }
 
+/// A popover of the details pane (2026-11-07): the status menu, every tag
+/// of the entry, the note editor for the entry named, or the full About.
+/// One at a time, over its section; Esc, a click outside or its X closes
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DetailsPop {
+    Status,
+    Tags,
+    Note(String),
+    About,
+}
+
 /// What the sidebar's TAGS section lists (a Settings choice in 1f).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SidebarTags {
@@ -172,11 +184,14 @@ pub struct State {
     pub type_boxes: bool,
     /// The details pane's rating picker.
     pub details_rating_open: bool,
+    /// The details pane's open popover.
+    pub details_pop: Option<DetailsPop>,
     /// The entry whose cover in details the pointer went over, so its
     /// sharper copy for the viewer is fetched while it stays selected.
     pub cover_warm: Option<String>,
-    /// The details pane's note as typed, with its entry's id, until Enter
-    /// saves it, the pane moves on (which saves it too) or Esc drops it.
+    /// The details pane's note as typed in its popover, with its entry's
+    /// id, until a pause in the typing, the popover closing or the pane
+    /// moving on saves it.
     pub note_draft: Option<(String, String)>,
     /// The album track whose rating picker is open, by title.
     pub track_rating_open: Option<String>,
@@ -219,6 +234,9 @@ pub enum Message {
     ToggleType(MediaType),
     /// An overview list's "See all".
     SeeAll(Section),
+    /// The pinned panel's "See all" with nothing selected: the type's
+    /// upcoming titles, or the ones in progress, keeping the type.
+    GlanceSeeAll(Section),
     /// A sidebar tag: filters by it alone, or clears it when it is the only
     /// tag picked.
     PickTag(String),
@@ -365,15 +383,13 @@ pub fn wanted(app: &App, wants: &mut Wants) {
         overview::wanted(app, view, wants);
         return;
     }
-    // At a glance's pick, while the pinned panel shows it.
-    if !state.pane_open() && panel(app) == Panel::Pinned {
-        let listing = state.listing(library, app.today);
-        if let Some(entry) = panel::pick(&listing, state.pick) {
-            wants.covers.push(entry.id.clone());
-        }
-    }
     if view == View::Text {
         return;
+    }
+    // The glance's covers, while the pinned panel shows it.
+    if !state.pane_open() && panel(app) == Panel::Pinned {
+        let listing = state.listing(library, app.today);
+        wants.covers.extend(panel::glance_covers(app, &listing));
     }
     if state.single() == Some(MediaType::Music)
         && state.artist.is_none()
@@ -489,6 +505,18 @@ impl State {
                     }
                 }
             }
+            Message::GlanceSeeAll(section) => {
+                self.deselect();
+                self.page = None;
+                match section {
+                    Section::ComingSoon => {
+                        self.status = None;
+                        self.filter.not_released = true;
+                        self.sort = Sort::YearOldest;
+                    }
+                    _ => self.status = Some(EntryStatus::InProgress),
+                }
+            }
             Message::PickTag(tag) => {
                 self.page = None;
                 self.filter.tag_categories.clear();
@@ -519,6 +547,7 @@ impl State {
             Message::Select(id) => {
                 self.series = None;
                 self.details_rating_open = false;
+                self.details_pop = None;
                 self.track_rating_open = None;
                 self.season_menu = None;
                 self.selected = if self.selected.as_deref() == Some(id.as_str()) {
@@ -681,7 +710,7 @@ impl State {
             }
             return true;
         }
-        self.popup.take().is_some() || self.note_draft.take().is_some()
+        self.popup.take().is_some()
     }
 
     /// Nothing in the details pane: no entry and no series.
@@ -726,6 +755,7 @@ impl State {
     pub fn close_popovers(&mut self) {
         self.popup = None;
         self.details_rating_open = false;
+        self.details_pop = None;
         self.track_rating_open = None;
         self.season_menu = None;
     }
@@ -1034,7 +1064,7 @@ pub fn view<'a>(app: &'a App) -> Element<'a, AppMessage> {
     ];
     let mut lower = row![container(under).width(Fill)];
     if mode == Panel::Pinned {
-        lower = lower.push(panel::side(app, &listing));
+        lower = lower.push(panel::side(app));
     }
     let main: Element<'a, AppMessage> = column![top, lower].into();
     let picker = match (&state.picker, &state.cover_dialog) {

@@ -1,25 +1,28 @@
 //! The details panel at the library's right (decided 2026-10-31):
 //! selecting a title never moves the list. Home keeps its own layout,
 //! the details taking the place of its right column (`overview`).
-//! Elsewhere the panel is pinned (always there, "At a glance" while nothing is
-//! selected) or unpinned (the list gets the full width and a selection
-//! slides a drawer over the list's right side), remembered per view key
-//! like the view. A narrow window unpins it.
+//! Elsewhere the panel is pinned (always there, the list at a glance while
+//! nothing is selected) or unpinned (the list gets the full width and a
+//! selection slides a drawer over the list's right side), remembered per
+//! view key like the view. A narrow window unpins it.
+//!
+//! The glance (2026-11-07) never scrolls: it is built for the panel's
+//! height, with Coming soon, what is in progress, the active plan's items
+//! left for the type, the most used tags and Pick something, the empty
+//! sections left out and the rows fitted to the height (`rows`).
 
 use std::time::{Duration, Instant};
 
-use iced::widget::{
-    Column, Row, button, column, container, opaque, progress_bar, row, space, text,
-};
+use iced::widget::{Column, Row, button, column, container, opaque, responsive, row, space, text};
 use iced::{Background, Border, Center, Color, Element, Fill, Padding, Shadow, Vector};
 
-use super::overview::{self, RowStyle};
-use super::{Listing, Message, OpenSeries};
+use super::overview;
+use super::{Listing, Message, OpenSeries, View};
 use crate::animation::{Easing, Slide};
 use crate::app::{App, KeyPress, Message as AppMessage};
-use crate::browse;
+use crate::browse::{self, ActivePlan, Section};
 use crate::history::Direction;
-use crate::model::EntryStatus;
+use crate::model::{Date, Entry, EntryStatus, MediaType};
 use crate::screens::{entry, shell};
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, FocusExt, Icon};
@@ -38,7 +41,7 @@ pub const NARROW: f32 = 720.0;
 pub enum Panel {
     /// Home: the details in its right column (`overview`).
     Home,
-    /// Always there, At a glance when empty.
+    /// Always there, the list at a glance when empty.
     Pinned,
     /// Only with a selection, over the list.
     Drawer,
@@ -160,10 +163,6 @@ pub fn slide_drawer(app: &mut App, closes: bool, before: (Panel, Option<Shown>),
     app.library.motion = motion;
 }
 
-/// How many recently added titles At a glance lists, and how many tags.
-const RECENT: usize = 5;
-const TAGS: usize = 6;
-
 /// What the selection puts in the panel: an entry's details or a series.
 pub(super) fn details<'a>(app: &'a App) -> Option<Element<'a, AppMessage>> {
     let state = &app.library;
@@ -178,12 +177,12 @@ pub(super) fn details<'a>(app: &'a App) -> Option<Element<'a, AppMessage>> {
     }
 }
 
-/// The pinned panel beside the list: the selection's details, else At a
-/// glance.
-pub fn side<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> {
-    let tokens = app.tokens();
-    let content =
-        details(app).unwrap_or_else(|| entry::details::pane(glance(app, listing, &tokens), None));
+/// The pinned panel beside the list: the selection's details, else the
+/// list at a glance, built for the panel's height.
+pub fn side<'a>(app: &'a App) -> Element<'a, AppMessage> {
+    let content = details(app).unwrap_or_else(|| {
+        responsive(move |size| entry::details::pane(glance(app, size.height), None)).into()
+    });
     container(content).width(entry::details::WIDTH).into()
 }
 
@@ -302,14 +301,274 @@ pub fn toggle<'a>(app: &App) -> Option<Element<'a, AppMessage>> {
     )
 }
 
-/// The pick from Want for `pick` (moved on by "Another"), from the list's
-/// own order so it is the same on every frame.
-pub fn pick<'a>(listing: &Listing<'a>, pick: u64) -> Option<&'a crate::model::Entry> {
+/// How many rows the glance's sections show at most, and how many tags.
+const SOON_MAX: usize = 4;
+const NOW_MAX: usize = 3;
+const PLAN_MAX: usize = 3;
+const TAGS: usize = 6;
+/// The glance's measures: the gap between sections, a section's header
+/// row and the space under it, a text row and a cover row, the plan's
+/// line under its header, the tag chips, and the Pick something card with
+/// and without its cover.
+const SECTION_GAP: f32 = 26.0;
+const HEADER_H: f32 = 24.0;
+const HEADER_GAP: f32 = 2.0;
+const TEXT_ROW_H: f32 = 36.0;
+const COVER_ROW_H: f32 = 50.0;
+const PLAN_LINE_H: f32 = 23.0;
+const TAGS_HEADER_H: f32 = 18.0;
+const TAGS_HEADER_GAP: f32 = 9.0;
+const TAG_CHIP_H: f32 = 28.0;
+const TAG_GAP: f32 = 6.0;
+const PICK_GAP: f32 = 9.0;
+const PICK_COVER_CARD: f32 = 86.0;
+const PICK_TEXT_CARD: f32 = 56.0;
+/// The pane's padding over and under the glance.
+const PANE_PAD: f32 = entry::details::PAD + 18.0;
+
+/// How many rows each section of the glance shows for the height it
+/// has (2026-11-07), so the panel never scrolls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Rows {
+    pub soon: usize,
+    pub now: usize,
+    pub plan: usize,
+    pub tags: bool,
+    pub pick: bool,
+}
+
+/// The rows for `avail` px with rows `row_h` tall: every section with
+/// something to show gets one row (`counts` is what Coming soon, the
+/// in-progress list and the plan have; `tags_h` and `pick_h` the heights
+/// of Most used tags and Pick something, when they have something), and
+/// when even that is too tall the sections go from the bottom. Then
+/// Coming soon grows to four rows, the in-progress list to three and the
+/// plan to three, a row at a time while it fits, and Pick something shows
+/// only if it fits after them.
+pub fn rows(
+    avail: f32,
+    row_h: f32,
+    counts: [usize; 3],
+    tags_h: Option<f32>,
+    pick_h: Option<f32>,
+) -> Rows {
+    let maxes = [SOON_MAX, NOW_MAX, PLAN_MAX];
+    let base = [
+        HEADER_H + HEADER_GAP,
+        HEADER_H + HEADER_GAP,
+        HEADER_H + PLAN_LINE_H + HEADER_GAP,
+    ];
+    // The sections in order, each with its height at one row.
+    let mut parts: Vec<(usize, f32)> = (0..3)
+        .filter(|&i| counts[i] > 0)
+        .map(|i| (i, base[i] + row_h))
+        .collect();
+    if let Some(tags_h) = tags_h {
+        parts.push((3, tags_h));
+    }
+    let total = |parts: &[(usize, f32)]| {
+        parts.iter().map(|(_, h)| h).sum::<f32>()
+            + parts.len().saturating_sub(1) as f32 * SECTION_GAP
+    };
+    while !parts.is_empty() && total(&parts) > avail {
+        parts.pop();
+    }
+    let mut rows = Rows::default();
+    let mut used = total(&parts);
+    for &(i, _) in &parts {
+        match i {
+            0 => rows.soon = 1,
+            1 => rows.now = 1,
+            2 => rows.plan = 1,
+            _ => rows.tags = true,
+        }
+    }
+    loop {
+        let mut grew = false;
+        for i in 0..3 {
+            let have = match i {
+                0 => &mut rows.soon,
+                1 => &mut rows.now,
+                _ => &mut rows.plan,
+            };
+            if *have > 0 && *have < counts[i].min(maxes[i]) && used + row_h <= avail {
+                *have += 1;
+                used += row_h;
+                grew = true;
+                break;
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    if let Some(pick_h) = pick_h {
+        let gap = if parts.is_empty() { 0.0 } else { SECTION_GAP };
+        rows.pick = used + gap + pick_h <= avail;
+    }
+    rows
+}
+
+/// A title on its way: an entry not out yet, or an announced season of a
+/// show.
+struct Soon<'a> {
+    entry: &'a Entry,
+    sub: String,
+    when: Date,
+    meta: String,
+}
+
+/// What the list at a glance has to show, before the fit.
+struct Glance<'a> {
+    soon: Vec<Soon<'a>>,
+    now: Vec<&'a Entry>,
+    now_title: &'static str,
+    /// The active plan, and its items left to do among the list's titles.
+    plan: Option<(ActivePlan<'a>, Vec<&'a Entry>)>,
+    tags: Vec<(&'a str, usize)>,
+    pick: Option<&'a Entry>,
+}
+
+/// "Watching now" for the types shown, "Right now" when they differ.
+fn now_title(types: &std::collections::BTreeSet<MediaType>) -> &'static str {
+    let verb = |media: MediaType| match media {
+        MediaType::Movies | MediaType::Shows | MediaType::Anime => "Watching now",
+        MediaType::Books => "Reading now",
+        MediaType::Games => "Playing now",
+        MediaType::Music => "Listening now",
+    };
+    let mut verbs = types.iter().map(|&m| verb(m));
+    match verbs.next() {
+        Some(first) if verbs.all(|v| v == first) => first,
+        _ => "Right now",
+    }
+}
+
+/// "3 movies left", "1 title left".
+fn left_label(n: usize, single: Option<MediaType>) -> String {
+    let noun = match (single, n == 1) {
+        (Some(MediaType::Movies), one) => {
+            if one {
+                "movie"
+            } else {
+                "movies"
+            }
+        }
+        (Some(MediaType::Shows), one) => {
+            if one {
+                "show"
+            } else {
+                "shows"
+            }
+        }
+        (Some(MediaType::Books), one) => {
+            if one {
+                "book"
+            } else {
+                "books"
+            }
+        }
+        (Some(MediaType::Games), one) => {
+            if one {
+                "game"
+            } else {
+                "games"
+            }
+        }
+        (Some(MediaType::Music), one) => {
+            if one {
+                "album"
+            } else {
+                "albums"
+            }
+        }
+        (Some(MediaType::Anime), _) => "anime",
+        (None, one) => {
+            if one {
+                "title"
+            } else {
+                "titles"
+            }
+        }
+    };
+    format!("{n} {noun} left")
+}
+
+fn gather<'a>(app: &'a App, listing: &Listing<'a>) -> Glance<'a> {
+    let state = &app.library;
+    let today = app.today;
+    let shown = &listing.shown;
+    let mut soon = Vec::new();
+    for &entry in shown {
+        if browse::is_coming(entry, today)
+            && let Some(released) = entry.first_released()
+        {
+            let sub = match &entry.creator {
+                Some(creator) => format!("{} · {creator}", browse::kind_label(entry)),
+                None => browse::kind_label(entry).to_owned(),
+            };
+            soon.push(Soon {
+                entry,
+                sub,
+                when: released.available_from(),
+                meta: overview::short_release(released, today),
+            });
+        }
+        for season in entry.season_list() {
+            if let Some(released) = season.released
+                && !released.is_released_on(today)
+            {
+                soon.push(Soon {
+                    entry,
+                    sub: season.name(),
+                    when: released.available_from(),
+                    meta: overview::short_release(released, today),
+                });
+            }
+        }
+    }
+    soon.sort_by_key(|s| s.when);
+    let now: Vec<&Entry> = shown
+        .iter()
+        .copied()
+        .filter(|e| e.status == EntryStatus::InProgress)
+        .collect();
+    let plan = ActivePlan::of(app.repo.library(), today).map(|active| {
+        let left: Vec<&Entry> = active
+            .plan
+            .items
+            .iter()
+            .filter(|item| !item.done)
+            .filter_map(|item| shown.iter().copied().find(|e| e.id == item.entry))
+            .collect();
+        (active, left)
+    });
+    let mut tags = std::collections::BTreeMap::<&str, usize>::new();
+    for tag in shown.iter().flat_map(|e| &e.tags) {
+        *tags.entry(tag).or_default() += 1;
+    }
+    let mut tags: Vec<_> = tags.into_iter().collect();
+    tags.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    tags.truncate(TAGS);
+    Glance {
+        soon,
+        now,
+        now_title: now_title(&state.types),
+        plan: plan.filter(|(_, left)| !left.is_empty()),
+        tags,
+        pick: pick(listing, state.pick, today),
+    }
+}
+
+/// The pick from Want for `pick` (moved on by "Another"), among the
+/// titles that are out, from the list's own order so it is the same on
+/// every frame.
+pub fn pick<'a>(listing: &Listing<'a>, pick: u64, today: Date) -> Option<&'a crate::model::Entry> {
     let wants: Vec<_> = listing
         .shown
         .iter()
         .copied()
-        .filter(|e| e.status == EntryStatus::Want)
+        .filter(|e| e.status == EntryStatus::Want && e.is_released_on(today))
         .collect();
     if wants.is_empty() {
         return None;
@@ -319,170 +578,178 @@ pub fn pick<'a>(listing: &Listing<'a>, pick: u64) -> Option<&'a crate::model::En
     Some(wants[(mixed % wants.len() as u64) as usize])
 }
 
-/// Pinned with nothing selected: the list at a glance.
-fn glance<'a>(app: &'a App, listing: &Listing<'a>, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let state = &app.library;
-    let single = state.single();
-    let color = single.map_or(tokens.sub, |m| tokens.type_color(m));
-    let shown = &listing.shown;
-    let narrowed = state.filter_count() > 0 || state.status.is_some() || !state.query.is_empty();
-    let line = format!(
-        "{} {} {}",
-        shown.len(),
-        if shown.len() == 1 { "title" } else { "titles" },
-        if narrowed {
-            "match your filters"
-        } else {
-            "in your library"
-        }
-    );
-    let head = column![
-        ui::mono("AT A GLANCE", 11.0, color),
-        text(state.title()).size(24).font(font::EXTRABOLD),
-        text(line).size(13.5).color(tokens.sub),
-    ]
-    .spacing(4);
-
-    // The status counts over the type, the filter and the search, so every
-    // bar is there to click whatever the status chips say.
-    let statuses: Vec<EntryStatus> = browse::status_options(&state.types);
-    let counts: Vec<(EntryStatus, usize)> = statuses
+/// The covers the glance may show, for the lookups: whatever its
+/// sections could list, whether or not the height lets them.
+pub fn glance_covers(app: &App, listing: &Listing<'_>) -> Vec<String> {
+    let glance = gather(app, listing);
+    let mut ids: Vec<String> = glance
+        .soon
         .iter()
-        .map(|&s| (s, listing.base.iter().filter(|e| e.status == s).count()))
+        .take(SOON_MAX)
+        .map(|s| s.entry.id.clone())
         .collect();
-    let most = counts.iter().map(|(_, n)| *n).max().unwrap_or(0).max(1);
-    let (line_color, t) = (tokens.line, *tokens);
-    let stats = Column::with_children(counts.into_iter().map(|(status, n)| {
-        let bar = progress_bar(0.0..=most as f32, n as f32)
-            .girth(6)
-            .style(move |_| progress_bar::Style {
-                background: Background::Color(line_color),
-                bar: Background::Color(color),
-                border: Border::default().rounded(3),
-            });
-        let label = match single {
-            Some(media) => browse::status_label(Some(media), status),
-            None => browse::status_label(None, status),
-        };
-        button(
-            row![
-                text(label).size(13.5).width(96),
-                container(bar).width(Fill),
-                container(ui::mono(n.to_string(), 12.0, t.sub))
-                    .width(40)
-                    .align_x(iced::Right),
-            ]
-            .spacing(10)
-            .align_y(Center),
-        )
-        .width(Fill)
-        .padding([3, 0])
-        .on_press(msg(Message::Status(Some(status))))
-        .style(move |_, _| button::Style {
-            text_color: t.text,
-            ..button::Style::default()
-        })
-        .focusable(6.0, tokens)
-    }))
-    .spacing(3);
-    let mut items = Column::new()
-        .spacing(24)
-        .push(head)
-        .push(column![ui::section_header("Status", tokens), stats].spacing(6));
-
-    if let Some(entry) = pick(listing, state.pick) {
-        let another = button(text("Another").size(13).font(font::SEMIBOLD))
-            .padding(0)
-            .on_press(msg(Message::AnotherPick))
-            .style(move |_, _| button::Style {
-                text_color: t.ink,
-                ..button::Style::default()
-            })
-            .focusable(6.0, tokens);
-        let sub = match entry.years(app.today) {
-            Some(years) => format!("{} · {years}", browse::kind_label(entry)),
-            None => browse::kind_label(entry).to_owned(),
-        };
-        let card = button(
-            row![
-                ui::plain_cover(
-                    app.artwork.cover(entry),
-                    theme::cover_color(&entry.id),
-                    44.0,
-                    66.0,
-                    5.0
-                ),
-                column![
-                    text(&entry.title).size(14.5).font(font::SEMIBOLD),
-                    text(sub).size(12.5).color(t.sub),
-                ]
-                .spacing(3)
-                .width(Fill),
-            ]
-            .spacing(12)
-            .align_y(Center),
-        )
-        .width(Fill)
-        .padding(10)
-        .on_press(msg(Message::Select(entry.id.clone())))
-        .style(move |_, status| button::Style {
-            background: Some(Background::Color(
-                if matches!(status, button::Status::Hovered) {
-                    theme::mix_white(t.raised, if t.light { 0.0 } else { 0.04 })
-                } else {
-                    t.raised
-                },
-            )),
-            border: Border::default().rounded(10),
-            text_color: t.text,
-            ..button::Style::default()
-        })
-        .focusable(10.0, tokens);
-        items = items.push(
-            column![
-                row![
-                    ui::section_header("Pick something", tokens),
-                    space::horizontal(),
-                    another
-                ]
-                .align_y(Center),
-                card
-            ]
-            .spacing(9),
-        );
+    ids.extend(glance.now.iter().take(NOW_MAX).map(|e| e.id.clone()));
+    if let Some((_, left)) = &glance.plan {
+        ids.extend(left.iter().take(PLAN_MAX).map(|e| e.id.clone()));
     }
+    ids.extend(glance.pick.map(|e| e.id.clone()));
+    ids
+}
 
-    let mut recent: Vec<_> = shown.to_vec();
-    browse::Sort::NewestAdded.apply(&mut recent);
-    if !recent.is_empty() {
-        let rows = Column::with_children(recent.into_iter().take(RECENT).map(|entry| {
-            overview::overview_row(
+/// The width of a Most used tags chip: "#horror 12".
+fn tag_chip_width(tag: &str, n: usize) -> f32 {
+    ui::text_width(&format!("#{tag}"), 13.0, font::REGULAR)
+        + 6.0
+        + ui::text_width(&n.to_string(), 11.5, font::MONO)
+        + 20.0
+}
+
+/// Pinned with nothing selected: the list at a glance, for `height` px of
+/// panel. Coming soon, what is in progress, the active plan's items left
+/// for this type, the most used tags and Pick something, the empty ones
+/// left out and the rows fitted to the height (`rows`). Rows follow the
+/// view: text rows in the text view, small-cover rows in list and grid.
+fn glance<'a>(app: &'a App, height: f32) -> Element<'a, AppMessage> {
+    let tokens = app.tokens();
+    let state = &app.library;
+    let listing = state.listing(app.repo.library(), app.today);
+    let glance = gather(app, &listing);
+    let covers = state.view_mode() != View::Text;
+    let row_h = if covers { COVER_ROW_H } else { TEXT_ROW_H };
+    let inner = entry::details::INNER;
+
+    let tag_rows = ui::wrapped_rows(
+        &glance
+            .tags
+            .iter()
+            .map(|(tag, n)| tag_chip_width(tag, *n))
+            .collect::<Vec<_>>(),
+        inner,
+        TAG_GAP,
+    );
+    let tags_h = (tag_rows > 0).then(|| {
+        TAGS_HEADER_H
+            + TAGS_HEADER_GAP
+            + tag_rows as f32 * TAG_CHIP_H
+            + (tag_rows - 1) as f32 * TAG_GAP
+    });
+    let pick_h = glance.pick.map(|_| {
+        HEADER_H
+            + PICK_GAP
+            + if covers {
+                PICK_COVER_CARD
+            } else {
+                PICK_TEXT_CARD
+            }
+    });
+    let plan_left = glance.plan.as_ref().map_or(0, |(_, left)| left.len());
+    let fit = rows(
+        height - PANE_PAD,
+        row_h,
+        [glance.soon.len(), glance.now.len(), plan_left],
+        tags_h,
+        pick_h,
+    );
+
+    let t = tokens;
+    let see_all = |shown: usize, total: usize, section: Section| {
+        let label = if total > shown {
+            format!("See all {total}")
+        } else {
+            "See all".to_owned()
+        };
+        ui::header_link(label, true, &t, msg(Message::GlanceSeeAll(section)))
+    };
+    let header = |label: &str, right: Element<'a, AppMessage>| {
+        row![ui::section_header(label, &t), space::horizontal(), right]
+            .align_y(Center)
+            .height(HEADER_H)
+    };
+    let mut items = Column::new().spacing(SECTION_GAP);
+
+    if fit.soon > 0 {
+        let rows = Column::with_children(glance.soon.iter().take(fit.soon).map(|soon| {
+            glance_row(
                 app,
-                entry,
-                overview::short_day(entry.added, app.today),
-                RowStyle::Dot,
-                false,
-                tokens,
+                soon.entry,
+                &soon.sub,
+                soon.meta.clone(),
+                covers,
+                &tokens,
             )
         }));
         items = items.push(
             column![
-                container(ui::section_header("Recently added", tokens))
-                    .padding(Padding::new(0.0).bottom(4)),
+                header(
+                    "Coming soon",
+                    see_all(fit.soon, glance.soon.len(), Section::ComingSoon)
+                ),
                 rows
             ]
-            .spacing(0),
+            .spacing(HEADER_GAP),
         );
     }
-
-    let mut tags = std::collections::BTreeMap::<&str, usize>::new();
-    for tag in shown.iter().flat_map(|e| &e.tags) {
-        *tags.entry(tag).or_default() += 1;
+    if fit.now > 0 {
+        let rows = Column::with_children(glance.now.iter().take(fit.now).map(|entry| {
+            // The season under way, else the creator.
+            let sub = entry
+                .season_list()
+                .iter()
+                .rev()
+                .find(|s| s.status == Some(EntryStatus::InProgress))
+                .map(|s| s.name())
+                .or_else(|| entry.creator.clone())
+                .unwrap_or_else(|| browse::kind_label(entry).to_owned());
+            glance_row(app, entry, &sub, String::new(), covers, &tokens)
+        }));
+        items = items.push(
+            column![
+                header(
+                    glance.now_title,
+                    see_all(fit.now, glance.now.len(), Section::InProgress)
+                ),
+                rows
+            ]
+            .spacing(HEADER_GAP),
+        );
     }
-    let mut tags: Vec<_> = tags.into_iter().collect();
-    tags.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-    if !tags.is_empty() {
-        let chips = Row::with_children(tags.into_iter().take(TAGS).map(|(tag, n)| {
+    if fit.plan > 0
+        && let Some((active, left)) = &glance.plan
+    {
+        let mut line = left_label(left.len(), state.single());
+        match active.days_left {
+            Some(0) => line.push_str(" · last day"),
+            Some(1) => line.push_str(" · 1 day to go"),
+            Some(n) => line.push_str(&format!(" · {n} days to go")),
+            None => {}
+        }
+        let open = ui::header_link(
+            "Open",
+            true,
+            &tokens,
+            AppMessage::Plans(crate::screens::plans::Message::ShowPlan(
+                active.plan.id.clone(),
+            )),
+        );
+        let rows = Column::with_children(left.iter().take(fit.plan).map(|entry| {
+            let sub = match entry.years(app.today) {
+                Some(years) => format!("{} · {years}", browse::kind_label(entry)),
+                None => browse::kind_label(entry).to_owned(),
+            };
+            glance_row(app, entry, &sub, String::new(), covers, &tokens)
+        }));
+        items = items.push(
+            column![
+                header(&active.plan.title(), open),
+                container(text(line).size(13).color(tokens.sub))
+                    .padding(Padding::new(0.0).top(2).bottom(4)),
+                rows
+            ]
+            .spacing(HEADER_GAP),
+        );
+    }
+    if fit.tags {
+        let chips = Row::with_children(glance.tags.iter().map(|&(tag, n)| {
             button(
                 container(
                     row![
@@ -495,7 +762,7 @@ fn glance<'a>(app: &'a App, listing: &Listing<'a>, tokens: &Tokens) -> Element<'
                 .height(Fill)
                 .align_y(Center),
             )
-            .height(28)
+            .height(TAG_CHIP_H)
             .padding([0, 10])
             .on_press(msg(Message::PickTag(tag.to_owned())))
             .style(move |_, status| button::Style {
@@ -510,14 +777,122 @@ fn glance<'a>(app: &'a App, listing: &Listing<'a>, tokens: &Tokens) -> Element<'
                 text_color: t.text,
                 ..button::Style::default()
             })
-            .focusable(14.0, tokens)
+            .focusable(14.0, &tokens)
         }))
-        .spacing(6)
+        .spacing(TAG_GAP)
         .wrap()
-        .vertical_spacing(6);
-        items = items.push(column![ui::section_header("Most used tags", tokens), chips].spacing(9));
+        .vertical_spacing(TAG_GAP);
+        items = items.push(
+            column![ui::section_header("Most used tags", &tokens), chips].spacing(TAGS_HEADER_GAP),
+        );
+    }
+    if fit.pick
+        && let Some(entry) = glance.pick
+    {
+        let another = ui::header_link("Another", false, &tokens, msg(Message::AnotherPick));
+        let sub = match entry.years(app.today) {
+            Some(years) => format!("{} · {years}", browse::kind_label(entry)),
+            None => browse::kind_label(entry).to_owned(),
+        };
+        let words = column![
+            text(&entry.title).size(14.5).font(font::SEMIBOLD),
+            text(sub).size(12.5).color(t.sub),
+        ]
+        .spacing(3)
+        .width(Fill);
+        let mut content = Row::new().spacing(12).align_y(Center);
+        if covers {
+            content = content.push(ui::plain_cover(
+                app.artwork.cover(entry),
+                theme::cover_color(&entry.id),
+                44.0,
+                66.0,
+                5.0,
+            ));
+        }
+        let card = button(content.push(words))
+            .width(Fill)
+            .padding(10)
+            .on_press(msg(Message::Select(entry.id.clone())))
+            .style(move |_, status| button::Style {
+                background: Some(Background::Color(
+                    if matches!(status, button::Status::Hovered) {
+                        theme::mix_white(t.raised, if t.light { 0.0 } else { 0.04 })
+                    } else {
+                        t.raised
+                    },
+                )),
+                border: Border::default().rounded(10),
+                text_color: t.text,
+                ..button::Style::default()
+            })
+            .focusable(10.0, &tokens);
+        items = items.push(column![header("Pick something", another), card].spacing(PICK_GAP));
     }
     items.into()
+}
+
+/// A row of the glance: a type dot (text view) or a 26 × 39 cover with
+/// `sub` under the title (list and grid), `meta` in mono at the right,
+/// and a line under it; a click selects the title.
+fn glance_row<'a>(
+    app: &'a App,
+    entry: &'a Entry,
+    sub: &str,
+    meta: String,
+    cover: bool,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let color = tokens.type_color(entry.media);
+    let title = text(&entry.title)
+        .size(14)
+        .font(if cover { font::SEMIBOLD } else { font::MEDIUM })
+        .wrapping(text::Wrapping::None);
+    let mut content = Row::new().spacing(12).align_y(Center);
+    content = if cover {
+        content
+            .push(ui::plain_cover(
+                app.artwork.cover(entry),
+                theme::cover_color(&entry.id),
+                26.0,
+                39.0,
+                4.0,
+            ))
+            .push(
+                column![
+                    title,
+                    text(sub.to_owned())
+                        .size(12)
+                        .color(tokens.sub)
+                        .wrapping(text::Wrapping::None)
+                ]
+                .spacing(1)
+                .width(Fill)
+                .clip(true),
+            )
+    } else {
+        content
+            .push(ui::dot(color, 8.0, 3.0))
+            .push(container(title).width(Fill).clip(true))
+    };
+    content = content.push(ui::mono(meta, 12.0, tokens.sub));
+    let height = if cover { COVER_ROW_H } else { TEXT_ROW_H };
+    let line = tokens.line;
+    let row_button = button(content.height(Fill))
+        .width(Fill)
+        .height(height - 1.0)
+        .padding([0, 4])
+        .on_press(msg(Message::Select(entry.id.clone())))
+        .style(ui::row_style(tokens, false, 0.0))
+        .focusable(0.0, tokens);
+    column![
+        row_button,
+        container(space())
+            .width(Fill)
+            .height(1)
+            .style(move |_| container::background(line))
+    ]
+    .into()
 }
 
 #[cfg(test)]
@@ -614,23 +989,152 @@ mod tests {
     }
 
     #[test]
-    fn at_a_glance_picks_from_want_and_another_moves_on() {
+    fn the_glance_picks_from_want_among_what_is_out_and_another_moves_on() {
         let mut app = app();
         movies(&mut app);
         let listing = app.library.listing(app.repo.library(), app.today);
-        let first = pick(&listing, 0).expect("the fixture has movies to want");
+        let first = pick(&listing, 0, app.today).expect("the fixture has movies to want");
         assert_eq!(first.status, EntryStatus::Want);
+        assert!(first.is_released_on(app.today));
         let wants = listing
             .shown
             .iter()
-            .filter(|e| e.status == EntryStatus::Want)
+            .filter(|e| e.status == EntryStatus::Want && e.is_released_on(app.today))
             .count();
         if wants > 1 {
             assert!(
-                (1..8).any(|n| pick(&listing, n).map(|e| &e.id) != Some(&first.id)),
+                (1..8).any(|n| pick(&listing, n, app.today).map(|e| &e.id) != Some(&first.id)),
                 "Another finds a different one"
             );
         }
+    }
+
+    /// The glance's rows for a height: one row each, then Coming soon to
+    /// four, the in-progress list to three and the plan to three, Pick
+    /// something only when it fits, and sections dropped from the bottom
+    /// when even one row each is too tall.
+    #[test]
+    fn the_glance_fits_its_rows_to_the_height() {
+        let row = COVER_ROW_H;
+        let tags_h = TAGS_HEADER_H + TAGS_HEADER_GAP + TAG_CHIP_H;
+        let tags = Some(tags_h);
+        let pick = Some(HEADER_H + PICK_GAP + PICK_COVER_CARD);
+        // Room for everything: every section at its most.
+        let roomy = rows(2000.0, row, [6, 5, 4], tags, pick);
+        assert_eq!(
+            roomy,
+            Rows {
+                soon: 4,
+                now: 3,
+                plan: 3,
+                tags: true,
+                pick: true
+            }
+        );
+        // Never more rows than there are titles.
+        assert_eq!(rows(2000.0, row, [1, 0, 2], None, None).soon, 1);
+        assert_eq!(rows(2000.0, row, [1, 0, 2], None, None).now, 0);
+        assert_eq!(rows(2000.0, row, [1, 0, 2], None, None).plan, 2);
+        // One row each takes this much; the next row goes to Coming soon.
+        let one_each = (HEADER_H + HEADER_GAP + row) * 2.0
+            + (HEADER_H + PLAN_LINE_H + HEADER_GAP + row)
+            + tags_h
+            + 3.0 * SECTION_GAP;
+        let snug = rows(one_each + row + 1.0, row, [6, 5, 4], tags, pick);
+        assert_eq!((snug.soon, snug.now, snug.plan), (2, 1, 1));
+        assert!(snug.tags && !snug.pick);
+        // Coming soon fills up before the in-progress list grows.
+        let more = rows(one_each + 4.0 * row, row, [6, 5, 4], tags, pick);
+        assert_eq!((more.soon, more.now, more.plan), (4, 2, 1));
+        // Too tight for one row each: the tags go (and the room they free
+        // goes to Coming soon), then the plan.
+        let tight = rows(one_each - 1.0, row, [6, 5, 4], tags, pick);
+        assert!(!tight.tags);
+        assert_eq!((tight.soon, tight.now, tight.plan), (2, 1, 1));
+        let tighter = rows(
+            one_each - tags_h - SECTION_GAP - 1.0,
+            row,
+            [6, 5, 4],
+            tags,
+            pick,
+        );
+        assert_eq!((tighter.soon, tighter.now, tighter.plan), (3, 1, 0));
+        // Nothing at all fits nothing.
+        assert_eq!(rows(10.0, row, [6, 5, 4], tags, pick), Rows::default());
+        // Pick something alone, when there is nothing else.
+        let alone = rows(200.0, row, [0, 0, 0], None, pick);
+        assert!(alone.pick);
+    }
+
+    #[test]
+    fn the_glance_names_what_is_under_way_by_type() {
+        use std::collections::BTreeSet;
+        let types = |list: &[MediaType]| list.iter().copied().collect::<BTreeSet<_>>();
+        assert_eq!(now_title(&types(&[MediaType::Books])), "Reading now");
+        assert_eq!(now_title(&types(&[MediaType::Games])), "Playing now");
+        assert_eq!(now_title(&types(&[MediaType::Music])), "Listening now");
+        assert_eq!(
+            now_title(&types(&[MediaType::Movies, MediaType::Shows])),
+            "Watching now"
+        );
+        assert_eq!(
+            now_title(&types(&[MediaType::Movies, MediaType::Books])),
+            "Right now"
+        );
+        assert_eq!(now_title(&types(&[])), "Right now");
+        assert_eq!(left_label(3, Some(MediaType::Movies)), "3 movies left");
+        assert_eq!(left_label(1, Some(MediaType::Books)), "1 book left");
+        assert_eq!(left_label(2, None), "2 titles left");
+    }
+
+    /// The glance's sections, in order, follow the list: Coming soon with
+    /// announced seasons, what is in progress, the tags; the ones with
+    /// nothing are left out.
+    #[test]
+    fn the_glance_lists_what_the_type_has_and_leaves_empty_sections_out() {
+        let mut app = app();
+        let _ = app.update(msg(Message::ShowType(Some(MediaType::Shows))));
+        // Stranger Things with a second season announced for 2027.
+        let season = |n, released: &str, status| crate::model::Season {
+            season: n,
+            released: crate::model::Released::parse(released),
+            status,
+            fresh: None,
+            manual: None,
+        };
+        app.apply(crate::repo::Operation::SetSeasons {
+            id: "shows/stranger-things-2016".into(),
+            seasons: vec![
+                season(1, "2016-07-15", Some(EntryStatus::Done)),
+                season(2, "2027", None),
+            ],
+            today: app.today,
+        });
+        let listing = app.library.listing(app.repo.library(), app.today);
+        let glance = gather(&app, &listing);
+        assert!(
+            glance.soon.iter().any(|s| s.sub.starts_with("Season ")),
+            "an announced season counts as coming"
+        );
+        assert!(glance.soon.windows(2).all(|w| w[0].when <= w[1].when));
+        assert!(
+            glance
+                .now
+                .iter()
+                .all(|e| e.status == EntryStatus::InProgress)
+        );
+        assert_eq!(glance.now_title, "Watching now");
+        assert!(!glance.tags.is_empty());
+
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        assert!(ui.find("COMING SOON").is_ok());
+        assert!(ui.find("WATCHING NOW").is_ok());
+        assert!(ui.find("MOST USED TAGS").is_ok());
+        assert!(ui.find("AT A GLANCE").is_err());
     }
 
     #[test]
@@ -800,7 +1304,7 @@ mod tests {
         );
         // The pinned panel starts under the toolbar and the chips.
         let _ = app.update(msg(Message::TogglePanel));
-        let glance = place(&app, "AT A GLANCE");
+        let glance = place(&app, "MOST USED TAGS");
         assert!(glance.y > place(&app, "All").y + 20.0);
     }
 }

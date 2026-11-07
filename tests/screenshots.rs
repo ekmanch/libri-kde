@@ -18,7 +18,7 @@ use libri::browse::Sort;
 use libri::lookup::LookupState;
 use libri::model::{Date, EntryStatus, MediaType, Released, Season, TagCategory};
 use libri::repo::Operation;
-use libri::screens::library::{self, Page, SeasonMenu, View};
+use libri::screens::library::{self, DetailsPop, Page, SeasonMenu, View};
 use libri::screens::setup::{self, Step, Which};
 use libri::screens::{Screen, entry, plans};
 use libri::settings::{Missing, SyncState, ThemeChoice};
@@ -572,6 +572,13 @@ fn capture_every_screen() {
         ),
         (
             Screen::Library,
+            ("panel-glance-text", |app| {
+                show_type(app, MediaType::Shows);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Text)));
+            }),
+        ),
+        (
+            Screen::Library,
             ("panel-unpinned", |app| {
                 show_type(app, MediaType::Movies);
                 let _ = app.update(Message::Library(library::Message::TogglePanel));
@@ -629,15 +636,53 @@ fn capture_every_screen() {
                 let _ = app.update(Message::Entry(entry::Message::CreateTag));
             }),
         ),
+        // The details' popovers over their section: the note editor, the
+        // full About, every tag, and the status menu under its pill.
         (
             Screen::Library,
-            ("details-note-draft", |app| {
+            ("details-note-popover", |app| {
                 movies(app);
                 select(app, BABY);
-                let _ = app.update(Message::Entry(entry::Message::NoteDraft {
-                    id: BABY.into(),
-                    note: "Rewatch with the commentary track".into(),
-                }));
+                let _ = app.update(Message::Entry(entry::Message::TogglePop(DetailsPop::Note(
+                    BABY.into(),
+                ))));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("details-about-popover", |app| {
+                movies(app);
+                select(app, BABY);
+                let _ = app.update(Message::Entry(entry::Message::TogglePop(DetailsPop::About)));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("details-tags-popover", |app| {
+                movies(app);
+                select(app, BABY);
+                let _ = app.update(Message::Entry(entry::Message::TogglePop(DetailsPop::Tags)));
+            }),
+        ),
+        // An album: the track list takes what is left and scrolls within it.
+        (
+            Screen::Library,
+            ("details-album", |app| {
+                show_type(app, MediaType::Music);
+                let _ = app.update(Message::Library(library::Message::MusicTab(
+                    library::MusicTab::Albums,
+                )));
+                select(app, "music/master-of-puppets-metallica");
+            }),
+        ),
+        (
+            Screen::Library,
+            ("details-status-menu", |app| {
+                movies(app);
+                select(app, BABY);
+                let _ = app.update(Message::Entry(entry::Message::TogglePop(
+                    DetailsPop::Status,
+                )));
             }),
         ),
         (
