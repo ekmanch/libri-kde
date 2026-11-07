@@ -80,6 +80,13 @@ impl Slice {
     }
 }
 
+/// How much longer the slide takes than KWin's desktop switch at the same
+/// Plasma speed: twice (owner's request, 2026-11-07, after the KWin copy
+/// felt quick next to the phone's swipe, which settles on Flutter's
+/// softer scroll spring). At the owner's 0.25 that is KWin's spring at
+/// normal speed.
+pub const SLOWER: f32 = 2.0;
+
 /// The space between two slices as they pass, KWin's gap between desktops
 /// (`HorizontalGap`, 45 px by default).
 pub const GAP: f32 = 45.0;
@@ -87,7 +94,8 @@ pub const GAP: f32 = 45.0;
 /// The list on its way to another slice, moved as KWin moves the desktops:
 /// the page is a row of slices, Library, Discover, All and round again,
 /// and the list's position along it (in slices) rides
-/// `animation::Spring::desktop_switch` toward the slice picked. A switch
+/// `animation::Spring::desktop_switch`, slowed by `SLOWER`, toward the
+/// slice picked. A switch
 /// during a switch starts from where the list is, at the speed it has, as
 /// KWin's does, so quick presses run on smoothly.
 #[derive(Debug, Clone, PartialEq)]
@@ -2091,19 +2099,20 @@ mod tests {
         assert_eq!(moving.position(start), 0.0, "from Library");
         assert_eq!(moving.anchor, 1.0);
         assert!(moving.forward());
-        // KWin's desktop-switch spring at half speed: under 0.7 s.
-        assert!(!moving.done(start + Duration::from_millis(400)));
-        assert!(moving.done(start + Duration::from_millis(700)));
-        let halfway = moving.position(start + Duration::from_millis(60));
+        // KWin's desktop-switch spring at Plasma's half speed, slowed by
+        // `SLOWER`: past a second to the last pixel.
+        assert!(!moving.done(start + Duration::from_millis(900)));
+        assert!(moving.done(start + Duration::from_millis(1500)));
+        let halfway = moving.position(start + Duration::from_millis(140));
         assert!((0.3..0.7).contains(&halfway), "{halfway}");
         // A switch on the way starts where the list is, at its speed.
-        let mid = start + Duration::from_millis(60);
+        let mid = start + Duration::from_millis(140);
         let _ = app.update_at(lib(Message::SoonSlice(Slice::All)), mid);
         let again = app.library.slide.clone().unwrap();
         assert!((again.position(mid) - halfway).abs() < 1e-4);
         assert_eq!(again.anchor, 2.0, "on along the row, not back round");
         assert!(again.position(mid + Duration::from_millis(16)) > halfway);
-        let _ = app.update_at(AppMessage::Frame(start), mid + Duration::from_secs(1));
+        let _ = app.update_at(AppMessage::Frame(start), mid + Duration::from_secs(3));
         assert_eq!(app.library.slide, None, "settled on a frame after it");
         // Back is the other way; All to Library wraps forward.
         let _ = app.update_at(lib(Message::SoonSlice(Slice::Discover)), start);

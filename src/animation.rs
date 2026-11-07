@@ -108,6 +108,16 @@ impl Spring {
         }
     }
 
+    /// The same motion taking `by` times as long: the shape kept, every
+    /// moment stretched (a spring of a `by`²-th of the stiffness).
+    pub fn slowed(self, by: f32) -> Spring {
+        let by = by.max(1e-3);
+        Spring {
+            slow: self.slow / by,
+            fast: self.fast / by,
+        }
+    }
+
     /// The distance from the anchor and the velocity `t` seconds after
     /// starting `distance` away at `velocity`.
     pub fn at(self, distance: f32, velocity: f32, t: f32) -> (f32, f32) {
@@ -339,5 +349,11 @@ mod tests {
         }
         let (exact, _) = fast.at(1000.0, 0.0, 0.1);
         assert!((exact - x).abs() < 1.0, "{exact} against KWin's {x}");
+
+        // Slowed to half speed: the same curve, every moment twice as late,
+        // which at 0.25 is KWin's own spring at normal speed.
+        let half = fast.slowed(2.0);
+        assert!((half.at(1.0, 0.0, 0.1).0 - fast.at(1.0, 0.0, 0.05).0).abs() < 1e-5);
+        assert!((half.at(1.0, 0.0, 0.2).0 - normal.at(1.0, 0.0, 0.2).0).abs() < 1e-4);
     }
 }

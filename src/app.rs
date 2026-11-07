@@ -1795,7 +1795,7 @@ impl App {
                 self.library.slide.as_ref(),
                 from,
                 to,
-                spring,
+                spring.slowed(library::soon::SLOWER),
                 width + library::soon::GAP,
                 self.now,
             ));
