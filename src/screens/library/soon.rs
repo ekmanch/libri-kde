@@ -24,11 +24,11 @@ use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 use iced::mouse::ScrollDelta;
-use iced::widget::{Column, Row, button, column, container, grid, row, space, stack, text};
+use iced::widget::{Column, Row, Stack, button, column, container, grid, row, space, stack, text};
 use iced::{Background, Border, Center, Color, Element, Fill, FillPortion, Padding, Vector};
 
 use super::{Message, State, View, entries, panel, rail};
-use crate::animation::{Easing, Slide};
+use crate::animation::Spring;
 use crate::app::{App, Message as AppMessage};
 use crate::artwork::Wants;
 use crate::discover::{Found, Kind};
@@ -80,20 +80,95 @@ impl Slice {
     }
 }
 
-/// How long the list takes to slide between slices at Plasma's normal
-/// speed, and its curve: the canvas's `cubic-bezier(0.2, 0.8, 0.2, 1)`,
-/// an ease-out.
-pub const SLIDE: Duration = Duration::from_millis(250);
-pub const EASING: Easing = Easing::bezier(0.2, 0.8, 0.2, 1.0);
+/// The space between two slices as they pass, KWin's gap between desktops
+/// (`HorizontalGap`, 45 px by default).
+pub const GAP: f32 = 45.0;
 
-/// The list on its way to another slice: the slide, the slice it left
-/// and how far that one was scrolled, and the direction.
+/// The list on its way to another slice, moved as KWin moves the desktops:
+/// the page is a row of slices, Library, Discover, All and round again,
+/// and the list's position along it (in slices) rides
+/// `animation::Spring::desktop_switch` toward the slice picked. A switch
+/// during a switch starts from where the list is, at the speed it has, as
+/// KWin's does, so quick presses run on smoothly.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SliceSlide {
-    pub slide: Slide,
-    pub from: Slice,
-    pub from_scroll: f32,
-    pub forward: bool,
+    since: Instant,
+    /// Where the list was at `since`, in slices from Library.
+    start: f32,
+    /// Its velocity then, in slices a second.
+    velocity: f32,
+    /// Where it comes to rest: the picked slice's place one step from the
+    /// slice it was headed for, so All to Library wraps forward and
+    /// Library to All back.
+    pub anchor: f32,
+    spring: Spring,
+    end: Instant,
+}
+
+impl SliceSlide {
+    /// A slide to `to` from `from` at rest, or from wherever `moving` has
+    /// the list, keeping its speed. `slot` is a slice's width with the
+    /// gap, in pixels: the slide ends as KWin's does, under a pixel from
+    /// rest and slower than a pixel a second.
+    pub fn toward(
+        moving: Option<&SliceSlide>,
+        from: Slice,
+        to: Slice,
+        spring: Spring,
+        slot: f32,
+        now: Instant,
+    ) -> SliceSlide {
+        let (start, velocity, heading) = match moving {
+            Some(moving) => {
+                let (start, velocity) = moving.at(now);
+                (start, velocity, moving.anchor)
+            }
+            None => (from.index() as f32, 0.0, from.index() as f32),
+        };
+        // The step from the slice the list is headed for, so Discover to
+        // All goes on forward even while the list is still nearer Library.
+        let anchor = nearest(to, heading);
+        let epsilon = 1.0 / slot.max(1.0);
+        SliceSlide {
+            since: now,
+            start,
+            velocity,
+            anchor,
+            spring,
+            end: now + spring.settle(start - anchor, velocity, epsilon),
+        }
+    }
+
+    fn at(&self, now: Instant) -> (f32, f32) {
+        let t = now.saturating_duration_since(self.since).as_secs_f32();
+        let (distance, velocity) = self.spring.at(self.start - self.anchor, self.velocity, t);
+        (self.anchor + distance, velocity)
+    }
+
+    /// Where the list is at `now`, in slices from Library.
+    pub fn position(&self, now: Instant) -> f32 {
+        if self.done(now) {
+            self.anchor
+        } else {
+            self.at(now).0
+        }
+    }
+
+    /// Whether the slice it left lies ahead: the list moves left.
+    pub fn forward(&self) -> bool {
+        self.anchor > self.start
+    }
+
+    pub fn done(&self, now: Instant) -> bool {
+        now >= self.end
+    }
+}
+
+/// The place of `slice` in the endless row nearest `position`.
+fn nearest(slice: Slice, position: f32) -> f32 {
+    let n = Slice::ALL.len() as f32;
+    let index = slice.index() as f32;
+    index + ((position - index) / n).round() * n
 }
 
 /// One row of the page.
@@ -588,43 +663,50 @@ fn chips<'a>(
 }
 
 /// The list, sliding between slices when a switch is under way: the
-/// slice that left moves out one way and the new one in from the other,
-/// both fading through a veil; only the list moves. Each slice keeps its
-/// own scroll offset.
+/// slices side by side with KWin's gap between them, the list's position
+/// along the row from the spring; only the list moves, and nothing fades.
+/// The picked slice is the live list, always the first layer so its
+/// scroll state stays; the others pass as still copies at their own
+/// scroll offsets.
 fn list_area<'a>(app: &'a App, lists: &Lists<'a>, tokens: &Tokens) -> Element<'a, AppMessage> {
     let state = &app.library;
     let current = list(app, lists, state.slice, false, tokens);
-    let Some(moving) = &state.slide else {
-        return current;
-    };
-    let progress = moving.slide.progress(std::time::Instant::now());
     let width = if state.list_width > 0.0 {
         state.list_width
     } else {
         crate::screens::shell::content_width(app, 0.0)
     };
-    let direction = if moving.forward { 1.0 } else { -1.0 };
-    let veil = |alpha: f32| {
-        let color = tokens.content.scale_alpha(alpha.clamp(0.0, 1.0));
-        container(space())
-            .width(Fill)
-            .height(Fill)
-            .style(move |_| container::background(color))
-    };
-    let incoming = stack![current, veil(1.0 - progress)];
-    let leaving = list(app, lists, moving.from, true, tokens);
-    let outgoing = stack![
-        ui::slide_by(leaving, Vector::new(0.0, -moving.from_scroll)),
-        veil(progress)
-    ];
-    let layers = stack![
-        ui::slide_by(
-            incoming,
-            Vector::new(direction * width * (1.0 - progress), 0.0)
-        ),
-        ui::slide_by(outgoing, Vector::new(-direction * width * progress, 0.0)),
-    ];
-    container(layers).width(Fill).height(Fill).clip(true).into()
+    let slot = width + GAP;
+    let position = state
+        .slide
+        .as_ref()
+        .map_or(state.slice.index() as f32, |moving| {
+            moving.position(Instant::now())
+        });
+    let live = nearest(state.slice, position);
+    let mut layers = vec![ui::slide_by(current, Vector::new((live - position) * slot, 0.0)).into()];
+    if state.slide.is_some() {
+        let first = position.floor();
+        for place in [first, first + 1.0] {
+            let shift = (place - position) * slot;
+            if place == live || shift.abs() >= slot {
+                continue;
+            }
+            let n = Slice::ALL.len() as isize;
+            let slice = Slice::ALL[(place as isize).rem_euclid(n) as usize];
+            let scroll = state.slice_scroll.get(&slice).copied().unwrap_or(0.0);
+            let still = ui::slide_by(
+                list(app, lists, slice, true, tokens),
+                Vector::new(0.0, -scroll),
+            );
+            layers.push(ui::slide_by(still, Vector::new(shift, 0.0)).into());
+        }
+    }
+    container(Stack::with_children(layers).width(Fill).height(Fill))
+        .width(Fill)
+        .height(Fill)
+        .clip(true)
+        .into()
 }
 
 /// The rows of `slice` with the rail: in their groups with the pinned
@@ -2006,22 +2088,35 @@ mod tests {
         let start = Instant::now();
         let _ = app.update_at(lib(Message::SoonSlice(Slice::Discover)), start);
         let moving = app.library.slide.clone().expect("a slide");
-        assert_eq!(moving.from, Slice::Library);
-        assert!(moving.forward);
-        assert!(moving.slide.done(start + Duration::from_millis(125)));
-        assert!(!moving.slide.done(start + Duration::from_millis(124)));
-        let _ = app.update_at(AppMessage::Frame(start), start + Duration::from_millis(200));
+        assert_eq!(moving.position(start), 0.0, "from Library");
+        assert_eq!(moving.anchor, 1.0);
+        assert!(moving.forward());
+        // KWin's desktop-switch spring at half speed: under 0.7 s.
+        assert!(!moving.done(start + Duration::from_millis(400)));
+        assert!(moving.done(start + Duration::from_millis(700)));
+        let halfway = moving.position(start + Duration::from_millis(60));
+        assert!((0.3..0.7).contains(&halfway), "{halfway}");
+        // A switch on the way starts where the list is, at its speed.
+        let mid = start + Duration::from_millis(60);
+        let _ = app.update_at(lib(Message::SoonSlice(Slice::All)), mid);
+        let again = app.library.slide.clone().unwrap();
+        assert!((again.position(mid) - halfway).abs() < 1e-4);
+        assert_eq!(again.anchor, 2.0, "on along the row, not back round");
+        assert!(again.position(mid + Duration::from_millis(16)) > halfway);
+        let _ = app.update_at(AppMessage::Frame(start), mid + Duration::from_secs(1));
         assert_eq!(app.library.slide, None, "settled on a frame after it");
         // Back is the other way; All to Library wraps forward.
+        let _ = app.update_at(lib(Message::SoonSlice(Slice::Discover)), start);
+        assert!(!app.library.slide.as_ref().unwrap().forward());
+        app.library.slide = None;
         let _ = app.update_at(lib(Message::SoonSlice(Slice::Library)), start);
-        assert!(!app.library.slide.as_ref().unwrap().forward);
         app.library.slide = None;
         let _ = app.update_at(lib(Message::SoonSlice(Slice::All)), start);
-        assert!(!app.library.slide.as_ref().unwrap().forward);
+        assert!(!app.library.slide.as_ref().unwrap().forward());
         app.library.slide = None;
         let _ = app.update_at(lib(Message::SoonStep(1)), start);
         assert_eq!(app.library.slice, Slice::Library);
-        assert!(app.library.slide.as_ref().unwrap().forward);
+        assert!(app.library.slide.as_ref().unwrap().forward());
         // The same slice again, and type chips, never slide.
         app.library.slide = None;
         let _ = app.update_at(lib(Message::SoonSlice(Slice::Library)), start);

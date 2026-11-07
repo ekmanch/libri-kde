@@ -1041,7 +1041,7 @@ impl App {
             .library
             .slide
             .as_ref()
-            .is_some_and(|moving| moving.slide.done(now))
+            .is_some_and(|moving| moving.done(now))
         {
             self.library.slide = None;
         }
@@ -1768,7 +1768,8 @@ const DISCOVER_INTERVAL: Duration = Duration::from_secs(60 * 60);
 impl App {
     /// A slice switch on the Coming soon page (a segment, Shift+arrows, a
     /// side-scroll or Shift+wheel, a row of New in Discover): the list slides from the
-    /// slice left to the new one (250 ms, scaled by Plasma's speed; a
+    /// slice left to the new one as KWin switches desktops, on its spring
+    /// at Plasma's speed and from wherever a slide under way has it (a
     /// plain swap at Instant), and the new slice is scrolled back to
     /// where it was left.
     fn switch_slice(&mut self, message: Message) -> Task<Message> {
@@ -1779,23 +1780,25 @@ impl App {
             return Task::none();
         }
         let from = self.library.slice;
-        let from_scroll = self.library.scroll.offset;
         self.library.update(message);
         let to = self.library.slice;
         if from == to {
             return Task::none();
         }
-        if !self.speed.instant() {
-            self.library.slide = Some(library::SliceSlide {
-                slide: animation::Slide::start(
-                    self.now,
-                    self.speed.scale(library::soon::SLIDE),
-                    library::soon::EASING,
-                ),
+        if let Some(spring) = animation::Spring::desktop_switch(self.speed) {
+            let width = if self.library.list_width > 0.0 {
+                self.library.list_width
+            } else {
+                screens::shell::content_width(self, 0.0)
+            };
+            self.library.slide = Some(library::SliceSlide::toward(
+                self.library.slide.as_ref(),
                 from,
-                from_scroll,
-                forward: from.forward_to(to),
-            });
+                to,
+                spring,
+                width + library::soon::GAP,
+                self.now,
+            ));
         }
         let offset = scrollable::AbsoluteOffset {
             x: None,
