@@ -7,9 +7,11 @@
 //! Shift+wheel over the control, too), and the list slides like a Plasma
 //! desktop switch while the header, the chips, the rail and the panel
 //! stay. Type chips narrow a slice, remembered per slice. The rows are
-//! grouped by month, then year, then "Date not set", with pinned month
-//! headers and the section rail on the right, in the text, cover and grid
-//! views, remembered for the page.
+//! grouped by month, then year, then "Date not set", in the text, cover
+//! and grid views, remembered for the page. The text and cover views have
+//! pinned month headers; the grid is one continuous block whose first tile
+//! of each group carries the month as a tag. All three have the section
+//! rail on the right.
 //!
 //! The panel is the type screens' (pinned by default, key "soon"): with
 //! nothing selected a glance of Next up, New in Discover, By type and
@@ -576,8 +578,8 @@ fn list_area<'a>(app: &'a App, lists: &Lists<'a>, tokens: &Tokens) -> Element<'a
     container(layers).width(Fill).height(Fill).clip(true).into()
 }
 
-/// The rows of `slice` in their groups, with the pinned header and the
-/// rail, or the empty state. `still` builds the copy that slides out: a
+/// The rows of `slice` with the rail: in their groups with the pinned
+/// header, or in the grid one continuous block; or the empty state. `still` builds the copy that slides out: a
 /// plain column, since the scroll area is the incoming list's.
 fn list<'a>(
     app: &'a App,
@@ -602,22 +604,26 @@ fn list<'a>(
     let names: Vec<String> = groups.iter().map(|g| g.rail(app.today)).collect();
     let on_rail = (groups.len() >= 2).then(|| rail::Sections::new(names, false));
     let room = on_rail.as_ref().map_or(rail::LEFT, rail::Sections::room);
-    let mut children: Vec<Element<'a, AppMessage>> = groups
-        .iter()
-        .map(|group| {
-            column![
-                entries::bar_header(
-                    &group.name(app.today),
-                    tokens.ink,
-                    tokens.text,
-                    group.rows.len(),
-                    tokens
-                ),
-                block(app, group, slice, view, tokens)
-            ]
-            .into()
-        })
-        .collect();
+    let mut children: Vec<Element<'a, AppMessage>> = if view == View::Grid {
+        vec![tiles(app, &groups, slice, tokens)]
+    } else {
+        groups
+            .iter()
+            .map(|group| {
+                column![
+                    entries::bar_header(
+                        &group.name(app.today),
+                        tokens.ink,
+                        tokens.text,
+                        group.rows.len(),
+                        tokens
+                    ),
+                    block(app, group, slice, view == View::List, tokens)
+                ]
+                .into()
+            })
+            .collect()
+    };
     let hidden = lists.typed_hidden(&types);
     if slice != Slice::Library && !hidden.is_empty() && !shown.show_hidden {
         let t = *tokens;
@@ -652,7 +658,8 @@ fn list<'a>(
             .into();
     }
     let mut overlays = Vec::new();
-    if let Some(index) = entries::current_group(state)
+    if view != View::Grid
+        && let Some(index) = entries::current_group(state)
         && state.scroll.offset > state.group_tops[index] + 0.5
         && let Some(group) = groups.get(index)
     {
@@ -668,46 +675,83 @@ fn list<'a>(
         ));
     }
     if let Some(on_rail) = on_rail {
-        overlays.push(on_rail.in_list(state).view(state, tokens));
+        let on_rail = if view == View::Grid {
+            let counts: Vec<usize> = groups.iter().map(|g| g.rows.len()).collect();
+            on_rail.in_grid(state, &counts, grid_rows(state.list_width, room))
+        } else {
+            on_rail.in_list(state)
+        };
+        overlays.push(on_rail.view(state, tokens));
     }
     entries::scrolling(children, overlays, room)
 }
 
-/// A group's rows in the view: text rows, cover rows or a grid of tiles.
+/// A group's rows in the text view, or with `covers` the cover view.
 fn block<'a>(
     app: &'a App,
     group: &Group<'a>,
     slice: Slice,
-    view: View,
+    covers: bool,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let rows = group.rows.iter().map(|row| {
         let look = Look::of(app, row, slice, group.hidden, tokens);
         let id = row_key(&row.key());
-        let element = match view {
-            View::Grid => tile(app, row, look, tokens),
-            View::List => cover_row(app, row, look, tokens),
-            View::Text => text_row(row, look, tokens),
+        let element = if covers {
+            cover_row(app, row, look, tokens)
+        } else {
+            text_row(row, look, tokens)
         };
         container(element).id(id).into()
     });
-    match view {
-        View::Grid => container(
-            grid(rows)
-                .fluid(TILE_WIDTH)
-                .spacing(16.0)
-                .height(grid::aspect_ratio(TILE_WIDTH, TILE_HEIGHT)),
-        )
-        .padding(Padding::new(0.0).top(8).bottom(16))
-        .into(),
-        View::List => Column::with_children(rows)
+    if covers {
+        Column::with_children(rows)
             .spacing(2)
             .padding(Padding::new(0.0).top(4).bottom(16))
-            .into(),
-        View::Text => Column::with_children(rows)
+            .into()
+    } else {
+        Column::with_children(rows)
             .padding(Padding::new(0.0).bottom(16))
-            .into(),
+            .into()
     }
+}
+
+/// Every group's rows as one continuous grid, in date order. The first
+/// tile of a group carries the group's short label as a tag.
+fn tiles<'a>(
+    app: &'a App,
+    groups: &[Group<'a>],
+    slice: Slice,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let cards = groups.iter().flat_map(|group| {
+        group.rows.iter().enumerate().map(move |(index, row)| {
+            let look = Look::of(app, row, slice, group.hidden, tokens);
+            let tag = (index == 0).then(|| group.rail(app.today));
+            container(tile(app, row, look, tag, tokens))
+                .id(row_key(&row.key()))
+                .into()
+        })
+    });
+    container(
+        grid(cards)
+            .fluid(TILE_WIDTH)
+            .spacing(TILE_SPACING)
+            .height(grid::aspect_ratio(TILE_WIDTH, TILE_HEIGHT)),
+    )
+    .padding(Padding::new(0.0).top(8).bottom(24))
+    .into()
+}
+
+/// The rows of the grid in a list `list_width` wide with `room` kept for
+/// the rail at its right.
+fn grid_rows(list_width: f32, room: f32) -> rail::GridRows {
+    rail::GridRows::new(
+        list_width - rail::LEFT - room,
+        TILE_WIDTH,
+        TILE_SPACING,
+        TILE_WIDTH / TILE_HEIGHT,
+    )
 }
 
 /// A grid tile's width at most (the canvas's tiles are at least 140 px
@@ -715,6 +759,7 @@ fn block<'a>(
 /// cover and the caption under it.
 const TILE_WIDTH: f32 = 160.0;
 const TILE_HEIGHT: f32 = TILE_WIDTH * 1.5 + 28.0;
+const TILE_SPACING: f32 = 16.0;
 
 /// What marks a row at its right: a library row's Want in All, a
 /// Discover row's + Add, a hidden row's Restore, or nothing.
@@ -994,6 +1039,7 @@ fn tile<'a>(
     app: &'a App,
     row: &SoonRow<'a>,
     look: Look,
+    tag: Option<String>,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let (image, tint) = match row {
@@ -1054,13 +1100,14 @@ fn tile<'a>(
             .focusable(12.0, tokens)
         }
     };
-    let top = row![
-        ui::mono(look.kicker.to_uppercase(), 10.5, white),
-        space::horizontal(),
-        badge
-    ]
-    .align_y(Center)
-    .height(24);
+    let kicker: Element<'a, AppMessage> = if tag.is_some() {
+        space().into()
+    } else {
+        ui::mono(look.kicker.to_uppercase(), 10.5, white).into()
+    };
+    let top = row![kicker, space::horizontal(), badge]
+        .align_y(Center)
+        .height(24);
     let mut on_cover = column![top, space::vertical()].spacing(4);
     if image.is_none() {
         on_cover = on_cover.push(
@@ -1075,14 +1122,18 @@ fn tile<'a>(
     }
     let face = ui::cover(image, tint, Fill, Fill, 8.0, None);
     let ring = look.selected.then_some(tokens.accent);
-    let cover = container(stack![
+    let mut layers = stack![
         face,
         container(on_cover)
             .width(Fill)
             .height(Fill)
             .padding(Padding::new(14.0).top(10).right(10))
-    ])
-    .style(move |_| {
+    ];
+    if let Some(tag) = tag {
+        // Level with the badge across from it, centered in the same 24 px.
+        layers = layers.push(container(month_tag(tag, tokens)).padding(Padding::new(10.0).top(11)));
+    }
+    let cover = container(layers).style(move |_| {
         container::Style::default().border(
             Border::default()
                 .rounded(8)
@@ -1114,6 +1165,21 @@ fn tile<'a>(
             ..button::Style::default()
         })
         .focusable(8.0, tokens)
+}
+
+/// The accent tag on the first tile of a month or year.
+fn month_tag<'a>(label: String, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let fill = tokens.accent;
+    container(
+        ui::mono(label.to_uppercase(), 11.0, tokens.on_accent)
+            .wrapping(text::Wrapping::None)
+            .height(Fill)
+            .align_y(Center),
+    )
+    .height(22)
+    .padding([0, 8])
+    .style(move |_| container::background(fill).border(Border::default().rounded(11)))
+    .into()
 }
 
 /// Nothing to list: nothing at all on the way, or nothing in this slice
@@ -1963,6 +2029,142 @@ mod tests {
         );
         assert!(ui.find("+ Add").is_err());
         assert!(ui.find("November").is_ok(), "this year's month alone");
+    }
+
+    /// The list measured into `app` as a real frame would.
+    fn measured(app: &mut App) {
+        measured_at(app, crate::app::WINDOW_SIZE);
+    }
+
+    fn measured_at(app: &mut App, size: iced::Size) {
+        let messages: Vec<AppMessage> = {
+            let mut ui = iced_test::Simulator::with_size(crate::app::settings(), size, app.view());
+            let redraw = iced::window::Event::RedrawRequested(std::time::Instant::now());
+            let _ = ui.simulate([iced::Event::Window(redraw)]);
+            ui.into_messages().collect()
+        };
+        for message in messages {
+            let _ = app.update(message);
+        }
+    }
+
+    #[test]
+    fn the_grid_has_tags_for_headers_and_the_other_views_keep_theirs() {
+        let mut app = on_page();
+        let _ = app.update(lib(Message::SoonSlice(Slice::All)));
+        let _ = app.update(lib(Message::SetView(View::Grid)));
+        measured(&mut app);
+        {
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            assert!(ui.find("November").is_err(), "no month header");
+            assert!(ui.find("NOV").is_ok(), "the tag");
+            assert!(ui.find("Nov").is_ok(), "the rail");
+            assert!(ui.find("+ Add").is_ok(), "the badges stay");
+            assert!(ui.find("UPCOMING").is_ok(), "a later tile keeps its kicker");
+        }
+        for view in [View::List, View::Text] {
+            let _ = app.update(lib(Message::SetView(view)));
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            assert!(ui.find("November").is_ok(), "{view:?} keeps its header");
+            assert!(ui.find("NOV").is_err(), "{view:?} has no tag");
+        }
+    }
+
+    #[test]
+    fn a_groups_tag_replaces_the_kicker_on_its_first_tile_only() {
+        let mut app = on_page();
+        let _ = app.update(lib(Message::SetView(View::Grid)));
+        let _ = app.update(lib(Message::SoonType(MediaType::Games)));
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        assert!(ui.find("Grand Theft Auto VI").is_ok());
+        assert!(ui.find("GAME").is_err(), "one tile, and it has the tag");
+    }
+
+    #[test]
+    fn the_grids_rail_finds_the_rows_the_tiles_are_in() {
+        let mut app = on_page();
+        let _ = app.update(lib(Message::SoonSlice(Slice::All)));
+        let _ = app.update(lib(Message::SetView(View::Grid)));
+        measured(&mut app);
+        let state = &app.library;
+        let lists = Lists::of(&app);
+        let groups = page_groups(state, &lists);
+        assert!(groups.len() >= 2);
+        let names = groups.iter().map(|g| g.rail(app.today)).collect();
+        let room = rail::Sections::new(names, false).room();
+        let rows = grid_rows(state.list_width, room);
+        let keys: Vec<String> = groups
+            .iter()
+            .flat_map(|g| g.rows.iter().map(SoonRow::key))
+            .collect();
+        assert!(rows.columns > 1 && keys.len() > rows.columns);
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        let mut tile_at = |key: &str| {
+            ui.find(iced::advanced::widget::Id::from(row_key(key)))
+                .expect("the tile")
+                .bounds()
+        };
+        let first = tile_at(&keys[0]);
+        assert!((first.height - rows.cell).abs() < 0.01);
+        for (index, key) in keys.iter().enumerate() {
+            let top = tile_at(key).y - first.y;
+            assert!((top - rows.top(index)).abs() < 0.01, "tile {index}");
+        }
+    }
+
+    #[test]
+    fn a_click_on_the_rail_jumps_to_the_row_of_the_groups_first_tile() {
+        use iced::mouse::{Button, Event as Mouse};
+
+        // Narrow enough that the group's first tile is past the first row.
+        let size = iced::Size::new(1100.0, 800.0);
+        let mut app = on_page();
+        let _ = app.update(lib(Message::SoonSlice(Slice::All)));
+        let _ = app.update(lib(Message::SetView(View::Grid)));
+        measured_at(&mut app, size);
+        let state = &app.library;
+        let lists = Lists::of(&app);
+        let groups = page_groups(state, &lists);
+        let names: Vec<String> = groups.iter().map(|g| g.rail(app.today)).collect();
+        let room = rail::Sections::new(names.clone(), false).room();
+        let rows = grid_rows(state.list_width, room);
+        // A label its tag does not share: the tag is in capitals.
+        let group = names
+            .iter()
+            .rposition(|name| *name != name.to_uppercase())
+            .expect("a month");
+        let first: usize = groups[..group].iter().map(|g| g.rows.len()).sum();
+        assert!(first >= rows.columns, "{first} of {}", rows.columns);
+        let mut ui = iced_test::Simulator::with_size(crate::app::settings(), size, app.view());
+        let label = ui
+            .find(names[group].as_str())
+            .expect("on the rail")
+            .bounds();
+        ui.point_at(label.center());
+        let _ = ui.simulate([iced::Event::Mouse(Mouse::ButtonPressed(Button::Left))]);
+        let jump = ui.into_messages().find_map(|message| match message {
+            AppMessage::Library(Message::JumpToSection { label, offset, .. }) => {
+                Some((label, offset))
+            }
+            _ => None,
+        });
+        assert_eq!(jump, Some((names[group].clone(), rows.top(first))));
     }
 
     #[test]
