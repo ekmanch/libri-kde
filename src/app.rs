@@ -1272,7 +1272,7 @@ impl App {
                 // Only on the Coming soon page.
                 Action::SoonPrev | Action::SoonNext => {
                     let step = if action == Action::SoonPrev { -1 } else { 1 };
-                    (free && self.screen == Screen::Library && self.library.soon)
+                    self.soon_page_free()
                         .then_some(Message::Library(library::Message::SoonStep(step)))
                 }
             };
@@ -1291,6 +1291,18 @@ impl App {
             _ => return None,
         };
         Some(Message::Key(press))
+    }
+
+    /// The Coming soon page is on screen with nothing open over it, so a
+    /// key or the wheel may switch its slice.
+    fn soon_page_free(&self) -> bool {
+        self.screen == Screen::Library
+            && self.library.soon
+            && self.library.details_pop.is_none()
+            && !self.library.details_rating_open
+            && self.dialog.is_none()
+            && self.plan_dialog.is_none()
+            && !self.token_warning
     }
 
     /// The tag picker open on screen: the entry dialog's, the plan
@@ -1663,8 +1675,12 @@ impl App {
                 return operation::scroll_to(library::LIST_ID, offset);
             }
             Message::Library(library::Message::SoonWheel(delta)) => {
-                if self.modifiers.shift() && delta != 0.0 && self.library.soon {
-                    let step = if delta < 0.0 { 1 } else { -1 };
+                if self.soon_page_free()
+                    && let Some(step) =
+                        self.library
+                            .soon_wheel
+                            .feed(delta, self.modifiers.shift(), self.now)
+                {
                     return self.switch_slice(Message::Library(library::Message::SoonStep(step)));
                 }
             }
@@ -1788,6 +1804,16 @@ impl App {
         let traced = window::events().map(|(_, event)| Message::Window(event));
         let scheme = iced::system::theme_changes().map(Message::SystemTheme);
         let mut subscriptions = vec![keys, buttons, resizes, traced, scheme];
+        // Side-scrolling or Shift+wheel anywhere on the Coming soon page;
+        // the list may have captured the event, so its status is no matter.
+        if self.screen == Screen::Library && self.library.soon {
+            subscriptions.push(event::listen_with(|event, _status, _window| match event {
+                Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                    Some(Message::Library(library::Message::SoonWheel(delta)))
+                }
+                _ => None,
+            }));
+        }
         // The splash's bar, and the setup's ring while GitHub is asked.
         if self.screen == Screen::Splash
             || (self.screen == Screen::Setup && self.setup.busy.is_some())
@@ -1862,8 +1888,8 @@ const DISCOVER_DELAY: Duration = Duration::from_secs(5);
 const DISCOVER_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 impl App {
-    /// A slice switch on the Coming soon page (a segment, Shift+arrows,
-    /// Shift+wheel, a row of New in Discover): the list slides from the
+    /// A slice switch on the Coming soon page (a segment, Shift+arrows, a
+    /// side-scroll or Shift+wheel, a row of New in Discover): the list slides from the
     /// slice left to the new one (250 ms, scaled by Plasma's speed; a
     /// plain swap at Instant), and the new slice is scrolled back to
     /// where it was left.

@@ -237,6 +237,8 @@ pub struct State {
     /// The Coming soon page (decided 2026-11-07) is open, on `slice`.
     pub soon: bool,
     pub slice: Slice,
+    /// The wheel events towards the next slice switch.
+    pub soon_wheel: soon::WheelGesture,
     /// The type chips picked, per slice.
     pub slice_types: HashMap<Slice, BTreeSet<MediaType>>,
     /// Where each slice's list was scrolled to, in px.
@@ -344,12 +346,11 @@ pub enum Message {
     ShowSoon,
     /// A segment of the page's Library | Discover | All control.
     SoonSlice(Slice),
-    /// Shift+← and Shift+→ (rebindable): the slice before or after,
-    /// wrapping.
+    /// Shift+← and Shift+→ (rebindable), or the wheel: the slice before or
+    /// after, wrapping.
     SoonStep(isize),
-    /// The wheel over the segmented control, with its vertical delta; the
-    /// app steps the slice while Shift is held.
-    SoonWheel(f32),
+    /// A wheel event anywhere on the Coming soon page, side-scroll or not.
+    SoonWheel(iced::mouse::ScrollDelta),
     /// A type chip: only that type (a second click on the only one
     /// clears), or with Ctrl adds or removes it.
     SoonType(MediaType),

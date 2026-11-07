@@ -3,8 +3,8 @@
 //! Library is what the owner has on the way; Discover what the daily
 //! check found for things the owner has (`crate::discover`); All both,
 //! library rows marked Want and Discover rows with "+ Add". A segmented
-//! control beside the title switches them (Shift+← and Shift+→, and
-//! Shift+wheel over the control, too), and the list slides like a Plasma
+//! control beside the title switches them (Shift+← and Shift+→, and a
+//! side-scroll or Shift+wheel anywhere on the page, too), and the list slides like a Plasma
 //! desktop switch while the header, the chips, the rail and the panel
 //! stay. Type chips narrow a slice, remembered per slice. The rows are
 //! grouped by month, then year, then "Date not set", in the text, cover
@@ -21,11 +21,10 @@
 //! upcoming titles, and "Open Coming soon ›" at its bottom opens the page.
 
 use std::collections::BTreeSet;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use iced::widget::{
-    Column, Row, button, column, container, grid, mouse_area, row, space, stack, text,
-};
+use iced::mouse::ScrollDelta;
+use iced::widget::{Column, Row, button, column, container, grid, row, space, stack, text};
 use iced::{Background, Border, Center, Color, Element, Fill, FillPortion, Padding, Vector};
 
 use super::{Message, State, View, entries, panel, rail};
@@ -439,8 +438,66 @@ fn header<'a>(
         .into()
 }
 
-/// Library N | Discover N | All N, in the view switch's style; the wheel
-/// over it steps the slice while Shift is held.
+/// The silence that ends a wheel gesture.
+const WHEEL_QUIET: Duration = Duration::from_millis(150);
+/// A notch of a wheel in the pixels of a high-resolution wheel or a
+/// touchpad (15 logical pixels on Plasma, at a scale of 2).
+const WHEEL_NOTCH_PIXELS: f32 = 30.0;
+
+/// The wheel events towards the next slice switch: a side-scroll, or the
+/// wheel with Shift held. One gesture is one step however long it runs, or
+/// a held tilt wheel and a touchpad's swipe would race through the slices.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct WheelGesture {
+    notches: f32,
+    last: Option<Instant>,
+    spent: bool,
+}
+
+impl WheelGesture {
+    /// Takes in a wheel event and says which way to step, if it should.
+    pub fn feed(&mut self, delta: ScrollDelta, shift: bool, now: Instant) -> Option<isize> {
+        let (x, y, per_notch) = match delta {
+            ScrollDelta::Lines { x, y } => (x, y, 1.0),
+            ScrollDelta::Pixels { x, y } => (x, y, WHEEL_NOTCH_PIXELS),
+        };
+        let quiet = self
+            .last
+            .is_none_or(|last| now.saturating_duration_since(last) >= WHEEL_QUIET);
+        self.last = Some(now);
+        if quiet {
+            *self = WheelGesture {
+                last: self.last,
+                ..WheelGesture::default()
+            };
+        }
+        let amount = match shift {
+            true if y != 0.0 => y,
+            true => x,
+            // Mostly vertical is plain scrolling, whatever the drift.
+            false if x.abs() > y.abs() => x,
+            false => {
+                self.notches = 0.0;
+                return None;
+            }
+        } / per_notch;
+        if self.spent {
+            return None;
+        }
+        if self.notches * amount < 0.0 {
+            self.notches = 0.0;
+        }
+        self.notches += amount;
+        if self.notches.abs() < 1.0 {
+            return None;
+        }
+        self.spent = true;
+        // Scrolling towards the right or down (a negative delta) goes on.
+        Some(if self.notches < 0.0 { 1 } else { -1 })
+    }
+}
+
+/// Library N | Discover N | All N, in the view switch's style.
 fn segmented<'a>(items: [(Slice, usize, bool); 3], tokens: &Tokens) -> Element<'a, AppMessage> {
     let t = *tokens;
     let last = items.len() - 1;
@@ -488,15 +545,7 @@ fn segmented<'a>(items: [(Slice, usize, bool); 3], tokens: &Tokens) -> Element<'
         .style(move |_| {
             container::Style::default().border(Border::default().rounded(8).width(1).color(t.line))
         });
-    mouse_area(group)
-        .on_scroll(|delta| {
-            let (x, y) = match delta {
-                iced::mouse::ScrollDelta::Lines { x, y } => (x, y),
-                iced::mouse::ScrollDelta::Pixels { x, y } => (x, y),
-            };
-            msg(Message::SoonWheel(if y != 0.0 { y } else { x }))
-        })
-        .into()
+    group.into()
 }
 
 /// The chips row: one chip per type present in the slice, with its dot
@@ -1821,7 +1870,7 @@ mod tests {
     }
 
     #[test]
-    fn shift_arrows_and_shift_wheel_step_the_slices_only_on_the_page() {
+    fn the_keys_and_the_wheel_step_the_slices_only_on_the_page() {
         let mut app = on_page();
         let key = |app: &mut App, named: Named, modifiers: Modifiers| {
             let _ = app.update(AppMessage::KeyPressed(Key::Named(named), modifiers));
@@ -1833,14 +1882,27 @@ mod tests {
         assert_eq!(app.library.slice, Slice::Library, "wraps forward");
         key(&mut app, Named::ArrowLeft, Modifiers::SHIFT);
         assert_eq!(app.library.slice, Slice::All, "wraps back");
-        // The wheel over the control, with Shift held; without it nothing.
+        // The wheel anywhere on the page: Shift, or sideways; plain
+        // scrolling leaves the slice alone.
+        let start = Instant::now();
+        let wheel = |app: &mut App, x: f32, y: f32, after: u64| {
+            let delta = ScrollDelta::Lines { x, y };
+            let _ = app.update_at(
+                lib(Message::SoonWheel(delta)),
+                start + Duration::from_millis(after),
+            );
+        };
+        wheel(&mut app, 0.0, -1.0, 0);
+        assert_eq!(app.library.slice, Slice::All, "plain scrolling");
         let _ = app.update(AppMessage::Modifiers(Modifiers::SHIFT));
-        let _ = app.update(lib(Message::SoonWheel(-1.0)));
+        wheel(&mut app, 0.0, -1.0, 1000);
         assert_eq!(app.library.slice, Slice::Library);
-        let _ = app.update(lib(Message::SoonWheel(1.0)));
+        wheel(&mut app, 0.0, 1.0, 2000);
         assert_eq!(app.library.slice, Slice::All);
         let _ = app.update(AppMessage::Modifiers(Modifiers::empty()));
-        let _ = app.update(lib(Message::SoonWheel(1.0)));
+        wheel(&mut app, -1.0, 0.0, 3000);
+        assert_eq!(app.library.slice, Slice::Library, "sideways");
+        wheel(&mut app, 1.0, 0.0, 4000);
         assert_eq!(app.library.slice, Slice::All);
         // Off the page the keys do nothing.
         let _ = app.update(lib(Message::ShowType(Some(MediaType::Movies))));
@@ -2163,6 +2225,104 @@ mod tests {
         assert_eq!(map.combo(Action::SoonNext).to_string(), "Shift+→");
         let combo = Combo::of(&Key::Named(Named::ArrowLeft), Modifiers::SHIFT).unwrap();
         assert_eq!(map.action_for(&combo), Some(Action::SoonPrev));
+    }
+
+    #[test]
+    fn alt_arrows_stay_back_and_forward_on_the_page() {
+        let mut app = on_page();
+        let _ = app.update(lib(Message::ShowType(Some(MediaType::Movies))));
+        let _ = app.update(lib(Message::ShowSoon));
+        let _ = app.update(AppMessage::KeyPressed(
+            Key::Named(Named::ArrowLeft),
+            Modifiers::ALT,
+        ));
+        assert!(!app.library.soon, "Alt+← leaves the page");
+    }
+
+    /// Shift and an arrow reach the app through the page's widgets: none
+    /// of them captures the press, so the keyboard subscription hears it.
+    #[test]
+    fn no_widget_on_the_page_takes_shift_and_an_arrow() {
+        use iced::advanced::clipboard::Null;
+        use iced::advanced::renderer::Headless;
+        use iced::event::Status;
+        use iced::keyboard::{self, Location};
+        use iced::mouse;
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+
+        let mut renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as Headless>::new(iced::Font::default(), 14.into(), None),
+        )
+        .expect("a headless renderer");
+        let size = crate::app::WINDOW_SIZE;
+        let app = on_page();
+        let mut ui = UserInterface::build(app.view(), size, Cache::default(), &mut renderer);
+        let center = iced::Point::new(size.width / 2.0, size.height / 2.0);
+        let press = iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: Key::Named(Named::ArrowRight),
+            modified_key: Key::Named(Named::ArrowRight),
+            physical_key: keyboard::key::Physical::Code(keyboard::key::Code::ArrowRight),
+            location: Location::Standard,
+            modifiers: Modifiers::SHIFT,
+            text: None,
+            repeat: false,
+        });
+        let mut messages = Vec::new();
+        let (_, statuses) = ui.update(
+            &[
+                iced::Event::Mouse(mouse::Event::CursorMoved { position: center }),
+                iced::Event::Keyboard(keyboard::Event::ModifiersChanged(Modifiers::SHIFT)),
+                press,
+            ],
+            mouse::Cursor::Available(center),
+            &mut renderer,
+            &mut Null,
+            &mut messages,
+        );
+        assert_eq!(statuses[2], Status::Ignored, "{messages:?}");
+    }
+
+    #[test]
+    fn a_popover_keeps_the_slice() {
+        let mut app = on_page();
+        app.library.details_rating_open = true;
+        let _ = app.update(AppMessage::KeyPressed(
+            Key::Named(Named::ArrowRight),
+            Modifiers::SHIFT,
+        ));
+        assert_eq!(app.library.slice, Slice::Library);
+    }
+
+    #[test]
+    fn one_wheel_gesture_is_one_step() {
+        let start = Instant::now();
+        let at = |ms| start + Duration::from_millis(ms);
+        let side = |x| ScrollDelta::Lines { x, y: 0.0 };
+        let mut gesture = WheelGesture::default();
+        assert_eq!(gesture.feed(side(-1.0), false, at(0)), Some(1));
+        assert_eq!(gesture.feed(side(-1.0), false, at(60)), None, "still going");
+        assert_eq!(gesture.feed(side(-1.0), false, at(120)), None);
+        assert_eq!(
+            gesture.feed(side(1.0), false, at(400)),
+            Some(-1),
+            "a new one"
+        );
+        // A high-resolution wheel or a touchpad adds up to a notch.
+        let mut gesture = WheelGesture::default();
+        let pixels = |x, y| ScrollDelta::Pixels { x, y };
+        assert_eq!(gesture.feed(pixels(-10.0, 0.0), false, at(0)), None);
+        assert_eq!(gesture.feed(pixels(-10.0, 0.0), false, at(10)), None);
+        assert_eq!(gesture.feed(pixels(-10.0, 0.0), false, at(20)), Some(1));
+        // A vertical scroll that drifts sideways never gets there.
+        let mut gesture = WheelGesture::default();
+        for tick in 0..50 {
+            let drift = pixels(-6.0, if tick % 2 == 0 { -40.0 } else { -2.0 });
+            let step = gesture.feed(drift, false, at(tick * 10));
+            assert_eq!(step, None, "tick {tick}");
+        }
+        // With Shift the vertical wheel counts.
+        let mut gesture = WheelGesture::default();
+        assert_eq!(gesture.feed(pixels(0.0, -30.0), true, at(0)), Some(1));
     }
 
     #[test]

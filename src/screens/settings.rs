@@ -1091,7 +1091,7 @@ const MOUSE: [(&str, &str); 10] = [
     ("Tag menu (categories, move to group)", "Right-click"),
     ("Back", "Mouse back button"),
     ("Forward", "Mouse forward button"),
-    ("Coming soon: switch list", "Shift+wheel over the switch"),
+    ("Coming soon: switch list", "Side-scroll or Shift+wheel"),
 ];
 
 /// Keyboard and mouse: every shortcut, changed by clicking its keys and
