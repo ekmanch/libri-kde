@@ -26,7 +26,6 @@ pub mod storage;
 pub mod sync;
 pub mod tags;
 pub mod theme;
-pub mod trace;
 pub mod ui;
 pub mod upcoming;
 pub mod wallet;

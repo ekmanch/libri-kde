@@ -73,8 +73,6 @@ cargo test --test lookup_live -- --ignored --nocapture --test-threads=1   # asks
 ICED_BACKEND=tiny-skia cargo run   # software renderer
 ICED_PRESENT_MODE=fifo cargo run   # iced's FIFO default instead of the app's mailbox; reproduces the 2026-10-24 desktop freeze on KWin 6.8 with NVIDIA (DESIGN.md "Presentation mode")
 WGPU_BACKEND=gl cargo run          # OpenGL through EGL instead of Vulkan
-LIBRI_NO_MONITOR=1 cargo run       # without the freeze log; by default every run writes ~/.cache/libri/freeze-<date>.log: Libri's window events, redraw rate and gaps, and iced/winit/wgpu warnings (src/trace.rs), and scripts/freeze-monitor.sh adds KWin, VRAM and thread states every 2 s until 90 s after Libri exits (the 21:42 freeze began at the close)
-scripts/freeze-monitor.sh          # the monitor on its own, to watch the desktop without Libri (Ctrl+C stops it)
 qdbus6 org.kde.KWin /Compositor org.kde.kwin.Compositing.reinitialize  # during a freeze, from SSH or a Claude Code session driven from the phone: restarts KWin's render path without ending the session (untried; TODO.md 1g)
 ```
 

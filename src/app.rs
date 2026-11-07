@@ -43,16 +43,13 @@ pub const MIN_WINDOW_SIZE: Size = Size::new(1280.0, 720.0);
 pub fn run() -> iced::Result {
     present_with_mailbox();
     let window = window_settings();
-    freeze_log();
-    let result = iced::application(App::boot, App::update, App::view)
+    iced::application(App::boot, App::update, App::view)
         .title(App::title)
         .theme(App::iced_theme)
         .subscription(App::subscription)
         .settings(settings())
         .window(window)
-        .run();
-    crate::trace::line("exit");
-    result
+        .run()
 }
 
 fn window_settings() -> window::Settings {
@@ -90,7 +87,6 @@ fn quit() -> Task<Message> {
         discover::cancel();
         std::thread::spawn(|| {
             std::thread::sleep(EXIT_GRACE);
-            crate::trace::line("exit, not waiting for the calls still running");
             std::process::exit(0);
         });
     })
@@ -115,84 +111,6 @@ fn present_with_mailbox() {
     // SAFETY: `run` is called first thing from `main`, before any other
     // thread exists, so nothing can read the environment concurrently.
     unsafe { std::env::set_var("ICED_PRESENT_MODE", "mailbox") };
-}
-
-/// The freeze log of this run (TODO.md 1g, the desktop freeze):
-/// `~/.cache/libri/freeze-<date>.log`, which the trace (`crate::trace`)
-/// and `scripts/freeze-monitor.sh` write together, so every session is
-/// logged without anyone having to remember to. The monitor follows this
-/// process and keeps sampling KWin for 90 s after it exits, in its own
-/// process group so that a Ctrl+C in the terminal does not end it with
-/// Libri: the 2026-10-24 21:42 freeze began the moment Libri's window
-/// was closed. `LIBRI_NO_MONITOR=1` skips both; an installed binary has
-/// no script to start and only writes the trace.
-fn freeze_log() {
-    use std::os::unix::process::CommandExt;
-
-    if std::env::var_os("LIBRI_NO_MONITOR").is_some() {
-        return;
-    }
-    let Some(dir) = std::env::var_os("XDG_CACHE_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".cache"))
-        })
-        .map(|cache| cache.join("libri"))
-    else {
-        return;
-    };
-    if let Err(error) = std::fs::create_dir_all(&dir) {
-        eprintln!(
-            "libri: no freeze log, could not create {}: {error}",
-            dir.display()
-        );
-        return;
-    }
-    let log = dir.join(format!("freeze-{}.log", date_stamp()));
-    if let Err(error) = crate::trace::start(&log) {
-        eprintln!(
-            "libri: no freeze log, could not open {}: {error}",
-            log.display()
-        );
-        return;
-    }
-    eprintln!("libri: freeze log {}", log.display());
-    crate::trace::line(format_args!(
-        "start pid {} build {}",
-        std::process::id(),
-        option_env!("LIBRI_BUILD").unwrap_or("unknown")
-    ));
-    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/freeze-monitor.sh");
-    if !script.is_file() {
-        return;
-    }
-    if let Err(error) = std::process::Command::new(&script)
-        .arg(&log)
-        .arg(std::process::id().to_string())
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .process_group(0)
-        .spawn()
-    {
-        eprintln!("libri: could not start the freeze monitor: {error}");
-    }
-}
-
-/// `20261024-212503`, from `date`, or the seconds since the epoch when
-/// that fails.
-fn date_stamp() -> String {
-    std::process::Command::new("date")
-        .arg("+%Y%m%d-%H%M%S")
-        .output()
-        .ok()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-        .filter(|stamp| !stamp.is_empty())
-        .unwrap_or_else(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs().to_string())
-                .unwrap_or_default()
-        })
 }
 
 /// The bundled fonts with Figtree as the default. Shared with the headless
@@ -260,8 +178,6 @@ pub struct App {
     pub speed: animation::Speed,
     /// The window's logical size, for layouts that give way when narrow.
     pub window: Size,
-    /// The redraw counter of the freeze trace.
-    pub frames: crate::trace::Frames,
     /// The places visited, for Back and Forward.
     pub history: History,
     /// KWin's title bar, once the window is open on Plasma Wayland.
@@ -330,7 +246,7 @@ pub enum Message {
     /// A frame while the details drawer slides.
     Frame(Instant),
     Resized(Size),
-    /// The window's events, for the freeze trace.
+    /// The window's events: focus and the close request.
     Window(window::Event),
     /// The hold on KWin's title bar, once the window is open.
     Decoration(Option<Box<Decoration>>),
@@ -663,7 +579,6 @@ impl App {
                 let path = dir.join("library.json");
                 match LocalLibraryRepository::open(path.clone(), seed) {
                     Ok(repo) => {
-                        crate::trace::line(format_args!("library {}", path.display()));
                         self.repo = Box::new(repo);
                     }
                     Err(error) => eprintln!(
@@ -692,7 +607,6 @@ impl App {
             }
             Some(connection) => {
                 self.source = Some(Source::of(&connection.target, "…"));
-                crate::trace::line(format_args!("connected to {}", connection.target.key()));
                 Task::perform(blocking(wallet::read_token), |result| {
                     Message::Sync(SyncMessage::TokenLoaded(result))
                 })
@@ -735,7 +649,6 @@ impl App {
             splash_phase: 0.0,
             speed: animation::Speed::INSTANT,
             window: WINDOW_SIZE,
-            frames: crate::trace::Frames::new(std::time::Instant::now()),
             history: History::default(),
             decoration: None,
             lookup: lookup::LookupState::Results,
@@ -757,8 +670,7 @@ impl App {
         }
     }
 
-    /// Applies one change to the library and notes its summary in the
-    /// trace. A change that cannot apply (an entry gone meanwhile) or
+    /// Applies one change to the library. A change that cannot apply (an entry gone meanwhile) or
     /// changes nothing leaves the library as it was and is not queued.
     /// With a repository connected the change is queued for GitHub before
     /// the local file applies it, and the gathered edits go out as one
@@ -776,9 +688,8 @@ impl App {
             }
             engine.queue(operation.clone(), summary.clone());
         }
-        match self.repo.apply(operation) {
-            Ok(_) => crate::trace::line(format_args!("change: {summary}")),
-            Err(error) => eprintln!("libri: change not applied ({summary}): {error}"),
+        if let Err(error) = self.repo.apply(operation) {
+            eprintln!("libri: change not applied ({summary}): {error}");
         }
         if self.engine.is_some() {
             self.save_due = Some(Instant::now() + sync::DEBOUNCE);
@@ -819,17 +730,10 @@ impl App {
         let store = self.store_token(token);
         let mut engine = match self.engine.take() {
             Some(mut engine) if *engine.target() == target => {
-                crate::trace::line("reconnected to the same file; the queue stays");
                 engine.restart();
                 engine
             }
             Some(mut engine) => {
-                crate::trace::line(format_args!(
-                    "reconnected from {} to {}; dropping {} queued changes",
-                    engine.target().key(),
-                    target.key(),
-                    engine.status().pending
-                ));
                 engine.discard(true);
                 Engine::open(self.data_dir().as_deref(), target)
             }
@@ -974,7 +878,6 @@ impl App {
     /// computer's, and the next call as a Task.
     fn run(&mut self, outcome: Outcome) -> Task<Message> {
         if let Some(library) = outcome.library {
-            crate::trace::line("sync: taking GitHub's copy");
             self.repo.replace(library);
         }
         let (Some(request), Some(client), Some(engine)) =
@@ -1400,14 +1303,11 @@ impl App {
             Message::SetAccent(accent) => self.settings.accent = accent,
             // No answer from the portal (`None`) keeps the scheme, which
             // is dark at the start: System then means Graphite.
-            Message::SystemTheme(mode) if !self.plasma_fixed => {
-                crate::trace::line(format_args!("plasma scheme {mode:?}"));
-                match mode {
-                    ThemeMode::Dark => self.plasma_dark = true,
-                    ThemeMode::Light => self.plasma_dark = false,
-                    ThemeMode::None => {}
-                }
-            }
+            Message::SystemTheme(mode) if !self.plasma_fixed => match mode {
+                ThemeMode::Dark => self.plasma_dark = true,
+                ThemeMode::Light => self.plasma_dark = false,
+                ThemeMode::None => {}
+            },
             Message::SystemTheme(_) => {}
             // One sweep of the splash's bar takes 1.4 s; the setup's ring
             // turns twice in that time.
@@ -1463,7 +1363,6 @@ impl App {
                 if let Err(error) = result {
                     eprintln!("libri: the token could not be read: {error}");
                 }
-                crate::trace::line("no token: the setup");
                 self.source = None;
                 self.setup = setup::State::real(setup::Step::Connect, self.connection.as_ref());
                 self.screen = Screen::Setup;
@@ -1471,14 +1370,10 @@ impl App {
             Message::Sync(SyncMessage::WalletDone(result)) => {
                 if let Err(error) = result {
                     eprintln!("libri: {error}");
-                    crate::trace::line(format_args!("wallet: {error}"));
                 }
             }
             Message::Sync(SyncMessage::Answer(_, generation))
-                if generation != self.engine_generation =>
-            {
-                crate::trace::line("sync: an answer for an earlier connection, dropped");
-            }
+                if generation != self.engine_generation => {}
             Message::Sync(SyncMessage::Answer(answer, _)) => {
                 self.record_token_expiry();
                 let Some(engine) = &mut self.engine else {
@@ -1692,16 +1587,11 @@ impl App {
             Message::Library(library::Message::RestoreFound(key)) => self.discover.restore(&key),
             Message::Discover(discover::Message::Check) => return self.check_discover(),
             Message::Discover(discover::Message::Done(outcome)) => {
-                match &outcome.stopped {
-                    Some(why) => crate::trace::line(format_args!(
-                        "discover: the daily check stopped ({why}); asked {}",
+                if let Some(why) = &outcome.stopped {
+                    eprintln!(
+                        "libri: the daily check stopped ({why}); asked {}",
                         outcome.sources.join(", ")
-                    )),
-                    None => crate::trace::line(format_args!(
-                        "discover: the daily check found {} items from {}",
-                        outcome.items.len(),
-                        outcome.sources.join(", ")
-                    )),
+                    );
                 }
                 self.discover.finish(*outcome, Timestamp::now());
             }
@@ -1801,9 +1691,9 @@ impl App {
             _ => None,
         });
         let resizes = window::resize_events().map(|(_, size)| Message::Resized(size));
-        let traced = window::events().map(|(_, event)| Message::Window(event));
+        let windows = window::events().map(|(_, event)| Message::Window(event));
         let scheme = iced::system::theme_changes().map(Message::SystemTheme);
-        let mut subscriptions = vec![keys, buttons, resizes, traced, scheme];
+        let mut subscriptions = vec![keys, buttons, resizes, windows, scheme];
         // Side-scrolling or Shift+wheel anywhere on the Coming soon page;
         // the list may have captured the event, so its status is no matter.
         if self.screen == Screen::Library && self.library.soon {
@@ -1850,32 +1740,20 @@ impl App {
         Subscription::batch(subscriptions)
     }
 
-    /// A window event into the freeze trace: redraws as a rate and
-    /// gaps, everything else as it comes. Focus is remembered for the
-    /// check interval, and the window coming back asks GitHub for
+    /// A window event: the close request quits, focus is remembered for
+    /// the check interval, and the window coming back asks GitHub for
     /// changes unless a check was made moments ago.
     fn window_event(&mut self, event: window::Event) -> Task<Message> {
         match event {
-            window::Event::RedrawRequested(now) => {
-                for line in self.frames.redraw(now) {
-                    crate::trace::line(line);
+            window::Event::CloseRequested => return quit(),
+            window::Event::Focused => {
+                self.focused = true;
+                if self.check_is_stale() {
+                    return self.sync_now();
                 }
             }
-            window::Event::Moved(_) => {}
-            event => {
-                crate::trace::line(format_args!("window {event:?}"));
-                match event {
-                    window::Event::CloseRequested => return quit(),
-                    window::Event::Focused => {
-                        self.focused = true;
-                        if self.check_is_stale() {
-                            return self.sync_now();
-                        }
-                    }
-                    window::Event::Unfocused => self.focused = false,
-                    _ => {}
-                }
-            }
+            window::Event::Unfocused => self.focused = false,
+            _ => {}
         }
         Task::none()
     }
@@ -1944,7 +1822,6 @@ impl App {
             self.discover.finish(outcome, now);
             return Task::none();
         }
-        crate::trace::line("discover: the daily check starts");
         let github = self.github.clone();
         let target = self.engine.as_ref().map(|engine| engine.target().clone());
         let file = self.discover.file().map(std::path::Path::to_path_buf);

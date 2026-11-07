@@ -2,8 +2,8 @@
 //!
 //! The library lives under the XDG data home (`~/.local/share/libri/`)
 //! and the display preferences under the config home (`~/.config/libri/`),
-//! where the desktop's conventions put them; the freeze log is already
-//! under the cache home (`app::freeze_log`). Every file is written whole
+//! where the desktop's conventions put them, and what can be fetched again
+//! under the cache home. Every file is written whole
 //! to a sibling `.tmp` first and then renamed into place, so a crash or a
 //! full disk never leaves a half-written file (docs/DESIGN.md section 10,
 //! phase 2).
@@ -24,8 +24,7 @@ pub fn data_dir() -> Option<PathBuf> {
 }
 
 /// `$XDG_CACHE_HOME/libri`, or `~/.cache/libri`: what can be fetched
-/// again (covers, track lists, episodes, series, the IGDB token) and the
-/// freeze log.
+/// again (covers, track lists, episodes, series, the IGDB token).
 pub fn cache_dir() -> Option<PathBuf> {
     xdg_dir(
         std::env::var_os("XDG_CACHE_HOME"),
@@ -122,10 +121,9 @@ pub fn remove_if_exists(path: &Path) -> io::Result<()> {
     }
 }
 
-/// A local timestamp for a file name: `20261027-213005`, from the same
-/// clock as the freeze log.
+/// A local timestamp for a file name: `20261027-213005`.
 pub fn file_stamp() -> String {
-    crate::trace::file_stamp()
+    crate::clock::Timestamp::now().file_stamp()
 }
 
 /// `library.json.20261027-213005.unreadable` next to `library.json`: where

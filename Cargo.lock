@@ -2029,7 +2029,6 @@ dependencies = [
  "base64 0.22.1",
  "iced",
  "iced_test",
- "log",
  "raw-window-handle",
  "serde",
  "serde_json",

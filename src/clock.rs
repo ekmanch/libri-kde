@@ -1,8 +1,9 @@
 //! Moments in time as GitHub reports them and as the sync files keep
 //! them: seconds since the epoch, written as RFC 3339 in UTC
 //! ("2026-10-27T19:12:03Z"). Local dates and times use the computer's
-//! zone offset, read once through `trace::utc_offset`.
+//! zone offset, read once through `utc_offset`.
 
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::model::Date;
@@ -67,9 +68,23 @@ impl Timestamp {
         (Date::from_days(days), local.rem_euclid(86_400))
     }
 
+    /// Local time for a file name: `20261027-213005`.
+    pub fn file_stamp(self) -> String {
+        let (date, secs) = self.split(utc_offset());
+        format!(
+            "{:04}{:02}{:02}-{:02}{:02}{:02}",
+            date.year,
+            date.month,
+            date.day,
+            secs / 3600,
+            secs % 3600 / 60,
+            secs % 60
+        )
+    }
+
     /// The date on this computer's clock.
     pub fn local_date(self) -> Date {
-        self.split(crate::trace::utc_offset()).0
+        self.split(utc_offset()).0
     }
 
     /// Whole calendar days from `now`'s local date to this one: 0 for
@@ -80,7 +95,7 @@ impl Timestamp {
 
     /// "Oct 13, 20:12", in local time: the conflict dialog's last commit.
     pub fn month_day_time(self) -> String {
-        let (date, secs) = self.split(crate::trace::utc_offset());
+        let (date, secs) = self.split(utc_offset());
         format!(
             "{} {}, {:02}:{:02}",
             MONTHS[usize::from(date.month) - 1],
@@ -93,7 +108,7 @@ impl Timestamp {
     /// "today 09:12", "yesterday 18:40", or "Nov 3, 09:12", in local time:
     /// when the daily check last ran.
     pub fn day_and_time(self, now: Timestamp) -> String {
-        let (date, secs) = self.split(crate::trace::utc_offset());
+        let (date, secs) = self.split(utc_offset());
         let time = format!("{:02}:{:02}", secs / 3600, secs % 3600 / 60);
         match self.days_from(now) {
             0 => format!("today {time}"),
@@ -137,6 +152,20 @@ impl Timestamp {
             date.year
         )
     }
+}
+
+/// Seconds east of UTC on this computer, read once from `date +%z`
+/// (`+0200`), 0 when it cannot be read.
+pub fn utc_offset() -> i64 {
+    static OFFSET: OnceLock<i64> = OnceLock::new();
+    *OFFSET.get_or_init(|| {
+        std::process::Command::new("date")
+            .arg("+%z")
+            .output()
+            .ok()
+            .and_then(|output| zone_offset(String::from_utf8_lossy(&output.stdout).trim()))
+            .unwrap_or(0)
+    })
 }
 
 fn plural(n: i64, unit: &str) -> String {
@@ -231,5 +260,15 @@ mod tests {
         assert_eq!(zone_offset("UTC"), Some(0));
         assert_eq!(zone_offset("+2"), None);
         assert_eq!(zone_offset("CET"), None);
+    }
+
+    #[test]
+    fn file_stamps_are_date_dash_time() {
+        let stamp = Timestamp::parse("2026-10-27T12:00:00Z")
+            .unwrap()
+            .file_stamp();
+        assert_eq!(stamp.len(), 15);
+        assert!(stamp.starts_with("2026102"), "{stamp}");
+        assert_eq!(&stamp[8..9], "-");
     }
 }

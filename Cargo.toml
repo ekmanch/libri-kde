@@ -13,9 +13,6 @@ serde_json = "1.0.154"
 raw-window-handle = "0.6.2"
 wayland-client = { version = "0.31.15", features = ["system"] }
 wayland-protocols-plasma = { version = "0.3.12", features = ["client"] }
-# The freeze trace (src/trace.rs) catches iced's, winit's and wgpu's
-# warnings; already in the build through all three.
-log = "0.4.29"
 # GitHub's REST API (src/github): a small blocking client, run on tokio's
 # blocking pool from an iced Task. rustls through its default features.
 ureq = "3.4"

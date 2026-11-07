@@ -334,7 +334,6 @@ impl PreferencesFile {
             Err(error) => {
                 let message = format!("could not write {}: {error}", path.display());
                 eprintln!("libri: {message}");
-                crate::trace::line(message);
             }
         }
     }

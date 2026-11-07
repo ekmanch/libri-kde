@@ -87,10 +87,10 @@ impl BaseFile {
         let json: Value = serde_json::from_str(&text).ok()?;
         let base = Base::from_json(&json)?;
         if !base.target.is_empty() && base.target != target {
-            crate::trace::line(format_args!(
-                "the sync base is for {}, not {target}: no base",
+            eprintln!(
+                "libri: the sync base is for {}, not {target}: no base",
                 base.target
-            ));
+            );
             return None;
         }
         Some(base)
@@ -107,7 +107,6 @@ impl BaseFile {
         if let Err(error) = storage::write_atomically(path, &text) {
             let message = format!("could not write {}: {error}", path.display());
             eprintln!("libri: {message}");
-            crate::trace::line(message);
         }
     }
 

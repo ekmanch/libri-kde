@@ -131,7 +131,7 @@ pub struct Outcome {
     /// False when a provider was offline, busy or down, or the window
     /// closed, so the day is not recorded and a later run goes on.
     pub complete: bool,
-    /// Why an incomplete run stopped, for the trace: "Open Library:
+    /// Why an incomplete run stopped, printed to stderr: "Open Library:
     /// Offline: …", or "the window closed".
     pub stopped: Option<String>,
     /// The record as the run left it; `None` when it asked nothing.
