@@ -517,11 +517,6 @@ fn glance<'a>(app: &'a App, listing: &Listing<'a>, tokens: &Tokens) -> Element<'
         .vertical_spacing(6);
         items = items.push(column![ui::section_header("Most used tags", tokens), chips].spacing(9));
     }
-    items = items.push(
-        text("Click a title to see its details here.")
-            .size(12.5)
-            .color(tokens.sub),
-    );
     items.into()
 }
 
