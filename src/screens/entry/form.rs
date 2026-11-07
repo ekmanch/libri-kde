@@ -904,6 +904,7 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         form.rating_open,
         msg(Message::ToggleRating),
         |r| msg(Message::Rate(r)),
+        ui::Align::Start,
         tokens,
     );
     grid = grid

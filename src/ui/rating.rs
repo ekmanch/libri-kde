@@ -7,11 +7,15 @@ use iced::{Background, Border, Center, Element, Fill};
 use super::{Align, FocusExt, Icon, Popover, icon, panel_style, row_style};
 use crate::theme::{Tokens, font};
 
+/// `align` says which edge of the button the picker lines up with: the
+/// left in the form, the right in details, where the button sits at the
+/// row's right end.
 pub fn rating<'a, Message: Clone + 'a>(
     value: Option<u8>,
     open: bool,
     on_toggle: Message,
     on_pick: impl Fn(Option<u8>) -> Message + 'a,
+    align: Align,
     tokens: &Tokens,
 ) -> Element<'a, Message> {
     let label = match value {
@@ -41,7 +45,7 @@ pub fn rating<'a, Message: Clone + 'a>(
     };
     let picker = open.then(|| picker(value, on_pick, tokens));
     Popover::new(anchor.focusable(8.0, tokens), picker)
-        .align(Align::Start)
+        .align(align)
         .on_dismiss(on_toggle)
         .into()
 }
