@@ -122,9 +122,11 @@ pub fn season_row<'a>(
 }
 
 /// One part of a series: its number, title and year, then "This one", the
-/// part's status with a chevron, or "+ Add" for a part not in the library.
-/// In the series pane (`in_pane`) every part in the library shows its
-/// status and opens its details, the marked one in the selection gray.
+/// part's status, or "+ Add" for a part not in the library. A part in the
+/// library opens on a click (the row itself, no chevron: it only said what
+/// the row already does). In the series pane (`in_pane`) every part in the
+/// library shows its status and opens its details, the marked one in the
+/// selection gray.
 pub fn series_row<'a>(
     app: &'a App,
     part: &SeriesRow<'a>,
@@ -174,11 +176,7 @@ pub fn series_row<'a>(
         }
         Some(entry) => {
             let label = browse::status_label(Some(entry.media), entry.status);
-            content = content.push(status_pill(label, tokens)).push(ui::icon(
-                Icon::ChevronRight,
-                14.0,
-                tokens.sub,
-            ));
+            content = content.push(status_pill(label, tokens));
             if in_pane {
                 let open = library::Message::OpenSeriesPart(entry.id.clone());
                 (Some(AppMessage::Library(open)), part.is_this)

@@ -54,6 +54,10 @@ const LINK_HEADER_H: f32 = 24.0;
 const COVER_W: f32 = 96.0;
 const COVER_H: f32 = 144.0;
 const COVER_GAP: f32 = 16.0;
+/// The title's sizes, largest first, at 1.1 per line: the facts beside
+/// the cover never run past its height.
+const TITLE_SIZES: [f32; 3] = [24.0, 21.0, 18.0];
+const TITLE_LINE: f32 = 1.1;
 /// The Status row and the Rating button.
 const STATUS_H: f32 = 32.0;
 const RATING_H: f32 = 36.0;
@@ -101,6 +105,25 @@ pub struct Fit {
     pub scrolls: bool,
 }
 
+/// The title at `width` in `budget` px: the first of `TITLE_SIZES` whose
+/// wrapped lines fit, else the smallest cut to the lines that fit (at
+/// least one) with an ellipsis. The text, its size and its height.
+pub fn fit_title(title: &str, width: f32, budget: f32) -> (String, f32, f32) {
+    let flat = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    for size in TITLE_SIZES {
+        let n = ui::line_count(&flat, size, TITLE_LINE, font::EXTRABOLD, width).max(1);
+        let height = n as f32 * size * TITLE_LINE;
+        if height <= budget + 0.5 {
+            return (flat, size, height);
+        }
+    }
+    let size = TITLE_SIZES[TITLE_SIZES.len() - 1];
+    let line = size * TITLE_LINE;
+    let max_lines = ((budget / line).floor() as usize).max(1);
+    let (cut, _) = ui::clamp(&flat, size, TITLE_LINE, font::EXTRABOLD, width, max_lines);
+    (cut, size, max_lines as f32 * line)
+}
+
 fn about_line_px() -> f32 {
     ABOUT_SIZE * ABOUT_LINE
 }
@@ -112,9 +135,10 @@ fn note_field_h(lines: usize) -> f32 {
 /// The fit for `avail` px of body with `fixed` px taken by everything
 /// but About's lines, the note's lines and the track list: About takes
 /// what is left (at most ten lines) with the note at two lines; under two
-/// lines the note gives one up first, and About folds to its header when
-/// even that leaves it under two. The tracks, when there are any, get the
-/// rest and at least three rows. When the body is still too tall, the
+/// lines the note gives one up and About takes what that leaves, down to
+/// one line; when not even one fits About folds to its header, and the
+/// note gets its second line back if it fits. The tracks, when there are
+/// any, get the rest and at least three rows. When the body is still too tall, the
 /// Seasons or Series list keeps one row, freeing `spare_rows` px, and
 /// when that is not enough either the pane scrolls.
 pub fn fit(fixed: f32, avail: f32, has_about: bool, has_tracks: bool, spare_rows: f32) -> Fit {
@@ -150,10 +174,10 @@ fn fit_lines(fixed: f32, avail: f32, has_about: bool, has_tracks: bool) -> Fit {
         (0, if rest - note_field_h(2) >= 0.0 { 2 } else { 1 })
     } else if lines(2) >= 2 {
         (lines(2), 2)
-    } else if lines(1) >= 2 {
+    } else if lines(1) >= 1 {
         (lines(1), 1)
     } else {
-        (0, 1)
+        (0, if rest - note_field_h(2) >= 0.0 { 2 } else { 1 })
     };
     let used = about_lines as f32 * about_line_px() + note_field_h(note_lines);
     let tracks_height = if has_tracks {
@@ -218,19 +242,15 @@ fn build<'a>(
     {
         kicker = format!("{kicker} · {years}");
     }
-    // The facts beside the cover, each with its height, so the header's
-    // height is known: a long title wraps.
+    // The facts beside the cover, each with its height, so they never run
+    // past the cover: the title takes what the other facts leave, smaller
+    // when it has to be (`fit_title`).
     let facts_w = inner - COVER_W - COVER_GAP;
     let lines = |words: &str, size: f32, face| {
         ui::line_count(words, size, 1.3, face, facts_w).max(1) as f32 * size * 1.3
     };
-    let mut facts: Vec<(Element<'a, AppMessage>, f32)> = vec![
-        (ui::mono(kicker, 11.0, color).into(), 11.0 * 1.3),
-        (
-            text(&entry.title).size(24).font(font::EXTRABOLD).into(),
-            lines(&entry.title, 24.0, font::EXTRABOLD),
-        ),
-    ];
+    let mut facts: Vec<(Element<'a, AppMessage>, f32)> =
+        vec![(ui::mono(kicker, 11.0, color).into(), 11.0 * 1.3)];
     if let Some(creator) = &entry.creator {
         facts.push((
             text(creator).size(14).color(tokens.sub).into(),
@@ -273,13 +293,31 @@ fn build<'a>(
     if entry.has_new_season(today) {
         facts.push((ui::new_season_badge(&tokens), 20.0));
     }
-    let facts_h = 2.0 + facts.iter().map(|(_, h)| h + 6.0).sum::<f32>() - 6.0;
-    let facts = Column::with_children(facts.into_iter().map(|(line, _)| line))
-        .spacing(6)
-        .padding(Padding::new(0.0).top(2))
-        .width(Fill);
+    // The other facts with the gap each adds, then the title in what is
+    // left of the cover's height, under the kicker.
+    let rest_h = 2.0 + facts.iter().map(|(_, h)| h + 6.0).sum::<f32>();
+    let (title, title_size, title_h) = fit_title(&entry.title, facts_w, COVER_H - rest_h);
+    facts.insert(
+        1,
+        (
+            text(title)
+                .size(title_size)
+                .font(font::EXTRABOLD)
+                .line_height(TITLE_LINE)
+                .into(),
+            title_h,
+        ),
+    );
+    let facts = container(
+        Column::with_children(facts.into_iter().map(|(line, _)| line))
+            .spacing(6)
+            .padding(Padding::new(0.0).top(2))
+            .width(Fill),
+    )
+    .height(COVER_H)
+    .clip(true);
     let header = row![cover, facts].spacing(COVER_GAP);
-    fixed += COVER_H.max(facts_h);
+    fixed += COVER_H;
 
     // A part picked from a series in the pane: ‹ the series' name, back.
     let header: Element<'a, AppMessage> = match app.library.back_series() {
@@ -365,8 +403,9 @@ fn build<'a>(
 
     let has_tracks = entry.media == MediaType::Music && !music::is_song(entry);
     let has_about = !entry.description.is_empty();
-    // The note's header and field frame, About's header, and In plans.
-    fixed += GAP + HEADER_H + HEADER_GAP + 2.0 * NOTE_PAD;
+    // The note's header (its field is `note_field_h`, padding and all),
+    // About's header, and In plans.
+    fixed += GAP + HEADER_H + HEADER_GAP;
     if has_about {
         fixed += GAP + LINK_HEADER_H;
     }
@@ -1228,7 +1267,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn about_gives_way_first_then_the_note_then_about_folds_to_its_header() {
+    fn the_title_steps_down_to_fit_beside_the_cover_and_is_cut_at_the_smallest() {
+        // The facts column of the 352 px pane: 352 - 44 - 96 - 16.
+        let width = INNER - COVER_W - COVER_GAP;
+        // The kicker, a creator and a date leave the title about 75 px.
+        let budget = COVER_H - (2.0 + 11.0 * 1.3 + 6.0) - (14.0 * 1.3 + 6.0) - (12.5 * 1.3 + 6.0);
+        let (short, size, height) = fit_title("Dune", width, budget);
+        assert_eq!((short.as_str(), size, height), ("Dune", 24.0, 24.0 * 1.1));
+        let long = "Donkey Kong Country 2: Diddy's Kong Quest";
+        let (kept, size, height) = fit_title(long, width, budget);
+        assert_eq!(kept, long);
+        assert!(size < 24.0, "{size}");
+        assert!(height <= budget, "{height} > {budget}");
+        let endless = "The Hitchhiker's Guide to the Galaxy and Other Stories Told at Great Length";
+        let (cut, size, height) = fit_title(endless, width, budget);
+        assert_eq!(size, 18.0);
+        assert!(cut.ends_with('…'), "{cut}");
+        assert!(height <= budget, "{height} > {budget}");
+        // Too little room for even one line still keeps one.
+        let (one, _, height) = fit_title(endless, width, 10.0);
+        assert!(one.ends_with('…'));
+        assert_eq!(height, 18.0 * 1.1);
+    }
+
+    #[test]
+    fn about_gives_way_first_then_the_note_and_about_folds_only_under_one_line() {
         // Plenty of room: About caps at ten lines, the note keeps two.
         let roomy = fit(300.0, 900.0, true, false, 0.0);
         assert_eq!((roomy.about_lines, roomy.note_lines), (10, 2));
@@ -1250,14 +1313,20 @@ mod tests {
             0.0,
         );
         assert_eq!((tight.about_lines, tight.note_lines), (2, 1));
-        // Then About keeps only its header.
-        let tighter = fit(
+        // One line of About beats the note's second line.
+        let one_line = fit(
             300.0,
-            300.0 + note_field_h(1) + 1.0 * about_line_px(),
+            300.0 + note_field_h(1) + 1.2 * about_line_px(),
             true,
             false,
             0.0,
         );
+        assert_eq!((one_line.about_lines, one_line.note_lines), (1, 1));
+        // Under one line About keeps only its header, and the note gets
+        // its second line back when it fits.
+        let folded = fit(300.0, 300.0 + note_field_h(2) + 1.0, true, false, 0.0);
+        assert_eq!((folded.about_lines, folded.note_lines), (0, 2));
+        let tighter = fit(300.0, 300.0 + note_field_h(1) + 1.0, true, false, 0.0);
         assert_eq!((tighter.about_lines, tighter.note_lines), (0, 1));
         assert!(!tighter.one_row && !tighter.scrolls);
         // Without a description the note alone gives way.
