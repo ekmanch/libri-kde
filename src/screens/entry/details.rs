@@ -522,6 +522,7 @@ fn back_link<'a>(name: &str, tokens: &Tokens) -> Element<'a, AppMessage> {
                 .wrapping(text::Wrapping::None),
         ]
         .spacing(4)
+        .height(Fill)
         .align_y(iced::Center),
     )
     .height(30)
