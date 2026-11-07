@@ -335,6 +335,11 @@ pub enum Message {
     Add,
     /// Add with the type and the title typed: a series' "+ Add".
     AddWithTitle(MediaType, String),
+    /// Add prefilled from a match that was never searched for: a Discover
+    /// item's "+ Add" or "Add to library".
+    AddFromMatch(Box<Match>),
+    /// The form takes `found` as its pick, as a row of the lookup would.
+    PickMatch(Box<Match>),
     // The lookup pane: Look up again, the platform filter, the cover.
     LookAgain,
     CancelLookAgain,
@@ -1541,6 +1546,12 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             form.title = title;
             app.dialog = Some(Dialog::Form(Box::new(form)));
         }
+        Message::AddFromMatch(found) => {
+            let mut form = Form::add(found.media);
+            form.query = found.title.clone();
+            app.dialog = Some(Dialog::Form(Box::new(form)));
+            return form_update(app, Message::PickMatch(found));
+        }
         Message::SetSeasonStatus { id, season, status } => {
             app.library.season_menu = None;
             app.apply(Operation::SetSeasonStatus {
@@ -2037,6 +2048,7 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
                 form.pick(found, ctx);
             }
         }
+        Message::PickMatch(found) => form.pick(*found, ctx),
         Message::Details { source, result } => {
             if form.fetching.as_deref() == Some(source.as_str()) {
                 form.fetching = None;
@@ -3147,8 +3159,8 @@ mod tests {
             crate::app::WINDOW_SIZE,
             app.view(),
         );
-        assert!(ui.find("2 of 3 in your library").is_ok());
-        assert!(ui.find("3 movies · 2001–2003").is_ok());
+        assert!(ui.find("2 of 4 in your library").is_ok());
+        assert!(ui.find("4 movies · 2001–2027").is_ok());
         assert!(ui.find("+ Add").is_ok());
     }
 

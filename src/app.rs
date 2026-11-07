@@ -14,6 +14,7 @@ use crate::artwork::{self, Artwork};
 use crate::clock::Timestamp;
 use crate::connection::{Connection, ConnectionFile, Target};
 use crate::decoration::Decoration;
+use crate::discover;
 use crate::github;
 use crate::history::{Direction, History, Place};
 use crate::keymap::{Action, Combo, Keymap};
@@ -243,6 +244,9 @@ pub struct App {
     /// Covers, artist photos, episodes, series parts and track lists as
     /// fetched for the screens, with the cache under `~/.cache/libri/`.
     pub artwork: Artwork,
+    /// Discover: what the daily check found for the Coming soon page, and
+    /// the items marked Not interested.
+    pub discover: discover::State,
     /// `preferences.json` on this computer; kept nowhere in the tests.
     pub preferences: PreferencesFile,
     /// `connection.json` on this computer and what it holds: the repo,
@@ -269,6 +273,9 @@ pub struct App {
     /// and a run with a screen switch (`LIBRI_SCREEN`, `LIBRI_SYNC`,
     /// `LIBRI_SETUP`, `LIBRI_FIRST_RUN`, `LIBRI_LOCAL`).
     pub mock: bool,
+    /// When the message being handled arrived (`update_at`), so a slide
+    /// it starts is timed from it.
+    now: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -306,6 +313,8 @@ pub enum Message {
     Token(token::Message),
     /// A lookup task came back: a cover, an image, a season's episodes.
     Lookup(artwork::Message),
+    /// The daily check behind Coming soon's Discover.
+    Discover(discover::Message),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -381,6 +390,16 @@ impl Message {
                     | L::JumpToGroup(_)
                     | L::JumpToSection { .. }
                     | L::RailReleased
+                    | L::SoonSlice(_)
+                    | L::SoonStep(_)
+                    | L::SoonWheel(_)
+                    | L::SoonType(_)
+                    | L::SoonToggleType(_)
+                    | L::SoonAllTypes
+                    | L::ShowHidden
+                    | L::RestoreFound(_)
+                    | L::OpenTypePop
+                    | L::CloseTypePop
             ),
             Message::Key(key) => matches!(
                 key,
@@ -418,6 +437,8 @@ impl Message {
                     | L::MusicTab(_)
                     | L::OpenArtist(_)
                     | L::CloseArtist
+                    | L::ShowSoon
+                    | L::OpenSoonForTypes
             ),
             Message::Plans(message) => matches!(
                 message,
@@ -485,6 +506,7 @@ impl App {
             "LIBRI_SETUP",
             "LIBRI_FIRST_RUN",
             "LIBRI_LOCAL",
+            "LIBRI_SOON",
         ]
         .iter()
         .any(|name| var(name).is_some());
@@ -504,13 +526,20 @@ impl App {
                 );
             }
             app.lookups = Arc::new(Service::real(&keys, cache.as_deref()));
+            app.discover = discover::State::at(cache.as_deref(), storage::data_dir().as_deref());
             app.artwork = Artwork::at(cache);
             // Once per session, a little after the start: the records and
-            // files of entries that are gone.
-            lookups = Task::perform(
-                async { tokio::time::sleep(artwork::PRUNE_DELAY).await },
-                |_| Message::Lookup(artwork::Message::Prune),
-            );
+            // files of entries that are gone, and the daily check behind
+            // Discover unless it ran today.
+            lookups = Task::batch([
+                Task::perform(
+                    async { tokio::time::sleep(artwork::PRUNE_DELAY).await },
+                    |_| Message::Lookup(artwork::Message::Prune),
+                ),
+                Task::perform(async { tokio::time::sleep(DISCOVER_DELAY).await }, |_| {
+                    Message::Discover(discover::Message::Check)
+                }),
+            ]);
         }
         if var("LIBRI_FIRST_RUN").is_some() {
             app.source = None;
@@ -545,6 +574,22 @@ impl App {
             app.setup = setup::State::at(step, app.source.as_ref());
         }
         app.library.force_long = var("LIBRI_LONG_LISTS").is_some();
+        // `LIBRI_SOON=library|discover|all`: the Coming soon page on that
+        // slice, with the fake's Discover items.
+        if let Some(slice) = var("LIBRI_SOON") {
+            app.library.update(library::Message::ShowSoon);
+            let slice = match slice.as_str() {
+                "discover" => library::Slice::Discover,
+                "all" => library::Slice::All,
+                _ => library::Slice::Library,
+            };
+            app.library.update(library::Message::SoonSlice(slice));
+        }
+        if app.mock {
+            // The fake answers at once, so the mock screens have Discover
+            // rows to look at.
+            let _ = app.check_discover();
+        }
         if let Some(state) =
             var("LIBRI_LOOKUP").and_then(|value| lookup::LookupState::from_env(&value))
         {
@@ -665,6 +710,7 @@ impl App {
             lookup: lookup::LookupState::Results,
             lookups: Arc::new(Service::fake()),
             artwork: Artwork::default(),
+            discover: discover::State::default(),
             preferences: PreferencesFile::default(),
             connection_file: ConnectionFile::default(),
             connection: None,
@@ -676,6 +722,7 @@ impl App {
             focused: true,
             loading: false,
             mock: true,
+            now: std::time::Instant::now(),
         }
     }
 
@@ -1054,7 +1101,16 @@ impl App {
 
     /// `update` at a given time: the drawer's slide is timed from `now`.
     pub fn update_at(&mut self, message: Message, now: Instant) -> Task<Message> {
+        self.now = now;
         self.library.motion.settle(now);
+        if self
+            .library
+            .slide
+            .as_ref()
+            .is_some_and(|moving| moving.slide.done(now))
+        {
+            self.library.slide = None;
+        }
         let message = match message {
             Message::KeyPressed(key, modifiers) => match self.shortcut(&key, modifiers) {
                 Some(message) => message,
@@ -1148,6 +1204,8 @@ impl App {
                 Message::Entry(entry::Message::ViewCover(id))
             }
             Message::Library(L::ShowType(Some(media))) => Message::Library(L::ToggleType(media)),
+            // A type chip on the Coming soon page adds or removes the type.
+            Message::Library(L::SoonType(media)) => Message::Library(L::SoonToggleType(media)),
             Message::Plans(P::Select(id)) => Message::Plans(P::ToggleDone(id)),
             message => message,
         }
@@ -1180,6 +1238,12 @@ impl App {
                         Screen::Library | Screen::Plans | Screen::Settings
                     ))
                 .then_some(Message::Show(Screen::Settings)),
+                // Only on the Coming soon page.
+                Action::SoonPrev | Action::SoonNext => {
+                    let step = if action == Action::SoonPrev { -1 } else { 1 };
+                    (free && self.screen == Screen::Library && self.library.soon)
+                        .then_some(Message::Library(library::Message::SoonStep(step)))
+                }
             };
         }
         let press = match key {
@@ -1224,6 +1288,10 @@ impl App {
         }
         if self.library.back_series().is_some() {
             return Some(self.handle(Message::Library(library::Message::BackToSeries)));
+        }
+        if self.library.found.is_some() {
+            self.library.found = None;
+            return Some(Task::none());
         }
         if self.library.pane_open() {
             self.library.update(library::Message::ClosePanel);
@@ -1542,6 +1610,54 @@ impl App {
             Message::Library(library::Message::PickSeriesCover(id)) => {
                 self.apply(Operation::SetSeriesCover { id });
             }
+            // The Coming soon page's slices: the list slides between them
+            // and each keeps its own scroll offset.
+            Message::Library(
+                library::Message::SoonSlice(_)
+                | library::Message::SoonStep(_)
+                | library::Message::OpenFound(_),
+            ) => return self.switch_slice(message),
+            // Opening the page puts its list back where the slice was left.
+            Message::Library(
+                message @ (library::Message::ShowSoon
+                | library::Message::OpenSoonForTypes
+                | library::Message::SeeAll(crate::browse::Section::ComingSoon)),
+            ) => {
+                self.screen = Screen::Library;
+                self.library.update(message);
+                let offset = scrollable::AbsoluteOffset {
+                    x: None,
+                    y: Some(self.library.scroll.offset),
+                };
+                return operation::scroll_to(library::LIST_ID, offset);
+            }
+            Message::Library(library::Message::SoonWheel(delta)) => {
+                if self.modifiers.shift() && delta != 0.0 && self.library.soon {
+                    let step = if delta < 0.0 { 1 } else { -1 };
+                    return self.switch_slice(Message::Library(library::Message::SoonStep(step)));
+                }
+            }
+            Message::Library(library::Message::AddFound(key)) => return self.add_found(&key),
+            Message::Library(library::Message::HideFound(key)) => {
+                self.discover.hide(&key);
+                self.library.update(library::Message::HideFound(key));
+            }
+            Message::Library(library::Message::RestoreFound(key)) => self.discover.restore(&key),
+            Message::Discover(discover::Message::Check) => return self.check_discover(),
+            Message::Discover(discover::Message::Done(outcome)) => {
+                match &outcome.stopped {
+                    Some(why) => crate::trace::line(format_args!(
+                        "discover: the daily check stopped ({why}); asked {}",
+                        outcome.sources.join(", ")
+                    )),
+                    None => crate::trace::line(format_args!(
+                        "discover: the daily check found {} items from {}",
+                        outcome.items.len(),
+                        outcome.sources.join(", ")
+                    )),
+                }
+                self.discover.finish(*outcome, Timestamp::now());
+            }
             Message::Library(message) => {
                 if message.shows_library() {
                     self.screen = Screen::Library;
@@ -1648,8 +1764,9 @@ impl App {
         {
             subscriptions.push(time::every(Duration::from_millis(16)).map(|_| Message::Tick));
         }
-        // The drawer's slide draws every frame while it runs.
-        if self.library.motion.running() {
+        // The drawer's slide, and the Coming soon page's slice slide, draw
+        // every frame while they run.
+        if self.library.motion.running() || self.library.slide.is_some() {
             subscriptions.push(window::frames().map(Message::Frame));
         }
         // The debounce clock runs only while edits wait; while a
@@ -1686,11 +1803,16 @@ impl App {
             event => {
                 crate::trace::line(format_args!("window {event:?}"));
                 match event {
+                    // The daily check stops before its next request, so
+                    // the exit never waits for the rest of it.
+                    window::Event::CloseRequested | window::Event::Closed => discover::cancel(),
                     window::Event::Focused => {
                         self.focused = true;
+                        let discover = self.check_discover();
                         if self.check_is_stale() {
-                            return self.sync_now();
+                            return Task::batch([self.sync_now(), discover]);
                         }
+                        return discover;
                     }
                     window::Event::Unfocused => self.focused = false,
                     _ => {}
@@ -1698,6 +1820,129 @@ impl App {
             }
         }
         Task::none()
+    }
+}
+
+/// How long after the start the daily check behind Discover runs.
+const DISCOVER_DELAY: Duration = Duration::from_secs(5);
+
+impl App {
+    /// A slice switch on the Coming soon page (a segment, Shift+arrows,
+    /// Shift+wheel, a row of New in Discover): the list slides from the
+    /// slice left to the new one (250 ms, scaled by Plasma's speed; a
+    /// plain swap at Instant), and the new slice is scrolled back to
+    /// where it was left.
+    fn switch_slice(&mut self, message: Message) -> Task<Message> {
+        let Message::Library(message) = message else {
+            return Task::none();
+        };
+        if !self.library.soon {
+            return Task::none();
+        }
+        let from = self.library.slice;
+        let from_scroll = self.library.scroll.offset;
+        self.library.update(message);
+        let to = self.library.slice;
+        if from == to {
+            return Task::none();
+        }
+        if !self.speed.instant() {
+            self.library.slide = Some(library::SliceSlide {
+                slide: animation::Slide::start(
+                    self.now,
+                    self.speed.scale(library::soon::SLIDE),
+                    library::soon::EASING,
+                ),
+                from,
+                from_scroll,
+                forward: from.forward_to(to),
+            });
+        }
+        let offset = scrollable::AbsoluteOffset {
+            x: None,
+            y: Some(self.library.scroll.offset),
+        };
+        operation::scroll_to(library::LIST_ID, offset)
+    }
+
+    /// Runs the daily check behind Discover, unless it ran today or is
+    /// running: at once on the fake, else on the blocking pool.
+    fn check_discover(&mut self) -> Task<Message> {
+        let now = Timestamp::now();
+        if !self.discover.is_due(now) {
+            return Task::none();
+        }
+        self.discover.start(now);
+        let service = self.lookups.clone();
+        let library = self.repo.library().clone();
+        let today = self.today;
+        let previous = self.discover.record.items.clone();
+        if service.is_instant() {
+            let outcome = discover::run(&service, &library, today, &previous);
+            self.discover.finish(outcome, now);
+            return Task::none();
+        }
+        crate::trace::line("discover: the daily check starts");
+        Task::perform(
+            blocking(move || Ok(discover::run(&service, &library, today, &previous))),
+            move |result| {
+                let outcome = result.unwrap_or_else(|error| {
+                    eprintln!("libri: the daily check did not finish: {error}");
+                    discover::Outcome::failed(error)
+                });
+                Message::Discover(discover::Message::Done(Box::new(outcome)))
+            },
+        )
+    }
+
+    /// "+ Add" or "Add to library" on a Discover item: a season goes onto
+    /// its show as Want at once (the show is in the library already);
+    /// anything else opens the Add dialog prefilled from the item, with
+    /// the status Want.
+    fn add_found(&mut self, key: &str) -> Task<Message> {
+        let Some(found) = self.discover.item(key).cloned() else {
+            return Task::none();
+        };
+        match &found.kind {
+            discover::Kind::Season { show, number } => {
+                let Some(entry) = self.repo.library().entry(show) else {
+                    return Task::none();
+                };
+                let mut seasons = entry.season_list().to_vec();
+                if seasons.iter().any(|s| s.season == *number) {
+                    return Task::none();
+                }
+                seasons.push(crate::model::Season {
+                    season: *number,
+                    released: found.released,
+                    status: Some(crate::model::EntryStatus::Want),
+                    fresh: None,
+                    manual: None,
+                });
+                seasons.sort_by_key(|s| s.season);
+                self.apply(Operation::SetSeasons {
+                    id: show.clone(),
+                    seasons,
+                    today: self.today,
+                });
+                self.library
+                    .update(library::Message::HideFound(key.to_owned()));
+                Task::none()
+            }
+            _ => {
+                let mut probe =
+                    lookup::Match::new(found.media, found.title.clone(), found.source.clone());
+                probe.creator = found.creator.clone();
+                probe.released = found.released;
+                probe.description = found.description.clone();
+                probe.cover_url = found.cover_url.clone();
+                if found.media == crate::model::MediaType::Music {
+                    probe.kind = Some(crate::model::EntryKind::Album);
+                }
+                let task = entry::update(self, entry::Message::AddFromMatch(Box::new(probe)));
+                Task::batch([task, operation::focus(entry::LOOKUP_ID)])
+            }
+        }
     }
 }
 

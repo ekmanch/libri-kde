@@ -16,8 +16,7 @@ use std::time::{Duration, Instant};
 use iced::widget::{Column, Row, button, column, container, opaque, responsive, row, space, text};
 use iced::{Background, Border, Center, Color, Element, Fill, Padding, Shadow, Vector};
 
-use super::overview;
-use super::{Listing, Message, OpenSeries, View};
+use super::{Listing, Message, OpenSeries, View, overview, soon};
 use crate::animation::{Easing, Slide};
 use crate::app::{App, KeyPress, Message as AppMessage};
 use crate::browse::{self, ActivePlan, Section};
@@ -73,6 +72,8 @@ pub const CLOSE: Duration = Duration::from_millis(410);
 pub enum Shown {
     Entry(String),
     Series(OpenSeries),
+    /// A Discover item's preview, by its key.
+    Found(String),
 }
 
 /// The drawer's slide (2026-11-04): in from the window's right edge when
@@ -111,9 +112,10 @@ fn shown(app: &App) -> Option<Shown> {
         return None;
     }
     let state = &app.library;
-    match &state.selected {
-        Some(id) => Some(Shown::Entry(id.clone())),
-        None => state.open_series().cloned().map(Shown::Series),
+    match (&state.selected, &state.found) {
+        (Some(id), _) => Some(Shown::Entry(id.clone())),
+        (None, Some(key)) => Some(Shown::Found(key.clone())),
+        (None, None) => state.open_series().cloned().map(Shown::Series),
     }
 }
 
@@ -128,8 +130,12 @@ pub fn drawer_state(app: &App) -> (Panel, Option<Shown>) {
 pub fn closes_drawer(message: &AppMessage) -> bool {
     matches!(
         message,
-        AppMessage::Library(Message::ClosePanel | Message::Select(_))
-            | AppMessage::Key(KeyPress::Escape)
+        AppMessage::Library(
+            Message::ClosePanel
+                | Message::Select(_)
+                | Message::SelectFound(_)
+                | Message::HideFound(_)
+        ) | AppMessage::Key(KeyPress::Escape)
             | AppMessage::History(Direction::Back)
     )
 }
@@ -167,21 +173,40 @@ pub fn slide_drawer(app: &mut App, closes: bool, before: (Panel, Option<Shown>),
 pub(super) fn details<'a>(app: &'a App) -> Option<Element<'a, AppMessage>> {
     let state = &app.library;
     let library = app.repo.library();
-    match (
-        state.selected.as_deref().and_then(|id| library.entry(id)),
-        state.open_series(),
-    ) {
-        (Some(entry), _) => Some(entry::details::view(app, entry, None)),
-        (None, Some(open)) => entry::series::view(app, open),
-        (None, None) => None,
+    if let Some(entry) = state.selected.as_deref().and_then(|id| library.entry(id)) {
+        return Some(entry::details::view(app, entry, None));
     }
+    if let Some(found) = state
+        .found
+        .as_deref()
+        .and_then(|key| app.discover.item(key))
+    {
+        return Some(soon::preview(app, found));
+    }
+    state
+        .open_series()
+        .and_then(|open| entry::series::view(app, open))
 }
 
 /// The pinned panel beside the list: the selection's details, else the
-/// list at a glance, built for the panel's height.
+/// list at a glance (the Coming soon page's own on that page), built for
+/// the panel's height; the type panel's Coming soon popover over it.
 pub fn side<'a>(app: &'a App) -> Element<'a, AppMessage> {
     let content = details(app).unwrap_or_else(|| {
-        responsive(move |size| entry::details::pane(glance(app, size.height), None)).into()
+        responsive(move |size| {
+            let body = if app.library.soon {
+                soon::glance(app, size.height)
+            } else {
+                glance(app, size.height)
+            };
+            let pane = entry::details::pane(body, None);
+            if app.library.type_pop && !app.library.soon {
+                iced::widget::stack![pane, soon::type_popover(app, size.height)].into()
+            } else {
+                pane
+            }
+        })
+        .into()
     });
     container(content).width(entry::details::WIDTH).into()
 }
@@ -194,6 +219,7 @@ fn show<'a>(app: &'a App, shown: &'a Shown) -> Option<Element<'a, AppMessage>> {
             Some(entry::details::view(app, entry, None))
         }
         Shown::Series(open) => entry::series::view(app, open),
+        Shown::Found(key) => Some(soon::preview(app, app.discover.item(key)?)),
     }
 }
 

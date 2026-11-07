@@ -240,15 +240,29 @@ pub(super) fn section_header<'a>(
 /// the count.
 fn group_header<'a>(media: MediaType, count: usize, tokens: &Tokens) -> Element<'a, AppMessage> {
     let color = tokens.type_color(media);
+    bar_header(media.label(), color, color, count, tokens)
+}
+
+/// A large group heading: a 4 px bar in `bar`, the label at 24 px
+/// extrabold in `color`, and the count. The type groups of a grouped
+/// list, and the Coming soon page's months (the bar in the accent, the
+/// label in the text color).
+pub(super) fn bar_header<'a>(
+    label: &str,
+    bar: iced::Color,
+    color: iced::Color,
+    count: usize,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
     container(
         row![
             container(space())
                 .width(4)
                 .height(22)
                 .style(move |_| container::Style::default()
-                    .background(color)
+                    .background(bar)
                     .border(Border::default().rounded(2))),
-            text(media.label())
+            text(label.to_owned())
                 .size(theme::size::GROUP)
                 .font(font::EXTRABOLD)
                 .line_height(1.0)
@@ -263,7 +277,7 @@ fn group_header<'a>(media: MediaType, count: usize, tokens: &Tokens) -> Element<
 }
 
 /// The group being scrolled through, by its top.
-fn current_group(state: &super::State) -> Option<usize> {
+pub(super) fn current_group(state: &super::State) -> Option<usize> {
     let offset = state.scroll.offset;
     state
         .group_tops
@@ -285,6 +299,15 @@ fn pinned_header<'a>(
     }
     let (media, entries) = groups.get(index)?;
     let header = group_header((*media)?, entries.len(), tokens);
+    Some(pinned_bar(header, tokens))
+}
+
+/// `header` pinned at the top of the list, over what scrolls under it,
+/// with a soft shadow; the type groups' and the Coming soon page's months.
+pub(super) fn pinned_bar<'a>(
+    header: Element<'a, AppMessage>,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
     let (background, shadow) = (tokens.pinned, tokens.shadow);
     let bar = container(header)
         .width(Fill)
@@ -298,7 +321,7 @@ fn pinned_header<'a>(
             },
             ..container::Style::default()
         });
-    Some(column![bar, space::vertical()].into())
+    column![bar, space::vertical()].into()
 }
 
 /// The type-colored scrollbar: one segment per group, sized by its count,

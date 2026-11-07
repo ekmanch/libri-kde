@@ -8,6 +8,7 @@ mod page;
 mod panel;
 mod rail;
 mod reveal;
+pub mod soon;
 mod tags;
 mod toolbar;
 
@@ -16,6 +17,8 @@ use std::collections::{BTreeSet, HashMap};
 use iced::widget::{column, container, row};
 use iced::{Element, Fill};
 
+pub use overview::short_release;
+pub use soon::{Slice, SliceSlide};
 pub use tags::{all_tags_popover, long_group};
 
 use super::entry;
@@ -29,6 +32,9 @@ use crate::tags::{PickerMessage, PickerState};
 use crate::ui;
 
 pub use panel::{Motion, Panel, Shown, closes_drawer, drawer_state, narrow, panel, slide_drawer};
+
+/// The row of the Coming soon page the arrow keys and a click address.
+pub use soon::row_key;
 
 /// The search field's id, for Ctrl+K and Ctrl+F.
 pub const SEARCH_ID: &str = "library-search";
@@ -65,6 +71,8 @@ pub enum ViewKey {
     All,
     Several,
     Type(MediaType),
+    /// The Coming soon page.
+    Soon,
 }
 
 /// The popovers the library opens; one at a time.
@@ -154,6 +162,8 @@ pub struct Place {
     pub music_tab: MusicTab,
     pub artist: Option<String>,
     pub page: Option<Page>,
+    /// The Coming soon page.
+    pub soon: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -224,6 +234,21 @@ pub struct State {
     /// `LIBRI_LONG_LISTS=1`: section headers and the rail on every list,
     /// to look at them with the small fixture.
     pub force_long: bool,
+    /// The Coming soon page (decided 2026-11-07) is open, on `slice`.
+    pub soon: bool,
+    pub slice: Slice,
+    /// The type chips picked, per slice.
+    pub slice_types: HashMap<Slice, BTreeSet<MediaType>>,
+    /// Where each slice's list was scrolled to, in px.
+    pub slice_scroll: HashMap<Slice, f32>,
+    /// "Hidden · N ›" was pressed: the hidden items show as a last group.
+    pub show_hidden: bool,
+    /// The Discover item open in the panel, by its key.
+    pub found: Option<String>,
+    /// The list sliding to another slice.
+    pub slide: Option<SliceSlide>,
+    /// The type panel's Coming soon popover is open.
+    pub type_pop: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -313,6 +338,45 @@ pub enum Message {
     CloseSeriesCover,
     /// A part in the Series cover dialog: its cover stands for the series.
     PickSeriesCover(String),
+    // The Coming soon page (decided 2026-11-07).
+    /// The sidebar's Coming soon row: the page on the slice it was left on.
+    ShowSoon,
+    /// A segment of the page's Library | Discover | All control.
+    SoonSlice(Slice),
+    /// Shift+← and Shift+→ (rebindable): the slice before or after,
+    /// wrapping.
+    SoonStep(isize),
+    /// The wheel over the segmented control, with its vertical delta; the
+    /// app steps the slice while Shift is held.
+    SoonWheel(f32),
+    /// A type chip: only that type (a second click on the only one
+    /// clears), or with Ctrl adds or removes it.
+    SoonType(MediaType),
+    SoonToggleType(MediaType),
+    /// "All types".
+    SoonAllTypes,
+    /// A Discover row: its preview in the panel, or closed when it is open.
+    SelectFound(String),
+    /// A row of the panel's New in Discover: the Discover slice with that
+    /// item open.
+    OpenFound(String),
+    /// "+ Add" or "Add to library": the Add dialog prefilled from the item
+    /// (a season goes straight onto its show as Want).
+    AddFound(String),
+    /// "Not interested": the item joins the hidden list.
+    HideFound(String),
+    /// "Restore": the item leaves the hidden list.
+    RestoreFound(String),
+    /// "Hidden · N ›" at the bottom of Discover and All.
+    ShowHidden,
+    /// The type panel's Coming soon › See all: the popover over the panel.
+    OpenTypePop,
+    CloseTypePop,
+    /// A row in the popover: its entry's details, the popover closed.
+    PickFromTypePop(String),
+    /// The popover's "Open Coming soon ›": the page on Library, narrowed
+    /// to the panel's types.
+    OpenSoonForTypes,
 }
 
 /// How many of a long list's covers are asked for at a time: the ones
@@ -379,6 +443,10 @@ pub fn wanted(app: &App, wants: &mut Wants) {
         wants.covers.extend(parts.iter().map(|e| e.id.clone()));
     }
     let view = state.view_mode();
+    if state.soon {
+        soon::wanted(app, wants);
+        return;
+    }
     if state.is_overview() {
         overview::wanted(app, view, wants);
         return;
@@ -422,6 +490,7 @@ impl Message {
                 | Message::ToggleType(_)
                 | Message::PickTag(_)
                 | Message::PickFromAllTags(..)
+                | Message::ShowSoon
         )
     }
 }
@@ -438,6 +507,7 @@ impl State {
             music_tab: self.music_tab,
             artist: self.artist.clone(),
             page: self.page.clone(),
+            soon: self.soon,
         }
     }
 
@@ -452,6 +522,9 @@ impl State {
         self.music_tab = place.music_tab;
         self.artist = place.artist;
         self.page = place.page;
+        self.soon = place.soon;
+        self.show_hidden = false;
+        self.type_pop = false;
         self.deselect();
         self.popup = None;
         self.picker = None;
@@ -471,6 +544,7 @@ impl State {
         }
         match message {
             Message::ShowType(media) => {
+                self.leave_soon();
                 self.types = media.into_iter().collect();
                 self.artist = None;
                 self.status = None;
@@ -479,22 +553,26 @@ impl State {
                 self.page = None;
             }
             Message::ToggleType(media) => {
+                self.leave_soon();
                 if !self.types.remove(&media) {
                     self.types.insert(media);
                 }
                 self.deselect();
                 self.page = None;
             }
+            // Home's Coming soon › See all opens the page on Library, every
+            // type; the other lists narrow Home.
+            Message::SeeAll(Section::ComingSoon) => {
+                self.open_soon(Slice::Library, BTreeSet::new());
+            }
             Message::SeeAll(section) => {
+                self.leave_soon();
                 self.types.clear();
                 self.deselect();
                 self.page = None;
                 match section {
                     Section::InProgress => self.status = Some(EntryStatus::InProgress),
-                    Section::ComingSoon => {
-                        self.filter.not_released = true;
-                        self.sort = Sort::YearOldest;
-                    }
+                    Section::ComingSoon => {}
                     Section::RecentlyAdded => {
                         self.filter.recent = true;
                         self.sort = Sort::NewestAdded;
@@ -505,19 +583,97 @@ impl State {
                     }
                 }
             }
-            Message::GlanceSeeAll(section) => {
+            // The type panel's Coming soon › See all opens the popover over
+            // the panel, not the page.
+            Message::GlanceSeeAll(Section::ComingSoon) | Message::OpenTypePop => {
+                self.close_popovers();
+                self.type_pop = true;
+            }
+            Message::GlanceSeeAll(_) => {
+                self.leave_soon();
                 self.deselect();
                 self.page = None;
-                match section {
-                    Section::ComingSoon => {
-                        self.status = None;
-                        self.filter.not_released = true;
-                        self.sort = Sort::YearOldest;
+                self.status = Some(EntryStatus::InProgress);
+            }
+            Message::CloseTypePop => self.type_pop = false,
+            Message::PickFromTypePop(id) => {
+                self.type_pop = false;
+                self.update(Message::Select(id));
+            }
+            Message::OpenSoonForTypes => {
+                let types = self.types.clone();
+                self.open_soon(Slice::Library, types);
+            }
+            Message::ShowSoon => {
+                let types = self
+                    .slice_types
+                    .get(&self.slice)
+                    .cloned()
+                    .unwrap_or_default();
+                let slice = self.slice;
+                self.open_soon(slice, types);
+            }
+            Message::SoonSlice(slice) => {
+                if slice != self.slice {
+                    self.slice_scroll.insert(self.slice, self.scroll.offset);
+                    if self.slice == Slice::Discover {
+                        self.found = None;
                     }
-                    _ => self.status = Some(EntryStatus::InProgress),
+                    self.slice = slice;
+                    self.show_hidden = false;
+                    self.rail_pick = None;
+                    self.scroll.offset = self.slice_scroll.get(&slice).copied().unwrap_or(0.0);
                 }
             }
+            Message::SoonStep(by) => {
+                let next = self.slice.step(by);
+                self.update(Message::SoonSlice(next));
+            }
+            Message::SoonType(media) => {
+                let picked = self.slice_types.entry(self.slice).or_default();
+                if picked.len() == 1 && picked.contains(&media) {
+                    picked.clear();
+                } else {
+                    *picked = BTreeSet::from([media]);
+                }
+                self.rail_pick = None;
+            }
+            Message::SoonToggleType(media) => {
+                let picked = self.slice_types.entry(self.slice).or_default();
+                if !picked.remove(&media) {
+                    picked.insert(media);
+                }
+                self.rail_pick = None;
+            }
+            Message::SoonAllTypes => {
+                self.slice_types.remove(&self.slice);
+                self.rail_pick = None;
+            }
+            Message::SelectFound(key) => {
+                self.selected = None;
+                self.series = None;
+                self.series_back = None;
+                self.close_popovers();
+                self.found = if self.found.as_deref() == Some(key.as_str()) {
+                    None
+                } else {
+                    Some(key)
+                };
+            }
+            Message::OpenFound(key) => {
+                self.update(Message::SoonSlice(Slice::Discover));
+                self.update(Message::SelectFound(key));
+            }
+            Message::HideFound(key) => {
+                if self.found.as_deref() == Some(key.as_str()) {
+                    self.found = None;
+                }
+            }
+            // The app does the work; the page just redraws.
+            Message::AddFound(_) | Message::RestoreFound(_) | Message::SoonWheel(_) => {}
+            Message::ShowHidden => self.show_hidden = true,
             Message::PickTag(tag) => {
+                self.leave_soon();
                 self.page = None;
                 self.filter.tag_categories.clear();
                 self.filter.tags = if self.filter.tags == [tag.as_str()] {
@@ -528,6 +684,7 @@ impl State {
                 self.deselect();
             }
             Message::Status(status) => {
+                self.leave_soon();
                 self.status = status;
                 self.deselect();
             }
@@ -546,6 +703,8 @@ impl State {
             Message::AnotherPick => self.pick = self.pick.wrapping_add(1),
             Message::Select(id) => {
                 self.series = None;
+                self.found = None;
+                self.type_pop = false;
                 self.details_rating_open = false;
                 self.details_pop = None;
                 self.track_rating_open = None;
@@ -603,6 +762,7 @@ impl State {
             }
             Message::AllTagsSearch(query) => self.all_tags_query = query,
             Message::PickFromAllTags(tag, category) => {
+                self.leave_soon();
                 self.filter.tags.clear();
                 self.filter.tag_categories.clear();
                 self.filter.toggle_tag(&tag, category);
@@ -682,10 +842,12 @@ impl State {
             Message::CloseSeriesCover => self.cover_dialog = None,
             Message::Scrolled(scroll) => self.scroll = scroll,
             Message::MusicTab(tab) => {
+                self.leave_soon();
                 self.music_tab = tab;
                 self.artist = None;
             }
             Message::OpenArtist(name) => {
+                self.leave_soon();
                 self.artist = Some(name);
                 self.deselect();
             }
@@ -701,7 +863,10 @@ impl State {
     /// Esc: the tag picker first, then a popover. False when nothing was
     /// open.
     pub fn dismiss_top(&mut self) -> bool {
-        if self.season_menu.take().is_some() || self.cover_dialog.take().is_some() {
+        if self.season_menu.take().is_some()
+            || self.cover_dialog.take().is_some()
+            || std::mem::take(&mut self.type_pop)
+        {
             return true;
         }
         if let Some(picker) = &mut self.picker {
@@ -713,11 +878,52 @@ impl State {
         self.popup.take().is_some()
     }
 
-    /// Nothing in the details pane: no entry and no series.
+    /// Nothing in the details pane: no entry, no series, no Discover item.
     pub fn deselect(&mut self) {
         self.selected = None;
         self.series = None;
         self.series_back = None;
+        self.found = None;
+    }
+
+    /// Opens the Coming soon page on `slice` with `types` picked: from
+    /// the sidebar, Home's See all, or the type panel's popover.
+    fn open_soon(&mut self, slice: Slice, types: BTreeSet<MediaType>) {
+        if self.soon && self.slice != slice {
+            self.slice_scroll.insert(self.slice, self.scroll.offset);
+        }
+        self.soon = true;
+        self.slice = slice;
+        self.slice_types.insert(slice, types);
+        self.scroll.offset = self.slice_scroll.get(&slice).copied().unwrap_or(0.0);
+        self.show_hidden = false;
+        self.type_pop = false;
+        self.artist = None;
+        self.page = None;
+        self.deselect();
+        self.popup = None;
+        self.rail_pick = None;
+    }
+
+    /// Anything that shows a list or Home leaves the Coming soon page; the
+    /// slice and its chips are kept for the next visit.
+    fn leave_soon(&mut self) {
+        if self.soon {
+            self.slice_scroll.insert(self.slice, self.scroll.offset);
+        }
+        self.soon = false;
+        self.found = None;
+        self.show_hidden = false;
+        self.type_pop = false;
+        self.slide = None;
+    }
+
+    /// The types the page's chips pick on the current slice.
+    pub fn soon_types(&self) -> BTreeSet<MediaType> {
+        self.slice_types
+            .get(&self.slice)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// The selection moved (a click, the arrow keys, a save): an entry in
@@ -745,9 +951,10 @@ impl State {
         self.series.as_ref().filter(|_| self.selected.is_none())
     }
 
-    /// Whether the details pane is open, for an entry or a series.
+    /// Whether the details pane is open, for an entry, a series or a
+    /// Discover item.
     pub fn pane_open(&self) -> bool {
-        self.selected.is_some() || self.series.is_some()
+        self.selected.is_some() || self.series.is_some() || self.found.is_some()
     }
 
     /// Closes every popover: the Filter, Sort and All tags popovers and
@@ -783,14 +990,18 @@ impl State {
 
     /// All with nothing narrowing it shows the overview, not a list.
     pub fn is_overview(&self) -> bool {
-        self.types.is_empty()
+        !self.soon
+            && self.types.is_empty()
             && self.filter.is_empty()
             && self.status.is_none()
             && self.query.trim().is_empty()
     }
 
-    /// "Library", "Movies" or "Movies + Shows".
+    /// "Library", "Movies", "Movies + Shows" or "Coming soon".
     pub fn title(&self) -> String {
+        if self.soon {
+            return "Coming soon".into();
+        }
         if let (Some(artist), Some(MediaType::Music)) = (&self.artist, self.single()) {
             return artist.clone();
         }
@@ -808,6 +1019,9 @@ impl State {
     }
 
     fn view_key(&self) -> ViewKey {
+        if self.soon {
+            return ViewKey::Soon;
+        }
         match (self.types.len(), self.single()) {
             (0, _) => ViewKey::All,
             (_, Some(media)) => ViewKey::Type(media),
@@ -926,6 +1140,9 @@ impl State {
     /// type in its sort, All and several types by type first. Music
     /// follows its tab; the artist lists have no selection.
     pub fn display_order(&self, library: &Library, today: Date) -> Vec<String> {
+        if self.soon {
+            return soon::entry_order(self, library, today);
+        }
         let listing = self.listing(library, today);
         if self.is_overview() {
             return Vec::new();
@@ -1039,6 +1256,8 @@ pub fn view<'a>(app: &'a App) -> Element<'a, AppMessage> {
     let (top, body): (Element<'a, AppMessage>, Element<'a, AppMessage>) =
         if let Some(page) = &state.page {
             page::view(app, page)
+        } else if state.soon {
+            soon::view(app)
         } else if state.is_overview() {
             (toolbar::toolbar(app, &listing), overview::body(app))
         } else {
@@ -1108,15 +1327,27 @@ pub fn reveal<T: Send + 'static>(state: &State, id: &str) -> iced::Task<T> {
     iced::advanced::widget::operate(reveal::Reveal::new(LIST_ID, &entries::row_id(id)))
 }
 
-/// The repository and branch, quietly at the bottom of the content.
+/// The repository and branch, quietly at the bottom of the content; on
+/// the Coming soon page the daily check's time and sources at the left.
 fn footer<'a>(app: &App) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
     let line = app.source.as_ref().map(Source::footer).unwrap_or_default();
-    container(ui::mono(line, 12.0, tokens.sub))
+    let mut content = row![].align_y(iced::Center).spacing(16);
+    if app.library.soon {
+        content = content.push(
+            iced::widget::text(soon::check_line(app))
+                .size(12.5)
+                .color(tokens.sub)
+                .wrapping(iced::widget::text::Wrapping::None),
+        );
+    }
+    content = content
+        .push(iced::widget::space::horizontal())
+        .push(ui::mono(line, 12.0, tokens.sub));
+    container(content)
         .height(30)
         .width(Fill)
         .padding([0, 24])
-        .align_x(iced::alignment::Horizontal::Right)
         .align_y(iced::Center)
         .into()
 }
