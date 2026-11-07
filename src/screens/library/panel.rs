@@ -62,8 +62,8 @@ pub fn panel(app: &App) -> Panel {
 }
 
 /// How long the drawer slides in and out at Plasma's normal speed.
-pub const OPEN: Duration = Duration::from_millis(200);
-pub const CLOSE: Duration = Duration::from_millis(150);
+pub const OPEN: Duration = Duration::from_millis(540);
+pub const CLOSE: Duration = Duration::from_millis(410);
 
 /// What the drawer shows, kept while it slides out.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,10 +145,13 @@ pub fn slide_drawer(app: &mut App, closes: bool, before: (Panel, Option<Shown>),
     let after = shown(app);
     let motion = match (before, after) {
         ((Panel::Drawer, None), Some(_)) => {
-            Motion::Opening(Slide::start(now, app.speed.scale(OPEN), Easing::Out))
+            Motion::Opening(Slide::start(now, app.speed.scale(OPEN), Easing::STANDARD))
         }
         ((Panel::Drawer, Some(was)), None) if closes && panel(app) == Panel::Drawer => {
-            Motion::Closing(Slide::start(now, app.speed.scale(CLOSE), Easing::In), was)
+            Motion::Closing(
+                Slide::start(now, app.speed.scale(CLOSE), Easing::STANDARD),
+                was,
+            )
         }
         // Pinned, or on Home, there is no drawer to slide.
         _ if panel(app) != Panel::Drawer => Motion::Still,
@@ -680,31 +683,33 @@ mod tests {
         at(&mut app, msg(Message::TogglePanel), 0);
         assert_eq!(panel(&app), Panel::Drawer);
         assert_eq!(app.library.motion, Motion::Still);
-        // The open title closes it: out, at half of 150 ms.
+        // The open title closes it: out, at half of 410 ms.
         at(&mut app, msg(Message::Select(ids[0].clone())), 10);
         let Motion::Closing(slide, Shown::Entry(id)) = app.library.motion.clone() else {
             panic!("closing, got {:?}", app.library.motion);
         };
         assert_eq!(id, ids[0]);
-        assert!(slide.done(start + Duration::from_millis(85)));
-        assert!(!slide.done(start + Duration::from_millis(84)));
+        assert!(slide.done(start + Duration::from_millis(215)));
+        assert!(!slide.done(start + Duration::from_millis(214)));
         // A frame after it is over settles it.
-        at(&mut app, AppMessage::Frame(start), 100);
+        at(&mut app, AppMessage::Frame(start), 250);
         assert_eq!(app.library.motion, Motion::Still);
 
-        // A selection opens it: in, at half of 200 ms.
+        // A selection opens it: in, at half of 540 ms.
         at(&mut app, msg(Message::Select(ids[1].clone())), 200);
         let Motion::Opening(slide) = app.library.motion else {
             panic!("opening, got {:?}", app.library.motion);
         };
-        assert!(slide.done(start + Duration::from_millis(300)));
-        assert!(!slide.done(start + Duration::from_millis(299)));
+        assert!(slide.done(start + Duration::from_millis(470)));
+        assert!(!slide.done(start + Duration::from_millis(469)));
+        at(&mut app, AppMessage::Frame(start), 500);
+        assert_eq!(app.library.motion, Motion::Still);
         // Another title while it is open: the content changes, no slide.
-        at(&mut app, msg(Message::Select(ids[2].clone())), 400);
+        at(&mut app, msg(Message::Select(ids[2].clone())), 600);
         assert_eq!(app.library.motion, Motion::Still);
         assert_eq!(app.library.selected.as_deref(), Some(ids[2].as_str()));
         // Esc and the ✕ close it; Back too.
-        at(&mut app, AppMessage::Key(KeyPress::Escape), 400);
+        at(&mut app, AppMessage::Key(KeyPress::Escape), 600);
         assert!(matches!(app.library.motion, Motion::Closing(..)));
         at(&mut app, msg(Message::Select(ids[2].clone())), 1000);
         at(&mut app, msg(Message::ClosePanel), 2000);
@@ -760,7 +765,7 @@ mod tests {
         app.library.motion = Motion::Opening(Slide::start(
             std::time::Instant::now() + Duration::from_secs(60),
             Duration::from_millis(200),
-            Easing::Out,
+            Easing::STANDARD,
         ));
         let start = place(&app, "RATING").expect("still in the tree");
         assert!(

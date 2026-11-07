@@ -66,20 +66,59 @@ impl Speed {
     }
 }
 
-/// How a slide runs: fast first and settling (ease-out, cubic), or slow
-/// first and leaving fast (ease-in, cubic).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Easing {
-    Out,
-    In,
+/// The shape of a slide, as CSS's `cubic-bezier(x1, y1, x2, y2)`: time
+/// along x, distance along y, from (0, 0) to (1, 1) through the two
+/// control points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Easing {
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
 }
 
 impl Easing {
+    /// Material 3's standard curve, `cubic-bezier(0.2, 0, 0, 1)`: a short
+    /// ramp-up, 60 % of the way at a quarter of the time, 88 % at half,
+    /// and settling over the rest, so the slowing shows while there is
+    /// still distance left. A cubic ease-out, by contrast, starts at
+    /// three times the average speed and reads as a snap, and a cubic
+    /// ease-in has barely moved by half time and leaves at full speed.
+    pub const STANDARD: Easing = Easing::bezier(0.2, 0.0, 0.0, 1.0);
+
+    pub const fn bezier(x1: f32, y1: f32, x2: f32, y2: f32) -> Easing {
+        Easing { x1, y1, x2, y2 }
+    }
+
+    fn x(self, s: f32) -> f32 {
+        let r = 1.0 - s;
+        3.0 * r * r * s * self.x1 + 3.0 * r * s * s * self.x2 + s * s * s
+    }
+
+    fn y(self, s: f32) -> f32 {
+        let r = 1.0 - s;
+        3.0 * r * r * s * self.y1 + 3.0 * r * s * s * self.y2 + s * s * s
+    }
+
+    /// The distance at time `t` (0 to 1): the parameter where the curve's
+    /// x is `t`, found by bisection since x is monotonic, then its y.
     fn apply(self, t: f32) -> f32 {
-        match self {
-            Easing::Out => 1.0 - (1.0 - t).powi(3),
-            Easing::In => t.powi(3),
+        if t <= 0.0 {
+            return 0.0;
         }
+        if t >= 1.0 {
+            return 1.0;
+        }
+        let (mut lo, mut hi) = (0.0_f32, 1.0_f32);
+        for _ in 0..24 {
+            let mid = (lo + hi) / 2.0;
+            if self.x(mid) < t {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        self.y((lo + hi) / 2.0)
     }
 }
 
@@ -141,31 +180,40 @@ mod tests {
     }
 
     #[test]
-    fn a_slide_eases_out_or_in_and_ends_on_time() {
+    fn a_slide_ramps_up_settles_and_ends_on_time() {
         let start = Instant::now();
-        let out = Slide::start(start, Duration::from_millis(200), Easing::Out);
-        assert_eq!(out.progress(start), 0.0);
-        let half = out.progress(start + Duration::from_millis(100));
+        let slide = Slide::start(start, Duration::from_millis(200), Easing::STANDARD);
+        assert_eq!(slide.progress(start), 0.0);
+        let early = slide.progress(start + Duration::from_millis(20));
         assert!(
-            half > 0.8,
-            "ease-out is most of the way at half time: {half}"
+            (0.1..0.2).contains(&early),
+            "the ramp-up: a sixth of the way at a tenth of the time: {early}"
         );
-        assert_eq!(out.progress(start + Duration::from_millis(200)), 1.0);
-        assert_eq!(out.progress(start + Duration::from_secs(5)), 1.0);
-        assert!(!out.done(start + Duration::from_millis(199)));
-        assert!(out.done(start + Duration::from_millis(200)));
-
-        let r#in = Slide::start(start, Duration::from_millis(150), Easing::In);
-        let half = r#in.progress(start + Duration::from_millis(75));
-        assert!(half < 0.2, "ease-in has barely moved at half time: {half}");
-        assert_eq!(r#in.progress(start + Duration::from_millis(150)), 1.0);
+        let quarter = slide.progress(start + Duration::from_millis(50));
+        assert!(
+            (0.55..0.65).contains(&quarter),
+            "most of the way at quarter time: {quarter}"
+        );
+        let late = slide.progress(start + Duration::from_millis(150));
+        assert!(
+            (0.96..0.99).contains(&late),
+            "still settling at three quarters: {late}"
+        );
+        assert_eq!(slide.progress(start + Duration::from_millis(200)), 1.0);
+        assert_eq!(slide.progress(start + Duration::from_secs(5)), 1.0);
+        assert!(!slide.done(start + Duration::from_millis(199)));
+        assert!(slide.done(start + Duration::from_millis(200)));
 
         // Before it starts (a test's slide set in the future) it has not moved.
-        assert_eq!(out.progress(start - Duration::from_millis(5)), 0.0);
+        assert_eq!(slide.progress(start - Duration::from_millis(5)), 0.0);
         // An instant slide is over at once.
         assert_eq!(
-            Slide::start(start, Duration::ZERO, Easing::Out).progress(start),
+            Slide::start(start, Duration::ZERO, Easing::STANDARD).progress(start),
             1.0
         );
+        // A bezier through the diagonal is linear.
+        let linear = Easing::bezier(0.0, 0.0, 1.0, 1.0);
+        assert!((linear.apply(0.3) - 0.3).abs() < 1e-4);
+        assert!((linear.apply(0.9) - 0.9).abs() < 1e-4);
     }
 }
