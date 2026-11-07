@@ -1381,6 +1381,7 @@ impl Form {
             seasonal_only: false,
             added: today,
             source: None,
+            tmdb: None,
             cover_from: None,
             platform: None,
             formats: None,
@@ -1389,6 +1390,7 @@ impl Form {
             kind: None,
             album: None,
             tracks: None,
+            seasons_from: None,
             seasons: None,
         });
         // Changing the type clears the lookup id; editing a title never
@@ -1439,6 +1441,15 @@ impl Form {
             MediaType::Anime => self.anime_kind,
             _ => None,
         };
+        // The TMDB show of an anime series stays through an edit (the
+        // form has no field for it yet); a type change or marking the
+        // anime a movie clears it, as on the phone.
+        if !is(MediaType::Anime)
+            || base.is_some_and(|b| b.media != self.media)
+            || self.anime_kind == Some(EntryKind::Movie)
+        {
+            entry.tmdb = None;
+        }
         entry.pages = (is(MediaType::Books))
             .then(|| self.pages.trim().parse::<u32>().ok())
             .flatten()
@@ -1465,10 +1476,16 @@ impl Form {
         if entry.uses_seasons() {
             let mut seasons = self.season_list();
             seasons.sort_by_key(|s| s.season);
+            // The split the seasons are in stays while they come from a
+            // lookup; seasons all set by hand have none, as on the phone.
+            if seasons.is_empty() || seasons.iter().all(|s| s.manual == Some(true)) {
+                entry.seasons_from = None;
+            }
             entry.seasons = (!seasons.is_empty()).then_some(seasons);
             entry.refresh_status(today);
         } else {
             entry.seasons = None;
+            entry.seasons_from = None;
         }
         entry
     }

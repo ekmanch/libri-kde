@@ -211,6 +211,13 @@ pub struct Entry {
     /// The lookup id the entry was found by, "tmdb:movie:694", or null.
     #[serde(default)]
     pub source: Option<String>,
+    /// An anime series: the TMDB show its episode titles and the other
+    /// splits of its seasons come from, "tmdb:tv:209867", so every device
+    /// reads the same show; left out while there is none (a movie, an
+    /// anime with no TMDB match). Changing the type, or marking the anime
+    /// a movie, clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmdb: Option<String>,
     /// The lookup id of another match whose cover the entry shows (an
     /// edition, an ebook), left out while the cover is the match's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -234,6 +241,15 @@ pub struct Entry {
     pub album: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<Vec<Track>>,
+    /// Shows and anime series: which of the sources' splits the seasons
+    /// are in, so every device updates them within the same split:
+    /// "anilist" (AniList's sequel chain), "anilist:parts" (the chain's
+    /// entries one by one), "tmdb:seasons" (the TMDB show's season list)
+    /// or "tmdb:group:<id>" (one of its episode groups). Written only with
+    /// seasons from a lookup; left out on seasons set by hand and on an
+    /// entry from before splits, whose split is told by its shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seasons_from: Option<String>,
     // Shows and anime series: in season number order, omitted when the
     // show has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -523,6 +539,7 @@ mod tests {
             seasonal_only: false,
             added: Date::parse("2026-10-01").unwrap(),
             source: None,
+            tmdb: None,
             cover_from: None,
             platform: None,
             formats: None,
@@ -531,6 +548,7 @@ mod tests {
             kind: None,
             album: None,
             tracks: None,
+            seasons_from: None,
             seasons: None,
         }
     }

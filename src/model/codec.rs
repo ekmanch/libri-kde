@@ -85,12 +85,14 @@ mod tests {
             assert!(encoded.contains(&format!("\"{key}\": null")), "{key}");
         }
         for key in [
+            "tmdb",
             "cover_from",
             "platform",
             "formats",
             "kind",
             "album",
             "tracks",
+            "seasons_from",
             "seasons",
         ] {
             assert!(!encoded.contains(&format!("\"{key}\"")), "{key}");
@@ -109,6 +111,57 @@ mod tests {
         let cover_at = encoded.find("\"cover_from\": \"itunes:2019\"").unwrap();
         let formats_at = encoded.find("\"formats\":").unwrap();
         assert!(source_at < cover_at && cover_at < formats_at);
+    }
+
+    #[test]
+    fn an_anime_series_keeps_its_tmdb_show_and_season_split_in_the_phones_order() {
+        let text = concat!(
+            "{\n  \"version\": 2,\n  \"tags\": {},\n  \"entries\": [\n    {\n",
+            "      \"id\": \"anime/bleach-2004\",\n      \"type\": \"anime\",\n",
+            "      \"title\": \"Bleach\",\n      \"released\": null,\n      \"creator\": null,\n",
+            "      \"status\": \"want\",\n      \"rating\": null,\n      \"tags\": [],\n",
+            "      \"note\": \"\",\n      \"description\": \"\",\n      \"seasonal_only\": false,\n",
+            "      \"added\": \"2026-10-01\",\n      \"source\": \"anilist:269\",\n",
+            "      \"tmdb\": \"tmdb:tv:30984\",\n      \"cover_from\": \"tmdb:tv:1\",\n",
+            "      \"kind\": \"series\",\n",
+            "      \"seasons_from\": \"tmdb:group:67069c4d003c9214a0b3ceb1\",\n",
+            "      \"seasons\": [\n        {\n          \"season\": 1,\n",
+            "          \"released\": \"2004-10-05\",\n          \"status\": null\n        }\n",
+            "      ]\n    }\n  ],\n  \"plans\": []\n}\n"
+        );
+        let library = decode(text).unwrap();
+        let entry = &library.entries[0];
+        assert_eq!(entry.tmdb.as_deref(), Some("tmdb:tv:30984"));
+        assert_eq!(
+            entry.seasons_from.as_deref(),
+            Some("tmdb:group:67069c4d003c9214a0b3ceb1")
+        );
+        assert_eq!(
+            encode(&library),
+            text,
+            "the phone's key order, byte for byte"
+        );
+    }
+
+    /// The owner's library (`ekmanch/library`, cloned next to this repo)
+    /// round-trips byte for byte, so a save from the desktop never strips a
+    /// key the phone wrote. Skipped where the clone is not there.
+    #[test]
+    fn the_real_library_round_trips_to_the_same_bytes_when_cloned_next_door() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../library/library.json");
+        let Ok(original) = std::fs::read_to_string(path) else {
+            eprintln!("skipped: {path} is not there");
+            return;
+        };
+        let library = decode(&original).unwrap();
+        let encoded = encode(&library);
+        if encoded != original {
+            let lost: Vec<&str> = original
+                .lines()
+                .filter(|line| !encoded.contains(line))
+                .collect();
+            panic!("the re-encoding differs; lines not written back: {lost:#?}");
+        }
     }
 
     #[test]

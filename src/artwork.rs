@@ -1331,6 +1331,7 @@ mod tests {
             seasonal_only: false,
             added: Date::parse("2026-10-01").unwrap(),
             source: source.map(str::to_owned),
+            tmdb: None,
             cover_from: None,
             platform: None,
             formats: None,
@@ -1339,6 +1340,7 @@ mod tests {
             kind: None,
             album: None,
             tracks: None,
+            seasons_from: None,
             seasons: None,
         }
     }
