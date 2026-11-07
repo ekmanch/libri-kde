@@ -14,12 +14,23 @@ use iced::widget::space;
 use iced::{Element, Event, Length, Point, Rectangle, Size, Vector, mouse};
 
 /// Where the popover opens: below the anchor (above when there is no room),
-/// or to its right with the bottoms lined up.
+/// to its right with the bottoms lined up, or over it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Placement {
     #[default]
     Below,
     Right,
+    /// Over the anchor, covering it: `gap` px past its left and right
+    /// edges and past the edge named, growing away from it. The details
+    /// pane's popovers open this way, over their section.
+    Over(Edge),
+}
+
+/// The edge of the anchor an `Over` popover lines up with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Edge {
+    Top,
+    Bottom,
 }
 
 /// Which edges of the anchor and the popover line up, below it.
@@ -370,13 +381,27 @@ fn place(
     align: Align,
     gap: f32,
 ) -> Point {
-    if placement == Placement::Right {
-        let x = anchor.x + anchor.width + gap;
-        let y = anchor.y + anchor.height - size.height;
-        return Point::new(
+    let within = |x: f32, y: f32| {
+        Point::new(
             x.clamp(0.0, (window.width - size.width).max(0.0)),
             y.clamp(0.0, (window.height - size.height).max(0.0)),
-        );
+        )
+    };
+    match placement {
+        Placement::Right => {
+            return within(
+                anchor.x + anchor.width + gap,
+                anchor.y + anchor.height - size.height,
+            );
+        }
+        Placement::Over(edge) => {
+            let y = match edge {
+                Edge::Top => anchor.y - gap,
+                Edge::Bottom => anchor.y + anchor.height + gap - size.height,
+            };
+            return within(anchor.x - gap, y);
+        }
+        Placement::Below => {}
     }
     let x = match align {
         Align::Start => anchor.x,
@@ -423,6 +448,45 @@ mod tests {
             place(anchor, size, WINDOW, Placement::Below, Align::Start, 8.0),
             Point::new(1280.0, 272.0)
         );
+    }
+
+    #[test]
+    fn opens_over_the_anchor_past_its_top_or_bottom_and_stays_in_the_window() {
+        let anchor = Rectangle::new(Point::new(1270.0, 500.0), Size::new(308.0, 60.0));
+        let size = Size::new(332.0, 200.0);
+        assert_eq!(
+            place(
+                anchor,
+                size,
+                WINDOW,
+                Placement::Over(Edge::Top),
+                Align::Start,
+                12.0
+            ),
+            Point::new(1258.0, 488.0)
+        );
+        assert_eq!(
+            place(
+                anchor,
+                size,
+                WINDOW,
+                Placement::Over(Edge::Bottom),
+                Align::Start,
+                12.0
+            ),
+            Point::new(1258.0, 372.0)
+        );
+        // Near the bottom edge the popover is pushed up into the window.
+        let low = Rectangle::new(Point::new(1270.0, 840.0), Size::new(308.0, 40.0));
+        let point = place(
+            low,
+            size,
+            WINDOW,
+            Placement::Over(Edge::Top),
+            Align::Start,
+            12.0,
+        );
+        assert_eq!(point.y, 700.0);
     }
 
     #[test]

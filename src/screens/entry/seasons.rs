@@ -1,5 +1,5 @@
 //! The rows shared by the inspector and the content-pane pages: a season
-//! with its status pill, a part of a series, and the "All N seasons" row.
+//! with its status pill, and a part of a series.
 
 use iced::widget::{button, column, container, row, text};
 use iced::{Center, Element, Fill, Padding};
@@ -122,9 +122,11 @@ pub fn season_row<'a>(
 }
 
 /// One part of a series: its number, title and year, then "This one", the
-/// part's status with a chevron, or "+ Add" for a part not in the library.
-/// In the series pane (`in_pane`) every part in the library shows its
-/// status and opens its details, the marked one in the selection gray.
+/// part's status, or "+ Add" for a part not in the library. A part in the
+/// library opens on a click (the row itself, no chevron: it only said what
+/// the row already does). In the series pane (`in_pane`) every part in the
+/// library shows its status and opens its details, the marked one in the
+/// selection gray.
 pub fn series_row<'a>(
     app: &'a App,
     part: &SeriesRow<'a>,
@@ -174,11 +176,7 @@ pub fn series_row<'a>(
         }
         Some(entry) => {
             let label = browse::status_label(Some(entry.media), entry.status);
-            content = content.push(status_pill(label, tokens)).push(ui::icon(
-                Icon::ChevronRight,
-                14.0,
-                tokens.sub,
-            ));
+            content = content.push(status_pill(label, tokens));
             if in_pane {
                 let open = library::Message::OpenSeriesPart(entry.id.clone());
                 (Some(AppMessage::Library(open)), part.is_this)
@@ -204,28 +202,6 @@ pub fn series_row<'a>(
         .on_press_maybe(on_press)
         .style(ui::row_style(tokens, selected, 8.0))
         .focusable(8.0, tokens)
-}
-
-/// "All 29 seasons ›", "All 43 volumes ›".
-pub fn all_row<'a>(
-    label: String,
-    on_press: AppMessage,
-    tokens: &Tokens,
-) -> Element<'a, AppMessage> {
-    button(
-        row![
-            text(label).size(14).font(font::SEMIBOLD).width(Fill),
-            ui::icon(Icon::ChevronRight, 14.0, tokens.sub),
-        ]
-        .align_y(Center)
-        .height(Fill),
-    )
-    .width(Fill)
-    .height(44)
-    .padding([0, 10])
-    .on_press(on_press)
-    .style(ui::row_style(tokens, false, 8.0))
-    .focusable(8.0, tokens)
 }
 
 /// A read-only status pill, as a part's status shows in a series list.

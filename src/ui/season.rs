@@ -143,3 +143,79 @@ fn menu<'a, Message: Clone + 'a>(
         .style(move |_| panel_style(&tokens, 12.0))
         .into()
 }
+
+/// An entry's status in details (2026-11-07): a 32 px pill with the
+/// season pill's look, "Watching ▾", filled while in progress, that opens
+/// a menu of the type's statuses as radio rows. It sits at the right end
+/// of the Status row, so the menu lines up with its right edge.
+pub fn status_pill<'a, Message: Clone + 'a>(
+    media: MediaType,
+    status: EntryStatus,
+    open: bool,
+    on_toggle: Message,
+    on_pick: impl Fn(EntryStatus) -> Message + 'a,
+    tokens: &Tokens,
+) -> Element<'a, Message> {
+    let tokens_copy = *tokens;
+    let label = browse::status_label(Some(media), status);
+    let mut content = row![].spacing(6).align_y(Center).height(Fill);
+    if status == EntryStatus::Done {
+        content = content.push(icon(Icon::Check, 13.0, tokens.text));
+    }
+    content = content
+        .push(text(label).size(13.5).font(font::SEMIBOLD))
+        .push(icon(Icon::ChevronDown, 12.0, tokens.sub));
+    let anchor = button(content)
+        .height(32)
+        .padding(iced::Padding::new(0.0).left(12).right(9))
+        .on_press(on_toggle.clone())
+        .style(move |_, hovered| {
+            let filled = status == EntryStatus::InProgress;
+            let background = if matches!(hovered, button::Status::Hovered) {
+                Some(tokens_copy.hover)
+            } else if filled {
+                Some(tokens_copy.raised)
+            } else {
+                None
+            };
+            button::Style {
+                background: background.map(Background::Color),
+                text_color: tokens_copy.text,
+                border: Border::default().rounded(16).width(1).color(if filled {
+                    tokens_copy.raised
+                } else {
+                    tokens_copy.line
+                }),
+                ..button::Style::default()
+            }
+        })
+        .focusable(16.0, tokens);
+    let menu = open.then(|| {
+        let rows = EntryStatus::options_for(media).iter().map(|&choice| {
+            let on = choice == status;
+            button(
+                row![
+                    super::menu::radio(on, tokens),
+                    text(browse::status_label(Some(media), choice)).size(14)
+                ]
+                .spacing(10)
+                .align_y(Center)
+                .height(Fill),
+            )
+            .width(Fill)
+            .height(34)
+            .padding([0, 10])
+            .on_press(on_pick(choice))
+            .style(row_style(tokens, false, 8.0))
+            .focusable(8.0, tokens)
+        });
+        container(Column::with_children(rows).width(200))
+            .padding(6)
+            .style(move |_| panel_style(&tokens_copy, 12.0))
+            .into()
+    });
+    Popover::new(anchor, menu)
+        .align(Align::End)
+        .on_dismiss(on_toggle)
+        .into()
+}

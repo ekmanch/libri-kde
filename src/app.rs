@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use iced::keyboard::{self, Key, key::Named};
 use iced::theme::Mode as ThemeMode;
-use iced::widget::{operation, scrollable};
+use iced::widget::{operation, scrollable, text_editor};
 use iced::window::{self, settings::PlatformSpecific};
 use iced::{Element, Event, Size, Subscription, Task, event, mouse, time};
 
@@ -207,6 +207,11 @@ pub struct App {
     pub keymap: Keymap,
     pub repo: Box<dyn LibraryRepository>,
     pub library: library::State,
+    /// The details pane's note as its popover edits it (the text lives
+    /// here, since the editor's content is not `Clone`), and the count of
+    /// edits, so only the pause after the last one saves.
+    pub note_editor: text_editor::Content,
+    pub note_generation: u64,
     /// The entry dialog open over the window: Add or Edit, Delete, Add to
     /// plan.
     pub dialog: Option<entry::Dialog>,
@@ -642,6 +647,8 @@ impl App {
             keymap: Keymap::default(),
             repo: Box::new(repo),
             library: library::State::default(),
+            note_editor: text_editor::Content::new(),
+            note_generation: 0,
             dialog: None,
             plans: plans::State::default(),
             plan_dialog: None,

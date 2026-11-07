@@ -11,6 +11,7 @@ pub mod field;
 pub mod focus;
 pub mod groups;
 pub mod icon;
+pub mod measure;
 pub mod menu;
 pub mod music;
 pub mod popover;
@@ -45,11 +46,12 @@ pub use field::{labeled, text_field};
 pub use focus::{Barrier, FocusExt, Focusable};
 pub use groups::{Groups, Measure};
 pub use icon::{Icon, icon, marker};
+pub use measure::{clamp, fold, line_count, text_width, wrapped_rows};
 pub use menu::radio_menu;
-pub use popover::{Align, Placement, Popover};
+pub use popover::{Align, Edge, Placement, Popover};
 pub use rating::{rating, track_rating};
 pub use search::search_field;
-pub use season::season_pill;
+pub use season::{season_pill, status_pill};
 pub use section_rail::{RailLabel, SectionRail};
 pub use segmented::segmented;
 pub use slide::slide;
@@ -66,6 +68,34 @@ pub fn section_header<'a, Message>(label: &str, tokens: &Tokens) -> Element<'a, 
         .font(font::BOLD)
         .color(tokens.sub)
         .into()
+}
+
+/// A link at the right end of a section header, in the accent ink with a
+/// small chevron: "See all 12 ›", "All 29 ›", "Open ›", "More".
+pub fn header_link<'a, Message: Clone + 'a>(
+    label: impl text::IntoFragment<'a>,
+    chevron: bool,
+    tokens: &Tokens,
+    on_press: Message,
+) -> Element<'a, Message> {
+    let ink = tokens.ink;
+    let mut content = widget::Row::new()
+        .spacing(4)
+        .align_y(Vertical::Center)
+        .height(Fill)
+        .push(text(label).size(13).font(font::SEMIBOLD));
+    if chevron {
+        content = content.push(icon(Icon::ChevronRight, 12.0, ink));
+    }
+    button(content)
+        .height(24)
+        .padding([0, 2])
+        .on_press(on_press)
+        .style(move |_, _| button::Style {
+            text_color: ink,
+            ..button::Style::default()
+        })
+        .focusable(6.0, tokens)
 }
 
 /// A screen or dialog title.
