@@ -15,15 +15,21 @@
 
 use std::time::Duration;
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use super::http::{self, Http, int_at, objects_at, str_at, strings_at};
+use super::iso::two_letter;
 use super::text::{
     MAX_BOOK_TAGS, core_title, edition_label, first_publish_year, is_tag_like, same_book,
     same_title, share_author, strip_html, title_key, volume_of,
 };
 use super::wikidata::Wikidata;
-use super::{Failure, FailureKind, Hits, Match, Reply, SeriesPart, SeriesParts, Source};
+use super::{
+    CreatorMatch, EditionRelease, Failure, FailureKind, FollowKind, Hits, Match, Reply, SeriesPart,
+    SeriesParts, Source, is_new_work, is_recent_or_ahead,
+};
 use crate::model::{Date, MediaType, Released, Series};
 
 const OPEN_LIBRARY: &str = "https://openlibrary.org";
@@ -157,12 +163,16 @@ impl OpenLibrary {
         }
     }
 
-    /// The author called exactly `name` in the authors index
-    /// (`/search/authors.json`), as an author key ("OL2162284A").
+    /// The author named exactly `name` in the authors index, else the
+    /// first hit (the index ranks by how many works they have), as an
+    /// author key ("OL2162284A").
     fn author_key(&self, name: &str) -> Reply<Option<String>> {
         let json = self.get("/search/authors.json", &[("q", name), ("limit", "5")])?;
-        Ok(objects_at(&json, "docs")
-            .find(|doc| str_at(doc, "name").is_some_and(|n| same_title(n, name)))
+        let hits: Vec<&Value> = objects_at(&json, "docs").collect();
+        Ok(hits
+            .iter()
+            .find(|doc| str_at(doc, "name").is_some_and(|n| n.eq_ignore_ascii_case(name)))
+            .or(hits.first())
             .and_then(|doc| str_at(doc, "key"))
             .map(|key| key.rsplit('/').next().unwrap_or(key).to_owned()))
     }
@@ -170,6 +180,17 @@ impl OpenLibrary {
     /// The author's newest works (`/search.json?author_key=…&sort=new`).
     fn newest_by(&self, author_key: &str, limit: usize) -> Reply<Vec<Match>> {
         self.search(&[("author_key", author_key), ("sort", "new")], limit)
+    }
+
+    /// A work's editions in `languages` (`/works/{id}/editions.json`).
+    fn edition_release(&self, source: &str, languages: &[String]) -> Reply<EditionRelease> {
+        let limit = EDITIONS_LIMIT.to_string();
+        let json = self.get(
+            &format!("/works/{}/editions.json", work_id(source)?),
+            &[("limit", limit.as_str())],
+        )?;
+        let editions: Vec<&Value> = objects_at(&json, "entries").collect();
+        Ok(edition_release_from(&editions, languages))
     }
 
     /// The work record: its description and its first cover id.
@@ -812,46 +833,196 @@ impl Books {
 }
 
 impl Books {
-    /// An author's works still to come (the phone's "new book by an
-    /// author in your library"): the newest works of the author called
-    /// exactly `name`, those first published this year or later, since
-    /// Open Library dates a work by its year alone; Apple Books gives the
-    /// day, the cover and the description where it knows the book.
-    fn author_releases(&self, name: &str) -> Reply<Vec<Match>> {
-        let Some(key) = self.open_library.author_key(name)? else {
-            return Ok(Vec::new());
-        };
-        let today = Date::today();
-        let works = self.open_library.newest_by(&key, 20)?;
-        Ok(works
-            .into_iter()
-            .filter(|work| work.released.is_some_and(|r| !r.is_released_on(today)))
-            .take(AUTHOR_RELEASES)
-            .map(|work| {
-                let apple = self.apple_fill(&work.title, Some(name));
-                let mut found = Books::with_apple(work, apple.as_ref());
-                if let Some(date) = apple.as_ref().and_then(|a| a.released) {
-                    found.released = Some(date);
+    /// Whether `found`, a work dated this year or later, is itself new and
+    /// not a new edition or a translation of an older work Open Library
+    /// holds as a work of its own: no older work of the same title by the
+    /// author in its index, and Wikidata, when it knows the work, dates it
+    /// within the last year. Either not answering is not held against it.
+    fn is_new_work_of(&self, found: &Match, today: Date) -> bool {
+        if found.released.is_none() {
+            return true;
+        }
+        let core = core_title(&found.title);
+        let author = found.creator.as_deref();
+        if let Ok(hits) = self.open_library.search_title(&core, author, 10) {
+            for hit in hits {
+                let Some(released) = hit.released else {
+                    continue;
+                };
+                if hit.source == found.source || !same_title(&core_title(&hit.title), &core) {
+                    continue;
                 }
-                found
-            })
-            .collect())
+                let shared = author.is_none() || share_author(author, hit.creator.as_deref());
+                if shared && !is_new_work(released, today) {
+                    return false;
+                }
+            }
+        }
+        if let Ok(Some(first)) = self.wikidata.first_published(&core, author)
+            && !is_new_work(first, today)
+        {
+            return false;
+        }
+        true
     }
 }
 
-/// How many of an author's coming works Discover lists at most.
-const AUTHOR_RELEASES: usize = 5;
+/// How many of a work's editions are read for their languages and dates.
+const EDITIONS_LIMIT: usize = 100;
+
+/// A date in the words an edition has: "2026-12-25", "December 25, 2026",
+/// "Dec 2026" or "2026".
+fn parse_publish_date(text: &str) -> Option<Released> {
+    let clean = text.trim();
+    if let Some(date) = Released::parse(clean) {
+        return Some(date);
+    }
+    let lower = clean.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let year = words
+        .iter()
+        .filter(|w| w.len() == 4)
+        .find_map(|w| w.parse::<u16>().ok().filter(|y| (1500..2100).contains(y)))?;
+    const MONTHS: [&str; 12] = [
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+    ];
+    let month = MONTHS
+        .iter()
+        .position(|m| words.iter().any(|w| w.starts_with(m)))
+        .map(|at| at as u8 + 1);
+    let Some(month) = month else {
+        return Released::parse(&year.to_string());
+    };
+    let day = words
+        .iter()
+        .find_map(|w| w.parse::<u8>().ok().filter(|d| (1..=31).contains(d)));
+    day.and_then(|d| Released::parse(&format!("{year}-{month:02}-{d:02}")))
+        .or_else(|| Released::parse(&format!("{year}-{month:02}")))
+}
+
+/// A work's edition in `languages` from its editions as Open Library lists
+/// them. Editions with no language named are kept when nothing else says
+/// otherwise, by the owner's rule.
+pub fn edition_release_from(editions: &[&Value], languages: &[String]) -> EditionRelease {
+    let earliest = |a: Option<Released>, b: Option<Released>| match (a, b) {
+        (Some(a), Some(b)) if b.available_from() < a.available_from() => Some(b),
+        (a, b) => a.or(b),
+    };
+    let (mut any_named, mut in_languages) = (false, false);
+    let (mut named, mut unnamed): (Option<Released>, Option<Released>) = (None, None);
+    let mut title: Option<String> = None;
+    for edition in editions {
+        let codes: Vec<&str> = objects_at(edition, "languages")
+            .filter_map(|l| str_at(l, "key"))
+            .map(|key| key.rsplit('/').next().unwrap_or(key))
+            .collect();
+        let date = str_at(edition, "publish_date").and_then(parse_publish_date);
+        if codes.is_empty() {
+            unnamed = earliest(unnamed, date);
+            continue;
+        }
+        any_named = true;
+        if codes
+            .iter()
+            .filter_map(|code| two_letter(code))
+            .any(|code| languages.contains(&code))
+        {
+            in_languages = true;
+            let before = named;
+            named = earliest(named, date);
+            let name = str_at(edition, "title")
+                .map(str::trim)
+                .filter(|t| !t.is_empty());
+            if let Some(name) = name
+                && (title.is_none() || (date.is_some() && named != before))
+            {
+                title = Some(name.to_owned());
+            }
+        }
+    }
+    if !any_named {
+        return EditionRelease {
+            in_languages: true,
+            released: unnamed,
+            title: None,
+        };
+    }
+    if in_languages {
+        return EditionRelease {
+            in_languages: true,
+            released: named.or(unnamed),
+            title,
+        };
+    }
+    EditionRelease {
+        in_languages: unnamed.is_some(),
+        released: unnamed,
+        title: None,
+    }
+}
 
 impl Source for Books {
     fn id(&self) -> &'static str {
         "openlibrary"
     }
 
-    fn creator_releases(&self, name: &str, media: MediaType) -> Reply<Vec<Match>> {
-        if media != MediaType::Books {
-            return Ok(Vec::new());
+    fn creator_kinds(&self) -> &'static [FollowKind] {
+        &[FollowKind::Authors]
+    }
+
+    fn find_creator(&self, _kind: FollowKind, name: &str) -> Reply<Option<CreatorMatch>> {
+        Ok(self.open_library.author_key(name)?.map(|key| CreatorMatch {
+            provider_id: format!("openlibrary:author:{key}"),
+            inactive: None,
+        }))
+    }
+
+    /// The author's newest works, those first published this year or later,
+    /// or last year within thirty days, that are new works and not new
+    /// editions; each with Apple's cover and description when Apple knows
+    /// the book.
+    fn creator_releases(
+        &self,
+        provider_id: &str,
+        _kind: FollowKind,
+        today: Date,
+    ) -> Reply<Vec<Match>> {
+        let Some(key) = provider_id.strip_prefix("openlibrary:author:") else {
+            return Err(Failure::other(format!(
+                "not an Open Library author id: {provider_id}"
+            )));
+        };
+        Ok(self
+            .open_library
+            .newest_by(key, 20)?
+            .into_iter()
+            .filter(|work| is_recent_or_ahead(work.released, today, 30))
+            .filter(|work| self.is_new_work_of(work, today))
+            .map(|work| {
+                let apple = self.apple_fill(&work.title, work.creator.as_deref());
+                Books::with_apple(work, apple.as_ref())
+            })
+            .collect())
+    }
+
+    fn edition_release(&self, source: &str, languages: &[String]) -> Reply<Option<EditionRelease>> {
+        if Books::is_apple(source) || Books::is_google(source) || languages.is_empty() {
+            return Ok(None);
         }
-        self.author_releases(name)
+        self.open_library
+            .edition_release(source, languages)
+            .map(Some)
+    }
+
+    fn inactive_of(
+        &self,
+        kind: FollowKind,
+        names: &[String],
+    ) -> Reply<Option<HashMap<String, String>>> {
+        self.wikidata.inactive_of(kind, names).map(Some)
     }
 
     fn name(&self) -> &'static str {
@@ -984,7 +1155,8 @@ impl Source for Books {
         };
         let mut parts = self
             .wikidata
-            .series_of(&book.title, book.creator.as_deref())?
+            .series_of(&book.title, book.creator.as_deref())
+            .map_err(Failure::from_a_helper)?
             .map(|(parts, _)| parts);
         if parts.is_none() {
             let series_name = name

@@ -11,8 +11,11 @@ use serde_json::Value;
 
 use super::http::{self, Http, int_at, objects_at, str_at};
 use super::text::{pick_by_title_and_year, same_title};
-use super::{Failure, FailureKind, Hits, Match, Reply, Source, TrackInfo};
-use crate::model::{EntryKind, MediaType, Released};
+use super::{
+    CreatorMatch, Failure, FailureKind, FollowKind, Hits, Match, Reply, Source, TrackInfo,
+    is_recent_or_ahead,
+};
+use crate::model::{Date, EntryKind, MediaType, Released};
 
 const API: &str = "https://api.deezer.com";
 
@@ -246,35 +249,55 @@ impl Source for Deezer {
             .and_then(|hit| str_at(&hit, "picture_big").map(str::to_owned)))
     }
 
-    /// The artist's albums and EPs (`/artist/{id}/albums`) whose release
-    /// is still ahead; the list has no artist on its items, so the name
-    /// asked for is the creator.
-    fn creator_releases(&self, name: &str, media: MediaType) -> Reply<Vec<Match>> {
-        if media != MediaType::Music {
-            return Ok(Vec::new());
-        }
-        let Some(artist) = self.artist(name)? else {
-            return Ok(Vec::new());
-        };
-        let Some(id) = int_at(&artist, "id") else {
-            return Ok(Vec::new());
-        };
-        let today = crate::model::Date::today();
-        let albums = self.list(&format!("/artist/{id}/albums"), &[("limit", "50")])?;
-        Ok(albums
+    fn creator_kinds(&self) -> &'static [FollowKind] {
+        &[FollowKind::Artists]
+    }
+
+    /// The artist named exactly `name`, else the first hit.
+    fn find_creator(&self, _kind: FollowKind, name: &str) -> Reply<Option<CreatorMatch>> {
+        let hits = self.list("/search/artist", &[("q", name), ("limit", "5")])?;
+        let found = hits
             .iter()
-            .filter(|item| matches!(str_at(item, "record_type"), Some("album" | "ep") | None))
+            .find(|hit| str_at(hit, "name").is_some_and(|n| n.eq_ignore_ascii_case(name)))
+            .or(hits.first());
+        Ok(found
+            .and_then(|hit| int_at(hit, "id"))
+            .map(|id| CreatorMatch {
+                provider_id: format!("deezer:artist:{id}"),
+                inactive: None,
+            }))
+    }
+
+    /// The artist's albums and EPs (`/artist/{id}/albums`), singles and
+    /// compilations left out, each dated as Deezer lists it, soonest
+    /// first. One request: the name comes from the check.
+    fn creator_releases(
+        &self,
+        provider_id: &str,
+        _kind: FollowKind,
+        today: Date,
+    ) -> Reply<Vec<Match>> {
+        let Some(id) = provider_id.strip_prefix("deezer:artist:") else {
+            return Err(Failure::other(format!(
+                "not a Deezer artist id: {provider_id}"
+            )));
+        };
+        let albums = self.list(&format!("/artist/{id}/albums"), &[("limit", "50")])?;
+        let mut found: Vec<Match> = albums
+            .iter()
+            .filter(|item| matches!(str_at(item, "record_type"), Some("album" | "ep")))
             .filter_map(|item| {
                 let released = Deezer::released(item)?;
-                if released.is_released_on(today) {
+                if !is_recent_or_ahead(Some(released), today, 30) {
                     return None;
                 }
-                let mut found = Deezer::album(item)?;
-                found.released = Some(released);
-                found.creator = Some(name.to_owned());
-                Some(found)
+                let mut album = Deezer::album(item)?;
+                album.released = Some(released);
+                Some(album)
             })
-            .collect())
+            .collect();
+        found.sort_by_key(|m| m.released.map(Released::available_from));
+        Ok(found)
     }
 }
 

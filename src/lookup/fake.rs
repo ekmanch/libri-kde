@@ -4,7 +4,8 @@
 //! asks it on the spot (`Service::is_instant`).
 
 use super::{
-    Episode, GamePlatform, Hits, Match, Reply, SeriesPart, SeriesParts, Source, TrackInfo,
+    CreatorMatch, Episode, FollowKind, GamePlatform, Hits, Match, Reply, SeriesPart, SeriesParts,
+    Source, TrackInfo,
 };
 use crate::model::{Entry, EntryKind, MediaType, Released, Season, Series, text};
 
@@ -859,7 +860,29 @@ impl Source for Fake {
         Ok(series_parts(MediaType::Movies, name).or_else(|| series_parts(MediaType::Books, name)))
     }
 
-    fn creator_releases(&self, name: &str, media: MediaType) -> Reply<Vec<Match>> {
+    fn creator_kinds(&self) -> &'static [FollowKind] {
+        &[FollowKind::Authors, FollowKind::Artists]
+    }
+
+    fn find_creator(&self, kind: FollowKind, name: &str) -> Reply<Option<CreatorMatch>> {
+        Ok(Some(CreatorMatch {
+            provider_id: format!("fake:{}:{name}", kind.key()),
+            inactive: None,
+        }))
+    }
+
+    fn creator_releases(
+        &self,
+        provider_id: &str,
+        kind: FollowKind,
+        _today: crate::model::Date,
+    ) -> Reply<Vec<Match>> {
+        let name = provider_id.rsplit(':').next().unwrap_or_default();
+        let media = if kind == FollowKind::Artists {
+            MediaType::Music
+        } else {
+            MediaType::Books
+        };
         Ok(creator_releases(name, media))
     }
 

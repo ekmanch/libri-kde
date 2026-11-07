@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use super::http::{self, Http, objects_at, str_at};
 use super::text::core_title;
-use super::{Reply, SeriesPart, SeriesParts};
+use super::{FollowKind, Reply, SeriesPart, SeriesParts};
 use crate::model::Released;
 
 const API: &str = "https://www.wikidata.org/w/api.php";
@@ -106,6 +106,157 @@ impl Wikidata {
 
     fn item(row: &Value, key: &str) -> Option<String> {
         Wikidata::value(row, key).map(|v| v.rsplit('/').next().unwrap_or(v).to_owned())
+    }
+
+    /// When the work `title` by `creator` was first published: the earliest
+    /// P577 of the first candidate whose author is `creator`, for telling a
+    /// new work from a new edition of an old one.
+    pub fn first_published(&self, title: &str, creator: Option<&str>) -> Reply<Option<Released>> {
+        let ids = self.search(title)?;
+        if ids.is_empty() {
+            return Ok(None);
+        }
+        let values: Vec<String> = ids.iter().map(|id| format!("wd:{id}")).collect();
+        let rows = self.sparql(&format!(
+            "SELECT ?book ?date ?authorLabel WHERE {{\n  VALUES ?book {{ {} }}\n  \
+             ?book wdt:P577 ?date .\n  OPTIONAL {{ ?book wdt:P50 ?author }}\n  \
+             SERVICE wikibase:label {{ bd:serviceParam wikibase:language \"en\". }}\n}}\nLIMIT 500",
+            values.join(" ")
+        ))?;
+        let mut authors: HashMap<String, Vec<String>> = HashMap::new();
+        let mut dates: HashMap<String, Option<Released>> = HashMap::new();
+        for row in &rows {
+            let Some(id) = Wikidata::item(row, "book") else {
+                continue;
+            };
+            if let Some(author) = Wikidata::value(row, "authorLabel") {
+                authors
+                    .entry(id.clone())
+                    .or_default()
+                    .push(author.to_owned());
+            }
+            let date = Wikidata::released(Wikidata::value(row, "date"));
+            let earliest = dates.entry(id).or_default();
+            if let Some(date) = date
+                && earliest.is_none_or(|e| date.available_from() < e.available_from())
+            {
+                *earliest = Some(date);
+            }
+        }
+        for id in &ids {
+            let Some(date) = dates.get(id) else {
+                continue;
+            };
+            let names = authors.get(id).map(Vec::as_slice).unwrap_or_default();
+            let same = creator.is_none_or(|creator| {
+                let creator = creator.to_lowercase();
+                let words: Vec<&str> = creator
+                    .split_whitespace()
+                    .filter(|w| w.len() >= 3)
+                    .collect();
+                names.iter().any(|name| {
+                    let name = name.to_lowercase();
+                    name.split_whitespace().any(|w| words.contains(&w))
+                })
+            });
+            if same {
+                return Ok(*date);
+            }
+        }
+        Ok(None)
+    }
+
+    /// The classes a name of `kind` is looked for among: people; also
+    /// music groups for artists; companies and studios for studios.
+    fn inactive_classes(kind: FollowKind) -> &'static [&'static str] {
+        match kind {
+            FollowKind::Authors | FollowKind::Directors | FollowKind::Actors => &["Q5"],
+            FollowKind::Artists => &["Q5", "Q215380", "Q2088357", "Q5741069"],
+            FollowKind::Studios => &[
+                "Q4830453",
+                "Q783794",
+                "Q210167",
+                "Q1137109",
+                "Q1107679",
+                "Q18388277",
+            ],
+        }
+    }
+
+    /// For each of `names` Wikidata knows as one of the kind's classes, why
+    /// they are no longer active: only when every item of that name has a
+    /// date of death or dissolution, so a living namesake keeps a creator
+    /// active. The year is the latest date's.
+    pub fn inactive_of(
+        &self,
+        kind: FollowKind,
+        names: &[String],
+    ) -> Reply<HashMap<String, String>> {
+        if names.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let values: Vec<String> = names
+            .iter()
+            .map(|n| format!("\"{}\"@en", n.replace('\\', "\\\\").replace('"', "\\\"")))
+            .collect();
+        let classes: Vec<String> = Wikidata::inactive_classes(kind)
+            .iter()
+            .map(|c| format!("wd:{c}"))
+            .collect();
+        let rows = self.sparql(&format!(
+            "SELECT ?name ?item ?class ?death ?dissolved WHERE {{\n  \
+             VALUES ?name {{ {} }}\n  ?item rdfs:label ?name .\n  ?item wdt:P31 ?class .\n  \
+             VALUES ?class {{ {} }}\n  OPTIONAL {{ ?item wdt:P570 ?death }}\n  \
+             OPTIONAL {{ ?item wdt:P576 ?dissolved }}\n}}\nLIMIT 1000",
+            values.join(" "),
+            classes.join(" ")
+        ))?;
+        type Why = Option<(&'static str, u16)>;
+        let mut by_name: HashMap<String, HashMap<String, Why>> = HashMap::new();
+        for row in &rows {
+            let (Some(name), Some(item)) =
+                (Wikidata::value(row, "name"), Wikidata::item(row, "item"))
+            else {
+                continue;
+            };
+            let year = |key: &str| {
+                Wikidata::released(Wikidata::value(row, key)).map_or(0, |date| date.year)
+            };
+            let why: Why = if Wikidata::value(row, "death").is_some() {
+                Some(("Died", year("death")))
+            } else if Wikidata::value(row, "dissolved").is_some() {
+                let person = Wikidata::item(row, "class").as_deref() == Some("Q5");
+                let word = if kind == FollowKind::Artists && !person {
+                    "Disbanded"
+                } else {
+                    "Dissolved"
+                };
+                Some((word, year("dissolved")))
+            } else {
+                None
+            };
+            let items = by_name.entry(name.to_owned()).or_default();
+            let seen = items.entry(item).or_default();
+            // An item seen with and without a date keeps its date.
+            if why.is_some() {
+                *seen = why;
+            }
+        }
+        let mut result = HashMap::new();
+        for (name, items) in by_name {
+            if items.values().any(Option::is_none) {
+                continue;
+            }
+            if let Some((word, year)) = items.values().flatten().max_by_key(|(_, year)| *year) {
+                let label = if *year == 0 {
+                    (*word).to_owned()
+                } else {
+                    format!("{word} {year}")
+                };
+                result.insert(name, label);
+            }
+        }
+        Ok(result)
     }
 
     /// Whether a Wikidata author name is the entry's creator: a word of

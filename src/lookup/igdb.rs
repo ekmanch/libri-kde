@@ -14,7 +14,8 @@ use super::http::{Http, int_at, objects_at, str_at};
 use super::store::JsonFile;
 use super::text::pick_by_title_and_year;
 use super::{
-    Failure, FailureKind, GamePlatform, Hits, Match, Reply, SeriesPart, SeriesParts, Source,
+    CreatorMatch, Failure, FailureKind, FollowKind, GamePlatform, Hits, Match, Reply, SeriesPart,
+    SeriesParts, Source,
 };
 use crate::clock::Timestamp;
 use crate::model::{Date, MediaType, Released, Series, text};
@@ -650,6 +651,51 @@ impl Source for Igdb {
 
     /// The same name again is usually a remake or a port; the year tells
     /// them apart, and without one the first (IGDB's best) is taken.
+    fn creator_kinds(&self) -> &'static [FollowKind] {
+        &[FollowKind::Studios]
+    }
+
+    /// The company named exactly `name`, else the first hit.
+    fn find_creator(&self, _kind: FollowKind, name: &str) -> Reply<Option<CreatorMatch>> {
+        let hits = self.query(
+            "companies",
+            &format!("search {}; fields id,name; limit 5;", Igdb::quote(name)),
+        )?;
+        let company = hits
+            .iter()
+            .find(|c| str_at(c, "name").is_some_and(|n| n.eq_ignore_ascii_case(name)))
+            .or(hits.first());
+        Ok(company
+            .and_then(|c| int_at(c, "id"))
+            .map(|id| CreatorMatch {
+                provider_id: format!("igdb:company:{id}"),
+                inactive: None,
+            }))
+    }
+
+    /// The games the company is involved in from thirty days ago on,
+    /// soonest first; packs and updates left out.
+    fn creator_releases(
+        &self,
+        provider_id: &str,
+        _kind: FollowKind,
+        today: Date,
+    ) -> Reply<Vec<Match>> {
+        let Some(id) = provider_id.strip_prefix("igdb:company:") else {
+            return Err(Failure::other(format!(
+                "not an IGDB company id: {provider_id}"
+            )));
+        };
+        let epoch = Date::parse("1970-01-01").expect("a date");
+        let from = epoch.days_until(today.add_days(-30)) * 86_400;
+        let games = self.games(&format!(
+            "fields {SEARCH_FIELDS}; where involved_companies.company = {id} & \
+             first_release_date >= {from} & version_parent = null & game_type != (13, 14); \
+             sort first_release_date asc; limit 50;"
+        ))?;
+        Ok(games.iter().filter_map(Igdb::hit).collect())
+    }
+
     fn match_title(
         &self,
         title: &str,

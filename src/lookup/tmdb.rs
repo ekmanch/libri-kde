@@ -11,14 +11,17 @@ use serde_json::Value;
 use super::http::{self, Http, int_at, objects_at, str_at};
 use super::text::{collection_name, pick_by_title_and_year};
 use super::{
-    Episode, Failure, FailureKind, Hits, Match, Reply, SeriesPart, SeriesParts, ShowSeasons, Source,
+    CreatorMatch, Episode, Failure, FailureKind, FollowKind, Hits, Match, Reply, SeriesPart,
+    SeriesParts, ShowSeasons, Source, is_recent_or_ahead,
 };
-use crate::model::{MediaType, Released, Season, Series};
+use crate::model::{Date, MediaType, Released, Season, Series};
 
 const API: &str = "https://api.themoviedb.org/3/";
 const IMAGES: &str = "https://image.tmdb.org/t/p/";
 /// Poster widths: rows show a small thumbnail, the cache keeps the list
 /// and details size.
+/// How long after its first release a credit's movie is still listed.
+const DIGITAL_WINDOW: i64 = 120;
 const ROW_POSTER: &str = "w185";
 const COVER_POSTER: &str = "w342";
 /// How many of the billed cast a match carries.
@@ -120,6 +123,37 @@ impl Tmdb {
                 })
             })
             .collect()
+    }
+
+    /// A movie's first date from its `release_dates` answer: a theatrical
+    /// date (type 3), else a limited one (2), or a digital one (4) if
+    /// earlier.
+    fn movie_date_from(json: &Value) -> Option<Released> {
+        let earlier = |a: Option<Released>, b: Released| match a {
+            Some(a) if a.available_from() <= b.available_from() => Some(a),
+            _ => Some(b),
+        };
+        let (mut theatrical, mut limited, mut digital) = (None, None, None);
+        for country in objects_at(json, "results") {
+            for release in objects_at(country, "release_dates") {
+                let Some(date) = str_at(release, "release_date")
+                    .and_then(|d| d.split('T').next())
+                    .and_then(Released::parse)
+                else {
+                    continue;
+                };
+                match int_at(release, "type") {
+                    Some(3) => theatrical = earlier(theatrical, date),
+                    Some(2) => limited = earlier(limited, date),
+                    Some(4) => digital = earlier(digital, date),
+                    _ => {}
+                }
+            }
+        }
+        match (theatrical.or(limited), digital) {
+            (Some(cinema), Some(digital)) => earlier(Some(cinema), digital),
+            (cinema, digital) => cinema.or(digital),
+        }
     }
 
     /// `/collection/{id}` for the collection a movie record names: the
@@ -352,6 +386,133 @@ impl Source for Tmdb {
         }
         let json = self.get(&format!("movie/{id}"), &[])?;
         self.collection_of(&json)
+    }
+
+    fn creator_kinds(&self) -> &'static [FollowKind] {
+        &[
+            FollowKind::Directors,
+            FollowKind::Actors,
+            FollowKind::Studios,
+        ]
+    }
+
+    /// People: the most popular of that name, with `deathday` saying
+    /// whether they have died. Studios: the company named exactly, else
+    /// the first.
+    fn find_creator(&self, kind: FollowKind, name: &str) -> Reply<Option<CreatorMatch>> {
+        if kind == FollowKind::Studios {
+            let json = self.get("search/company", &[("query", name)])?;
+            let hits: Vec<&Value> = objects_at(&json, "results").collect();
+            let company = hits
+                .iter()
+                .find(|c| str_at(c, "name").is_some_and(|n| n.eq_ignore_ascii_case(name)))
+                .or(hits.first());
+            return Ok(company
+                .and_then(|c| int_at(c, "id"))
+                .map(|id| CreatorMatch {
+                    provider_id: format!("tmdb:company:{id}"),
+                    inactive: None,
+                }));
+        }
+        let json = self.get(
+            "search/person",
+            &[("query", name), ("include_adult", "false")],
+        )?;
+        let Some(id) = objects_at(&json, "results")
+            .next()
+            .and_then(|p| int_at(p, "id"))
+        else {
+            return Ok(None);
+        };
+        let person = self.get(&format!("person/{id}"), &[])?;
+        Ok(Some(CreatorMatch {
+            provider_id: format!("tmdb:person:{id}"),
+            inactive: str_at(&person, "deathday").map(|day| match Released::parse(day) {
+                Some(day) => format!("Died {}", day.year),
+                None => "Died".to_owned(),
+            }),
+        }))
+    }
+
+    /// A person's credits: the movies and shows they directed (or created)
+    /// or acted in; a company's movies from thirty days ago on.
+    fn creator_releases(
+        &self,
+        provider_id: &str,
+        kind: FollowKind,
+        today: Date,
+    ) -> Reply<Vec<Match>> {
+        if let Some(id) = provider_id.strip_prefix("tmdb:company:") {
+            let from = today.add_days(-30).to_string();
+            let json = self.get(
+                "discover/movie",
+                &[
+                    ("with_companies", id),
+                    ("sort_by", "primary_release_date.asc"),
+                    ("primary_release_date.gte", &from),
+                    ("include_adult", "false"),
+                ],
+            )?;
+            return Ok(objects_at(&json, "results")
+                .filter_map(|item| Tmdb::hit(item, MediaType::Movies))
+                .collect());
+        }
+        let Some(id) = provider_id.strip_prefix("tmdb:person:") else {
+            return Err(Failure::other(format!(
+                "not a TMDB creator id: {provider_id}"
+            )));
+        };
+        let json = self.get(&format!("person/{id}/combined_credits"), &[])?;
+        let credits: Vec<&Value> = if kind == FollowKind::Actors {
+            objects_at(&json, "cast").collect()
+        } else {
+            objects_at(&json, "crew")
+                .filter(|c| {
+                    matches!(
+                        str_at(c, "job"),
+                        Some("Director" | "Creator" | "Showrunner")
+                    )
+                })
+                .collect()
+        };
+        let mut seen = std::collections::BTreeSet::new();
+        let mut found: Vec<Match> = credits
+            .into_iter()
+            .filter(|c| {
+                seen.insert((
+                    str_at(c, "media_type").unwrap_or_default().to_owned(),
+                    int_at(c, "id"),
+                ))
+            })
+            .filter_map(|c| match str_at(c, "media_type") {
+                Some("movie") => Tmdb::hit(c, MediaType::Movies),
+                Some("tv") => Tmdb::hit(c, MediaType::Shows),
+                _ => None,
+            })
+            .filter(|m| {
+                // A movie stays a while, since its digital date comes
+                // months after the cinemas.
+                let days = if m.media == MediaType::Movies {
+                    DIGITAL_WINDOW
+                } else {
+                    30
+                };
+                is_recent_or_ahead(m.released, today, days)
+            })
+            .collect();
+        found.sort_by_key(|m| m.released.map(Released::available_from));
+        Ok(found)
+    }
+
+    /// The earliest of a movie's theatrical (else limited) and digital
+    /// dates, by `/movie/{id}/release_dates`.
+    fn movie_date(&self, source: &str) -> Reply<Option<Released>> {
+        let (kind, id) = Tmdb::parse(source)?;
+        if kind != "movie" {
+            return Ok(None);
+        }
+        let json = self.get(&format!("movie/{id}/release_dates"), &[])?;
+        Ok(Tmdb::movie_date_from(&json))
     }
 
     fn cover_url(&self, source: &str, _media: MediaType) -> Reply<Option<String>> {

@@ -1911,15 +1911,34 @@ impl App {
         let service = self.lookups.clone();
         let library = self.repo.library().clone();
         let today = self.today;
-        let previous = self.discover.record.items.clone();
+        let previous = self.discover.record.clone();
         if service.is_instant() {
-            let outcome = discover::run(&service, &library, today, &previous);
+            let settings = discover::Settings::default();
+            let outcome = discover::run(&service, &library, today, &settings, &previous, None);
             self.discover.finish(outcome, now);
             return Task::none();
         }
         crate::trace::line("discover: the daily check starts");
+        let github = self.github.clone();
+        let target = self.engine.as_ref().map(|engine| engine.target().clone());
+        let file = self.discover.file().map(std::path::Path::to_path_buf);
+        let settings_file = self
+            .discover
+            .settings_file()
+            .map(std::path::Path::to_path_buf);
         Task::perform(
-            blocking(move || Ok(discover::run(&service, &library, today, &previous))),
+            blocking(move || {
+                let remote = github.as_deref().zip(target.as_ref());
+                let settings = discover::read_settings(remote, settings_file.as_deref())?;
+                Ok(discover::run(
+                    &service,
+                    &library,
+                    today,
+                    &settings,
+                    &previous,
+                    file.as_deref(),
+                ))
+            }),
             move |result| {
                 let outcome = result.unwrap_or_else(|error| {
                     eprintln!("libri: the daily check did not finish: {error}");

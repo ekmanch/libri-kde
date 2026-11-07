@@ -162,3 +162,52 @@ fn a_cover_is_resolved_and_its_image_fetched() {
     assert!(photo.is_some());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// The whole daily check on the real library and the real `settings.json`,
+/// writing only to `LIBRI_LIVE_DIR`:
+///
+/// ```fish
+/// LIBRI_LIVE_SETTINGS=../library/settings.json LIBRI_LIVE_DIR=/tmp/live \
+///     cargo test --test lookup_live -- --ignored --nocapture the_daily_check
+/// ```
+#[test]
+#[ignore = "asks the real providers; run with --ignored"]
+fn the_daily_check_runs_on_the_real_library() {
+    use libri::discover::{self, Settings};
+    use libri::model::{Date, codec};
+
+    let dir = std::path::PathBuf::from(std::env::var("LIBRI_LIVE_DIR").expect("LIBRI_LIVE_DIR"));
+    let settings = std::env::var("LIBRI_LIVE_SETTINGS").expect("LIBRI_LIVE_SETTINGS");
+    let settings = Settings::parse(&std::fs::read_to_string(settings).unwrap());
+    let path = libri::storage::data_dir().unwrap().join("library.json");
+    let library = codec::decode(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let service = Service::real(&Keys::load(), Some(&dir));
+    let file = dir.join("discover.json");
+    // Goes on from what an earlier run in that folder left, as a retry does.
+    let previous = discover::State::at(Some(&dir), None).record;
+    let start = std::time::Instant::now();
+    let outcome = discover::run(
+        &service,
+        &library,
+        Date::today(),
+        &settings,
+        &previous,
+        Some(&file),
+    );
+    println!("took {:?}", start.elapsed());
+    println!(
+        "complete: {}, stopped: {:?}",
+        outcome.complete, outcome.stopped
+    );
+    println!("asked: {}", outcome.sources.join(", "));
+    println!("{} items", outcome.items.len());
+    for item in &outcome.items {
+        println!(
+            "  {:?} {} [{}] {}",
+            item.released.map(|r| r.to_string()),
+            item.full_title(),
+            item.provider,
+            item.why
+        );
+    }
+}
