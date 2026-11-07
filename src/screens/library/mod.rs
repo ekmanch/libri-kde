@@ -1263,7 +1263,11 @@ pub fn view<'a>(app: &'a App) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
     let state = &app.library;
     let library = app.repo.library();
-    let listing = state.listing(library, app.today);
+    // The filtered, sorted library: the lists, Home's toolbar and the tag
+    // picker want it, a page and Coming soon do not, and it is not cheap
+    // on a large library to make on every frame of a slide.
+    let listing = std::cell::OnceCell::new();
+    let listing = || listing.get_or_init(|| state.listing(library, app.today));
 
     let mode = panel(app);
     // The toolbar and the chips (or a page's back row) span the content's
@@ -1274,15 +1278,15 @@ pub fn view<'a>(app: &'a App) -> Element<'a, AppMessage> {
         } else if state.soon {
             soon::view(app)
         } else if state.is_overview() {
-            (toolbar::toolbar(app, &listing), overview::body(app))
+            (toolbar::toolbar(app, listing()), overview::body(app))
         } else {
             (
                 column![
-                    toolbar::toolbar(app, &listing),
-                    toolbar::chips(app, &listing)
+                    toolbar::toolbar(app, listing()),
+                    toolbar::chips(app, listing())
                 ]
                 .into(),
-                entries::body(app, &listing),
+                entries::body(app, listing()),
             )
         };
     // Unpinned, the details slide in as a drawer over the list's right
@@ -1305,7 +1309,7 @@ pub fn view<'a>(app: &'a App) -> Element<'a, AppMessage> {
     let main: Element<'a, AppMessage> = column![top, lower].into();
     let picker = match (&state.picker, &state.cover_dialog) {
         (_, Some((media, name))) => Some(entry::series::cover_dialog(app, *media, name)),
-        (Some(picker), None) => Some(tags::picker(app, picker, &listing)),
+        (Some(picker), None) => Some(tags::picker(app, picker, listing())),
         (None, None) => None,
     };
     let close = if state.cover_dialog.is_some() {

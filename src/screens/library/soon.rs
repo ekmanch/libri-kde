@@ -279,10 +279,11 @@ pub struct Lists<'a> {
 impl<'a> Lists<'a> {
     pub fn of(app: &'a App) -> Lists<'a> {
         let library = app.repo.library();
+        let (discover, hidden) = app.discover.lists(library);
         Lists {
             library: upcoming::library_upcoming(library, app.today),
-            discover: app.discover.visible(library),
-            hidden: app.discover.hidden_items(library),
+            discover,
+            hidden,
         }
     }
 

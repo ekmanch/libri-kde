@@ -1353,11 +1353,10 @@ mod tests {
             Duration::from_millis(200),
             Easing::STANDARD,
         ));
+        // Only its drawing moves (`ui::slide`), so its layout stays put and
+        // nothing in it reports a new place on every frame.
         let start = place(&app, "RATING").expect("still in the tree");
-        assert!(
-            start.x >= size.width,
-            "off the window at the start: {start:?} in {size:?}"
-        );
+        assert_eq!(start, shown, "the layout never moves");
         assert_eq!(place(&app, "Add"), Some(still), "the toolbar never moves");
     }
 

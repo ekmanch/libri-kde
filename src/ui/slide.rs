@@ -1,9 +1,14 @@
 //! Moves its content by an offset, without changing its size or anything
 //! around it: the details drawer slides in from the window's edge through
 //! it, and the Coming soon page's list slides sideways between its
-//! slices. The content is laid out as it is and then placed `offset` px
-//! away, so drawing and the mouse follow it there, and what runs past the
-//! edge is simply off the window (or clipped by a container around it).
+//! slices. The content keeps its layout where it is and is drawn `offset`
+//! px away, with the mouse shifted to match, cut to the slide's own place:
+//! what moves past its edge is not drawn.
+//!
+//! Only the drawing moves, never the layout: a scroll area reports its
+//! viewport whenever its bounds change, so a moved layout made the Coming
+//! soon list send `Scrolled` three times a frame, each one a rebuild of the
+//! whole window, and the slide ran at a fraction of the display's rate.
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Tree, Widget, tree};
@@ -67,10 +72,7 @@ where
     ) -> layout::Node {
         let node = self.content.as_widget_mut().layout(tree, renderer, limits);
         let size = node.size();
-        layout::Node::with_children(
-            size,
-            vec![node.move_to(Point::new(self.offset.x, self.offset.y))],
-        )
+        layout::Node::with_children(size, vec![node.move_to(Point::ORIGIN)])
     }
 
     fn update(
@@ -86,7 +88,14 @@ where
     ) {
         if let Some(inner) = layout.children().next() {
             self.content.as_widget_mut().update(
-                tree, event, inner, cursor, renderer, clipboard, shell, viewport,
+                tree,
+                event,
+                inner,
+                cursor - self.offset,
+                renderer,
+                clipboard,
+                shell,
+                &(*viewport - self.offset),
             );
         }
     }
@@ -103,9 +112,13 @@ where
             .children()
             .next()
             .map_or_else(Default::default, |inner| {
-                self.content
-                    .as_widget()
-                    .mouse_interaction(tree, inner, cursor, viewport, renderer)
+                self.content.as_widget().mouse_interaction(
+                    tree,
+                    inner,
+                    cursor - self.offset,
+                    &(*viewport - self.offset),
+                    renderer,
+                )
             })
     }
 
@@ -119,13 +132,30 @@ where
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        if let Some(inner) = layout.children().next()
-            && inner.bounds().intersects(viewport)
-        {
+        let Some(inner) = layout.children().next() else {
+            return;
+        };
+        if self.offset == Vector::ZERO {
             self.content
                 .as_widget()
                 .draw(tree, renderer, theme, style, inner, cursor, viewport);
+            return;
         }
+        // Moved, the content is cut to where the slide itself is: iced's
+        // `clip` on a container only narrows the viewport it hands down,
+        // and a scroll area whose content fits draws it without a clip of
+        // its own, so a short Coming soon list slid over the panel.
+        let Some(clip) = layout.bounds().intersection(viewport) else {
+            return;
+        };
+        let (cursor, viewport) = (cursor - self.offset, clip - self.offset);
+        renderer.with_layer(clip, |renderer| {
+            renderer.with_translation(self.offset, |renderer| {
+                self.content
+                    .as_widget()
+                    .draw(tree, renderer, theme, style, inner, cursor, &viewport);
+            });
+        });
     }
 
     fn operate(
@@ -151,9 +181,13 @@ where
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
         let inner = layout.children().next()?;
-        self.content
-            .as_widget_mut()
-            .overlay(tree, inner, renderer, viewport, translation)
+        self.content.as_widget_mut().overlay(
+            tree,
+            inner,
+            renderer,
+            viewport,
+            translation + self.offset,
+        )
     }
 }
 
@@ -166,5 +200,47 @@ where
 {
     fn from(slide: Slide<'a, Message, Theme, Renderer>) -> Self {
         Element::new(slide)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::widget::{button, container};
+    use iced::{Element, Point};
+    use iced_test::simulator;
+
+    use super::slide;
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct Pressed;
+
+    fn moved(offset: f32) -> Element<'static, Pressed> {
+        container(slide(
+            button("Go").width(100).height(40).on_press(Pressed),
+            offset,
+        ))
+        .width(400)
+        .height(100)
+        .into()
+    }
+
+    #[test]
+    fn the_drawing_and_the_mouse_move_but_never_the_layout() {
+        // The layout is where it would be without the slide.
+        let mut ui = simulator(moved(200.0));
+        assert_eq!(ui.find("Go").unwrap().bounds(), {
+            let mut still = simulator(moved(0.0));
+            still.find("Go").unwrap().bounds()
+        });
+
+        // A click where the button was laid out misses it; one where it is
+        // drawn, 200 px on, presses it.
+        ui.point_at(Point::new(50.0, 20.0));
+        let _ = ui.simulate(iced_test::simulator::click());
+        assert!(ui.into_messages().next().is_none());
+        let mut ui = simulator(moved(200.0));
+        ui.point_at(Point::new(250.0, 20.0));
+        let _ = ui.simulate(iced_test::simulator::click());
+        assert_eq!(ui.into_messages().collect::<Vec<_>>(), vec![Pressed]);
     }
 }

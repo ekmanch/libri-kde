@@ -33,7 +33,7 @@
 //! `settings.json` sync of TODO.md phase 4 syncs them with the phone;
 //! until then the file is this computer's.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -110,14 +110,49 @@ impl Found {
     /// an entry, the show has the season by now, or an entry of the type
     /// has its title (added by hand).
     pub fn in_library(&self, library: &Library) -> bool {
+        self.in_owned(&Owned::of(library))
+    }
+
+    fn in_owned(&self, owned: &Owned<'_>) -> bool {
         match &self.kind {
-            Kind::Season { show, number } => library
+            Kind::Season { show, number } => owned
+                .library
                 .entry(show)
                 .is_none_or(|e| e.season_list().iter().any(|s| s.season == *number)),
-            Kind::Part { .. } | Kind::Creator => library.entries.iter().any(|e| {
-                e.source.as_deref() == Some(self.source.as_str())
-                    || (e.media == self.media && lookup::text::same_title(&e.title, &self.title))
-            }),
+            Kind::Part { .. } | Kind::Creator => {
+                owned.sources.contains(self.source.as_str())
+                    || owned
+                        .titles
+                        .contains(&(self.media, lookup::text::title_key(&self.title)))
+            }
+        }
+    }
+}
+
+/// The library's lookup ids and titles (as `lookup::text::same_title`
+/// compares them), gathered once so each item asks a set: the page is
+/// drawn on every frame of a slide, and asking every entry for every item
+/// took 4 ms a frame on a library of a thousand entries (2026-11-07).
+struct Owned<'a> {
+    library: &'a Library,
+    sources: HashSet<&'a str>,
+    titles: HashSet<(MediaType, String)>,
+}
+
+impl<'a> Owned<'a> {
+    fn of(library: &'a Library) -> Owned<'a> {
+        Owned {
+            library,
+            sources: library
+                .entries
+                .iter()
+                .filter_map(|e| e.source.as_deref())
+                .collect(),
+            titles: library
+                .entries
+                .iter()
+                .map(|e| (e.media, lookup::text::title_key(&e.title)))
+                .collect(),
         }
     }
 }
@@ -588,20 +623,23 @@ impl State {
 
     /// The items Discover lists: not in the library, not hidden.
     pub fn visible(&self, library: &Library) -> Vec<&Found> {
-        self.record
-            .items
-            .iter()
-            .filter(|item| !item.in_library(library) && !self.hidden.contains(&item.key))
-            .collect()
+        self.lists(library).0
     }
 
     /// The hidden items still worth restoring: not in the library.
     pub fn hidden_items(&self, library: &Library) -> Vec<&Found> {
+        self.lists(library).1
+    }
+
+    /// Both at once, the library gathered once: what `visible` and
+    /// `hidden_items` return.
+    pub fn lists(&self, library: &Library) -> (Vec<&Found>, Vec<&Found>) {
+        let owned = Owned::of(library);
         self.record
             .items
             .iter()
-            .filter(|item| !item.in_library(library) && self.hidden.contains(&item.key))
-            .collect()
+            .filter(|item| !item.in_owned(&owned))
+            .partition(|item| !self.hidden.contains(&item.key))
     }
 
     pub fn item(&self, key: &str) -> Option<&Found> {
