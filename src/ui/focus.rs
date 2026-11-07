@@ -296,9 +296,10 @@ where
 
 /// The screen under a modal dialog: drawn and laid out as usual, but
 /// while `active`, focus operations and keys stop here, so Tab and Enter
-/// stay in the dialog. Inactive (no dialog open) it passes everything
-/// through; it stays in the tree so the tree keeps its shape, see
-/// `ui::modal`.
+/// stay in the dialog; only a change of the modifiers passes, so the
+/// widgets under the dialog keep theirs current. Inactive (no dialog
+/// open) it passes everything through; it stays in the tree so the tree
+/// keeps its shape, see `ui::modal`.
 pub struct Barrier<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     child: Element<'a, Message, Theme, Renderer>,
     active: bool,
@@ -368,7 +369,15 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        if self.active && matches!(event, Event::Keyboard(_)) {
+        // A change of the modifiers goes through: iced's widgets keep their
+        // own copy (the scrollable swaps the wheel's axes while Shift is
+        // held), and one that missed the release of a Shift held when the
+        // dialog opened would keep a phantom Shift until the window lost
+        // focus (2026-11-07, a Movies list whose wheel went dead).
+        if self.active
+            && matches!(event, Event::Keyboard(_))
+            && !matches!(event, Event::Keyboard(keyboard::Event::ModifiersChanged(_)))
+        {
             return;
         }
         self.child.as_widget_mut().update(

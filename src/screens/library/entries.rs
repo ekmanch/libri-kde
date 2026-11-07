@@ -882,4 +882,67 @@ mod tests {
             }
         }
     }
+
+    /// A Shift held when a dialog opens (Ctrl+Shift+click opens Edit) and
+    /// released inside it: the list under the dialog must still hear the
+    /// release, or its scrollable keeps a phantom Shift and the wheel
+    /// scrolls sideways, which a vertical list drops (2026-11-07).
+    #[test]
+    fn a_shift_released_inside_a_dialog_still_lets_the_wheel_scroll() {
+        use iced::advanced::clipboard::Null;
+        use iced::advanced::renderer::Headless;
+        use iced::keyboard::{self, Modifiers};
+        use iced::mouse::{self, ScrollDelta};
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+
+        let mut renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as Headless>::new(iced::Font::default(), 14.into(), None),
+        )
+        .expect("a headless renderer");
+        let size = crate::app::WINDOW_SIZE;
+        let mut app = long_grid();
+        let id = app.library.listing(app.repo.library(), app.today).shown[0]
+            .id
+            .clone();
+        let position = iced::Point::new(size.width / 2.0, size.height / 2.0);
+        let cursor = mouse::Cursor::Available(position);
+        let wheel = iced::Event::Mouse(mouse::Event::WheelScrolled {
+            delta: ScrollDelta::Lines { x: 0.0, y: -1.0 },
+        });
+        let modifiers = |m| iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m));
+        // One frame: the view built on the cache, the events, the list's
+        // scroll offsets it reported.
+        let mut frame = |app: &App, cache: Cache, events: &[iced::Event]| {
+            let mut ui = UserInterface::build(app.view(), size, cache, &mut renderer);
+            let mut messages = Vec::new();
+            let _ = ui.update(events, cursor, &mut renderer, &mut Null, &mut messages);
+            let offsets: Vec<f32> = messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    AppMessage::Library(Message::Scrolled(scroll)) => Some(scroll.offset),
+                    _ => None,
+                })
+                .collect();
+            (ui.into_cache(), offsets)
+        };
+        let moved = iced::Event::Mouse(mouse::Event::CursorMoved { position });
+        let (cache, offsets) = frame(&app, Cache::default(), &[moved, wheel.clone()]);
+        let first = offsets[0];
+        assert!(first > 0.0, "the wheel scrolls the list: {offsets:?}");
+        let (cache, _) = frame(
+            &app,
+            cache,
+            &[modifiers(Modifiers::CTRL | Modifiers::SHIFT)],
+        );
+        let _ = app.update(AppMessage::Entry(crate::screens::entry::Message::Edit(id)));
+        assert!(app.dialog.is_some());
+        let (cache, _) = frame(&app, cache, &[modifiers(Modifiers::empty())]);
+        let _ = app.update(AppMessage::Entry(crate::screens::entry::Message::Close));
+        assert!(app.dialog.is_none());
+        let (_, offsets) = frame(&app, cache, &[wheel]);
+        assert!(
+            offsets.first().is_some_and(|&offset| offset > first),
+            "the wheel still scrolls after the dialog: {offsets:?}"
+        );
+    }
 }
