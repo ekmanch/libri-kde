@@ -1236,9 +1236,19 @@ impl Form {
     /// into it.
     fn open_group(&mut self, category: TagCategory) {
         if let Some(picker) = &mut self.picker {
-            // A group holding a tag on this entry is open by default.
-            picker.open(category, true);
+            picker.open(category);
         }
+    }
+
+    /// The tag picker as it opens: the groups holding a tag on this entry
+    /// unfolded.
+    pub fn picker_state(&self, library: &Library) -> PickerState {
+        let groups = self.picker_groups(library);
+        PickerState::opening(tags::groups_with_picks(
+            groups.iter().map(|(c, names)| (*c, names.as_slice())),
+            |tag| self.categories_of(tag, library).len() > 1,
+            |tag, category| self.has_tag_as(tag, category, library),
+        ))
     }
 
     /// Re-keys the entry's pick for `tag` after its categories change from
@@ -1544,7 +1554,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::EditTags(id) => {
             let entry = app.repo.library().entry(&id).expect("checked above");
             let mut form = Form::edit(entry);
-            form.picker = Some(PickerState::default());
+            form.picker = Some(form.picker_state(app.repo.library()));
             app.dialog = Some(Dialog::Tags(Box::new(form)));
         }
         Message::SaveTags => {
@@ -2137,7 +2147,7 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
         Message::Description(action) => form.description.perform(action),
         Message::Note(note) => form.note = note,
         Message::AlsoPlan(plan) => form.also_plan = plan,
-        Message::OpenPicker => form.picker = Some(PickerState::default()),
+        Message::OpenPicker => form.picker = Some(form.picker_state(library)),
         Message::ClosePicker => form.picker = None,
         Message::Picker(message) => {
             if let Some(picker) = &mut form.picker {
@@ -2411,9 +2421,19 @@ pub fn confirm(app: &mut App) -> Task<AppMessage> {
     update(app, message)
 }
 
+/// A click on the scrim: the details' tag picker keeps what was picked,
+/// as Done does; every other dialog closes as its X does.
+pub fn dismiss_message(dialog: &Dialog) -> Message {
+    match dialog {
+        Dialog::Tags(_) => Message::SaveTags,
+        _ => Message::Close,
+    }
+}
+
 /// The open dialog over `base`.
 pub fn overlay<'a>(app: &'a App, base: Element<'a, AppMessage>) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
+    let on_dismiss = app.dialog.as_ref().map_or(Message::Close, dismiss_message);
     let dialog = app.dialog.as_ref().map(|dialog| match dialog {
         Dialog::Form(form) => form::view(app, form),
         Dialog::Tags(form) => form::tags_view(app, form),
@@ -2422,7 +2442,7 @@ pub fn overlay<'a>(app: &'a App, base: Element<'a, AppMessage>) -> Element<'a, A
         Dialog::SeasonDropped { id, season } => dialogs::season_dropped(app, id, *season),
         Dialog::Cover(view) => cover::view(app, view),
     });
-    ui::modal(base, dialog, AppMessage::Entry(Message::Close), &tokens)
+    ui::modal(base, dialog, AppMessage::Entry(on_dismiss), &tokens)
 }
 
 #[cfg(test)]
@@ -3291,13 +3311,17 @@ mod tests {
 
     const BABY: &str = "movies/million-dollar-baby-2004";
 
-    /// "+ Tag" in the details pane: the picker alone, and Done writes the
-    /// tags as one change; X drops them.
+    /// "+ Tag" in the details pane: the picker alone, and Done or a click
+    /// outside writes the tags as one change; X drops them.
     #[test]
     fn the_details_picker_saves_the_tags_as_one_change_and_close_drops_them() {
         let mut app = app();
         send(&mut app, Message::EditTags(BABY.into()));
         assert!(matches!(app.dialog, Some(Dialog::Tags(_))));
+        assert!(matches!(
+            dismiss_message(app.dialog.as_ref().unwrap()),
+            Message::SaveTags
+        ));
         send(
             &mut app,
             Message::Picker(PickerMessage::Toggle("horror".into(), None)),
@@ -3393,6 +3417,91 @@ mod tests {
         assert!(form(&app).new_tag.is_none());
         assert!(dismiss_top(&mut app));
         assert!(app.dialog.is_none());
+    }
+
+    /// A click beside the details' tag sheet saves the picks; one on the
+    /// sheet's own title does nothing (the sheet is opaque).
+    #[test]
+    fn a_click_beside_the_details_picker_saves_and_one_on_it_stays() {
+        use iced::mouse::{Button, Event as Mouse};
+
+        let mut app = app();
+        send(&mut app, Message::EditTags(BABY.into()));
+        let click = |app: &App, at: iced::Point| -> Vec<Message> {
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            ui.point_at(at);
+            let _ = ui.simulate([
+                iced::Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+                iced::Event::Mouse(Mouse::ButtonReleased(Button::Left)),
+            ]);
+            ui.into_messages()
+                .filter_map(|message| match message {
+                    AppMessage::Entry(message) => Some(message),
+                    _ => None,
+                })
+                .collect()
+        };
+        let title = {
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            ui.find("Tags")
+                .expect("the sheet's title")
+                .bounds()
+                .center()
+        };
+        assert!(
+            click(&app, title).is_empty(),
+            "a click on the sheet's title sends nothing"
+        );
+        let beside = click(&app, iced::Point::new(12.0, 12.0));
+        assert!(
+            beside.iter().any(|m| matches!(m, Message::SaveTags)),
+            "a click beside the sheet saves: {beside:?}"
+        );
+    }
+
+    /// The groups holding a tag on the entry open with the picker, and a
+    /// tick neither folds nor unfolds a group: the one it was ticked in
+    /// stays as it was.
+    #[test]
+    fn the_picker_opens_the_groups_with_a_pick_and_a_tick_keeps_them() {
+        let mut app = app();
+        send(&mut app, Message::EditTags(BABY.into()));
+        let open = |app: &App| form(app).picker.as_ref().unwrap().open.clone();
+        assert_eq!(
+            open(&app).into_iter().collect::<Vec<_>>(),
+            [
+                TagCategory::Genres,
+                TagCategory::Directors,
+                TagCategory::Actors
+            ],
+            "drama, and Clint Eastwood as director and actor"
+        );
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::ToggleGroup(TagCategory::Mood)),
+        );
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Toggle("cozy".into(), None)),
+        );
+        assert!(form(&app).tags.iter().any(|t| t == "cozy"));
+        assert!(open(&app).contains(&TagCategory::Mood), "stays open");
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Toggle("drama".into(), None)),
+        );
+        assert!(
+            open(&app).contains(&TagCategory::Genres),
+            "the last untick keeps it open"
+        );
     }
 
     /// The note is typed in the details pane: Enter saves it as one change,

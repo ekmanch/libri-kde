@@ -1,11 +1,12 @@
 //! The tag picker, one widget for the Filter popover's "All tags…", the
 //! entry form's Tags and the plan dialog's linked hashtags: a search
 //! across every group, groups that fold (those holding a picked tag start
-//! open), a tag in several categories as a chip under each with its own
-//! tick, a group of more than 24 tags as one row that opens the full list
-//! (search, letter headers, a letter rail, a check per row), and, in the
-//! entry form, a right-click menu on every chip and "+ Add to Directors"
-//! for a person found under another people category.
+//! open, and a tick never folds one), a tag in several categories as a
+//! chip under each with its own tick, a group of more than 24 tags as one
+//! row that opens the full list (a "‹ Tags" row back to the groups, the
+//! group's name and count, search, letter headers, a letter rail, a check
+//! per row), and, in the entry form, a right-click menu on every chip and
+//! "+ Add to Directors" for a person found under another people category.
 //!
 //! The state and the messages are `crate::tags`; the caller maps them into
 //! its own messages with `map`, and wraps `header`, `body` and `footer` in
@@ -44,8 +45,6 @@ pub struct Picker<'a, M> {
     pub is_on: IsOn<'a>,
     /// Whether a group shows before anything is typed.
     pub visible: Box<dyn Fn(TagCategory) -> bool + 'a>,
-    /// Whether a group starts open, given how many of its tags are picked.
-    pub default_open: Box<dyn Fn(TagCategory, usize) -> bool + 'a>,
     /// A group with more tags than this is a row that opens the full list.
     pub long_group: usize,
     /// The right-click menu on chips (the entry form).
@@ -89,8 +88,9 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
     }
 
     /// The dialog's title row: `back` (the plan dialog's way back to the
-    /// form), the title and subtitle, and Close; inside a long group, its
-    /// own back arrow, name and count line instead.
+    /// form), the title and subtitle, and Close; inside a long group, the
+    /// "‹ Tags" row back to the groups instead (the group's own name
+    /// heads the body).
     pub fn header(
         &self,
         title: &str,
@@ -101,24 +101,8 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
     ) -> Element<'a, M> {
         let mut heading = Row::new().spacing(8).align_y(Center);
         match &self.state.drill {
-            Some(drill) => {
-                let all = self.all_in(drill.category);
-                let selected = all
-                    .iter()
-                    .filter(|tag| (self.is_on)(tag, self.key(tag, drill.category)))
-                    .count();
-                let mut line = format!("{} {}", all.len(), drill.category.name().to_lowercase());
-                if selected > 0 {
-                    line.push_str(&format!(" · {selected} selected"));
-                }
-                heading = heading
-                    .push(back_button(self.send(PickerMessage::Back), tokens))
-                    .push(
-                        text(drill.category.name().to_owned())
-                            .size(19)
-                            .font(font::EXTRABOLD),
-                    )
-                    .push(text(line).size(13).color(tokens.sub));
+            Some(_) => {
+                heading = heading.push(back_row(title, self.send(PickerMessage::Back), tokens));
             }
             None => {
                 if let Some(back) = back {
@@ -203,9 +187,7 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
             if listed.is_empty() && add_rows.is_empty() {
                 continue;
             }
-            let open = searching
-                || ((self.default_open)(category, selected)
-                    != self.state.toggled.contains(&category));
+            let open = searching || self.state.open.contains(&category);
             let chips = listed
                 .iter()
                 .map(|&tag| self.chip(tag, category, tokens))
@@ -386,10 +368,27 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
         rows
     }
 
-    /// The long group in full: a search, letter headers, a check per row,
-    /// and the letter rail that jumps.
+    /// The long group in full: its name and "29 genres · 4 selected", a
+    /// search, letter headers, a check per row, and the letter rail that
+    /// jumps.
     fn drill(&self, category: TagCategory, query: &'a str, tokens: &Tokens) -> Element<'a, M> {
         let all = self.all_in(category);
+        let selected = all
+            .iter()
+            .filter(|tag| (self.is_on)(tag, self.key(tag, category)))
+            .count();
+        let mut line = format!("{} {}", all.len(), category.name().to_lowercase());
+        if selected > 0 {
+            line.push_str(&format!(" · {selected} selected"));
+        }
+        let heading = row![
+            text(category.name().to_owned())
+                .size(19)
+                .font(font::EXTRABOLD),
+            text(line).size(13).color(tokens.sub),
+        ]
+        .spacing(8)
+        .align_y(Center);
         let raw = query.trim().to_lowercase();
         let hyphenated = normalize(query);
         let listed = all.iter().map(String::as_str).filter(|tag| {
@@ -480,6 +479,7 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
             .height(self.height)
             .width(Fill);
         column![
+            heading,
             search,
             // `height` before `align_y`: `center_y(Fill)` would make the
             // rail as tall as the window and the dialog with it.
@@ -568,6 +568,24 @@ fn back_button<'a, M: Clone + 'a>(on_press: M, tokens: &Tokens) -> Element<'a, M
         .on_press(on_press)
         .style(row_style(tokens, false, 8.0))
         .focusable(8.0, tokens)
+}
+
+/// The long group's way back: "‹ Tags", the arrow with the dialog's title.
+fn back_row<'a, M: Clone + 'a>(title: &str, on_press: M, tokens: &Tokens) -> Element<'a, M> {
+    button(
+        row![
+            icon(Icon::ChevronLeft, 16.0, tokens.text),
+            text(title.to_owned()).size(14).font(font::SEMIBOLD),
+        ]
+        .spacing(4)
+        .align_y(Center)
+        .height(Fill),
+    )
+    .height(32)
+    .padding(Padding::new(0.0).left(4).right(10))
+    .on_press(on_press)
+    .style(row_style(tokens, false, 8.0))
+    .focusable(8.0, tokens)
 }
 
 /// A search as a tag would be written: trimmed, lower case, a leading "#"

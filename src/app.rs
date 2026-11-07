@@ -26,7 +26,7 @@ use crate::screens::{self, Screen, entry, library, plans, setup, token};
 use crate::settings::{Settings, Source, SyncState, ThemeChoice};
 use crate::storage;
 use crate::sync::{self, Answer, Base, Engine, Kind, Outcome, Phase, Request};
-use crate::tags;
+use crate::tags::{self, PickerState};
 use crate::theme::{Accent, Theme, Tokens, font};
 use crate::wallet;
 
@@ -425,6 +425,9 @@ impl Message {
 pub enum KeyPress {
     /// Closes the topmost popover or dialog.
     Escape,
+    /// Backspace with no text field taking it: back from the tag picker's
+    /// long group.
+    Backspace,
     /// Confirms the open dialog.
     Enter,
     /// Moves focus; `back` with Shift.
@@ -1178,9 +1181,26 @@ impl App {
             Key::Named(Named::Tab) => KeyPress::Tab {
                 back: modifiers.shift(),
             },
+            Key::Named(Named::Backspace) if modifiers.is_empty() => KeyPress::Backspace,
             _ => return None,
         };
         Some(Message::Key(press))
+    }
+
+    /// The tag picker open on screen: the entry dialog's, the plan
+    /// dialog's or the Filter popover's.
+    fn picker_mut(&mut self) -> Option<&mut PickerState> {
+        match &mut self.dialog {
+            Some(entry::Dialog::Form(form) | entry::Dialog::Tags(form)) => {
+                return form.picker.as_mut();
+            }
+            Some(_) => return None,
+            None => {}
+        }
+        if let Some(plans::Dialog::Form(form)) = &mut self.plan_dialog {
+            return form.tag_view.as_mut();
+        }
+        self.library.picker.as_mut()
     }
 
     /// Esc and Back on the library close the details panel first: a part
@@ -1214,6 +1234,10 @@ impl App {
     /// selection and the popovers closed. Nothing happens over a dialog or
     /// the token warning. On the setup, Back is the wizard's own Back.
     fn travel(&mut self, direction: Direction) -> Task<Message> {
+        // Inside a tag picker's long group, Back is the way out of it.
+        if direction == Direction::Back && self.picker_mut().is_some_and(PickerState::back) {
+            return Task::none();
+        }
         if self.token_warning || self.dialog.is_some() || self.plan_dialog.is_some() {
             return Task::none();
         }
@@ -1342,6 +1366,11 @@ impl App {
                 self.refresh_sync_state();
                 return self.run(outcome);
             }
+            Message::Key(KeyPress::Backspace) => {
+                if let Some(picker) = self.picker_mut() {
+                    picker.back_on_backspace();
+                }
+            }
             Message::Key(KeyPress::Tab { back: false }) => return operation::focus_next(),
             Message::Key(KeyPress::Tab { back: true }) => return operation::focus_previous(),
             // The token warning sits over everything; then a dialog; the
@@ -1468,6 +1497,19 @@ impl App {
             }
             Message::Library(library::Message::Picker(tags::PickerMessage::Jump(offset))) => {
                 return tags::jump(offset);
+            }
+            // The groups holding a chosen tag start open.
+            Message::Library(library::Message::OpenPicker) => {
+                let library = self.repo.library();
+                let open = tags::groups_with_picks(
+                    library.tags.iter().map(|(&c, names)| (c, names.as_slice())),
+                    |tag| library.is_multi_category(tag),
+                    |tag, category| self.library.filter.has_tag(tag, category),
+                );
+                self.library.update(library::Message::OpenPicker);
+                if let Some(picker) = &mut self.library.picker {
+                    picker.open = open;
+                }
             }
             Message::Library(
                 message @ (library::Message::OpenSeries(_)
@@ -2144,6 +2186,69 @@ mod tests {
 
         let _ = app.update(Message::Settings(S::ResetKeys));
         assert!(!app.keymap.is_changed());
+    }
+
+    /// Inside the tag picker's long group, Backspace with the search empty,
+    /// Back and Esc go back to the groups; the dialog stays. Backspace
+    /// with text in the search, or the press that emptied it, stays.
+    #[test]
+    fn backspace_back_and_esc_leave_the_long_group() {
+        use crate::model::TagCategory;
+        use tags::PickerMessage;
+
+        let mut app = App::new(Screen::Library);
+        let picker = |app: &App| match &app.dialog {
+            Some(entry::Dialog::Tags(form)) => form.picker.clone().unwrap(),
+            other => panic!("no picker: {other:?}"),
+        };
+        let send = |app: &mut App, message: Message| {
+            let _ = app.update(message);
+        };
+        let drill = |app: &mut App| {
+            send(
+                app,
+                Message::Entry(entry::Message::Picker(PickerMessage::Drill(
+                    TagCategory::Genres,
+                ))),
+            );
+        };
+        send(
+            &mut app,
+            Message::Entry(entry::Message::EditTags(
+                "movies/million-dollar-baby-2004".into(),
+            )),
+        );
+
+        drill(&mut app);
+        send(
+            &mut app,
+            Message::Entry(entry::Message::Picker(PickerMessage::DrillQuery(
+                "h".into(),
+            ))),
+        );
+        send(&mut app, Message::Key(KeyPress::Backspace));
+        assert!(picker(&app).drill.is_some(), "deletes text");
+        send(
+            &mut app,
+            Message::Entry(entry::Message::Picker(PickerMessage::DrillQuery(
+                String::new(),
+            ))),
+        );
+        send(&mut app, Message::Key(KeyPress::Backspace));
+        assert!(picker(&app).drill.is_some(), "the press that emptied it");
+        send(&mut app, Message::Key(KeyPress::Backspace));
+        assert!(picker(&app).drill.is_none(), "an empty search goes back");
+
+        drill(&mut app);
+        send(&mut app, Message::History(Direction::Back));
+        assert!(picker(&app).drill.is_none());
+        assert!(matches!(app.dialog, Some(entry::Dialog::Tags(_))));
+
+        drill(&mut app);
+        send(&mut app, Message::Key(KeyPress::Escape));
+        assert!(picker(&app).drill.is_none());
+        send(&mut app, Message::Key(KeyPress::Escape));
+        assert!(app.dialog.is_none(), "Esc at the top closes the sheet");
     }
 
     #[test]

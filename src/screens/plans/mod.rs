@@ -14,7 +14,7 @@ use iced::{Element, Task};
 
 use crate::app::{App, Message as AppMessage};
 use crate::artwork::Wants;
-use crate::model::{Date, EntryStatus, MediaType, Plan, PlanItem, Season};
+use crate::model::{Date, EntryStatus, MediaType, Plan, PlanItem, Season, TagCategory};
 use crate::plans::{self as rules, PlanState};
 use crate::repo::Operation;
 use crate::tags::{self, PickerMessage, PickerState};
@@ -462,7 +462,7 @@ fn update_form(form: &mut PlanForm, message: Message) {
         Message::Timeline(on) => form.timeline = on,
         Message::StartWith { copy } => form.copy = copy,
         Message::Source(id) => form.source = Some(id),
-        Message::OpenTags => form.tag_view = Some(PickerState::default()),
+        Message::OpenTags => form.tag_view = Some(PickerState::opening([TagCategory::Season])),
         Message::CloseTags => form.tag_view = None,
         Message::Picker(message) => {
             if let Some(view) = &mut form.tag_view {

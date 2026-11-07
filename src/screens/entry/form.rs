@@ -6,7 +6,8 @@ use std::fmt;
 use std::rc::Rc;
 
 use iced::widget::{
-    Column, Row, button, column, container, pick_list, row, space, text, text_editor,
+    Column, Row, button, column, container, mouse_area, opaque, pick_list, row, space, text,
+    text_editor,
 };
 use iced::{Background, Border, Center, Color, Element, Fill, Padding};
 
@@ -90,7 +91,9 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
 
 /// The details pane's "+ Tag": the tag picker alone over the library,
 /// with the new-tag confirmation and the categories dialog over it. X
-/// drops the changes, Done saves them.
+/// drops the changes; Done and a click outside save them. The click is
+/// taken here, not by the scrim's: this view is the window's size, so the
+/// modal's opaque wrapper covers the whole scrim.
 pub fn tags_view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
     let picker: Element<'a, AppMessage> = match &form.picker {
@@ -104,8 +107,12 @@ pub fn tags_view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
         ),
         None => space().into(),
     };
-    // The window's size, so the layers over the picker cover it all.
-    let picker: Element<'_, AppMessage> = container(picker).padding([30, 40]).center(Fill).into();
+    // The window's size, so the layers over the picker cover it all. A
+    // press on the picker stops at `opaque`; one beside it saves.
+    let picker: Element<'_, AppMessage> =
+        mouse_area(container(opaque(picker)).padding([30, 40]).center(Fill))
+            .on_press(msg(Message::SaveTags))
+            .into();
     tag_layers(app, form, picker, &tokens)
 }
 
@@ -1494,7 +1501,6 @@ fn tag_picker<'a>(
         visible: Box::new(move |category| {
             category.offered_for(media) || holds_a_tag.contains(&category)
         }),
-        default_open: Box::new(|_, selected| selected > 0),
         long_group: crate::screens::library::long_group(app),
         with_menu: true,
         with_add_to: true,

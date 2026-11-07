@@ -8,7 +8,7 @@ use iced::{Background, Border, Center, Element, Fill, Padding};
 
 use super::{Message, PlanForm};
 use crate::app::{App, Message as AppMessage};
-use crate::model::{Plan, TagCategory};
+use crate::model::Plan;
 use crate::plans::{self as rules};
 use crate::tags::PickerState;
 use crate::theme::{Tokens, font};
@@ -278,7 +278,6 @@ fn tag_view<'a>(
         categories_of: Box::new(|tag| library.categories_of(tag)),
         is_on: Box::new(|tag, _| form.tags.iter().any(|t| t == tag)),
         visible: Box::new(|_| true),
-        default_open: Box::new(|category, _| category == TagCategory::Season),
         long_group: crate::screens::library::long_group(app),
         with_menu: false,
         with_add_to: false,

@@ -80,7 +80,6 @@ pub fn picker<'a>(
         visible: Box::new(|category| {
             types.is_empty() || types.iter().any(|&media| category.offered_for(media))
         }),
-        default_open: Box::new(|_, selected| selected > 0),
         long_group: long_group(app),
         with_menu: false,
         with_add_to: false,
