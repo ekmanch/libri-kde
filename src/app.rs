@@ -42,19 +42,7 @@ pub const MIN_WINDOW_SIZE: Size = Size::new(1280.0, 720.0);
 
 pub fn run() -> iced::Result {
     present_with_mailbox();
-    let window = window::Settings {
-        size: WINDOW_SIZE,
-        min_size: Some(MIN_WINDOW_SIZE),
-        // KDE groups the window and finds its icon by the app id.
-        platform_specific: PlatformSpecific {
-            application_id: "libri".into(),
-            ..PlatformSpecific::default()
-        },
-        // Glass paints see-through surfaces over the blurred desktop; the
-        // other themes paint every pixel, so they lose nothing by it.
-        transparent: true,
-        ..window::Settings::default()
-    };
+    let window = window_settings();
     freeze_log();
     let result = iced::application(App::boot, App::update, App::view)
         .title(App::title)
@@ -65,6 +53,49 @@ pub fn run() -> iced::Result {
         .run();
     crate::trace::line("exit");
     result
+}
+
+fn window_settings() -> window::Settings {
+    window::Settings {
+        size: WINDOW_SIZE,
+        min_size: Some(MIN_WINDOW_SIZE),
+        // KDE groups the window and finds its icon by the app id.
+        platform_specific: PlatformSpecific {
+            application_id: "libri".into(),
+            ..PlatformSpecific::default()
+        },
+        // Glass paints see-through surfaces over the blurred desktop; the
+        // other themes paint every pixel, so they lose nothing by it.
+        transparent: true,
+        // A close comes to `App::update` as a message, so `quit` can run.
+        exit_on_close_request: false,
+        ..window::Settings::default()
+    }
+}
+
+/// How long a closing app may take to shut down before the process ends
+/// anyway. Well under the seconds after which KWin calls a window that
+/// does not answer "not responding".
+const EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Closes the app without waiting for the network. Dropping tokio's
+/// runtime waits for every blocking call still running, up to
+/// `lookup::http::TIMEOUT` a request, with the main thread blocked. So the
+/// daily check is told to stop, and if the normal exit has not finished
+/// after `EXIT_GRACE` the process ends where it stands. Nothing is lost:
+/// the library and `pending.json` are on disk before a save is sent, and
+/// the next start settles a save cut off on its way (`sync::Engine`).
+fn quit() -> Task<Message> {
+    Task::future(async {
+        discover::cancel();
+        std::thread::spawn(|| {
+            std::thread::sleep(EXIT_GRACE);
+            crate::trace::line("exit, not waiting for the calls still running");
+            std::process::exit(0);
+        });
+    })
+    .discard()
+    .chain(iced::exit())
 }
 
 /// Mailbox presentation instead of iced's FIFO default, unless the
@@ -1803,9 +1834,7 @@ impl App {
             event => {
                 crate::trace::line(format_args!("window {event:?}"));
                 match event {
-                    // The daily check stops before its next request, so
-                    // the exit never waits for the rest of it.
-                    window::Event::CloseRequested | window::Event::Closed => discover::cancel(),
+                    window::Event::CloseRequested => return quit(),
                     window::Event::Focused => {
                         self.focused = true;
                         let discover = self.check_discover();
@@ -2028,6 +2057,11 @@ mod tests {
     use super::*;
     use crate::model::MediaType;
     use crate::theme;
+
+    #[test]
+    fn a_close_comes_to_the_app_so_it_never_waits_for_the_network() {
+        assert!(!window_settings().exit_on_close_request);
+    }
 
     #[test]
     fn starts_on_the_library_in_graphite_and_peach() {
