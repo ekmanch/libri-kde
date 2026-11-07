@@ -9,9 +9,9 @@
 //! stay. Type chips narrow a slice, remembered per slice. The rows are
 //! grouped by month, then year, then "Date not set", in the text, cover
 //! and grid views, remembered for the page. The text and cover views have
-//! pinned month headers; the grid is one continuous block whose first tile
-//! of each group carries the month as a tag. All three have the section
-//! rail on the right.
+//! pinned month headers; the grid is one continuous block, where the date
+//! under each tile and the section rail are the only date cues. All three
+//! have the section rail on the right.
 //!
 //! The panel is the type screens' (pinned by default, key "soon"): with
 //! nothing selected a glance of Next up, New in Discover, By type and
@@ -716,8 +716,7 @@ fn block<'a>(
     }
 }
 
-/// Every group's rows as one continuous grid, in date order. The first
-/// tile of a group carries the group's short label as a tag.
+/// Every group's rows as one continuous grid, in date order.
 fn tiles<'a>(
     app: &'a App,
     groups: &[Group<'a>],
@@ -725,10 +724,9 @@ fn tiles<'a>(
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let cards = groups.iter().flat_map(|group| {
-        group.rows.iter().enumerate().map(move |(index, row)| {
+        group.rows.iter().map(move |row| {
             let look = Look::of(app, row, slice, group.hidden, tokens);
-            let tag = (index == 0).then(|| group.rail(app.today));
-            container(tile(app, row, look, tag, tokens))
+            container(tile(app, row, look, tokens))
                 .id(row_key(&row.key()))
                 .into()
         })
@@ -782,13 +780,12 @@ struct Look {
     on_press: AppMessage,
     /// The key the mark acts on, for a Discover row.
     key: String,
-    kicker: String,
 }
 
 impl Look {
     fn of(app: &App, row: &SoonRow<'_>, slice: Slice, hidden: bool, tokens: &Tokens) -> Look {
         let state = &app.library;
-        let (selected, mark, on_press, kicker) = match row {
+        let (selected, mark, on_press) = match row {
             SoonRow::Library(upcoming) => (
                 state.selected.as_deref() == Some(upcoming.entry.id.as_str()),
                 if slice == Slice::All {
@@ -797,13 +794,11 @@ impl Look {
                     Mark::None
                 },
                 msg(Message::Select(upcoming.entry.id.clone())),
-                crate::browse::kind_label(upcoming.entry).to_owned(),
             ),
             SoonRow::Found(found) => (
                 state.found.as_deref() == Some(found.key.as_str()),
                 if hidden { Mark::Restore } else { Mark::Add },
                 msg(Message::SelectFound(found.key.clone())),
-                "Upcoming".into(),
             ),
         };
         let released = row.released();
@@ -820,7 +815,6 @@ impl Look {
             },
             on_press,
             key: row.key(),
-            kicker,
         }
     }
 }
@@ -1033,13 +1027,12 @@ fn cover_row<'a>(
     dim(row_button, look.mark == Mark::Restore, tokens)
 }
 
-/// A grid tile: the 2:3 cover with the kicker and the title on its
-/// placeholder and the mark top right, then the title and the date.
+/// A grid tile: the 2:3 cover with the title on its placeholder and the
+/// mark top right, then the title and the date.
 fn tile<'a>(
     app: &'a App,
     row: &SoonRow<'a>,
     look: Look,
-    tag: Option<String>,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let (image, tint) = match row {
@@ -1100,14 +1093,7 @@ fn tile<'a>(
             .focusable(12.0, tokens)
         }
     };
-    let kicker: Element<'a, AppMessage> = if tag.is_some() {
-        space().into()
-    } else {
-        ui::mono(look.kicker.to_uppercase(), 10.5, white).into()
-    };
-    let top = row![kicker, space::horizontal(), badge]
-        .align_y(Center)
-        .height(24);
+    let top = row![space::horizontal(), badge].align_y(Center).height(24);
     let mut on_cover = column![top, space::vertical()].spacing(4);
     if image.is_none() {
         on_cover = on_cover.push(
@@ -1122,17 +1108,13 @@ fn tile<'a>(
     }
     let face = ui::cover(image, tint, Fill, Fill, 8.0, None);
     let ring = look.selected.then_some(tokens.accent);
-    let mut layers = stack![
+    let layers = stack![
         face,
         container(on_cover)
             .width(Fill)
             .height(Fill)
             .padding(Padding::new(14.0).top(10).right(10))
     ];
-    if let Some(tag) = tag {
-        // Level with the badge across from it, centered in the same 24 px.
-        layers = layers.push(container(month_tag(tag, tokens)).padding(Padding::new(10.0).top(11)));
-    }
     let cover = container(layers).style(move |_| {
         container::Style::default().border(
             Border::default()
@@ -1165,21 +1147,6 @@ fn tile<'a>(
             ..button::Style::default()
         })
         .focusable(8.0, tokens)
-}
-
-/// The accent tag on the first tile of a month or year.
-fn month_tag<'a>(label: String, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let fill = tokens.accent;
-    container(
-        ui::mono(label.to_uppercase(), 11.0, tokens.on_accent)
-            .wrapping(text::Wrapping::None)
-            .height(Fill)
-            .align_y(Center),
-    )
-    .height(22)
-    .padding([0, 8])
-    .style(move |_| container::background(fill).border(Border::default().rounded(11)))
-    .into()
 }
 
 /// Nothing to list: nothing at all on the way, or nothing in this slice
@@ -2049,7 +2016,7 @@ mod tests {
     }
 
     #[test]
-    fn the_grid_has_tags_for_headers_and_the_other_views_keep_theirs() {
+    fn the_grid_has_no_month_headers_or_tags_and_the_other_views_keep_their_headers() {
         let mut app = on_page();
         let _ = app.update(lib(Message::SoonSlice(Slice::All)));
         let _ = app.update(lib(Message::SetView(View::Grid)));
@@ -2061,10 +2028,10 @@ mod tests {
                 app.view(),
             );
             assert!(ui.find("November").is_err(), "no month header");
-            assert!(ui.find("NOV").is_ok(), "the tag");
+            assert!(ui.find("NOV").is_err(), "no month tag");
             assert!(ui.find("Nov").is_ok(), "the rail");
             assert!(ui.find("+ Add").is_ok(), "the badges stay");
-            assert!(ui.find("UPCOMING").is_ok(), "a later tile keeps its kicker");
+            assert!(ui.find("UPCOMING").is_err(), "no type on a tile");
         }
         for view in [View::List, View::Text] {
             let _ = app.update(lib(Message::SetView(view)));
@@ -2074,12 +2041,11 @@ mod tests {
                 app.view(),
             );
             assert!(ui.find("November").is_ok(), "{view:?} keeps its header");
-            assert!(ui.find("NOV").is_err(), "{view:?} has no tag");
         }
     }
 
     #[test]
-    fn a_groups_tag_replaces_the_kicker_on_its_first_tile_only() {
+    fn a_tile_shows_no_type() {
         let mut app = on_page();
         let _ = app.update(lib(Message::SetView(View::Grid)));
         let _ = app.update(lib(Message::SoonType(MediaType::Games)));
@@ -2089,7 +2055,7 @@ mod tests {
             app.view(),
         );
         assert!(ui.find("Grand Theft Auto VI").is_ok());
-        assert!(ui.find("GAME").is_err(), "one tile, and it has the tag");
+        assert!(ui.find("GAME").is_err(), "no type on the tile");
     }
 
     #[test]
@@ -2144,7 +2110,7 @@ mod tests {
         let names: Vec<String> = groups.iter().map(|g| g.rail(app.today)).collect();
         let room = rail::Sections::new(names.clone(), false).room();
         let rows = grid_rows(state.list_width, room);
-        // A label its tag does not share: the tag is in capitals.
+        // A month, since a year or TBD can also be the date under a tile.
         let group = names
             .iter()
             .rposition(|name| *name != name.to_uppercase())
