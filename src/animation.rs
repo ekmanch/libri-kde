@@ -129,13 +129,14 @@ impl Spring {
     }
 
     /// When the motion is over, as KWin ends it (`SpringMotion::isMoving`):
-    /// both the distance left and the speed at most `epsilon` (KWin's is one
-    /// pixel, and one pixel a second), found in 1 ms steps; at most 5 s.
-    pub fn settle(self, distance: f32, velocity: f32, epsilon: f32) -> Duration {
+    /// the distance left at most `near` and the speed at most `slow` (KWin's
+    /// are one pixel, and one pixel a second), found in 1 ms steps; at most
+    /// 5 s.
+    pub fn settle(self, distance: f32, velocity: f32, near: f32, slow: f32) -> Duration {
         let mut ms = 0;
         while ms < 5000 {
             let (x, v) = self.at(distance, velocity, ms as f32 / 1000.0);
-            if x.abs() <= epsilon && v.abs() <= epsilon {
+            if x.abs() <= near && v.abs() <= slow {
                 break;
             }
             ms += 1;
@@ -302,8 +303,8 @@ mod tests {
         let fast = Spring::desktop_switch(Speed::factor(0.25)).unwrap();
         // A 1000 px switch, ended as KWin ends it.
         let (normal_end, fast_end) = (
-            normal.settle(1000.0, 0.0, 1.0),
-            fast.settle(1000.0, 0.0, 1.0),
+            normal.settle(1000.0, 0.0, 1.0, 1.0),
+            fast.settle(1000.0, 0.0, 1.0, 1.0),
         );
         // The time grows about with the square root of the factor, not the
         // factor (a little more, as the stiffer spring's pixel stop comes later).

@@ -81,11 +81,10 @@ impl Slice {
 }
 
 /// How much longer the slide takes than KWin's desktop switch at the same
-/// Plasma speed: twice (owner's request, 2026-11-07, after the KWin copy
-/// felt quick next to the phone's swipe, which settles on Flutter's
-/// softer scroll spring). At the owner's 0.25 that is KWin's spring at
-/// normal speed.
-pub const SLOWER: f32 = 2.0;
+/// Plasma speed: three times (owner's request, 2026-11-07, after the KWin
+/// copy felt quick next to the phone's swipe, which settles on Flutter's
+/// softer scroll spring, and twice still did).
+pub const SLOWER: f32 = 3.0;
 
 /// The space between two slices as they pass, KWin's gap between desktops
 /// (`HorizontalGap`, 45 px by default).
@@ -116,8 +115,10 @@ pub struct SliceSlide {
 impl SliceSlide {
     /// A slide to `to` from `from` at rest, or from wherever `moving` has
     /// the list, keeping its speed. `slot` is a slice's width with the
-    /// gap, in pixels: the slide ends as KWin's does, under a pixel from
-    /// rest and slower than a pixel a second.
+    /// gap, in device pixels: the slide ends once the list is within half
+    /// a device pixel of rest and slower than 30 a second, when the drawn
+    /// offset (rounded to device pixels) has reached its last value, so
+    /// no sub-pixel crawl is left; KWin waits for 1 px and 1 px a second.
     pub fn toward(
         moving: Option<&SliceSlide>,
         from: Slice,
@@ -136,14 +137,14 @@ impl SliceSlide {
         // The step from the slice the list is headed for, so Discover to
         // All goes on forward even while the list is still nearer Library.
         let anchor = nearest(to, heading);
-        let epsilon = 1.0 / slot.max(1.0);
+        let pixel = 1.0 / slot.max(1.0);
         SliceSlide {
             since: now,
             start,
             velocity,
             anchor,
             spring,
-            end: now + spring.settle(start - anchor, velocity, epsilon),
+            end: now + spring.settle(start - anchor, velocity, 0.5 * pixel, 30.0 * pixel),
         }
     }
 
@@ -672,7 +673,8 @@ fn chips<'a>(
 
 /// The list, sliding between slices when a switch is under way: the
 /// slices side by side with KWin's gap between them, the list's position
-/// along the row from the spring; only the list moves, and nothing fades.
+/// along the row from the spring, snapped to device pixels; only the list
+/// moves, and nothing fades.
 /// The picked slice is the live list, always the first layer so its
 /// scroll state stays; the others pass as still copies at their own
 /// scroll offsets.
@@ -692,11 +694,17 @@ fn list_area<'a>(app: &'a App, lists: &Lists<'a>, tokens: &Tokens) -> Element<'a
             moving.position(Instant::now())
         });
     let live = nearest(state.slice, position);
-    let mut layers = vec![ui::slide_by(current, Vector::new((live - position) * slot, 0.0)).into()];
+    // On whole device pixels: at a fraction the text is laid out anew
+    // between glyph positions on every frame and the covers resampled,
+    // which reads as smudging while the list moves slowly.
+    let scale = app.scale.max(1.0);
+    let snap = |x: f32| (x * scale).round() / scale;
+    let mut layers =
+        vec![ui::slide_by(current, Vector::new(snap((live - position) * slot), 0.0)).into()];
     if state.slide.is_some() {
         let first = position.floor();
         for place in [first, first + 1.0] {
-            let shift = (place - position) * slot;
+            let shift = snap((place - position) * slot);
             if place == live || shift.abs() >= slot {
                 continue;
             }
@@ -2100,13 +2108,13 @@ mod tests {
         assert_eq!(moving.anchor, 1.0);
         assert!(moving.forward());
         // KWin's desktop-switch spring at Plasma's half speed, slowed by
-        // `SLOWER`: past a second to the last pixel.
-        assert!(!moving.done(start + Duration::from_millis(900)));
-        assert!(moving.done(start + Duration::from_millis(1500)));
-        let halfway = moving.position(start + Duration::from_millis(140));
+        // `SLOWER`: well past a second to the last pixel.
+        assert!(!moving.done(start + Duration::from_millis(1400)));
+        assert!(moving.done(start + Duration::from_millis(2200)));
+        let halfway = moving.position(start + Duration::from_millis(210));
         assert!((0.3..0.7).contains(&halfway), "{halfway}");
         // A switch on the way starts where the list is, at its speed.
-        let mid = start + Duration::from_millis(140);
+        let mid = start + Duration::from_millis(210);
         let _ = app.update_at(lib(Message::SoonSlice(Slice::All)), mid);
         let again = app.library.slide.clone().unwrap();
         assert!((again.position(mid) - halfway).abs() < 1e-4);

@@ -176,6 +176,10 @@ pub struct App {
     /// Plasma's animation speed, read from `kdeglobals` at the start;
     /// instant in the tests and `App::new`.
     pub speed: animation::Speed,
+    /// Device pixels per logical pixel (2 at 200 %), asked when the window
+    /// opens and kept up with `Rescaled`: a slide lands on whole device
+    /// pixels, so its text and covers stay sharp on the way.
+    pub scale: f32,
     /// The window's logical size, for layouts that give way when narrow.
     pub window: Size,
     /// The places visited, for Back and Forward.
@@ -248,6 +252,8 @@ pub enum Message {
     Resized(Size),
     /// The window's events: focus and the close request.
     Window(window::Event),
+    /// The window's scale factor, asked when it opens.
+    ScaleFactor(f32),
     /// The hold on KWin's title bar, once the window is open.
     Decoration(Option<Box<Decoration>>),
     /// The sync row's and the banner's actions, and the conflict dialog.
@@ -648,6 +654,7 @@ impl App {
             settings_page: screens::settings::State::default(),
             splash_phase: 0.0,
             speed: animation::Speed::INSTANT,
+            scale: 1.0,
             window: WINDOW_SIZE,
             history: History::default(),
             decoration: None,
@@ -1316,6 +1323,11 @@ impl App {
             Message::Frame(_) => {}
             Message::Resized(size) => self.window = size,
             Message::Window(event) => return self.window_event(event),
+            Message::ScaleFactor(scale) => {
+                if scale.is_finite() && scale > 0.0 {
+                    self.scale = scale;
+                }
+            }
             Message::Decoration(decoration) => self.decoration = decoration,
             Message::Sync(SyncMessage::Retry | SyncMessage::Now) => {
                 // "Check again" in the unreadable dialog closes it; the
@@ -1753,6 +1765,14 @@ impl App {
                 }
             }
             window::Event::Unfocused => self.focused = false,
+            window::Event::Opened { .. } => {
+                return window::latest()
+                    .and_then(window::scale_factor)
+                    .map(Message::ScaleFactor);
+            }
+            window::Event::Rescaled(scale) => {
+                return self.update(Message::ScaleFactor(scale));
+            }
             _ => {}
         }
         Task::none()
@@ -1796,7 +1816,7 @@ impl App {
                 from,
                 to,
                 spring.slowed(library::soon::SLOWER),
-                width + library::soon::GAP,
+                (width + library::soon::GAP) * self.scale,
                 self.now,
             ));
         }
@@ -2613,6 +2633,18 @@ mod tests {
         let _ = app.update(Message::Sync(SyncMessage::Tick));
         assert!(app.save_due.is_none());
         assert!(app.engine.as_ref().unwrap().running());
+    }
+
+    #[test]
+    fn the_scale_factor_is_kept_for_sharp_slides() {
+        let mut app = App::new(Screen::Library);
+        assert_eq!(app.scale, 1.0);
+        let _ = app.update(Message::Window(window::Event::Rescaled(2.0)));
+        assert_eq!(app.scale, 2.0);
+        let _ = app.update(Message::ScaleFactor(1.5));
+        assert_eq!(app.scale, 1.5);
+        let _ = app.update(Message::ScaleFactor(0.0));
+        assert_eq!(app.scale, 1.5, "nonsense is ignored");
     }
 
     #[test]
