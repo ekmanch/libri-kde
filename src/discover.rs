@@ -8,7 +8,8 @@
 //! provider and the lookup id.
 //!
 //! The check runs once a day (`State::checked_today`): a little after the
-//! start, and when the window comes back, until it has run that day. Its
+//! start, then on the hour's timer until it has finished that day, whether
+//! the window has focus or not. Its
 //! answer is kept in `discover.json` under the cache folder with the time
 //! of the check and the providers asked, so the page shows at once and
 //! the footer can say "Checked today 09:12 · TMDB, IGDB, Open Library,
@@ -27,7 +28,6 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -143,10 +143,6 @@ pub fn cancel() {
 fn cancelled() -> bool {
     CANCELLED.load(Ordering::Relaxed)
 }
-
-/// How long after an incomplete run the next open waits before asking
-/// again, so a provider that refuses is not asked on every focus.
-pub const RETRY_AFTER: Duration = Duration::from_secs(15 * 60);
 
 /// The messages of the check.
 #[derive(Debug, Clone)]
@@ -296,7 +292,6 @@ pub struct State {
     pub hidden: Hidden,
     file: Option<PathBuf>,
     pub running: bool,
-    pub attempted: Option<Timestamp>,
 }
 
 impl State {
@@ -315,7 +310,6 @@ impl State {
             hidden: data.map_or_else(Hidden::default, |dir| Hidden::at(dir.join("settings.json"))),
             file,
             running: false,
-            attempted: None,
         }
     }
 
@@ -326,20 +320,14 @@ impl State {
             .is_some_and(|checked| checked.local_date() == now.local_date())
     }
 
-    /// Whether a run should start now: none out, none completed today,
-    /// and none started within `RETRY_AFTER` (an incomplete one).
+    /// Whether a run should start now: none out and none completed today.
     pub fn is_due(&self, now: Timestamp) -> bool {
-        !self.running
-            && !self.checked_today(now)
-            && !self
-                .attempted
-                .is_some_and(|at| now.0 - at.0 < RETRY_AFTER.as_secs() as i64)
+        !self.running && !self.checked_today(now)
     }
 
     /// A run starts now.
-    pub fn start(&mut self, now: Timestamp) {
+    pub fn start(&mut self) {
         self.running = true;
-        self.attempted = Some(now);
     }
 
     /// The items Discover lists: not in the library, not hidden.
@@ -931,13 +919,24 @@ mod tests {
         let before = state.record.clone();
         state.finish(Outcome::failed("Fake: Offline"), now);
         assert_eq!(state.record, before);
-        // An incomplete run is not tried again at once.
-        assert!(!state.is_due(now), "completed today");
-        let tomorrow = Timestamp(now.0 + 86_400);
-        assert!(state.is_due(tomorrow));
-        state.start(tomorrow);
-        state.finish(Outcome::failed("Fake: Offline"), tomorrow);
-        assert!(!state.is_due(Timestamp(tomorrow.0 + 60)), "just tried");
-        assert!(state.is_due(Timestamp(tomorrow.0 + RETRY_AFTER.as_secs() as i64)));
+    }
+
+    #[test]
+    fn an_unfinished_run_goes_again_and_a_finished_one_waits_for_tomorrow() {
+        // Noon, so an hour on stays on the same date in any time zone
+        // this runs in, and a day on does not.
+        let now = Timestamp::parse("2026-10-19T12:00:00Z").unwrap();
+        let hour_on = Timestamp(now.0 + 3_600);
+        let mut state = State::at(None, None);
+        assert!(state.is_due(now));
+        state.start();
+        assert!(!state.is_due(now), "running");
+        state.finish(Outcome::failed("Fake: Offline"), now);
+        assert!(state.is_due(hour_on), "not finished");
+        state.start();
+        let outcome = run(&Service::fake(), &library(), today(), &[]);
+        state.finish(outcome, hour_on);
+        assert!(!state.is_due(hour_on), "finished today");
+        assert!(state.is_due(Timestamp(now.0 + 86_400)));
     }
 }

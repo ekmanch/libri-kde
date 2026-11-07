@@ -1808,6 +1808,11 @@ impl App {
                 time::every(Duration::from_millis(250)).map(|_| Message::Sync(SyncMessage::Tick)),
             );
         }
+        if !self.mock {
+            subscriptions.push(
+                time::every(DISCOVER_INTERVAL).map(|_| Message::Discover(discover::Message::Check)),
+            );
+        }
         if self.engine.is_some() {
             let interval = if self.focused {
                 sync::FOCUSED_CHECK_INTERVAL
@@ -1837,11 +1842,9 @@ impl App {
                     window::Event::CloseRequested => return quit(),
                     window::Event::Focused => {
                         self.focused = true;
-                        let discover = self.check_discover();
                         if self.check_is_stale() {
-                            return Task::batch([self.sync_now(), discover]);
+                            return self.sync_now();
                         }
-                        return discover;
                     }
                     window::Event::Unfocused => self.focused = false,
                     _ => {}
@@ -1854,6 +1857,9 @@ impl App {
 
 /// How long after the start the daily check behind Discover runs.
 const DISCOVER_DELAY: Duration = Duration::from_secs(5);
+/// How often an open app sees whether the check is due: a new day, or a
+/// run that did not finish. Focus has no part in it.
+const DISCOVER_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 impl App {
     /// A slice switch on the Coming soon page (a segment, Shift+arrows,
@@ -1901,7 +1907,7 @@ impl App {
         if !self.discover.is_due(now) {
             return Task::none();
         }
-        self.discover.start(now);
+        self.discover.start();
         let service = self.lookups.clone();
         let library = self.repo.library().clone();
         let today = self.today;
@@ -2057,6 +2063,15 @@ mod tests {
     use super::*;
     use crate::model::MediaType;
     use crate::theme;
+
+    #[test]
+    fn regaining_focus_never_starts_the_daily_check() {
+        let mut app = App::new(Screen::Library);
+        let _ = app.update(Message::Window(window::Event::Focused));
+        assert_eq!(app.discover.record.checked, None, "not on focus");
+        let _ = app.update(Message::Discover(discover::Message::Check));
+        assert!(app.discover.record.checked.is_some(), "when asked");
+    }
 
     #[test]
     fn a_close_comes_to_the_app_so_it_never_waits_for_the_network() {
