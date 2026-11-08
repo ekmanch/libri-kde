@@ -436,6 +436,19 @@ impl Artwork {
         self.tracks.get(&entry.id)
     }
 
+    /// An album's track list as if a lookup had just answered.
+    #[cfg(test)]
+    pub fn set_tracks(&mut self, id: &str, tracks: Vec<TrackInfo>) {
+        self.tracks.insert(
+            id.to_owned(),
+            TracksState {
+                source: "test".into(),
+                loaded: Loaded::Ready(tracks),
+                loading: false,
+            },
+        );
+    }
+
     /// IGDB's platforms, once loaded; `None` while loading or before.
     pub fn platforms(&self) -> Option<&Reply<Vec<GamePlatform>>> {
         self.platforms.as_ref()

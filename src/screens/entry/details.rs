@@ -1194,7 +1194,7 @@ fn tracks<'a>(
         .iter()
         .filter(|t| !listed.iter().any(|l| key(l) == key(&t.title)))
         .map(|t| t.title.as_str());
-    let open = app.library.track_rating_open.as_deref();
+    let open = app.library.track_rating_open;
 
     let mut rows = Column::new();
     for (index, title) in listed.iter().copied().chain(extra).enumerate() {
@@ -1205,8 +1205,8 @@ fn tracks<'a>(
         };
         let picker = ui::track_rating(
             rating_of(title),
-            open == Some(title),
-            msg(Message::ToggleTrackRating(title.to_owned())),
+            open == Some(index),
+            msg(Message::ToggleTrackRating(index)),
             move |rating| {
                 msg(Message::RateTrack {
                     album: album.id.clone(),

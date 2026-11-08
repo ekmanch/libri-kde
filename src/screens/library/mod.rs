@@ -203,8 +203,10 @@ pub struct State {
     /// id, until a pause in the typing, the popover closing or the pane
     /// moving on saves it.
     pub note_draft: Option<(String, String)>,
-    /// The album track whose rating picker is open, by title.
-    pub track_rating_open: Option<String>,
+    /// The album track whose rating picker is open, by its row in the
+    /// track list: a title can be listed twice (a single and its bonus
+    /// version), and each row opens only its own picker.
+    pub track_rating_open: Option<usize>,
     pub music_tab: MusicTab,
     /// The artist whose page is open, within Music.
     pub artist: Option<String>,

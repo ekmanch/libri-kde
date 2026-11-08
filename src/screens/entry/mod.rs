@@ -328,8 +328,8 @@ pub enum Message {
     SetStatus(String, EntryStatus),
     SetRating(String, Option<u8>),
     ToggleDetailsRating,
-    /// An album track's rating picker, by the track's title.
-    ToggleTrackRating(String),
+    /// An album track's rating picker, by the track's row in the list.
+    ToggleTrackRating(usize),
     RateTrack {
         album: String,
         title: String,
@@ -1523,13 +1523,9 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::ToggleDetailsRating => {
             app.library.details_rating_open = !app.library.details_rating_open
         }
-        Message::ToggleTrackRating(title) => {
+        Message::ToggleTrackRating(row) => {
             let open = &mut app.library.track_rating_open;
-            *open = if open.as_deref() == Some(title.as_str()) {
-                None
-            } else {
-                Some(title)
-            };
+            *open = if *open == Some(row) { None } else { Some(row) };
         }
         Message::RateTrack {
             album,
@@ -2852,11 +2848,56 @@ mod tests {
     fn opening_a_dialog_closes_the_popovers_under_it() {
         let mut app = app();
         app.library.selected = Some("music/dirt-alice-in-chains".into());
-        send(&mut app, Message::ToggleTrackRating("Rooster".into()));
+        send(&mut app, Message::ToggleTrackRating(0));
         send(&mut app, Message::ToggleDetailsRating);
         send(&mut app, Message::Add);
         assert_eq!(app.library.track_rating_open, None);
         assert!(!app.library.details_rating_open);
+    }
+
+    #[test]
+    fn a_title_listed_twice_opens_one_picker_that_rates() {
+        // Deezer lists some albums with a title twice, a single and its
+        // bonus version: only the row clicked opens its picker, and a
+        // pick in it is not taken as a click away by the other row's.
+        let mut app = app();
+        let id = "music/dirt-alice-in-chains";
+        let track = |n: usize, title: &str| crate::lookup::TrackInfo {
+            id: format!("test:{n}"),
+            title: title.into(),
+        };
+        // Far enough apart that the two pickers would not overlap.
+        let titles = ["Them Bones", "Rooster", "Dam That River", "Rain When I Die"];
+        let tracks = titles
+            .iter()
+            .chain(&["Sickman", "Junkhead", "Rooster"])
+            .enumerate()
+            .map(|(n, title)| track(n, title))
+            .collect();
+        app.artwork.set_tracks(id, tracks);
+        let _ = app.update(AppMessage::Library(
+            crate::screens::library::Message::Select(id.into()),
+        ));
+        send(&mut app, Message::ToggleTrackRating(1));
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        let _ = ui.click("Clear rating");
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, AppMessage::Entry(Message::RateTrack { .. }))),
+            "{messages:?}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|m| matches!(m, AppMessage::Entry(Message::ToggleTrackRating(_)))),
+            "{messages:?}"
+        );
     }
 
     /// Edit Million Dollar Baby with the form's tag picker open.
