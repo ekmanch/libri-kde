@@ -388,17 +388,18 @@ impl ImageStore {
         Ok(path)
     }
 
-    /// Removes every image whose URL is not in `keep_urls`. Returns how
-    /// many went.
-    pub fn prune(&self, keep_urls: &[String]) -> usize {
+    /// Removes every image whose URL is not in `keep_urls`. Returns the
+    /// file names (without extension) that went: the `key_for` of their
+    /// URLs.
+    pub fn prune(&self, keep_urls: &[String]) -> HashSet<String> {
+        let mut removed = HashSet::new();
         let Some(dir) = &self.dir else {
-            return 0;
+            return removed;
         };
         let Ok(entries) = std::fs::read_dir(dir) else {
-            return 0;
+            return removed;
         };
         let keep: HashSet<String> = keep_urls.iter().map(|u| key_for(u)).collect();
-        let mut removed = 0;
         for entry in entries.flatten() {
             let path = entry.path();
             let stem = path
@@ -409,7 +410,7 @@ impl ImageStore {
                 .extension()
                 .is_some_and(|e| e == "img" || IMAGE_EXTENSIONS.iter().any(|x| e == *x));
             if (!known || !keep.contains(&stem)) && std::fs::remove_file(&path).is_ok() {
-                removed += 1;
+                removed.insert(stem);
             }
         }
         removed
@@ -661,7 +662,7 @@ mod tests {
         assert!(store.cached(d).is_none());
         assert!(!store.path_with(d, "img").unwrap().exists());
 
-        assert_eq!(store.prune(&[c.into()]), 1);
+        assert_eq!(store.prune(&[c.into()]), HashSet::from([key_for(a)]));
         assert!(store.cached(a).is_none());
         assert!(store.cached(c).is_some());
         assert_eq!(

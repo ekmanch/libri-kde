@@ -1633,6 +1633,21 @@ impl App {
             Message::Setup(message) => return setup::update(self, message),
             Message::Settings(message) => return screens::settings::update(self, message),
             Message::Token(message) => return token::update(self, message),
+            Message::Lookup(artwork::Message::Prune) => {
+                // Discover's covers belong to no entry; the prune keeps
+                // them too, hidden ones included.
+                let covers: Vec<String> = self
+                    .discover
+                    .record
+                    .items
+                    .iter()
+                    .filter_map(|item| item.cover_url.clone())
+                    .collect();
+                return self
+                    .artwork
+                    .prune(self.repo.library(), &covers)
+                    .map(Message::Lookup);
+            }
             Message::Lookup(message) => {
                 return self
                     .artwork
