@@ -829,11 +829,11 @@ fn glance<'a>(app: &'a App, height: f32) -> Element<'a, AppMessage> {
         .width(Fill);
         let mut content = Row::new().spacing(12).align_y(Center);
         if covers {
-            content = content.push(ui::plain_cover(
+            content = content.push(ui::cover::thumb(
                 app.artwork.cover(entry),
                 theme::cover_color(&entry.id),
                 44.0,
-                66.0,
+                entry.media,
                 5.0,
             ));
         }
@@ -859,7 +859,8 @@ fn glance<'a>(app: &'a App, height: f32) -> Element<'a, AppMessage> {
     items.into()
 }
 
-/// A row of the glance: a type dot (text view) or a 26 × 39 cover with
+/// A row of the glance: a type dot (text view) or a 26 × 39 cover (an
+/// album's square) with
 /// `sub` under the title (list and grid), `meta` in mono at the right,
 /// and a line under it; a click selects the title.
 fn glance_row<'a>(
@@ -878,11 +879,11 @@ fn glance_row<'a>(
     let mut content = Row::new().spacing(12).align_y(Center);
     content = if cover {
         content
-            .push(ui::plain_cover(
+            .push(ui::cover::thumb(
                 app.artwork.cover(entry),
                 theme::cover_color(&entry.id),
                 26.0,
-                39.0,
+                entry.media,
                 4.0,
             ))
             .push(

@@ -118,6 +118,25 @@ pub fn plain_cover<'a, Message: 'a>(
     cover(handle, tint, width, height, radius, None)
 }
 
+/// A small plain cover in a row, `width` wide: a 2:3 poster, or for
+/// `media` with square covers (albums) a square, so the row is only as
+/// tall as its cover and the gaps between rows stay the same.
+pub fn thumb<'a, Message: 'a>(
+    handle: Option<image::Handle>,
+    tint: Color,
+    width: f32,
+    media: MediaType,
+    radius: f32,
+) -> Element<'a, Message> {
+    plain_cover(
+        handle,
+        tint,
+        width,
+        height_for(width, is_square(media)),
+        radius,
+    )
+}
+
 /// A cover with the title on its placeholder, as the inspector, the form
 /// and the shelves show it.
 pub fn titled_cover<'a, Message: 'a>(

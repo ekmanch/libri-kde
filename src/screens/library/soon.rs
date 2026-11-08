@@ -32,7 +32,7 @@ use crate::animation::Spring;
 use crate::app::{App, Message as AppMessage};
 use crate::artwork::Wants;
 use crate::discover::{Found, Kind};
-use crate::model::{Date, Library, MediaType, Released};
+use crate::model::{Date, Entry, Library, MediaType, Released};
 use crate::screens::entry;
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, ButtonKind, FocusExt, Icon};
@@ -1127,7 +1127,7 @@ fn text_row<'a>(row: &SoonRow<'a>, look: Look, tokens: &Tokens) -> Element<'a, A
     .into()
 }
 
-/// A cover row: a 44 × 66 cover, the title and the line with the type
+/// A cover row: a 44 × 66 cover (44 × 44 for an album), the title and the line with the type
 /// dot, the mark and the date.
 fn cover_row<'a>(
     app: &'a App,
@@ -1158,7 +1158,7 @@ fn cover_row<'a>(
     .width(Fill)
     .clip(true);
     let content = row![
-        ui::plain_cover(image, tint, 44.0, 66.0, 5.0),
+        ui::cover::thumb(image, tint, 44.0, row.media(), 5.0),
         words,
         mark(&look, 28.0, false, tokens),
         container(ui::mono(look.date.clone(), 12.5, tokens.sub).wrapping(text::Wrapping::None))
@@ -1375,8 +1375,8 @@ pub fn glance<'a>(app: &'a App, height: f32) -> Element<'a, AppMessage> {
     if shown(0) {
         let rows = Column::with_children(next.iter().map(|row| {
             small_cover_row(
+                row.entry,
                 app.artwork.cover(row.entry),
-                theme::cover_color(&row.entry.id),
                 row.full_title(),
                 row.line(),
                 upcoming::date_label(row.released, today),
@@ -1539,11 +1539,11 @@ fn since_label(day: Date, today: Date) -> String {
     }
 }
 
-/// A 50 px row with a 26 × 39 cover, a title, a line under it and the
+/// A 50 px row with a 26 × 39 cover (26 × 26 for an album), a title, a line under it and the
 /// date, with a rule under it: Next up and the type popover's rows.
 fn small_cover_row<'a>(
+    entry: &Entry,
     image: Option<iced::widget::image::Handle>,
-    tint: Color,
     title: String,
     line: String,
     date: String,
@@ -1551,7 +1551,7 @@ fn small_cover_row<'a>(
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let content = row![
-        ui::plain_cover(image, tint, 26.0, 39.0, 4.0),
+        ui::cover::thumb(image, theme::cover_color(&entry.id), 26.0, entry.media, 4.0),
         column![
             text(title)
                 .size(14)
@@ -1783,8 +1783,8 @@ pub fn type_popover<'a>(app: &'a App, height: f32) -> Element<'a, AppMessage> {
                 continue;
             };
             list = list.push(small_cover_row(
+                row.entry,
                 app.artwork.cover(row.entry),
-                theme::cover_color(&row.entry.id),
                 row.full_title(),
                 row.line(),
                 upcoming::date_label(row.released, app.today),

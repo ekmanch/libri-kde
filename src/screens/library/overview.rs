@@ -365,11 +365,11 @@ pub(super) fn overview_row<'a>(
         RowStyle::Cover => {
             let tint = theme::cover_color(&entry.id);
             content
-                .push(ui::plain_cover(
+                .push(ui::cover::thumb(
                     app.artwork.cover(entry),
                     tint,
                     30.0,
-                    45.0,
+                    entry.media,
                     4.0,
                 ))
                 .push(
