@@ -903,7 +903,9 @@ fn grid_rows(list_width: f32, room: f32) -> rail::GridRows {
 /// and grow; iced's grid shrinks from a largest), and its height: a 2:3
 /// cover and the caption under it.
 const TILE_WIDTH: f32 = 160.0;
-const TILE_HEIGHT: f32 = TILE_WIDTH * 1.5 + 28.0;
+const TILE_HEIGHT: f32 = TILE_WIDTH * 1.5 + 8.0 + CAPTION_HEIGHT;
+/// The row under a tile: the mark and the date.
+const CAPTION_HEIGHT: f32 = 24.0;
 const TILE_SPACING: f32 = 16.0;
 
 /// What marks a row at its right: a library row's Want in All, a
@@ -923,7 +925,6 @@ struct Look {
     dimmed: bool,
     mark: Mark,
     date: String,
-    date_color: Color,
     on_press: AppMessage,
     /// The key the mark acts on, for a Discover row.
     key: String,
@@ -948,18 +949,12 @@ impl Look {
                 msg(Message::SelectFound(found.key.clone())),
             ),
         };
-        let released = row.released();
         Look {
             color: tokens.type_color(row.media()),
             selected,
             dimmed: hidden || (state.pane_open() && !selected),
             mark,
-            date: upcoming::date_label(released, app.today),
-            date_color: if released.is_some() {
-                tokens.sub
-            } else {
-                tokens.line
-            },
+            date: upcoming::date_label(row.released(), app.today),
             on_press,
             key: row.key(),
         }
@@ -968,34 +963,44 @@ impl Look {
 
 /// The mark as a control: the Want pill, the + Add button or the Restore
 /// link, at `height` px; `plain` draws Want and Restore as words alone
-/// (the text view).
+/// (the text view). At 24 px (a grid tile's caption) the words are a
+/// little smaller. The canvas's + Add is dashed; iced 0.14 draws only
+/// solid borders.
 fn mark<'a>(look: &Look, height: f32, plain: bool, tokens: &Tokens) -> Element<'a, AppMessage> {
     let t = *tokens;
+    let small = plain || height <= 24.0;
+    let (size, pad) = if small { (12.5, 10) } else { (13.0, 12) };
     match look.mark {
         Mark::None => space().width(0).into(),
         Mark::Want if plain => text("Want").size(12.5).color(t.sub).into(),
-        Mark::Want => container(text("Want").size(12.5).font(font::SEMIBOLD).color(t.sub))
-            .height(height - 2.0)
-            .padding([0, 10])
-            .align_y(Center)
-            .style(move |_| {
-                container::Style::default().border(
-                    Border::default()
-                        .rounded(height / 2.0)
-                        .width(1)
-                        .color(t.line),
-                )
-            })
-            .into(),
+        Mark::Want => container(
+            text("Want")
+                .size(if small { 12.0 } else { 12.5 })
+                .font(font::SEMIBOLD)
+                .color(t.sub),
+        )
+        .height(height - 2.0)
+        .padding([0, if small { 9 } else { 10 }])
+        .align_y(Center)
+        .style(move |_| {
+            container::Style::default().border(
+                Border::default()
+                    .rounded(height / 2.0)
+                    .width(1)
+                    .color(t.line),
+            )
+        })
+        .into(),
         Mark::Add => button(
             text("+ Add")
-                .size(if plain { 12.5 } else { 13.0 })
+                .size(size)
                 .font(font::SEMIBOLD)
+                .wrapping(text::Wrapping::None)
                 .height(Fill)
                 .align_y(Center),
         )
         .height(if plain { 24.0 } else { height })
-        .padding([0, if plain { 10 } else { 12 }])
+        .padding([0, pad])
         .on_press(msg(Message::AddFound(look.key.clone())))
         .style(move |_, status| button::Style {
             background: matches!(status, button::Status::Hovered)
@@ -1010,13 +1015,14 @@ fn mark<'a>(look: &Look, height: f32, plain: bool, tokens: &Tokens) -> Element<'
         .focusable(height / 2.0, tokens),
         Mark::Restore => button(
             text("Restore")
-                .size(if plain { 12.5 } else { 13.0 })
+                .size(size)
                 .font(font::SEMIBOLD)
+                .wrapping(text::Wrapping::None)
                 .height(Fill)
                 .align_y(Center),
         )
         .height(if plain { 24.0 } else { height })
-        .padding([0, if plain { 0 } else { 12 }])
+        .padding([0, if plain { 0 } else { pad }])
         .on_press(msg(Message::RestoreFound(look.key.clone())))
         .style(move |_, _| button::Style {
             text_color: t.ink,
@@ -1099,11 +1105,9 @@ fn text_row<'a>(row: &SoonRow<'a>, look: Look, tokens: &Tokens) -> Element<'a, A
         container(mark(&look, 24.0, true, tokens))
             .width(70)
             .align_right(70),
-        container(
-            ui::mono(look.date.clone(), 12.5, look.date_color).wrapping(text::Wrapping::None)
-        )
-        .width(76)
-        .align_right(76),
+        container(ui::mono(look.date.clone(), 12.5, tokens.sub).wrapping(text::Wrapping::None))
+            .width(76)
+            .align_right(76),
     ]
     .spacing(12)
     .align_y(Center)
@@ -1157,11 +1161,9 @@ fn cover_row<'a>(
         ui::plain_cover(image, tint, 44.0, 66.0, 5.0),
         words,
         mark(&look, 28.0, false, tokens),
-        container(
-            ui::mono(look.date.clone(), 12.5, look.date_color).wrapping(text::Wrapping::None)
-        )
-        .width(76)
-        .align_right(76),
+        container(ui::mono(look.date.clone(), 12.5, tokens.sub).wrapping(text::Wrapping::None))
+            .width(76)
+            .align_right(76),
     ]
     .spacing(14)
     .align_y(Center);
@@ -1174,8 +1176,9 @@ fn cover_row<'a>(
     dim(row_button, look.mark == Mark::Restore, tokens)
 }
 
-/// A grid tile: the 2:3 cover with the title on its placeholder and the
-/// mark top right, then the title and the date.
+/// A grid tile: the 2:3 cover, with the title painted on a placeholder,
+/// then one row: the mark at the left, the date at the right. The full
+/// title and the date are its tooltip.
 fn tile<'a>(
     app: &'a App,
     row: &SoonRow<'a>,
@@ -1190,58 +1193,7 @@ fn tile<'a>(
         SoonRow::Found(found) => (found_image(app, found), found_tint(found)),
     };
     let white = Color::WHITE;
-    let badge: Element<'a, AppMessage> = match look.mark {
-        Mark::None => space().into(),
-        Mark::Want => container(text("Want").size(11.5).font(font::SEMIBOLD).color(white))
-            .height(22)
-            .padding([0, 8])
-            .align_y(Center)
-            .style(|_| {
-                container::background(Color::from_rgba(0.0, 0.0, 0.0, 0.45))
-                    .border(Border::default().rounded(11))
-            })
-            .into(),
-        Mark::Add | Mark::Restore => {
-            let (label, message) = if look.mark == Mark::Add {
-                ("+ Add", Message::AddFound(look.key.clone()))
-            } else {
-                ("Restore", Message::RestoreFound(look.key.clone()))
-            };
-            button(
-                text(label)
-                    .size(12)
-                    .font(font::SEMIBOLD)
-                    .color(white)
-                    .wrapping(text::Wrapping::None)
-                    .height(Fill)
-                    .align_y(Center),
-            )
-            .height(24)
-            .padding([0, 9])
-            .on_press(msg(message))
-            .style(move |_, status| button::Style {
-                background: Some(Background::Color(Color::from_rgba(
-                    0.0,
-                    0.0,
-                    0.0,
-                    if matches!(status, button::Status::Hovered) {
-                        0.7
-                    } else {
-                        0.5
-                    },
-                ))),
-                text_color: white,
-                border: Border::default()
-                    .rounded(12)
-                    .width(1)
-                    .color(Color::from_rgba(1.0, 1.0, 1.0, 0.6)),
-                ..button::Style::default()
-            })
-            .focusable(12.0, tokens)
-        }
-    };
-    let top = row![space::horizontal(), badge].align_y(Center).height(24);
-    let mut on_cover = column![top, space::vertical()].spacing(4);
+    let mut on_cover = column![space::vertical()].spacing(4);
     if image.is_none() {
         on_cover = on_cover.push(
             text(row.title().to_owned())
@@ -1257,10 +1209,7 @@ fn tile<'a>(
     let ring = look.selected.then_some(tokens.accent);
     let layers = stack![
         face,
-        container(on_cover)
-            .width(Fill)
-            .height(Fill)
-            .padding(Padding::new(14.0).top(10).right(10))
+        container(on_cover).width(Fill).height(Fill).padding(14)
     ];
     let cover = container(layers).style(move |_| {
         container::Style::default().border(
@@ -1270,30 +1219,42 @@ fn tile<'a>(
                 .color(ring.unwrap_or(Color::TRANSPARENT)),
         )
     });
+    // "Date not set" and + Add do not fit side by side under a tile of
+    // 140 px, so an undated tile says "TBD", the rail's word (owner,
+    // 2026-11-08); the tooltip keeps "Date not set".
+    let tile_date = if row.released().is_some() {
+        look.date.clone()
+    } else {
+        "TBD".to_owned()
+    };
     let caption = row![
-        container(
-            text(row.title().to_owned())
-                .size(14)
-                .font(font::SEMIBOLD)
-                .wrapping(text::Wrapping::None)
-        )
-        .width(Fill)
-        .clip(true),
-        ui::mono(look.date.clone(), 12.0, look.date_color),
+        mark(&look, CAPTION_HEIGHT, false, tokens),
+        space::horizontal(),
+        ui::mono(tile_date, 12.5, tokens.sub).wrapping(text::Wrapping::None),
     ]
     .spacing(8)
-    .align_y(iced::alignment::Vertical::Bottom)
-    .height(20);
+    .align_y(Center)
+    .height(CAPTION_HEIGHT);
     let card = column![cover, caption].spacing(8);
     let text_color = tokens.text;
-    button(dim(card.into(), look.dimmed, tokens))
+    let tip = format!("{} · {}", title_line(row), look.date);
+    let tile = button(dim(card.into(), look.dimmed, tokens))
         .padding(0)
         .on_press(look.on_press.clone())
         .style(move |_, _| button::Style {
             text_color,
             ..button::Style::default()
         })
-        .focusable(8.0, tokens)
+        .focusable(8.0, tokens);
+    ui::tooltip(tile, tip, tokens)
+}
+
+/// A row's title with its sub: "Severance · Season 3".
+fn title_line(row: &SoonRow<'_>) -> String {
+    match row {
+        SoonRow::Library(upcoming) => upcoming.full_title(),
+        SoonRow::Found(found) => found.full_title(),
+    }
 }
 
 /// Nothing to list: nothing at all on the way, or nothing in this slice
@@ -1709,11 +1670,10 @@ pub fn preview<'a>(app: &'a App, found: &'a Found) -> Element<'a, AppMessage> {
     if let Some(creator) = &found.creator {
         facts = facts.push(text(creator.clone()).size(14).color(t.sub));
     }
-    let released = found.released;
     facts = facts.push(ui::mono(
-        upcoming::date_label(released, app.today),
+        upcoming::date_label(found.released, app.today),
         12.5,
-        if released.is_some() { t.sub } else { t.line },
+        t.sub,
     ));
     let cover = ui::titled_cover(
         found_image(app, found),
@@ -2204,7 +2164,7 @@ mod tests {
             assert!(ui.find("November").is_err(), "no month header");
             assert!(ui.find("NOV").is_err(), "no month tag");
             assert!(ui.find("Nov").is_ok(), "the rail");
-            assert!(ui.find("+ Add").is_ok(), "the badges stay");
+            assert!(ui.find("+ Add").is_ok(), "the marks stay");
             assert!(ui.find("UPCOMING").is_err(), "no type on a tile");
         }
         for view in [View::List, View::Text] {
@@ -2216,6 +2176,29 @@ mod tests {
             );
             assert!(ui.find("November").is_ok(), "{view:?} keeps its header");
         }
+    }
+
+    #[test]
+    fn an_undated_tile_says_tbd_and_the_text_view_date_not_set() {
+        let mut app = on_page();
+        let _ = app.update(lib(Message::SoonSlice(Slice::All)));
+        let _ = app.update(lib(Message::SetView(View::Grid)));
+        {
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            assert!(ui.find("Date not set").is_err());
+            assert!(ui.find("TBD").is_ok());
+        }
+        let _ = app.update(lib(Message::SetView(View::Text)));
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        assert!(ui.find("Date not set").is_ok());
     }
 
     #[test]

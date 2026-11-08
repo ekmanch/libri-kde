@@ -148,6 +148,26 @@ pub fn panel_style(tokens: &Tokens, radius: f32) -> container::Style {
     }
 }
 
+/// A hover tooltip on `content`: `label` on the popover surface, by the
+/// pointer after half a second (the canvas's `title`).
+pub fn tooltip<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+    label: String,
+    tokens: &Tokens,
+) -> Element<'a, Message> {
+    let tokens = *tokens;
+    iced::widget::tooltip(
+        content,
+        text(label).size(12.5),
+        iced::widget::tooltip::Position::FollowCursor,
+    )
+    .padding(8)
+    .gap(12)
+    .delay(std::time::Duration::from_millis(500))
+    .style(move |_| panel_style(&tokens, 6.0))
+    .into()
+}
+
 /// The mockup's thin scrollbar.
 pub fn scrollbar() -> scrollable::Scrollbar {
     scrollable::Scrollbar::new()
