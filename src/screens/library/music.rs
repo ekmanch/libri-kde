@@ -90,7 +90,7 @@ pub fn body<'a>(
                 super::entries::block_entries(app, &albums, view, tokens)
             }
             MusicTab::Songs => {
-                let songs = music::songs(&listing.shown);
+                let songs = music::songs_matching(&listing.shown, &state.query);
                 if songs.is_empty() {
                     return empty("No songs here", tokens);
                 }

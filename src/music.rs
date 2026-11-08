@@ -145,6 +145,25 @@ pub fn songs<'a>(entries: &[&'a Entry]) -> Vec<Song<'a>> {
     songs
 }
 
+/// The Songs tab under a search: a track shows when its title holds the
+/// search or its album matches on its own (title, artist, tags), so
+/// searching an artist lists every song of theirs and searching a song
+/// lists that song, not the rest of its album.
+pub fn songs_matching<'a>(entries: &[&'a Entry], query: &str) -> Vec<Song<'a>> {
+    let needle = crate::browse::search_needle(query);
+    let mut songs = songs(entries);
+    if !needle.is_empty() {
+        songs.retain(|song| match song {
+            Song::Entry(_) => true,
+            Song::Track { album, track } => {
+                crate::browse::matches_entry(album, &needle)
+                    || track.title.to_lowercase().contains(&needle)
+            }
+        });
+    }
+    songs
+}
+
 fn norm(text: Option<&str>) -> String {
     text.unwrap_or_default().trim().to_lowercase()
 }
@@ -261,6 +280,36 @@ mod tests {
         assert_eq!(rooster.entry().title, "Dirt", "a track opens its album");
         assert_eq!(rooster.subtitle(), "Alice in Chains · 1992");
         assert!(songs.iter().any(|s| s.title() == "Human Fly"));
+    }
+
+    #[test]
+    fn a_search_lists_an_artists_songs_or_the_matching_track() {
+        let library = library();
+        let entries: Vec<&Entry> = library
+            .entries
+            .iter()
+            .filter(|e| crate::browse::matches_search(e, "alice in"))
+            .collect();
+        let titles: Vec<&str> = songs_matching(&entries, "alice in")
+            .iter()
+            .map(|s| s.title())
+            .collect();
+        assert_eq!(
+            titles,
+            ["Them Bones", "Rooster", "Down in a Hole"],
+            "every track by the artist"
+        );
+
+        let entries: Vec<&Entry> = library
+            .entries
+            .iter()
+            .filter(|e| crate::browse::matches_search(e, "rooster"))
+            .collect();
+        let titles: Vec<&str> = songs_matching(&entries, "rooster")
+            .iter()
+            .map(|s| s.title())
+            .collect();
+        assert_eq!(titles, ["Rooster"], "not the rest of the album");
     }
 
     #[test]

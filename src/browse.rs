@@ -792,12 +792,33 @@ impl<'a> ActivePlan<'a> {
     }
 }
 
-/// Case-insensitive search over titles and tags; a leading "#" is ignored.
+/// A search as it is compared: trimmed, lowercase, without a leading "#".
+pub fn search_needle(query: &str) -> String {
+    query.trim().trim_start_matches('#').to_lowercase()
+}
+
+/// Case-insensitive search over titles, creators (artist, author,
+/// director), tags and an album's rated tracks; a leading "#" is ignored.
 pub fn matches_search(entry: &Entry, query: &str) -> bool {
-    let query = query.trim().trim_start_matches('#').to_lowercase();
+    let query = search_needle(query);
     query.is_empty()
-        || entry.title.to_lowercase().contains(&query)
-        || entry.tags.iter().any(|tag| tag.contains(&query))
+        || matches_entry(entry, &query)
+        || entry
+            .tracks
+            .iter()
+            .flatten()
+            .any(|track| track.title.to_lowercase().contains(&query))
+}
+
+/// The entry's own title, creator or tags hold `needle` (from
+/// `search_needle`), leaving its tracks out.
+pub fn matches_entry(entry: &Entry, needle: &str) -> bool {
+    entry.title.to_lowercase().contains(needle)
+        || entry
+            .creator
+            .as_deref()
+            .is_some_and(|creator| creator.to_lowercase().contains(needle))
+        || entry.tags.iter().any(|tag| tag.contains(needle))
 }
 
 /// How a status reads for a type: "Watching" for a show in progress,
@@ -1142,6 +1163,25 @@ mod tests {
         assert!(matches_search(mummy, "MUMMY"));
         assert!(matches_search(mummy, "#lightheart"));
         assert!(!matches_search(mummy, "dracula"));
+    }
+
+    #[test]
+    fn search_matches_creators_and_rated_tracks() {
+        let mut album = library().entries[0].clone();
+        album.media = MediaType::Music;
+        album.title = "Merry Christmas".into();
+        album.creator = Some("Mariah Carey".into());
+        album.tags = Vec::new();
+        album.tracks = Some(vec![crate::model::Track {
+            title: "Silent Night".into(),
+            id: None,
+            rating: 8,
+        }]);
+        assert!(matches_search(&album, "mariah"));
+        assert!(matches_search(&album, "CAREY"));
+        assert!(matches_search(&album, "silent"));
+        assert!(!matches_entry(&album, "silent"));
+        assert!(!matches_search(&album, "whitney"));
     }
 
     #[test]
