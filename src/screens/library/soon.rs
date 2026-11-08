@@ -390,8 +390,15 @@ pub fn wanted(app: &App, wants: &mut Wants) {
     let state = &app.library;
     let lists = Lists::of(app);
     if state.view_mode() != View::Text {
+        let framed = state.view_mode() == View::Grid && frames_albums(state);
         for group in page_groups(state, &lists) {
             for row in group.rows {
+                if framed
+                    && ui::cover::is_square(row.media())
+                    && let Some(url) = image_url(app, &row)
+                {
+                    wants.backdrops.push(url.to_owned());
+                }
                 match row {
                     SoonRow::Library(row) => wants.covers.push(row.entry.id.clone()),
                     SoonRow::Found(found) => want_found(found, wants),
@@ -414,6 +421,29 @@ pub fn wanted(app: &App, wants: &mut Wants) {
                 .take(NEXT_UP)
                 .map(|row| row.entry.id.clone()),
         );
+    }
+}
+
+/// Whether the grid sets its albums in poster frames: with every type,
+/// or a pick of types that is not Music alone, so posters can share the
+/// rows.
+fn frames_albums(state: &State) -> bool {
+    state.soon_types() != BTreeSet::from([MediaType::Music])
+}
+
+/// The URL of a row's picture, once known.
+fn image_url<'a>(app: &'a App, row: &SoonRow<'a>) -> Option<&'a str> {
+    match row {
+        SoonRow::Library(upcoming) => app.artwork.cover_url(upcoming.entry),
+        SoonRow::Found(found) => match (&found.cover_url, &found.kind) {
+            (Some(url), _) => Some(url.as_str()),
+            (None, Kind::Season { show, .. }) => app
+                .repo
+                .library()
+                .entry(show)
+                .and_then(|entry| app.artwork.cover_url(entry)),
+            _ => None,
+        },
     }
 }
 
@@ -1205,23 +1235,41 @@ fn tile<'a>(
             on_cover = on_cover.push(text(sub).size(12.5).font(font::MEDIUM).color(white));
         }
     }
+    let square = ui::cover::is_square(row.media());
+    // Among posters an album without its image is a plain 2:3
+    // placeholder, as a poster's: a flat color has no shape to keep.
+    let shaped = square && !(frames_albums(&app.library) && image.is_none());
+    let framed = shaped && frames_albums(&app.library);
+    let backdrop = if framed {
+        image_url(app, row)
+            .and_then(|url| app.artwork.backdrop(url))
+            .or_else(|| image.clone())
+    } else {
+        None
+    };
     let face = ui::cover(image, tint, Fill, Fill, 8.0, None);
     let ring = look.selected.then_some(tokens.accent);
     let layers = stack![
         face,
         container(on_cover).width(Fill).height(Fill).padding(14)
     ];
-    let cover = container(layers).style(move |_| {
-        container::Style::default().border(
-            Border::default()
-                .rounded(8)
-                .width(if ring.is_some() { 3.0 } else { 0.0 })
-                .color(ring.unwrap_or(Color::TRANSPARENT)),
-        )
-    });
-    // An album's square sits at the bottom of the 2:3 slot, so the row
-    // under every tile stays on one line.
-    let cover = ui::cover::in_poster_slot(cover, ui::cover::is_square(row.media()));
+    // Among posters an album's square sits in a poster frame filling the
+    // 2:3 slot; in a grid of albums only it sits at the bottom of the
+    // slot, so the row under every tile stays on one line.
+    let ringed = move |content: Element<'a, AppMessage>| {
+        container(content).style(move |_| {
+            container::Style::default().border(
+                Border::default()
+                    .rounded(8)
+                    .width(if ring.is_some() { 3.0 } else { 0.0 })
+                    .color(ring.unwrap_or(Color::TRANSPARENT)),
+            )
+        })
+    };
+    let cover = match backdrop {
+        Some(backdrop) => ringed(ui::cover::poster_frame(layers, backdrop, 8.0)).into(),
+        None => ui::cover::in_poster_slot(ringed(layers.into()), shaped),
+    };
     // "Date not set" and + Add do not fit side by side under a tile of
     // 140 px, so an undated tile says "TBD", the rail's word (owner,
     // 2026-11-08); the tooltip keeps "Date not set".

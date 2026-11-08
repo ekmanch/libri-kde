@@ -4,6 +4,7 @@
 pub mod animation;
 pub mod app;
 pub mod artwork;
+pub mod blur;
 pub mod browse;
 pub mod clock;
 pub mod connection;

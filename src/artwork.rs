@@ -64,11 +64,13 @@ pub const PRUNE_DELAY: Duration = Duration::from_secs(15);
 /// season or track list is open. `large` are the cover viewer's sharper
 /// copies, fetched ahead of everything else and without waiting for a
 /// free download; `sizes` the images whose width and height are read
-/// from the file once it is here.
+/// from the file once it is here; `backdrops` the images a poster frame
+/// shows (an album among posters), blurred once each (`blur`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Wants {
     pub large: Vec<String>,
     pub sizes: Vec<String>,
+    pub backdrops: Vec<String>,
     pub covers: Vec<String>,
     pub artists: Vec<String>,
     pub images: Vec<String>,
@@ -190,6 +192,12 @@ pub enum Message {
         outcome: Reply<Vec<TrackInfo>>,
     },
     Platforms(Reply<Vec<GamePlatform>>),
+    /// An image's blurred copy for a poster frame, none when it did not
+    /// decode.
+    Blurred {
+        url: String,
+        backdrop: Option<image::Handle>,
+    },
     /// The session's prune, due; the app answers it with `prune` and
     /// Discover's covers.
     Prune,
@@ -225,6 +233,10 @@ pub struct Artwork {
     /// Images' widths and heights by URL, read once each (none when the
     /// header was not understood).
     sizes: HashMap<String, Option<(u32, u32)>>,
+    /// The poster frames' blurred copies by URL, in memory only (none
+    /// when the image did not decode), and the ones being made.
+    backdrops: HashMap<String, Option<image::Handle>>,
+    blurring: HashSet<String>,
     series: HashMap<String, SeriesState>,
     episodes: HashMap<(String, u32), EpisodesState>,
     tracks: HashMap<String, TracksState>,
@@ -274,6 +286,8 @@ impl Artwork {
             downloading: HashSet::new(),
             image_queue: Vec::new(),
             sizes: HashMap::new(),
+            backdrops: HashMap::new(),
+            blurring: HashSet::new(),
             series: HashMap::new(),
             episodes: HashMap::new(),
             tracks: HashMap::new(),
@@ -404,6 +418,12 @@ impl Artwork {
         self.sizes.get(url).copied().flatten()
     }
 
+    /// An image's blurred copy for a poster frame, once it is made (it
+    /// was wanted in `Wants::backdrops`).
+    pub fn backdrop(&self, url: &str) -> Option<image::Handle> {
+        self.backdrops.get(url).cloned().flatten()
+    }
+
     /// Whether the image's download failed and is not to be tried again
     /// yet.
     pub fn image_failed(&self, url: &str) -> bool {
@@ -515,6 +535,9 @@ impl Artwork {
             }
         }
         let mut tasks = Vec::new();
+        for url in &wants.backdrops {
+            tasks.extend(self.want_backdrop(url));
+        }
         for id in &wants.series {
             if let Some(entry) = library.entry(id) {
                 tasks.extend(self.want_series(entry, service));
@@ -592,6 +615,26 @@ impl Artwork {
         {
             self.queue.push(Job::Artist(name.to_owned()));
         }
+    }
+
+    /// Starts the blurred copy of an image that is on this computer.
+    fn want_backdrop(&mut self, url: &str) -> Option<Task<Message>> {
+        if self.backdrops.contains_key(url) || self.blurring.contains(url) {
+            return None;
+        }
+        let Some(ImageState::Ready(path)) = self.image_states.get(url) else {
+            return None;
+        };
+        let path = path.clone();
+        let url = url.to_owned();
+        self.blurring.insert(url.clone());
+        Some(Task::perform(
+            crate::app::blocking(move || Ok(crate::blur::backdrop(&path))),
+            move |result| Message::Blurred {
+                url: url.clone(),
+                backdrop: result.ok().flatten(),
+            },
+        ))
     }
 
     fn want_image(&mut self, url: &str) {
@@ -971,6 +1014,10 @@ impl Artwork {
                     Err(ImageFailure::Other(_)) => ImageState::Failed(Instant::now() + IMAGE_RETRY),
                 };
                 self.image_states.insert(url, state);
+            }
+            Message::Blurred { url, backdrop } => {
+                self.blurring.remove(&url);
+                self.backdrops.insert(url, backdrop);
             }
             Message::Episodes {
                 id,

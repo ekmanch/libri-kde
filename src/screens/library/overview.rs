@@ -54,13 +54,18 @@ pub fn wanted(app: &App, view: View, wants: &mut crate::artwork::Wants) {
         View::Grid => {
             let covers = shelf_covers(app);
             for section in SHELVES {
-                wants.covers.extend(
-                    overview
-                        .list(section)
-                        .iter()
-                        .take(covers)
-                        .map(|e| e.id.clone()),
-                );
+                let list = overview.list(section);
+                let shown = &list[..covers.min(list.len())];
+                wants.covers.extend(shown.iter().map(|e| e.id.clone()));
+                // The albums of a shelf mixing types sit in poster frames.
+                if !shown.iter().all(|e| ui::cover::is_square(e.media)) {
+                    wants.backdrops.extend(
+                        shown
+                            .iter()
+                            .filter(|e| ui::cover::is_square(e.media))
+                            .filter_map(|e| app.artwork.cover_url(e).map(str::to_owned)),
+                    );
+                }
             }
         }
         View::List => {
@@ -228,7 +233,8 @@ fn shelf<'a>(
     let selected = app.library.selected.as_deref();
     let shown = &list[..covers.min(list.len())];
     // A shelf of albums only is as tall as its squares; one mixing types
-    // keeps the 2:3 slot, so the details stay on one line.
+    // keeps the 2:3 slot, its albums in poster frames, so the details
+    // stay on one line.
     let all_square = shown.iter().all(|e| ui::cover::is_square(e.media));
     let row = Row::with_children(shown.iter().map(|entry| {
         let dimmed = selected.is_some_and(|id| id != entry.id);
@@ -240,9 +246,10 @@ fn shelf<'a>(
 }
 
 /// A 100 × 150 cover with the title on it, the detail under it. An
-/// album's is 100 × 100 at the bottom of the same slot, so the details
-/// stay on one line; on a shelf of albums only (`all_square`) the slot is
-/// the square itself.
+/// album's 100 × 100 sits in a poster frame of the same slot (its
+/// placeholder fills the slot until the image is here), so the details
+/// stay on one line; on a shelf of albums only (`all_square`) the
+/// slot is the square itself.
 fn shelf_cover<'a>(
     app: &'a App,
     entry: &'a Entry,
@@ -253,19 +260,31 @@ fn shelf_cover<'a>(
 ) -> Element<'a, AppMessage> {
     let tint = theme::cover_color(&entry.id);
     let square = ui::cover::is_square(entry.media);
-    let cover = container(ui::cover::in_poster_slot(
-        ui::titled_cover(
-            app.artwork.cover(entry),
-            tint,
-            &entry.title,
-            COVER_WIDTH,
-            ui::cover::height_for(COVER_WIDTH, square),
-            14.0,
-        ),
-        square && !all_square,
-    ))
-    .width(COVER_WIDTH)
-    .height(ui::cover::height_for(COVER_WIDTH, all_square));
+    let image = app.artwork.cover(entry);
+    let framed = square && !all_square;
+    // Among posters an album without its image is a plain 2:3
+    // placeholder, as a poster's: a flat color has no shape to keep.
+    let poster = !square || (framed && image.is_none());
+    let face = ui::titled_cover(
+        image.clone(),
+        tint,
+        &entry.title,
+        COVER_WIDTH,
+        ui::cover::height_for(COVER_WIDTH, !poster),
+        14.0,
+    );
+    let backdrop = app
+        .artwork
+        .cover_url(entry)
+        .and_then(|url| app.artwork.backdrop(url))
+        .or(image);
+    let face = match backdrop {
+        Some(backdrop) if framed && !poster => ui::cover::poster_frame(face, backdrop, 8.0),
+        _ => face,
+    };
+    let cover = container(face)
+        .width(COVER_WIDTH)
+        .height(ui::cover::height_for(COVER_WIDTH, all_square));
     let content = column![
         cover,
         ui::mono(meta, 12.0, tokens.sub).wrapping(text::Wrapping::None)

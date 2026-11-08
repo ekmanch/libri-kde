@@ -24,8 +24,9 @@ pub fn height_for(width: f32, square: bool) -> f32 {
 }
 
 /// A cover that fills a 2:3 slot, or for a square cover the bottom two
-/// thirds of it, so the captions of a row mixing types stay on one line
-/// (Home's shelves, the Coming soon grid).
+/// thirds of it, so the captions under a grid of squares in 2:3 slots
+/// stay where a poster's would (Coming soon's grid with Music only); a
+/// row mixing types frames its squares instead (`poster_frame`).
 pub fn in_poster_slot<'a, Message: 'a>(
     cover: impl Into<Element<'a, Message>>,
     square: bool,
@@ -38,6 +39,44 @@ pub fn in_poster_slot<'a, Message: 'a>(
         container(cover).width(Fill).height(FillPortion(2)),
     ]
     .into()
+}
+
+/// How bright a poster frame's backdrop is: its blurred copy drawn this
+/// faded over black.
+const BACKDROP_BRIGHTNESS: f32 = 0.55;
+
+/// A square cover in a 2:3 tile among posters (option C of the album
+/// sketch, owner 2026-11-08): the square centered on `backdrop`, its
+/// blurred copy (`blur`), darkened and filling the tile, rounded by
+/// `radius`; until the copy is made, the image itself. The tile fills
+/// the 2:3 slot it is given, `square` its middle two thirds. An album
+/// without its image is a plain 2:3 placeholder there instead.
+pub fn poster_frame<'a, Message: 'a>(
+    square: impl Into<Element<'a, Message>>,
+    backdrop: image::Handle,
+    radius: f32,
+) -> Element<'a, Message> {
+    let dark = Color::BLACK;
+    let base = container(
+        Image::new(backdrop)
+            .width(Fill)
+            .height(Fill)
+            .content_fit(ContentFit::Cover)
+            .border_radius(radius)
+            .opacity(BACKDROP_BRIGHTNESS),
+    )
+    .width(Fill)
+    .height(Fill)
+    .clip(true)
+    .style(move |_| container::background(dark).border(Border::default().rounded(radius)));
+    // The square is the tile's width, two thirds of its height, with a
+    // sixth above and below.
+    let centered = column![
+        Space::new().width(Fill).height(FillPortion(1)),
+        container(square).width(Fill).height(FillPortion(4)),
+        Space::new().width(Fill).height(FillPortion(1)),
+    ];
+    iced::widget::stack![base, centered].into()
 }
 
 /// A placeholder's label: the words and their size, drawn bottom-left in
