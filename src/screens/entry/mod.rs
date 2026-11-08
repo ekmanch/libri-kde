@@ -2579,6 +2579,33 @@ mod tests {
     }
 
     #[test]
+    fn no_cover_yet_shows_only_without_a_cover() {
+        let mut app = app();
+        let id = "movies/the-mummy-1999";
+        send(&mut app, Message::Edit(id.into()));
+        let shows = |app: &App| {
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            ui.find("No cover yet").is_ok()
+        };
+        assert!(shows(&app), "no match and no cover");
+        // A cover found by the title, for an entry saved without a match.
+        let entry = app.repo.library().entry(id).unwrap().clone();
+        let _ = app.artwork.update(
+            crate::artwork::Message::CoverResolved {
+                id: id.into(),
+                key: crate::artwork::Artwork::key_for(&entry),
+                outcome: Ok((Some("https://image.tmdb.org/t/p/w342/m.jpg".into()), None)),
+            },
+            app.repo.library(),
+        );
+        assert!(!shows(&app));
+    }
+
+    #[test]
     fn a_picked_match_fills_the_form_and_saves_a_new_entry() {
         let mut app = app();
         send(&mut app, Message::Add);

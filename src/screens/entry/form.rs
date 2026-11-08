@@ -701,13 +701,13 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
     };
     // The picked cover or the match's own, once fetched; for an entry
     // edited without a new pick, the cover the library shows.
-    let handle = match form.cover_url() {
-        Some(url) => app.artwork.image(&url),
-        None => form
-            .editing
-            .as_deref()
-            .and_then(|id| library.entry(id))
-            .and_then(|entry| app.artwork.cover(entry)),
+    let edited = form.editing.as_deref().and_then(|id| library.entry(id));
+    let (handle, has_cover) = match form.cover_url() {
+        Some(url) => (app.artwork.image(&url), true),
+        None => (
+            edited.and_then(|entry| app.artwork.cover(entry)),
+            edited.is_some_and(|entry| app.artwork.cover_url(entry).is_some()),
+        ),
     };
     // An album's cover is a 150 px square.
     let cover_height = ui::cover::height_for(150.0, ui::cover::is_square(form.media));
@@ -718,18 +718,21 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         .on_press_maybe((!blank).then(|| msg(Message::OpenCover)))
         .style(|_, _| button::Style::default())
         .focusable(8.0, tokens);
-    let note = if blank {
-        "No cover yet"
-    } else if form.cover_from.is_some() {
-        "From another match"
+    // "No cover yet" only when there is none: an entry saved without a
+    // match can still have a cover, found by its title.
+    let note = if form.cover_from.is_some() {
+        Some("From another match")
+    } else if !blank {
+        Some("From the match · click to change")
+    } else if !has_cover {
+        Some("No cover yet")
     } else {
-        "From the match · click to change"
+        None
     };
-    let mut cover = column![
-        cover_button,
-        container(text(note).size(12).color(tokens.sub)).center_x(150),
-    ]
-    .spacing(10);
+    let mut cover = column![cover_button].spacing(10);
+    if let Some(note) = note {
+        cover = cover.push(container(text(note).size(12).color(tokens.sub)).center_x(150));
+    }
     if form.cover_from.is_some() {
         cover = cover.push(
             container(ui::labeled_button(
