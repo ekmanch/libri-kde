@@ -443,8 +443,9 @@ impl Season {
     /// A show's status from its seasons. One season: that season's status,
     /// Want while not set. More: only seasons that are out and have a
     /// status count; any In progress is In progress; else any DNF is DNF;
-    /// all Done is Done; Done and Want together are In progress; all Want,
-    /// or nothing set, is Want.
+    /// all Done is Done; anything else (Done and Want together, all Want,
+    /// nothing set) is Want. Only a season set to In progress makes the
+    /// show In progress (canvas revision of 2026-11-08).
     pub fn show_status(seasons: &[Season], today: Date) -> EntryStatus {
         if let [only] = seasons {
             return only.status.unwrap_or(EntryStatus::Want);
@@ -463,10 +464,10 @@ impl Season {
         if set.contains(&EntryStatus::Dnf) {
             return EntryStatus::Dnf;
         }
-        if set.iter().all(|s| *s == set[0]) {
-            return set[0];
+        if set.iter().all(|s| *s == EntryStatus::Done) {
+            return EntryStatus::Done;
         }
-        EntryStatus::InProgress
+        EntryStatus::Want
     }
 }
 
@@ -607,8 +608,17 @@ mod tests {
         );
         assert_eq!(
             status(&[season(1, "2024", done), season(2, "2025", want)]),
-            EntryStatus::InProgress,
+            EntryStatus::Want,
             "Done and Want together"
+        );
+        assert_eq!(
+            status(&[
+                season(1, "2024", done),
+                season(2, "2025", want),
+                season(3, "2026-01-16", Some(EntryStatus::InProgress))
+            ]),
+            EntryStatus::InProgress,
+            "only a season in progress makes the show in progress"
         );
         assert_eq!(
             status(&[season(1, "2024", done), season(2, "2027", want)]),
