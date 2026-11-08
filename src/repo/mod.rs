@@ -106,10 +106,14 @@ pub enum Operation {
         entry: String,
     },
     /// Rates a track on an album, or clears it: only rated tracks are
-    /// stored. A track is matched by title, case ignored.
+    /// stored. A track is matched by its lookup id when both have one,
+    /// else by title, case ignored; `track_id` is stored with a new
+    /// rating ("Rate it on the album" passes the song's), and a track
+    /// already stored keeps its own.
     SetTrackRating {
         album: String,
         title: String,
+        track_id: Option<String>,
         rating: Option<u8>,
     },
     /// Sets one season's status (`None` clears it); the show's status
@@ -241,11 +245,13 @@ impl Operation {
                 album,
                 title: track,
                 rating: Some(rating),
+                ..
             } => format!("Rate {track} on {} {rating} of 10", title(album)),
             Operation::SetTrackRating {
                 album,
                 title: track,
                 rating: None,
+                ..
             } => format!("Clear the rating of {track} on {}", title(album)),
             Operation::SetSeasonStatus {
                 id,
@@ -412,6 +418,7 @@ impl Operation {
             Operation::SetTrackRating {
                 album,
                 title,
+                track_id,
                 rating,
             } => {
                 if rating.is_some_and(|r| !(1..=10).contains(&r)) {
@@ -419,9 +426,10 @@ impl Operation {
                 }
                 let album = entry_mut(library, &album)?;
                 let tracks = album.tracks.get_or_insert_with(Vec::new);
-                let found = tracks
-                    .iter()
-                    .position(|t| t.title.eq_ignore_ascii_case(&title));
+                let found = tracks.iter().position(|t| match (&t.id, &track_id) {
+                    (Some(a), Some(b)) if a == b => true,
+                    _ => t.title.eq_ignore_ascii_case(&title),
+                });
                 match (found, rating) {
                     (Some(index), Some(rating)) => tracks[index].rating = rating,
                     (Some(index), None) => {
@@ -429,7 +437,7 @@ impl Operation {
                     }
                     (None, Some(rating)) => tracks.push(Track {
                         title,
-                        id: None,
+                        id: track_id,
                         rating,
                     }),
                     (None, None) => {}
@@ -786,6 +794,7 @@ mod summary_tests {
                 Operation::SetTrackRating {
                     album: id(DIRT),
                     title: id("Would?"),
+                    track_id: None,
                     rating: Some(10),
                 },
                 format!("Rate Would? on {dirt} 10 of 10"),
@@ -794,6 +803,7 @@ mod summary_tests {
                 Operation::SetTrackRating {
                     album: id(DIRT),
                     title: id("Would?"),
+                    track_id: None,
                     rating: None,
                 },
                 format!("Clear the rating of Would? on {dirt}"),

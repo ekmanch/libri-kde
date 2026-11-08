@@ -57,18 +57,24 @@ pub fn encode(operation: &Operation) -> Value {
         Operation::SetTrackRating {
             album,
             title,
+            track_id,
             rating: Some(rating),
-        } => (
-            "rateTrack",
-            json!({ "entryId": album, "track": { "title": title, "rating": rating } }),
-        ),
+        } => {
+            // The phone's track: the id only when there is one.
+            let mut track = json!({ "rating": rating, "title": title });
+            if let Some(track_id) = track_id {
+                track["id"] = json!(track_id);
+            }
+            ("rateTrack", json!({ "entryId": album, "track": track }))
+        }
         Operation::SetTrackRating {
             album,
             title,
+            track_id,
             rating: None,
         } => (
             "clearTrackRating",
-            json!({ "entryId": album, "trackId": null, "title": title }),
+            json!({ "entryId": album, "trackId": track_id, "title": title }),
         ),
         Operation::SetSeasonStatus {
             id,
@@ -190,6 +196,7 @@ pub fn decode(value: &Value) -> Result<Operation, String> {
                 .as_str()
                 .map(str::to_owned)
                 .ok_or_else(|| format!("{op}: no track title"))?,
+            track_id: value["track"]["id"].as_str().map(str::to_owned),
             rating: Some(
                 value["track"]["rating"]
                     .as_u64()
@@ -200,6 +207,7 @@ pub fn decode(value: &Value) -> Result<Operation, String> {
         "clearTrackRating" => Operation::SetTrackRating {
             album: string("entryId")?,
             title: string("title")?,
+            track_id: value["trackId"].as_str().map(str::to_owned),
             rating: None,
         },
         "setSeasonStatus" => Operation::SetSeasonStatus {
@@ -317,11 +325,13 @@ mod tests {
             Operation::SetTrackRating {
                 album: "music/album".into(),
                 title: "Enter Sandman".into(),
+                track_id: Some("deezer:track:3135556".into()),
                 rating: Some(9),
             },
             Operation::SetTrackRating {
                 album: "music/album".into(),
                 title: "Enter Sandman".into(),
+                track_id: None,
                 rating: None,
             },
             Operation::SetSeasonStatus {

@@ -166,8 +166,8 @@ pub struct Form {
     pub categories: Option<CategoriesDialog>,
     /// The phone's replace question, asked on Save (D12, D13).
     pub replace: Option<Replace>,
-    /// The answer, once given: replace (true) or keep both (false).
-    pub replace_answer: Option<bool>,
+    /// The answer, once given.
+    pub replace_answer: Option<ReplaceChoice>,
     /// Music's lookup: the matching artists, the artist open, the paging.
     pub music: MusicLookup,
 }
@@ -308,17 +308,79 @@ pub const DEBOUNCE: Duration = Duration::from_millis(400);
 /// pause rather than one per key.
 pub const NOTE_DEBOUNCE: Duration = Duration::from_millis(800);
 
-/// Saving music that overlaps what is saved.
+/// The question asked when saved music overlaps what is being saved
+/// (canvas: Library › Add: a song from a saved album, Add: an album with
+/// saved songs): what overlaps, and the answer picked so far.
 #[derive(Debug, Clone)]
-pub enum Replace {
+pub struct Replace {
+    pub overlap: Overlap,
+    pub pick: ReplaceChoice,
+}
+
+/// What a save overlaps.
+#[derive(Debug, Clone)]
+pub enum Overlap {
     /// D12: an album whose songs are saved as entries.
     Songs { album: String, songs: Vec<String> },
-    /// D13: a song whose album is saved.
+    /// D13: a song whose album is saved. `rating` is the song's, which
+    /// "Rate it on the album" stores in the album's tracks.
     Album {
         album: String,
+        album_id: String,
         song: String,
         adding: bool,
+        rating: Option<u8>,
     },
+}
+
+/// An answer to the overlap question.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplaceChoice {
+    /// The song's rating goes in the album's tracks; no new entry.
+    RateOnAlbum,
+    /// Save it as its own entry beside what overlaps.
+    KeepBoth,
+    /// Delete what overlaps: the album, or the songs into the album.
+    Replace,
+}
+
+impl Overlap {
+    /// The answers, in the dialog's order: "Rate it on the album" first
+    /// when adding a song, "Replace songs with album" first for an album.
+    pub fn choices(&self) -> &'static [ReplaceChoice] {
+        use ReplaceChoice::*;
+        match self {
+            Overlap::Songs { .. } => &[Replace, KeepBoth],
+            Overlap::Album { adding: true, .. } => &[RateOnAlbum, KeepBoth, Replace],
+            Overlap::Album { .. } => &[KeepBoth, Replace],
+        }
+    }
+
+    /// Whether `choice` can be picked: only a rated song can be rated on
+    /// its album, since only rated tracks are stored.
+    pub fn can(&self, choice: ReplaceChoice) -> bool {
+        choice != ReplaceChoice::RateOnAlbum
+            || matches!(
+                self,
+                Overlap::Album {
+                    rating: Some(_),
+                    ..
+                }
+            )
+    }
+}
+
+impl Replace {
+    /// The question with its first answer that can be picked selected.
+    pub fn new(overlap: Overlap) -> Replace {
+        let pick = overlap
+            .choices()
+            .iter()
+            .copied()
+            .find(|&c| overlap.can(c))
+            .unwrap_or(ReplaceChoice::KeepBoth);
+        Replace { overlap, pick }
+    }
 }
 
 /// A tag the lookup suggests: the tag, and the category it would go in
@@ -580,9 +642,10 @@ pub enum Message {
     Pages(String),
     SeriesName(String),
     SeriesNumber(String),
-    /// The replace question's answers.
-    ReplaceKeepBoth,
-    ReplaceConfirm,
+    /// The replace question: an answer picked, the action button, and
+    /// Cancel (also Esc and a click outside) back to the form.
+    ReplacePick(ReplaceChoice),
+    ReplaceGo,
     ReplaceCancel,
     // The other dialogs.
     ConfirmDelete,
@@ -1894,6 +1957,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             app.apply(Operation::SetTrackRating {
                 album,
                 title,
+                track_id: None,
                 rating,
             });
             app.library.track_rating_open = None;
@@ -2131,6 +2195,8 @@ fn form_update(app: &mut App, message: Message) -> Task<AppMessage> {
     if let Some(operations) = outcome {
         let selected = operations.iter().find_map(|op| match op {
             Operation::AddEntry(entry) | Operation::UpdateEntry(entry) => Some(entry.id.clone()),
+            // Rated on the album: the album it went to.
+            Operation::SetTrackRating { album, .. } => Some(album.clone()),
             _ => None,
         });
         app.dialog = None;
@@ -2309,6 +2375,14 @@ pub fn wanted(app: &App, wants: &mut Wants) {
         if let Some(url) = &artist.picture_url {
             wants.images.push(url.clone());
         }
+    }
+    // The overlap question shows the saved album's cover.
+    if let Some(Replace {
+        overlap: Overlap::Album { album_id, .. },
+        ..
+    }) = &form.replace
+    {
+        wants.covers.push(album_id.clone());
     }
     match form.cover_url() {
         Some(url) => wants.images.push(url),
@@ -2824,10 +2898,18 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
             }
         }
         Message::CancelCategories => form.categories = None,
-        Message::ReplaceKeepBoth | Message::ReplaceConfirm => {
-            form.replace = None;
-            form.replace_answer = Some(matches!(message, Message::ReplaceConfirm));
-            return update_form(form, Message::Save, ctx);
+        Message::ReplacePick(choice) => {
+            if let Some(replace) = &mut form.replace
+                && replace.overlap.can(choice)
+            {
+                replace.pick = choice;
+            }
+        }
+        Message::ReplaceGo => {
+            if let Some(replace) = form.replace.take() {
+                form.replace_answer = Some(replace.pick);
+                return update_form(form, Message::Save, ctx);
+            }
         }
         Message::ReplaceCancel => {
             form.replace = None;
@@ -2860,21 +2942,37 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
             let overlaps =
                 entry.media == MediaType::Music && (!songs.is_empty() || album.is_some());
             if overlaps && form.replace_answer.is_none() {
-                form.replace = Some(match album {
-                    Some(album) => Replace::Album {
+                form.replace = Some(Replace::new(match album {
+                    Some(album) => Overlap::Album {
                         album: album.title.clone(),
+                        album_id: album.id.clone(),
                         song: entry.title.clone(),
                         adding: base.is_none(),
+                        rating: entry.rating,
                     },
-                    None => Replace::Songs {
+                    None => Overlap::Songs {
                         album: entry.title.clone(),
                         songs: songs.iter().map(|s| s.title.clone()).collect(),
                     },
-                });
+                }));
                 return None;
             }
+            let answer = form.replace_answer.filter(|_| overlaps);
+            // Rated on the album: the song's rating in its tracks, with
+            // the song's lookup id, and no entry of its own.
+            if answer == Some(ReplaceChoice::RateOnAlbum)
+                && let Some(album) = album
+                && let Some(rating) = entry.rating
+            {
+                return Some(vec![Operation::SetTrackRating {
+                    album: album.id.clone(),
+                    title: entry.title.clone(),
+                    track_id: entry.source.clone(),
+                    rating: Some(rating),
+                }]);
+            }
             let mut removals = Vec::new();
-            if overlaps && form.replace_answer == Some(true) {
+            if answer == Some(ReplaceChoice::Replace) {
                 if entry.media == MediaType::Music && !music::is_song(&entry) {
                     entry = music::absorb_songs(entry, &songs);
                 }
@@ -2978,6 +3076,7 @@ pub fn confirm(app: &mut App) -> Task<AppMessage> {
             Message::SaveCategories
         }
         Some(Dialog::Tags(_)) => Message::SaveTags,
+        Some(Dialog::Form(form)) if form.replace.is_some() => Message::ReplaceGo,
         Some(Dialog::Form(form)) if form.picker.is_some() => Message::ClosePicker,
         Some(Dialog::Form(form)) if form.picked.is_none() && !form.matches().is_empty() => {
             Message::Pick(0)
@@ -3282,10 +3381,16 @@ mod tests {
         send(&mut app, Message::Title("Bad Music for Bad People".into()));
         send(&mut app, Message::Creator("The Cramps".into()));
         send(&mut app, Message::Save);
+        let replace = form(&app).replace.clone().unwrap();
         assert!(
-            matches!(&form(&app).replace, Some(Replace::Songs { songs, .. }) if songs == &["Human Fly"])
+            matches!(&replace.overlap, Overlap::Songs { songs, .. } if songs == &["Human Fly"])
         );
-        send(&mut app, Message::ReplaceConfirm);
+        assert_eq!(
+            replace.pick,
+            ReplaceChoice::Replace,
+            "replacing is the default"
+        );
+        send(&mut app, Message::ReplaceGo);
         let library = app.repo.library();
         assert!(
             library.entry("music/human-fly-the-cramps").is_none(),
@@ -3297,8 +3402,61 @@ mod tests {
         assert_eq!(album.tracks.as_ref().unwrap()[0].title, "Human Fly");
     }
 
+    /// A song form for Dirt's "Angry Chair", which Dirt has no rating
+    /// for, found by a lookup with the id it gives.
+    fn angry_chair(app: &mut App, rating: Option<u8>) {
+        send(app, Message::Add);
+        send(app, Message::Type(MediaType::Music));
+        send(app, Message::Kind(EntryKind::Song));
+        send(app, Message::Title("Angry Chair".into()));
+        send(app, Message::Creator("Alice in Chains".into()));
+        send(app, Message::Album("Dirt".into()));
+        send(app, Message::Rate(rating));
+        if let Some(Dialog::Form(form)) = &mut app.dialog {
+            form.source = Some("deezer:track:42".into());
+        }
+        send(app, Message::Save);
+    }
+
+    const DIRT: &str = "music/dirt-alice-in-chains";
+    const ANGRY_CHAIR: &str = "music/angry-chair-alice-in-chains";
+
     #[test]
-    fn saving_a_song_whose_album_is_saved_asks_and_can_keep_both() {
+    fn a_rated_song_whose_album_is_saved_is_rated_on_the_album_by_default() {
+        let mut app = app();
+        angry_chair(&mut app, Some(8));
+        let replace = form(&app).replace.clone().unwrap();
+        assert!(
+            matches!(&replace.overlap, Overlap::Album { album, adding: true, .. } if album == "Dirt")
+        );
+        assert_eq!(replace.pick, ReplaceChoice::RateOnAlbum);
+        assert_eq!(
+            replace.overlap.choices(),
+            [
+                ReplaceChoice::RateOnAlbum,
+                ReplaceChoice::KeepBoth,
+                ReplaceChoice::Replace
+            ]
+        );
+        send(&mut app, Message::ReplaceGo);
+        assert!(app.dialog.is_none());
+        let library = app.repo.library();
+        assert!(library.entry(ANGRY_CHAIR).is_none(), "no new entry");
+        let tracks = library.entry(DIRT).unwrap().tracks.clone().unwrap();
+        let track = tracks.iter().find(|t| t.title == "Angry Chair").unwrap();
+        assert_eq!(
+            (track.rating, track.id.as_deref()),
+            (8, Some("deezer:track:42"))
+        );
+        assert_eq!(
+            app.library.selected.as_deref(),
+            Some(DIRT),
+            "the album is shown"
+        );
+    }
+
+    #[test]
+    fn rating_a_song_already_rated_on_its_album_changes_that_rating() {
         let mut app = app();
         send(&mut app, Message::Add);
         send(&mut app, Message::Type(MediaType::Music));
@@ -3306,14 +3464,82 @@ mod tests {
         send(&mut app, Message::Title("Rooster".into()));
         send(&mut app, Message::Creator("Alice in Chains".into()));
         send(&mut app, Message::Album("Dirt".into()));
+        send(&mut app, Message::Rate(Some(7)));
         send(&mut app, Message::Save);
-        assert!(
-            matches!(&form(&app).replace, Some(Replace::Album { album, adding: true, .. }) if album == "Dirt")
+        send(&mut app, Message::ReplaceGo);
+        let tracks = app
+            .repo
+            .library()
+            .entry(DIRT)
+            .unwrap()
+            .tracks
+            .clone()
+            .unwrap();
+        let rooster: Vec<_> = tracks.iter().filter(|t| t.title == "Rooster").collect();
+        assert_eq!(rooster.len(), 1);
+        assert_eq!(
+            (rooster[0].rating, rooster[0].id.as_deref()),
+            (7, Some("mb:7c9a7")),
+            "the stored id stays"
         );
-        send(&mut app, Message::ReplaceKeepBoth);
+    }
+
+    #[test]
+    fn an_unrated_song_cannot_be_rated_on_its_album() {
+        let mut app = app();
+        angry_chair(&mut app, None);
+        let pick = |app: &App| form(app).replace.as_ref().unwrap().pick;
+        assert_eq!(pick(&app), ReplaceChoice::KeepBoth);
+        send(&mut app, Message::ReplacePick(ReplaceChoice::RateOnAlbum));
+        assert_eq!(pick(&app), ReplaceChoice::KeepBoth, "the pick is refused");
+        // Enter takes the pick.
+        let _ = confirm(&mut app);
         let library = app.repo.library();
-        assert!(library.entry("music/dirt-alice-in-chains").is_some());
-        assert!(library.entry("music/rooster-alice-in-chains").is_some());
+        assert!(library.entry(DIRT).is_some());
+        assert!(library.entry(ANGRY_CHAIR).is_some());
+    }
+
+    #[test]
+    fn a_song_can_replace_its_album() {
+        let mut app = app();
+        angry_chair(&mut app, Some(8));
+        send(&mut app, Message::ReplacePick(ReplaceChoice::Replace));
+        send(&mut app, Message::ReplaceGo);
+        let library = app.repo.library();
+        assert!(library.entry(DIRT).is_none());
+        assert!(library.entry(ANGRY_CHAIR).is_some());
+    }
+
+    #[test]
+    fn cancel_goes_back_to_the_form_and_asks_again() {
+        let mut app = app();
+        angry_chair(&mut app, Some(8));
+        send(&mut app, Message::ReplacePick(ReplaceChoice::KeepBoth));
+        assert!(dismiss_top(&mut app), "Esc closes the question alone");
+        assert!(form(&app).replace.is_none());
+        assert!(app.repo.library().entry(ANGRY_CHAIR).is_none());
+        send(&mut app, Message::Save);
+        assert_eq!(
+            form(&app).replace.as_ref().unwrap().pick,
+            ReplaceChoice::RateOnAlbum,
+            "a new question starts on the default"
+        );
+    }
+
+    #[test]
+    fn editing_a_song_whose_album_is_saved_offers_no_rating_on_the_album() {
+        let overlap = Overlap::Album {
+            album: "Dirt".into(),
+            album_id: DIRT.into(),
+            song: "Angry Chair".into(),
+            adding: false,
+            rating: Some(8),
+        };
+        assert_eq!(
+            overlap.choices(),
+            [ReplaceChoice::KeepBoth, ReplaceChoice::Replace]
+        );
+        assert_eq!(Replace::new(overlap).pick, ReplaceChoice::KeepBoth);
     }
 
     #[test]

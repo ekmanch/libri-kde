@@ -11,14 +11,14 @@ use iced::widget::{
 };
 use iced::{Background, Border, Center, Color, Element, Fill, Padding};
 
-use super::{CategoriesDialog, Form, Message, NewTag, Replace};
+use super::{CategoriesDialog, Form, Message, NewTag, Overlap, Replace, ReplaceChoice};
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
 use crate::lookup::{self, ArtistHit, GamePlatform, Match, MusicScope};
 use crate::model::{BookFormat, EntryKind, EntryStatus, MediaType, TagCategory, text as rules};
 use crate::screens::entry::SeasonDraft;
 use crate::tags::PickerState;
-use crate::theme::{self, Tokens, font};
+use crate::theme::{self, Tokens, font, size};
 use crate::ui::{self, ButtonKind, FocusExt, Icon, Picker};
 
 fn msg(message: Message) -> AppMessage {
@@ -83,7 +83,7 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
         with_categories,
         form.replace
             .as_ref()
-            .map(|replace| replace_dialog(replace, &tokens)),
+            .map(|replace| replace_dialog(app, form, replace, &tokens)),
         msg(Message::ReplaceCancel),
         &tokens,
     )
@@ -142,73 +142,244 @@ fn tag_layers<'a>(
     )
 }
 
-/// The phone's D12 and D13: keep both, replace, or go back to the form.
-fn replace_dialog<'a>(replace: &Replace, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let (title, body, note, replace_label) = match replace {
-        Replace::Songs { album, songs } => {
+/// The phone's D12 and D13, as the canvas asks them (Library › Add: a
+/// song from a saved album, Add: an album with saved songs): the cover
+/// and the question, one answer per row with the first picked, and the
+/// action button named after the pick. Cancel, Esc and a click outside
+/// go back to the form.
+fn replace_dialog<'a>(
+    app: &'a App,
+    form: &'a Form,
+    replace: &Replace,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let (handle, tint) = match &replace.overlap {
+        Overlap::Album { album_id, .. } => {
+            let album = app.repo.library().entry(album_id);
+            (
+                album.and_then(|entry| app.artwork.cover(entry)),
+                theme::cover_color(album_id),
+            )
+        }
+        Overlap::Songs { .. } => {
+            let (handle, tint, _) = form_cover(app, form);
+            (handle, tint)
+        }
+    };
+    let (title, sub) = match &replace.overlap {
+        Overlap::Songs { album, songs } => {
             let n = songs.len();
-            let note = if n == 1 {
-                "The song entry is removed. Its rating moves to the album's track list.".to_owned()
-            } else {
-                format!(
-                    "The {} song entries are removed. Their ratings move to the album's track list.",
-                    count_word(n)
-                )
-            };
             (
                 format!(
                     "You have {n} {} from {album} saved",
                     if n == 1 { "song" } else { "songs" }
                 ),
                 songs.join(" · "),
-                note,
-                "Replace songs with album",
             )
         }
-        Replace::Album {
+        Overlap::Album {
             album,
             song,
             adding,
+            ..
         } => (
             format!("{album} is already in your library"),
             format!(
-                "You are {} the song {song} from this album.",
+                "You're {} the song {song} from it.",
                 if *adding { "adding" } else { "saving" }
             ),
-            "Replacing deletes the album entry, with its rating and note.".to_owned(),
-            "Replace album with this song",
         ),
     };
-    let body = column![text(body).size(14), text(note).size(13).color(tokens.sub)].spacing(10);
-    let actions = column![
-        ui::wide_button(
-            "Keep both",
-            ButtonKind::Outline,
-            *tokens,
-            Some(msg(Message::ReplaceKeepBoth))
-        ),
-        ui::wide_button(
-            replace_label,
-            ButtonKind::Destructive,
-            *tokens,
-            Some(msg(Message::ReplaceConfirm))
-        ),
-        ui::wide_button(
+    let header = row![
+        ui::plain_cover(handle, tint, 56.0, 56.0, 6.0),
+        column![
+            text(title).size(19).font(font::EXTRABOLD),
+            text(sub).size(13.5).color(tokens.sub),
+        ]
+        .spacing(3),
+    ]
+    .spacing(14)
+    .align_y(Center);
+
+    let options = Column::with_children(replace.overlap.choices().iter().map(|&choice| {
+        let words = answer_words(&replace.overlap, choice, form.editing.is_some());
+        replace_option(
+            words,
+            choice == replace.pick,
+            replace.overlap.can(choice),
+            tokens,
+            msg(Message::ReplacePick(choice)),
+        )
+    }))
+    .spacing(6);
+
+    let pick = answer_words(&replace.overlap, replace.pick, form.editing.is_some());
+    let go_kind = if pick.danger {
+        ButtonKind::Destructive
+    } else {
+        ButtonKind::Primary
+    };
+    let footer = row![
+        space::horizontal(),
+        ui::labeled_button(
             "Cancel",
-            ButtonKind::Text,
+            ButtonKind::Outline,
             *tokens,
             Some(msg(Message::ReplaceCancel))
         ),
+        ui::labeled_button(pick.action, go_kind, *tokens, Some(msg(Message::ReplaceGo))),
     ]
     .spacing(8);
-    ui::dialog(
-        title,
-        body,
-        actions,
-        440,
-        tokens,
-        msg(Message::ReplaceCancel),
+
+    let tokens_copy = *tokens;
+    container(column![header, options, footer].spacing(14))
+        .width(560)
+        .padding(Padding::new(22.0).bottom(18))
+        .style(move |_| ui::panel_style(&tokens_copy, 14.0))
+        .into()
+}
+
+/// An answer's words: its label, the line under it, the action button's
+/// label, and whether it deletes what was saved (red).
+struct AnswerWords {
+    label: &'static str,
+    help: String,
+    action: &'static str,
+    danger: bool,
+}
+
+fn answer_words(overlap: &Overlap, choice: ReplaceChoice, editing: bool) -> AnswerWords {
+    let words = |label, help, action, danger| AnswerWords {
+        label,
+        help,
+        action,
+        danger,
+    };
+    match overlap {
+        Overlap::Songs { songs, .. } => {
+            let one = songs.len() == 1;
+            match choice {
+                ReplaceChoice::Replace => words(
+                    "Replace songs with album",
+                    if one {
+                        "Removes the song entry. Its rating moves to the album's tracks.".to_owned()
+                    } else {
+                        format!(
+                            "Removes the {} song entries. Their ratings move to the album's tracks.",
+                            count_word(songs.len())
+                        )
+                    },
+                    "Replace songs",
+                    false,
+                ),
+                _ => words(
+                    "Keep both",
+                    format!(
+                        "Keeps the song {} and {} the album.",
+                        if one { "entry" } else { "entries" },
+                        if editing { "saves" } else { "adds" }
+                    ),
+                    if editing { "Save album" } else { "Add album" },
+                    false,
+                ),
+            }
+        }
+        Overlap::Album {
+            album,
+            song,
+            rating,
+            ..
+        } => match choice {
+            ReplaceChoice::RateOnAlbum => words(
+                "Rate it on the album",
+                match rating {
+                    Some(rating) => format!(
+                        "Saves your {rating}/10 for {song} in {album}'s tracks. No new entry; it shows under Songs and opens the album."
+                    ),
+                    None => format!(
+                        "Give {song} a rating first: only rated tracks are kept on an album."
+                    ),
+                },
+                "Rate on album",
+                false,
+            ),
+            ReplaceChoice::KeepBoth => words(
+                "Keep both",
+                format!(
+                    "{} {song} as its own song entry too, with its own status, note and tags.",
+                    if editing { "Keeps" } else { "Adds" }
+                ),
+                if editing { "Save song" } else { "Add song" },
+                false,
+            ),
+            ReplaceChoice::Replace => words(
+                "Replace album with this song",
+                format!(
+                    "Deletes the {album} entry, with its rating and note, and {} {song}.",
+                    if editing { "saves" } else { "adds" }
+                ),
+                "Replace album",
+                true,
+            ),
+        },
+    }
+}
+
+/// One answer of the replace question: the label (red when it deletes)
+/// over its line, in a box with the accent outline when picked. One that
+/// cannot be picked is dimmed and takes no press.
+fn replace_option<'a>(
+    words: AnswerWords,
+    picked: bool,
+    enabled: bool,
+    tokens: &Tokens,
+    on_press: AppMessage,
+) -> Element<'a, AppMessage> {
+    let tokens = *tokens;
+    let label_color = if words.danger {
+        tokens.danger
+    } else {
+        tokens.text
+    };
+    let (label_color, help_color) = if enabled {
+        (label_color, tokens.sub)
+    } else {
+        (label_color.scale_alpha(0.5), tokens.sub.scale_alpha(0.6))
+    };
+    button(
+        column![
+            text(words.label)
+                .size(size::BODY)
+                .font(font::SEMIBOLD)
+                .color(label_color),
+            text(words.help)
+                .size(12.5)
+                .line_height(1.45)
+                .color(help_color),
+        ]
+        .spacing(3),
     )
+    .width(Fill)
+    .padding([11, 14])
+    .on_press_maybe(enabled.then_some(on_press))
+    .style(move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: (picked || hovered).then_some(Background::Color(if picked {
+                tokens.picked
+            } else {
+                tokens.hover
+            })),
+            text_color: tokens.text,
+            border: Border::default().rounded(10).width(1).color(if picked {
+                tokens.accent
+            } else {
+                tokens.line
+            }),
+            ..button::Style::default()
+        }
+    })
+    .focusable(10.0, &tokens)
 }
 
 /// "two", "three": small counts in words, as the phone writes them.
@@ -887,6 +1058,29 @@ fn platform_picker<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element
         .into()
 }
 
+/// The form's cover: the image once fetched, the placeholder's tint, and
+/// whether there is a cover to fetch. The picked cover or the match's
+/// own; for an entry edited without a new pick, the cover the library
+/// shows.
+fn form_cover(app: &App, form: &Form) -> (Option<iced::widget::image::Handle>, Color, bool) {
+    // The cover is the match's, or another match's after Pick a cover.
+    let tint = match (&form.cover_from, &form.source) {
+        (Some(id), _) => theme::cover_color(id),
+        (None, Some(source)) => theme::cover_color(source),
+        (None, None) => theme::cover_color(&format!("{}/{}", form.media.key(), form.title)),
+    };
+    let library = app.repo.library();
+    let edited = form.editing.as_deref().and_then(|id| library.entry(id));
+    let (handle, has_cover) = match form.cover_url() {
+        Some(url) => (app.artwork.image(&url), true),
+        None => (
+            edited.and_then(|entry| app.artwork.cover(entry)),
+            edited.is_some_and(|entry| app.artwork.cover_url(entry).is_some()),
+        ),
+    };
+    (handle, tint, has_cover)
+}
+
 /// The lookup field's id, focused when the dialog opens.
 pub const LOOKUP_ID: &str = "entry-lookup";
 /// The lookup's list of rows.
@@ -897,25 +1091,11 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
     let library = app.repo.library();
     let blank = form.title.trim().is_empty() || form.source.is_none();
     // The cover is the match's, or another match's after Pick a cover.
-    let tint = match (&form.cover_from, &form.source) {
-        (Some(id), _) => theme::cover_color(id),
-        (None, Some(source)) => theme::cover_color(source),
-        (None, None) => theme::cover_color(&format!("{}/{}", form.media.key(), form.title)),
-    };
+    let (handle, tint, has_cover) = form_cover(app, form);
     let cover_title = if form.title.is_empty() {
         "No title yet"
     } else {
         form.title.as_str()
-    };
-    // The picked cover or the match's own, once fetched; for an entry
-    // edited without a new pick, the cover the library shows.
-    let edited = form.editing.as_deref().and_then(|id| library.entry(id));
-    let (handle, has_cover) = match form.cover_url() {
-        Some(url) => (app.artwork.image(&url), true),
-        None => (
-            edited.and_then(|entry| app.artwork.cover(entry)),
-            edited.is_some_and(|entry| app.artwork.cover_url(entry).is_some()),
-        ),
     };
     // An album's cover is a 150 px square.
     let cover_height = ui::cover::height_for(150.0, ui::cover::is_square(form.media));

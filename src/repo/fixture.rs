@@ -212,6 +212,7 @@ mod tests {
         let rate = |title: &str, rating| Operation::SetTrackRating {
             album: dirt.into(),
             title: title.into(),
+            track_id: None,
             rating,
         };
         repo.apply(rate("Would?", Some(10))).unwrap();

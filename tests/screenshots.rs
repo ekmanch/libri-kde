@@ -1207,6 +1207,63 @@ fn capture_every_screen() {
                 }
             }),
         ),
+        // The music overlap question (canvas: Library › Add: a song from
+        // a saved album, Add: an album with saved songs).
+        (
+            Screen::Library,
+            ("add-song-from-saved-album", |app| {
+                use entry::Message as E;
+                show_type(app, MediaType::Music);
+                for message in [
+                    E::Add,
+                    E::Type(MediaType::Music),
+                    E::Kind(EntryKind::Song),
+                    E::Title("Angry Chair".into()),
+                    E::Creator("Alice in Chains".into()),
+                    E::Album("Dirt".into()),
+                    E::Rate(Some(9)),
+                    E::Save,
+                ] {
+                    let _ = app.update(Message::Entry(message));
+                }
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-song-from-saved-album-replace", |app| {
+                use entry::Message as E;
+                show_type(app, MediaType::Music);
+                for message in [
+                    E::Add,
+                    E::Type(MediaType::Music),
+                    E::Kind(EntryKind::Song),
+                    E::Title("Angry Chair".into()),
+                    E::Creator("Alice in Chains".into()),
+                    E::Album("Dirt".into()),
+                    E::Rate(Some(9)),
+                    E::Save,
+                    E::ReplacePick(entry::ReplaceChoice::Replace),
+                ] {
+                    let _ = app.update(Message::Entry(message));
+                }
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-album-with-saved-songs", |app| {
+                use entry::Message as E;
+                show_type(app, MediaType::Music);
+                for message in [
+                    E::Add,
+                    E::Type(MediaType::Music),
+                    E::Title("Bad Music for Bad People".into()),
+                    E::Creator("The Cramps".into()),
+                    E::Save,
+                ] {
+                    let _ = app.update(Message::Entry(message));
+                }
+            }),
+        ),
         (
             Screen::Library,
             ("add-no-matches", |app| {

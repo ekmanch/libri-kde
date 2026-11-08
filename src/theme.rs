@@ -207,6 +207,9 @@ pub struct Tokens {
     pub track: Color,
     /// Popovers and menus.
     pub popover: Color,
+    /// The picked answer of a pick-one dialog (the music overlap
+    /// question): a step lighter than the popover, solid on Glass too.
+    pub picked: Color,
     /// The Add and Edit dialog's surface, and the lookup pane beside it.
     /// Opaque on every theme: a dialog never shows the screen through it,
     /// so on Glass they are Graphite's content and chrome.
@@ -310,6 +313,9 @@ impl Tokens {
         let success = pick(hex(0x40A02B), hex(0xA6E3A1));
         let warning = pick(hex(0xA36706), hex(0xF2B544));
         let danger = pick(hex(0xD7263D), hex(0xF0525F));
+        // Popovers and menus stay solid on Glass, so they read over the
+        // glass they open on.
+        let popover = pick(hex(0xFFFFFF), if glass { hex(0x26292D) } else { raised });
         Tokens {
             theme,
             light,
@@ -323,9 +329,8 @@ impl Tokens {
             selection: pick(hex(0xE9EBEE), veil(0.13, mix_white(content, 0.14))),
             hover: pick(hex(0xF1F2F4), veil(0.07, mix_white(content, 0.07))),
             track: pick(hex(0xE3E5E9), veil(0.14, mix_white(content, 0.12))),
-            // Popovers and menus stay solid on Glass, so they read over the
-            // glass they open on.
-            popover: pick(hex(0xFFFFFF), if glass { hex(0x26292D) } else { raised }),
+            popover,
+            picked: pick(hex(0xF1F2F4), mix_white(popover, 0.06)),
             dialog: if glass {
                 hex(if flat { 0x151515 } else { 0x1D1F22 })
             } else {
