@@ -516,6 +516,9 @@ impl State {
     /// Returns to `place` (Back or Forward): the selection and the
     /// popovers close, the pins and the views stay.
     pub fn go_to(&mut self, place: Place) {
+        if place != self.place() {
+            self.list_changed();
+        }
         self.types = place.types;
         self.status = place.status;
         self.filter = place.filter;
@@ -535,6 +538,25 @@ impl State {
     }
 
     pub fn update(&mut self, message: Message) {
+        let before = self.place();
+        self.handle(message);
+        // Another list: its size is not known until it reports it, and a
+        // list that fits on screen never does (iced reports a scroll area
+        // only when it scrolls), so the covers asked for would follow the
+        // last list's size. The offset stays for Back to restore.
+        if self.place() != before {
+            self.list_changed();
+        }
+    }
+
+    /// Forgets the list's measured size, which the new list reports when
+    /// it scrolls.
+    fn list_changed(&mut self) {
+        self.scroll.viewport = 0.0;
+        self.scroll.content = 0.0;
+    }
+
+    fn handle(&mut self, message: Message) {
         // The rail's bubble is there while the button is held on it:
         // anything but the list following along ends it, should the
         // release never arrive.
@@ -1817,5 +1839,24 @@ mod tests {
             content: 100.0 * tiles.len() as f32,
         }));
         assert!(crate::screens::wanted(&app).covers.contains(&tiles[0]));
+    }
+
+    #[test]
+    fn a_short_list_after_a_long_one_asks_for_all_its_covers() {
+        let mut app = App::new(crate::screens::Screen::Library);
+        app.library
+            .update(Message::ShowType(Some(MediaType::Music)));
+        app.library.update(Message::MusicTab(MusicTab::Albums));
+        // A long list's size; the next list fits on screen and, iced
+        // reporting only a scroll area that scrolls, never says its own.
+        app.library.update(Message::Scrolled(Scroll {
+            offset: 0.0,
+            viewport: 900.0,
+            content: 30_000.0,
+        }));
+        app.library.update(Message::MusicTab(MusicTab::Songs));
+        let order = app.library.cover_order(app.repo.library(), app.today);
+        let wants = crate::screens::wanted(&app);
+        assert!(order.iter().all(|id| wants.covers.contains(id)));
     }
 }
