@@ -339,7 +339,7 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
     };
     if state == lookup::LookupState::Loading && !query.is_empty() {
         for _ in 0..3 {
-            list = list.push(placeholder_row(tokens));
+            list = list.push(placeholder_row(form.media, tokens));
         }
     } else if let Some((message, retry)) = message {
         let mut block = Column::new()
@@ -440,7 +440,8 @@ fn match_row<'a>(
         .cover_url
         .as_deref()
         .and_then(|url| app.artwork.image(url));
-    let cover = ui::plain_cover(handle, tint, 44.0, 62.0, 5.0);
+    // An album's thumbnail is square, at the same width.
+    let cover = ui::plain_cover(handle, tint, 44.0, match_thumb_height(form.media), 5.0);
     let mut parts = vec![found.creator.clone().unwrap_or_default()];
     if let Some(platform) = platform {
         let others = found.platforms.len().saturating_sub(1);
@@ -474,8 +475,17 @@ fn match_row<'a>(
         .focusable(10.0, tokens)
 }
 
+/// A match's thumbnail is 44 px wide: 62 tall, or square for an album.
+fn match_thumb_height(media: MediaType) -> f32 {
+    if ui::cover::is_square(media) {
+        44.0
+    } else {
+        62.0
+    }
+}
+
 /// A gray row while the lookup is on its way.
-fn placeholder_row<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
+fn placeholder_row<'a>(media: MediaType, tokens: &Tokens) -> Element<'a, AppMessage> {
     let raised = tokens.raised;
     let block = |w: f32, h: f32| {
         container(space())
@@ -485,7 +495,7 @@ fn placeholder_row<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
     };
     container(
         row![
-            block(44.0, 62.0),
+            block(44.0, match_thumb_height(media)),
             column![block(180.0, 14.0), block(120.0, 12.0)].spacing(8)
         ]
         .spacing(12)
@@ -699,7 +709,9 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
             .and_then(|id| library.entry(id))
             .and_then(|entry| app.artwork.cover(entry)),
     };
-    let cover_face = ui::titled_cover(handle, tint, cover_title, 150.0, 225.0, 18.0);
+    // An album's cover is a 150 px square.
+    let cover_height = ui::cover::height_for(150.0, ui::cover::is_square(form.media));
+    let cover_face = ui::titled_cover(handle, tint, cover_title, 150.0, cover_height, 18.0);
     // A click on the cover opens Pick a cover, once there is a match.
     let cover_button = button(cover_face)
         .padding(0)
@@ -975,6 +987,7 @@ fn cover_dialog<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a
             sub: found.year_and_edition(),
             note: if is_own { "The match's cover" } else { "" },
             on,
+            square: ui::cover::is_square(form.media),
         };
         ui::cover::choice_tile(
             choice,

@@ -211,6 +211,8 @@ pub fn cover_dialog<'a>(app: &'a App, media: MediaType, name: &str) -> Element<'
             sub: part.year().map(|y| y.to_string()).unwrap_or_default(),
             note,
             on,
+            // Music has no series.
+            square: false,
         };
         ui::cover::choice_tile(
             choice,

@@ -16,9 +16,11 @@ fn msg(message: Message) -> AppMessage {
 }
 
 /// Grid cells: at most this wide, 2:3 covers with the caption under them.
+/// Albums get square cells of the same width (`ALBUM_CARD_HEIGHT`).
 const CARD_MAX_WIDTH: f32 = 190.0;
 const CARD_WIDTH: f32 = 173.0;
 const CARD_HEIGHT: f32 = CARD_WIDTH * 1.5 + 28.0;
+const ALBUM_CARD_HEIGHT: f32 = CARD_WIDTH + 28.0;
 const CARD_SPACING: f32 = 20.0;
 
 pub fn body<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> {
@@ -409,13 +411,22 @@ pub(super) fn block<'a>(
         (row_id(&row.lead().id), look, on_press)
     });
     let found = |id: String, row: Element<'a, AppMessage>| container(row).id(id).into();
+    // A block is one type: albums get square cells.
+    let square = rows
+        .first()
+        .is_some_and(|row| ui::cover::is_square(row.lead().media));
+    let card_height = if square {
+        ALBUM_CARD_HEIGHT
+    } else {
+        CARD_HEIGHT
+    };
     match view {
         View::Grid => grid(
             looks.map(|(id, look, on_press)| found(id, ui::entry_card(look, tokens, on_press))),
         )
         .fluid(CARD_MAX_WIDTH)
         .spacing(CARD_SPACING)
-        .height(grid::aspect_ratio(CARD_WIDTH, CARD_HEIGHT))
+        .height(grid::aspect_ratio(CARD_WIDTH, card_height))
         .into(),
         View::List => Column::with_children(
             looks.map(|(id, look, on_press)| found(id, ui::entry_list_row(look, tokens, on_press))),
@@ -481,6 +492,7 @@ fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryL
                 dimmed: view == View::Grid && state.pane_open() && !is_selected,
                 stack: None,
                 new_season: entry.has_new_season(today),
+                square: ui::cover::is_square(entry.media),
             };
             (look, msg(Message::Select(entry.id.clone())))
         }
@@ -512,6 +524,7 @@ fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryL
                 dimmed: view == View::Grid && state.pane_open() && !series_on,
                 stack: Some(group.parts.len()),
                 new_season: false,
+                square: ui::cover::is_square(group.media),
             };
             let open = super::OpenSeries {
                 media: group.media,

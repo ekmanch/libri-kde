@@ -5,10 +5,40 @@
 //! songs, discs for artists; an image of another shape is cropped to fit.
 
 use iced::widget::image::{self, Image};
-use iced::widget::{Space, container, text};
-use iced::{Border, Color, ContentFit, Element, Length};
+use iced::widget::{Space, column, container, text};
+use iced::{Border, Color, ContentFit, Element, Fill, FillPortion, Length};
 
+use crate::model::MediaType;
 use crate::theme::font;
+
+/// Whether the type's covers are square: music's albums (and the songs,
+/// which show their album's), as on the phone. Artists are discs.
+pub fn is_square(media: MediaType) -> bool {
+    media == MediaType::Music
+}
+
+/// A cover's height for its width: the width for a square, 1.5 times it
+/// for a poster.
+pub fn height_for(width: f32, square: bool) -> f32 {
+    if square { width } else { width * 1.5 }
+}
+
+/// A cover that fills a 2:3 slot, or for a square cover the bottom two
+/// thirds of it, so the captions of a row mixing types stay on one line
+/// (Home's shelves, the Coming soon grid).
+pub fn in_poster_slot<'a, Message: 'a>(
+    cover: impl Into<Element<'a, Message>>,
+    square: bool,
+) -> Element<'a, Message> {
+    if !square {
+        return cover.into();
+    }
+    column![
+        Space::new().width(Fill).height(FillPortion(1)),
+        container(cover).width(Fill).height(FillPortion(2)),
+    ]
+    .into()
+}
 
 /// A placeholder's label: the words and their size, drawn bottom-left in
 /// white; a disc centers them.
@@ -116,7 +146,7 @@ pub fn titled_cover<'a, Message: 'a>(
 /// One choice in Pick a cover: the cover ringed in the accent when it is
 /// the one in use, the title, the year and edition, and a note ("The
 /// match's cover"). The form's dialog and the cover viewer both list
-/// them; `width` sets the tile, the cover 2:3 under it.
+/// them; `width` sets the tile, the cover 2:3 under it, or square.
 pub struct Choice<'a> {
     pub handle: Option<image::Handle>,
     pub tint: Color,
@@ -124,6 +154,7 @@ pub struct Choice<'a> {
     pub sub: String,
     pub note: &'a str,
     pub on: bool,
+    pub square: bool,
 }
 
 /// The accent ring around the chosen cover.
@@ -139,6 +170,7 @@ pub fn choice_tile<'a, Message: Clone + 'a>(
     use iced::widget::{button, column};
 
     let on = choice.on;
+    let square = choice.square;
     let (accent, text_color) = (tokens.accent, tokens.text);
     let label_size = if width >= 150.0 { 15.0 } else { 13.0 };
     // The ring sits around the cover, 3 px in the accent on the one in
@@ -149,7 +181,7 @@ pub fn choice_tile<'a, Message: Clone + 'a>(
         choice.tint,
         choice.title,
         inner,
-        inner * 1.5,
+        height_for(inner, square),
         label_size,
     ))
     .padding(RING)

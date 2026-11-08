@@ -50,9 +50,11 @@ const HEADER_GAP: f32 = 8.0;
 /// A header of caps alone, and one with a link or a count at the right.
 const HEADER_H: f32 = 18.0;
 const LINK_HEADER_H: f32 = 24.0;
-/// The cover, and the gap between it and the facts.
+/// The cover, and the gap between it and the facts. An album's is a
+/// square of `ALBUM_COVER`, which the facts beside it keep within too.
 const COVER_W: f32 = 96.0;
 const COVER_H: f32 = 144.0;
+const ALBUM_COVER: f32 = 120.0;
 const COVER_GAP: f32 = 16.0;
 /// The title's sizes, largest first, at 1.1 per line: the facts beside
 /// the cover never run past its height.
@@ -217,14 +219,19 @@ fn build<'a>(
 
     // The header: the cover, and the facts beside it.
     let tint = theme::cover_color(&entry.id);
+    let (cover_w, cover_h) = if ui::cover::is_square(entry.media) {
+        (ALBUM_COVER, ALBUM_COVER)
+    } else {
+        (COVER_W, COVER_H)
+    };
     // A click opens the cover viewer, where the cover can be changed.
     let cover = mouse_area(
         button(ui::titled_cover(
             app.artwork.cover(entry),
             tint,
             &entry.title,
-            COVER_W,
-            COVER_H,
+            cover_w,
+            cover_h,
             14.0,
         ))
         .padding(0)
@@ -245,7 +252,7 @@ fn build<'a>(
     // The facts beside the cover, each with its height, so they never run
     // past the cover: the title takes what the other facts leave, smaller
     // when it has to be (`fit_title`).
-    let facts_w = inner - COVER_W - COVER_GAP;
+    let facts_w = inner - cover_w - COVER_GAP;
     let lines = |words: &str, size: f32, face| {
         ui::line_count(words, size, 1.3, face, facts_w).max(1) as f32 * size * 1.3
     };
@@ -296,7 +303,7 @@ fn build<'a>(
     // The other facts with the gap each adds, then the title in what is
     // left of the cover's height, under the kicker.
     let rest_h = 2.0 + facts.iter().map(|(_, h)| h + 6.0).sum::<f32>();
-    let (title, title_size, title_h) = fit_title(&entry.title, facts_w, COVER_H - rest_h);
+    let (title, title_size, title_h) = fit_title(&entry.title, facts_w, cover_h - rest_h);
     facts.insert(
         1,
         (
@@ -314,10 +321,10 @@ fn build<'a>(
             .padding(Padding::new(0.0).top(2))
             .width(Fill),
     )
-    .height(COVER_H)
+    .height(cover_h)
     .clip(true);
     let header = row![cover, facts].spacing(COVER_GAP);
-    fixed += COVER_H;
+    fixed += cover_h;
 
     // A part picked from a series in the pane: ‹ the series' name, back.
     let header: Element<'a, AppMessage> = match app.library.back_series() {

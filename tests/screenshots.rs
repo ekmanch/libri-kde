@@ -67,6 +67,7 @@ fn picker(app: &mut App, message: PickerMessage) {
 const FRIEREN: &str = "anime/frieren-beyond-journeys-end-2023";
 const STRANGER: &str = "shows/stranger-things-2016";
 const BERSERK_43: &str = "books/berserk-vol-43-2025";
+const DIRT: &str = "music/dirt-alice-in-chains";
 const FELLOWSHIP: &str = "movies/the-lord-of-the-rings-the-fellowship-of-the-ring-2001";
 
 fn show_type(app: &mut App, media: MediaType) {
@@ -131,6 +132,15 @@ fn add_in_state(app: &mut App, state: LookupState) {
     let _ = app.update(Message::Entry(entry::Message::Add));
     let _ = app.update(Message::Entry(entry::Message::Type(MediaType::Games)));
     let _ = app.update(Message::Entry(entry::Message::Query("castlevania".into())));
+}
+
+/// Music's Albums tab in `view`.
+fn albums(app: &mut App, view: View) {
+    show_type(app, MediaType::Music);
+    let _ = app.update(Message::Library(library::Message::MusicTab(
+        library::MusicTab::Albums,
+    )));
+    let _ = app.update(Message::Library(library::Message::SetView(view)));
 }
 
 /// Runs the daily check against the fake, so Discover has rows.
@@ -644,6 +654,30 @@ fn capture_every_screen() {
                 let _ = app.update(Message::Entry(entry::Message::ViewCover(
                     "books/berserk-vol-42-2021".into(),
                 )));
+            }),
+        ),
+        // Albums: square covers in the grid, the list and details, and
+        // the viewer with Pick a cover beside it.
+        (
+            Screen::Library,
+            ("music-albums-grid", |app| {
+                albums(app, View::Grid);
+                select(app, DIRT);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("music-albums-list", |app| {
+                albums(app, View::List);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("cover-viewer-album", |app| {
+                albums(app, View::Grid);
+                select(app, DIRT);
+                let _ = app.update(Message::Entry(entry::Message::ViewCover(DIRT.into())));
+                let _ = app.update(Message::Entry(entry::Message::ChangeCover));
             }),
         ),
         // The Coming soon page (canvas "Coming soon" and its states): the
@@ -1172,6 +1206,31 @@ fn capture_every_screen() {
                     "books/dracula-1897".into(),
                 )));
                 let _ = app.update(Message::Entry(entry::Message::LookAgain));
+                let _ = app.update(Message::Entry(entry::Message::Pick(0)));
+                let _ = app.update(Message::Entry(entry::Message::CancelLookAgain));
+                let _ = app.update(Message::Entry(entry::Message::OpenCover));
+            }),
+        ),
+        // An album's edit sheet: square thumbnails in the lookup, the
+        // square cover, and Pick a cover's square tiles.
+        (
+            Screen::Library,
+            ("edit-album-look-again", |app| {
+                albums(app, View::Grid);
+                let _ = app.update(Message::Entry(entry::Message::Edit(DIRT.into())));
+                let _ = app.update(Message::Entry(entry::Message::LookAgain));
+                // The fake's one album.
+                let _ = app.update(Message::Entry(entry::Message::Query("mezzanine".into())));
+                let _ = app.update(Message::Entry(entry::Message::Pick(0)));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-album-pick-cover", |app| {
+                albums(app, View::Grid);
+                let _ = app.update(Message::Entry(entry::Message::Edit(DIRT.into())));
+                let _ = app.update(Message::Entry(entry::Message::LookAgain));
+                let _ = app.update(Message::Entry(entry::Message::Query("mezzanine".into())));
                 let _ = app.update(Message::Entry(entry::Message::Pick(0)));
                 let _ = app.update(Message::Entry(entry::Message::CancelLookAgain));
                 let _ = app.update(Message::Entry(entry::Message::OpenCover));

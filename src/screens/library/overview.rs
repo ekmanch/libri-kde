@@ -234,7 +234,9 @@ fn shelf<'a>(
     Some(column![header, row].spacing(10).into())
 }
 
-/// A 100 × 150 cover with the title on it, the detail under it.
+/// A 100 × 150 cover with the title on it, the detail under it. An
+/// album's is 100 × 100 at the bottom of the same slot, so the details
+/// stay on one line.
 fn shelf_cover<'a>(
     app: &'a App,
     entry: &'a Entry,
@@ -243,14 +245,20 @@ fn shelf_cover<'a>(
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let tint = theme::cover_color(&entry.id);
-    let cover = ui::titled_cover(
-        app.artwork.cover(entry),
-        tint,
-        &entry.title,
-        100.0,
-        150.0,
-        14.0,
-    );
+    let square = ui::cover::is_square(entry.media);
+    let cover = container(ui::cover::in_poster_slot(
+        ui::titled_cover(
+            app.artwork.cover(entry),
+            tint,
+            &entry.title,
+            COVER_WIDTH,
+            ui::cover::height_for(COVER_WIDTH, square),
+            14.0,
+        ),
+        square,
+    ))
+    .width(COVER_WIDTH)
+    .height(COVER_WIDTH * 1.5);
     let content = column![
         cover,
         ui::mono(meta, 12.0, tokens.sub).wrapping(text::Wrapping::None)

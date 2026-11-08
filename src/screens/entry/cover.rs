@@ -28,7 +28,7 @@ use crate::app::{App, Message as AppMessage};
 use crate::artwork::Wants;
 use crate::browse;
 use crate::lookup::{self, Match};
-use crate::model::{Entry, MediaType, Series};
+use crate::model::{Entry, Series};
 use crate::series;
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, ButtonKind, FocusExt, Icon};
@@ -37,9 +37,10 @@ fn msg(message: Message) -> AppMessage {
     AppMessage::Entry(message)
 }
 
-/// The cover's longer side at its largest, the room kept around it and
-/// its corners.
+/// The cover's longer side at its largest (an album's square side at
+/// most `MAX_ALBUM_SIDE`), the room kept around it and its corners.
 const MAX_SIDE: f32 = 600.0;
+const MAX_ALBUM_SIDE: f32 = 520.0;
 const MARGIN: f32 = 240.0;
 const RADIUS: f32 = 12.0;
 /// The round ‹ and › beside the cover, and their gap to it.
@@ -173,15 +174,13 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
     // The image's own shape, 2:3 or square for music until it is
     // measured, its longer side as long as the window allows.
     let url = shown_url(app, view, entry);
-    let side = (app.window.height - MARGIN).clamp(240.0, MAX_SIDE);
+    let square = ui::cover::is_square(entry.media);
+    let max_side = if square { MAX_ALBUM_SIDE } else { MAX_SIDE };
+    let side = (app.window.height - MARGIN).clamp(240.0, max_side);
     let ratio = url
         .and_then(|url| app.artwork.image_size(url))
         .map(|(w, h)| w as f32 / h as f32)
-        .unwrap_or(if entry.media == MediaType::Music {
-            1.0
-        } else {
-            2.0 / 3.0
-        })
+        .unwrap_or(if square { 1.0 } else { 2.0 / 3.0 })
         .clamp(NARROWEST, WIDEST);
     let (width, height) = if ratio <= 1.0 {
         (side * ratio, side)
@@ -406,7 +405,9 @@ fn picker<'a>(
     let list = choices(app, view, entry);
     // The grid scrolls once its rows outgrow the window.
     let rows = list.len().div_ceil(3) as f32;
-    let grid_height = rows * (tile * 1.5 + TILE_CAPTION) + (rows - 1.0).max(0.0) * TILE_GAP;
+    let square = ui::cover::is_square(entry.media);
+    let grid_height = rows * (ui::cover::height_for(tile, square) + TILE_CAPTION)
+        + (rows - 1.0).max(0.0) * TILE_GAP;
     let max_height = (app.window.height - 80.0).max(300.0);
     let grid_height = grid_height.min(max_height - PANEL_CHROME);
     let tiles = list.into_iter().map(|choice| {
@@ -432,6 +433,7 @@ fn picker<'a>(
             sub,
             note: if is_own { "The match's cover" } else { "" },
             on,
+            square,
         };
         ui::cover::choice_tile(
             tile_choice,

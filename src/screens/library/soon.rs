@@ -1219,6 +1219,9 @@ fn tile<'a>(
                 .color(ring.unwrap_or(Color::TRANSPARENT)),
         )
     });
+    // An album's square sits at the bottom of the 2:3 slot, so the row
+    // under every tile stays on one line.
+    let cover = ui::cover::in_poster_slot(cover, ui::cover::is_square(row.media()));
     // "Date not set" and + Add do not fit side by side under a tile of
     // 140 px, so an undated tile says "TBD", the rail's word (owner,
     // 2026-11-08); the tooltip keeps "Date not set".

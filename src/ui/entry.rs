@@ -37,10 +37,14 @@ pub struct EntryLook {
     pub stack: Option<usize>,
     /// A show whose daily check added a season that is out and unset.
     pub new_season: bool,
+    /// A music album's square cover, not a 2:3 poster.
+    pub square: bool,
 }
 
-/// A grid card: the 2:3 cover with a status badge (and a series' count or
-/// a new season), the placeholder's title and creator on it, then the title and year under it. Fills its grid cell.
+/// A grid card: the cover with a status badge (and a series' count or a
+/// new season), the placeholder's title and creator on it, then the title
+/// and year under it. Fills its grid cell, whose shape makes the cover 2:3
+/// or square.
 pub fn entry_card<'a, Message: Clone + 'a>(
     look: EntryLook,
     tokens: &Tokens,
@@ -159,14 +163,16 @@ fn status_badge<'a, Message: 'a>(status: EntryStatus) -> Option<Element<'a, Mess
     )
 }
 
-/// A list row: a small cover, title and creator, then tags, status, rating
-/// and year in fixed columns.
+/// A list row: a small cover (44 × 66, or 44 × 44 for an album, so the
+/// text starts at the same place), title and creator, then tags, status,
+/// rating and year in fixed columns.
 pub fn entry_list_row<'a, Message: Clone + 'a>(
     look: EntryLook,
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
-    let cover = cover::plain_cover(look.image.clone(), look.cover, 44.0, 66.0, 6.0);
+    let height = cover::height_for(44.0, look.square);
+    let cover = cover::plain_cover(look.image.clone(), look.cover, 44.0, height, 6.0);
     let content = row![
         cover,
         column![
