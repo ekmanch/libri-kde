@@ -211,3 +211,57 @@ fn the_daily_check_runs_on_the_real_library() {
         );
     }
 }
+
+#[test]
+#[ignore = "asks Deezer; run with --ignored"]
+fn deezer_pages_a_search_and_an_artists_albums_and_songs() {
+    use libri::lookup::{MusicList, MusicRequest, MusicScope};
+    let service = Service::real(&Keys::default(), None);
+    let search = |scope, cursor| MusicRequest {
+        list: MusicList::Search("ghost".into()),
+        scope,
+        cursor,
+    };
+    let first = service.music_page(&search(MusicScope::Albums, 0)).unwrap();
+    let names: Vec<&str> = first.artists.iter().map(|a| a.name.as_str()).collect();
+    println!("albums: {:?} total, artists {names:?}", first.total);
+    assert!(!first.matches.is_empty() && first.next == Some(25));
+    assert!(names.contains(&"Ghost"), "Ghost among {names:?}");
+    let next = service
+        .music_page(&search(MusicScope::Albums, first.next.unwrap()))
+        .unwrap();
+    assert!(next.artists.is_empty());
+    assert_ne!(next.matches[0].source, first.matches[0].source);
+    let year = service
+        .album_released(&first.matches[0].source)
+        .unwrap()
+        .map(|r| r.year);
+    println!("first album {} from {year:?}", first.matches[0].title);
+    assert!(year.is_some());
+
+    let ghost = first.artists.iter().find(|a| a.name == "Ghost").unwrap();
+    let artist = |scope| MusicRequest {
+        list: MusicList::Artist {
+            source: ghost.source.clone(),
+            name: ghost.name.clone(),
+        },
+        scope,
+        cursor: 0,
+    };
+    let albums = service.music_page(&artist(MusicScope::Albums)).unwrap();
+    let years: Vec<u16> = albums.matches.iter().filter_map(|m| m.year()).collect();
+    println!(
+        "Ghost: {:?} albums, {:?}",
+        albums.total,
+        &years[..years.len().min(8)]
+    );
+    assert!(years.windows(2).all(|w| w[0] >= w[1]), "newest first");
+    let songs = service.music_page(&artist(MusicScope::Songs)).unwrap();
+    println!(
+        "Ghost's songs: {} on the first page, next {:?}, first {:?}",
+        songs.matches.len(),
+        songs.next,
+        songs.matches.first().map(|m| (&m.title, &m.album))
+    );
+    assert!(songs.matches.len() >= 25);
+}

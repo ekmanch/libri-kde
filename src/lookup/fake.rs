@@ -4,8 +4,9 @@
 //! asks it on the spot (`Service::is_instant`).
 
 use super::{
-    CreatorMatch, Episode, FollowKind, GamePlatform, Hits, Match, Reply, SeriesPart, SeriesParts,
-    Source, TrackInfo,
+    ArtistHit, CreatorMatch, Episode, FollowKind, GamePlatform, Hits, MATCHING_ARTISTS, Match,
+    MusicList, MusicPage, MusicRequest, MusicScope, Reply, SeriesPart, SeriesParts, Source,
+    TrackInfo,
 };
 use crate::model::{Entry, EntryKind, MediaType, Released, Season, Series, text};
 
@@ -787,6 +788,274 @@ pub fn by_source(source: &str) -> Option<Match> {
         .map(Row::to_match)
 }
 
+/// The music the fake pages through (the canvas's "ghost" boards): the
+/// artists with their fans, then each album with its artist, date, id and
+/// songs, an artist's newest first.
+const ARTISTS: &[(&str, u32)] = &[
+    ("Ghost", 615_851),
+    ("Ghostface Killah", 402_118),
+    ("Ghost Town", 52_340),
+    ("Massive Attack", 1_204_377),
+];
+
+type AlbumRow = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static [&'static str],
+);
+
+const ALBUMS: &[AlbumRow] = &[
+    (
+        "Ghost",
+        "Skeletá",
+        "2025-04-25",
+        "fake:album:skeleta",
+        &[
+            "Peacefield",
+            "Lachryma",
+            "Satanized",
+            "Guiding Lights",
+            "De Profundis Borealis",
+        ],
+    ),
+    (
+        "Ghost",
+        "Impera",
+        "2022-03-11",
+        "fake:album:impera",
+        &[
+            "Kaisarion",
+            "Spillways",
+            "Call Me Little Sunshine",
+            "Hunter's Moon",
+            "Watcher in the Sky",
+        ],
+    ),
+    (
+        "Ghost",
+        "Seven Inches of Satanic Panic",
+        "2019-09-13",
+        "fake:album:seven-inches",
+        &["Mary on a Cross", "Kiss the Go-Goat"],
+    ),
+    (
+        "Ghost",
+        "Prequelle",
+        "2018-06-01",
+        "fake:album:prequelle",
+        &[
+            "Rats",
+            "Faith",
+            "Dance Macabre",
+            "Pro Memoria",
+            "See the Light",
+        ],
+    ),
+    (
+        "Ghost",
+        "Meliora",
+        "2015-08-21",
+        "fake:album:meliora",
+        &[
+            "Spirit",
+            "From the Pinnacle to the Pit",
+            "Cirice",
+            "He Is",
+            "Mummy Dust",
+        ],
+    ),
+    (
+        "Ghost",
+        "Infestissumam",
+        "2013-04-10",
+        "fake:album:infestissumam",
+        &[
+            "Per Aspera ad Inferi",
+            "Secular Haze",
+            "Year Zero",
+            "Ghuleh / Zombie Queen",
+        ],
+    ),
+    (
+        "Ghost",
+        "Opus Eponymous",
+        "2010-10-18",
+        "fake:album:opus-eponymous",
+        &[
+            "Deus Culpa",
+            "Con Clavi Con Dio",
+            "Ritual",
+            "Elizabeth",
+            "Stand by Him",
+        ],
+    ),
+    (
+        "Ghostface Killah",
+        "Fishscale",
+        "2006-03-28",
+        "fake:album:fishscale",
+        &["Shakey Dog", "Back Like That"],
+    ),
+    (
+        "Ghostface Killah",
+        "Supreme Clientele",
+        "2000-02-08",
+        "fake:album:supreme-clientele",
+        &["Nutmeg", "Cherchez LaGhost"],
+    ),
+    (
+        "Ghostface Killah",
+        "Ironman",
+        "1996-10-29",
+        "fake:album:ironman",
+        &["Daytona 500", "All That I Got Is You"],
+    ),
+    (
+        "Ghost Town",
+        "Evolution",
+        "2015-03-10",
+        "fake:album:evolution",
+        &["Bad Dreams"],
+    ),
+    (
+        "Ghost Town",
+        "The After Party",
+        "2013-09-17",
+        "fake:album:the-after-party",
+        &["Universe Is Laughing"],
+    ),
+    (
+        "Ghost Town",
+        "Party in the Graveyard",
+        "2011-11-01",
+        "fake:album:party-in-the-graveyard",
+        &["You're So Creepy"],
+    ),
+    (
+        "Coldplay",
+        "Ghost Stories",
+        "2014-05-16",
+        "fake:album:ghost-stories",
+        &["Magic", "A Sky Full of Stars"],
+    ),
+    (
+        "Nine Inch Nails",
+        "Ghosts I–IV",
+        "2008-03-02",
+        "fake:album:ghosts-i-iv",
+        &["1 Ghosts I", "2 Ghosts I"],
+    ),
+    (
+        "The Police",
+        "Ghost in the Machine",
+        "1981-10-02",
+        "fake:album:ghost-in-the-machine",
+        &[
+            "Spirits in the Material World",
+            "Every Little Thing She Does Is Magic",
+        ],
+    ),
+    (
+        "Massive Attack",
+        "Mezzanine",
+        "1998-04-20",
+        "deezer:album:302127",
+        &["Angel", "Teardrop", "Inertia Creeps"],
+    ),
+];
+
+fn album_match(row: &AlbumRow) -> Match {
+    let (artist, title, released, source, _) = *row;
+    by_source(source).unwrap_or_else(|| Match {
+        creator: Some(artist.to_owned()),
+        released: Released::parse(released),
+        kind: Some(EntryKind::Album),
+        description: format!("An album by {artist}."),
+        cover_url: Some(format!("fake://cover/{source}")),
+        ..Match::new(MediaType::Music, title, source)
+    })
+}
+
+fn song_matches(row: &AlbumRow) -> impl Iterator<Item = Match> + '_ {
+    let (artist, album, released, source, songs) = *row;
+    songs.iter().map(move |song| Match {
+        creator: Some(artist.to_owned()),
+        released: Released::parse(released),
+        kind: Some(EntryKind::Song),
+        album: Some(album.to_owned()),
+        album_source: Some(source.to_owned()),
+        cover_url: Some(format!("fake://cover/{source}")),
+        ..Match::new(
+            MediaType::Music,
+            *song,
+            format!("fake:track:{}", text::slugify(&format!("{artist} {song}"))),
+        )
+    })
+}
+
+/// A music page of the fake: a search finds albums and songs whose title
+/// or artist holds the query, and artists whose name does; an artist's
+/// list is theirs, newest first.
+pub fn music_page(request: &MusicRequest, limit: usize) -> MusicPage {
+    let holds = |text: &str, query: &str| text.to_lowercase().contains(query);
+    let (rows, artists): (Vec<Match>, Vec<ArtistHit>) = match &request.list {
+        MusicList::Search(query) => {
+            let query = query.trim().to_lowercase();
+            let albums = ALBUMS
+                .iter()
+                .filter(|row| holds(row.0, &query) || holds(row.1, &query));
+            let rows = match request.scope {
+                MusicScope::Albums => albums.map(album_match).collect(),
+                MusicScope::Songs => ALBUMS
+                    .iter()
+                    .flat_map(song_matches)
+                    .filter(|m| {
+                        holds(&m.title, &query)
+                            || m.creator.as_deref().is_some_and(|c| holds(c, &query))
+                    })
+                    .collect(),
+            };
+            let mut artists: Vec<&(&str, u32)> = ARTISTS
+                .iter()
+                .filter(|(name, _)| holds(name, &query))
+                .collect();
+            artists.sort_by_key(|(_, fans)| std::cmp::Reverse(*fans));
+            let artists = artists
+                .into_iter()
+                .take(MATCHING_ARTISTS)
+                .map(|(name, _)| ArtistHit {
+                    source: format!("fake:artist:{}", text::slugify(name)),
+                    name: (*name).to_owned(),
+                    picture_url: None,
+                    albums: Some(ALBUMS.iter().filter(|row| row.0 == *name).count() as u32),
+                })
+                .collect();
+            (rows, artists)
+        }
+        MusicList::Artist { name, .. } => {
+            let albums = ALBUMS.iter().filter(|row| row.0 == name);
+            let rows = match request.scope {
+                MusicScope::Albums => albums.map(album_match).collect(),
+                MusicScope::Songs => albums.flat_map(song_matches).collect(),
+            };
+            (rows, Vec::new())
+        }
+    };
+    let end = (request.cursor + limit).min(rows.len());
+    MusicPage {
+        matches: rows.get(request.cursor..end).unwrap_or_default().to_vec(),
+        total: Some(rows.len()),
+        next: (end < rows.len()).then_some(end),
+        artists: if request.cursor == 0 {
+            artists
+        } else {
+            Vec::new()
+        },
+    }
+}
+
 /// The fake as a source.
 pub struct Fake;
 
@@ -900,6 +1169,17 @@ impl Source for Fake {
 
     fn album_tracks(&self, _album_source: &str) -> Reply<Vec<TrackInfo>> {
         Ok(Vec::new())
+    }
+
+    fn music_page(&self, request: &MusicRequest, limit: usize) -> Reply<MusicPage> {
+        Ok(music_page(request, limit))
+    }
+
+    fn album_released(&self, album_source: &str) -> Reply<Option<Released>> {
+        Ok(ALBUMS
+            .iter()
+            .find(|row| row.3 == album_source)
+            .and_then(|row| Released::parse(row.2)))
     }
 }
 

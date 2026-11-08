@@ -12,8 +12,9 @@ pub mod series;
 
 pub use form::LOOKUP_ID;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use iced::widget::text_editor;
@@ -21,7 +22,10 @@ use iced::{Element, Task};
 
 use crate::app::{App, Message as AppMessage};
 use crate::artwork::Wants;
-use crate::lookup::{self, GamePlatform, Match, SearchResult, Service};
+use crate::lookup::{
+    self, ArtistHit, GamePlatform, Match, MusicList, MusicPage, MusicRequest, MusicScope,
+    SearchResult, Service,
+};
 use crate::model::{
     BookFormat, Date, Entry, EntryKind, EntryStatus, Library, MediaType, PlanItem, Released,
     Season, Series, TagCategory, TagPicks, text,
@@ -164,6 +168,72 @@ pub struct Form {
     pub replace: Option<Replace>,
     /// The answer, once given: replace (true) or keep both (false).
     pub replace_answer: Option<bool>,
+    /// Music's lookup: the matching artists, the artist open, the paging.
+    pub music: MusicLookup,
+}
+
+/// The music lookup's state beside the rows (`Form::results`): it lists
+/// albums or songs as the form's "Album or song" says, a page at a time,
+/// with up to three matching artists above a search's rows; opening one
+/// lists only their albums or songs, newest first.
+#[derive(Debug, Default)]
+pub struct MusicLookup {
+    /// The artists whose names match the search.
+    pub artists: Vec<ArtistHit>,
+    /// The artist whose list is open, in place of the search's.
+    pub artist: Option<ArtistHit>,
+    /// How many the list holds, when the lookup says (an artist's songs
+    /// are counted once the last is listed).
+    pub total: Option<usize>,
+    /// Where the next page starts; `None` at the end.
+    pub next: Option<usize>,
+    /// The next page is on its way ("Loading more…").
+    pub loading_more: bool,
+    /// The next page did not come.
+    pub more_failed: bool,
+    /// When the albums of rows that came without a date came out, by the
+    /// album's id, as they are asked after the rows.
+    pub years: HashMap<String, Released>,
+    /// The albums whose dates were asked already.
+    pub asked_years: HashSet<String>,
+    /// The search the date asks belong to: they stop once another starts.
+    pub epoch: Epoch,
+}
+
+/// The generation of the music search a date ask belongs to, shared with
+/// the task that asks.
+#[derive(Debug, Clone, Default)]
+pub struct Epoch(Arc<AtomicU64>);
+
+impl Epoch {
+    fn set(&self, generation: u64) {
+        self.0.store(generation, Ordering::Relaxed);
+    }
+
+    fn is(&self, generation: u64) -> bool {
+        self.0.load(Ordering::Relaxed) == generation
+    }
+}
+
+impl PartialEq for Epoch {
+    fn eq(&self, other: &Epoch) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl MusicLookup {
+    /// The album a row's year is read from: its own id, or a song's
+    /// album's.
+    pub fn album_key(found: &Match) -> &str {
+        found.album_source.as_deref().unwrap_or(&found.source)
+    }
+
+    /// A row's release: its own, else its album's once asked.
+    pub fn released(&self, found: &Match) -> Option<Released> {
+        found
+            .released
+            .or_else(|| self.years.get(MusicLookup::album_key(found)).copied())
+    }
 }
 
 /// Work a form change asks the app to start.
@@ -184,6 +254,20 @@ pub enum Pending {
         media: MediaType,
         creator: Option<String>,
     },
+    /// A page of the music lookup.
+    Music {
+        generation: u64,
+        request: MusicRequest,
+    },
+    /// The dates of the albums of music rows that came without one, asked
+    /// one by one until another search starts.
+    MusicYears {
+        albums: Vec<String>,
+        epoch: Epoch,
+        generation: u64,
+    },
+    /// The lookup's list back at its top: another list is in it.
+    ScrollTop,
 }
 
 /// What a form change needs of the app: the library, the day, the default
@@ -355,6 +439,33 @@ pub enum Message {
     PickPlatform(Option<String>),
     /// "Try again" in the lookup pane.
     RetryLookup,
+    /// The lookup's list was scrolled; `true` when near its end, so the
+    /// music lookup's next page is asked for.
+    LookupScrolled(bool),
+    /// A page of the music lookup came.
+    MusicPage {
+        generation: u64,
+        request: MusicRequest,
+        result: Result<MusicPage, lookup::Failure>,
+    },
+    /// The date of a music row's album came.
+    MusicYear {
+        album: String,
+        released: Option<Released>,
+    },
+    /// A matching artist's "All albums ›" or "All songs ›".
+    OpenArtist(usize),
+    /// "‹ Back to results for …": the search's list again.
+    BackToResults,
+    /// Shift+← or Shift+→ with the music lookup open, whether or not a
+    /// widget took it.
+    ScopeKeyPressed(isize),
+    /// The same, and whether the search field has focus: the music
+    /// lookup's Albums | Songs switch.
+    ScopeKey {
+        step: isize,
+        focused: bool,
+    },
     /// "Try again" in the platform picker.
     RetryPlatforms,
     /// The debounce after typing ran out.
@@ -556,6 +667,7 @@ impl Form {
             categories: None,
             replace: None,
             replace_answer: None,
+            music: MusicLookup::default(),
         }
     }
 
@@ -669,6 +781,10 @@ impl Form {
     /// the answer is remembered from this session. The rows on screen stay
     /// while a refined query is on its way.
     fn search(&mut self, ctx: &Context) {
+        if self.media == MediaType::Music {
+            self.music_search(ctx, false);
+            return;
+        }
         self.search_generation += 1;
         self.fetching = None;
         let query = self.query.trim().to_owned();
@@ -696,9 +812,252 @@ impl Form {
         self.pending.push(Pending::Debounce(self.search_generation));
     }
 
+    /// The music lookup's scope: the form's "Album or song".
+    pub fn scope(&self) -> MusicScope {
+        MusicScope::of(self.kind)
+    }
+
+    /// The list the music lookup shows: the open artist's, else the
+    /// search's.
+    fn music_list(&self) -> MusicList {
+        match &self.music.artist {
+            Some(artist) => MusicList::Artist {
+                source: artist.source.clone(),
+                name: artist.name.clone(),
+            },
+            None => MusicList::Search(self.query.trim().to_owned()),
+        }
+    }
+
+    /// The music lookup's first page, for the query typed (after the
+    /// debounce, the rows on screen kept meanwhile) or, with `now`, for
+    /// another scope or list (asked at once, the rows cleared and the list
+    /// back at its top). The fake and a remembered page answer on the spot.
+    fn music_search(&mut self, ctx: &Context, now: bool) {
+        self.search_generation += 1;
+        self.music.epoch.set(self.search_generation);
+        self.fetching = None;
+        self.music.next = None;
+        self.music.total = None;
+        self.music.loading_more = false;
+        self.music.more_failed = false;
+        if now {
+            self.pending.push(Pending::ScrollTop);
+        }
+        let request = MusicRequest {
+            list: self.music_list(),
+            scope: self.scope(),
+            cursor: 0,
+        };
+        if matches!(&request.list, MusicList::Search(q) if q.is_empty()) {
+            self.results = SearchResult {
+                complete: true,
+                ..SearchResult::default()
+            };
+            self.music.artists.clear();
+            self.searching = false;
+            return;
+        }
+        let ready = if ctx.service.is_instant() {
+            Some(ctx.service.music_page(&request))
+        } else {
+            ctx.service.cached_music(&request).map(Ok)
+        };
+        if let Some(result) = ready {
+            self.music_answer(self.search_generation, request, result, ctx);
+            return;
+        }
+        self.searching = true;
+        if now {
+            self.results = SearchResult::default();
+            self.music.artists.clear();
+            self.pending.push(Pending::Music {
+                generation: self.search_generation,
+                request,
+            });
+        } else {
+            self.pending.push(Pending::Debounce(self.search_generation));
+        }
+    }
+
+    /// The music lookup's next page, when there is one and none is on its
+    /// way.
+    fn more_music(&mut self, ctx: &Context) {
+        let Some(cursor) = self.music.next else {
+            return;
+        };
+        if self.media != MediaType::Music || self.searching || self.music.loading_more {
+            return;
+        }
+        let request = MusicRequest {
+            list: self.music_list(),
+            scope: self.scope(),
+            cursor,
+        };
+        self.music.loading_more = true;
+        self.music.more_failed = false;
+        if ctx.service.is_instant() {
+            let result = ctx.service.music_page(&request);
+            self.music_answer(self.search_generation, request, result, ctx);
+            return;
+        }
+        self.pending.push(Pending::Music {
+            generation: self.search_generation,
+            request,
+        });
+    }
+
+    /// A page of the music lookup: the first replaces the rows and the
+    /// artists, a later one adds to them (an artist's songs once each, as
+    /// a single repeats its album's). Then the dates of the rows that came
+    /// without one are asked.
+    fn music_answer(
+        &mut self,
+        generation: u64,
+        request: MusicRequest,
+        result: Result<MusicPage, lookup::Failure>,
+        ctx: &Context,
+    ) {
+        if generation != self.search_generation
+            || request.list != self.music_list()
+            || request.scope != self.scope()
+        {
+            return;
+        }
+        let first = request.cursor == 0;
+        if first {
+            self.searching = false;
+        } else {
+            self.music.loading_more = false;
+        }
+        let page = match result {
+            Ok(page) => page,
+            Err(failure) if first => {
+                let set_up = failure.kind != lookup::FailureKind::NotConfigured;
+                self.results = SearchResult {
+                    matches: Vec::new(),
+                    failures: if set_up {
+                        vec![failure.kind]
+                    } else {
+                        Vec::new()
+                    },
+                    asked: usize::from(set_up),
+                    complete: true,
+                };
+                self.music.artists.clear();
+                return;
+            }
+            Err(_) => {
+                self.music.more_failed = true;
+                return;
+            }
+        };
+        let artist_songs = self.music.artist.is_some() && request.scope == MusicScope::Songs;
+        if first {
+            self.results = SearchResult {
+                matches: Vec::new(),
+                failures: Vec::new(),
+                asked: 1,
+                complete: true,
+            };
+            self.music.artists = if self.music.artist.is_none() {
+                page.artists
+            } else {
+                Vec::new()
+            };
+        }
+        let came = page.matches.len();
+        for found in page.matches {
+            if artist_songs
+                && self
+                    .results
+                    .matches
+                    .iter()
+                    .any(|m| lookup::text::same_title(&m.title, &found.title))
+            {
+                continue;
+            }
+            self.results.matches.push(found);
+        }
+        self.music.next = page.next;
+        self.music.total = page
+            .total
+            .or_else(|| page.next.is_none().then_some(self.results.matches.len()));
+        self.picked = self.picked_match.as_ref().and_then(|p| {
+            self.results
+                .matches
+                .iter()
+                .position(|m| m.source == p.source)
+        });
+        self.ask_years(ctx);
+        // Deezer drops what is not available from a page, so a short one
+        // may not fill the list enough to scroll: the next comes at once.
+        if came < lookup::MUSIC_PAGE / 2 && self.music.next.is_some() {
+            self.more_music(ctx);
+        }
+    }
+
+    /// Asks the dates of the albums of rows that came without one.
+    fn ask_years(&mut self, ctx: &Context) {
+        let mut albums: Vec<String> = Vec::new();
+        for found in &self.results.matches {
+            let key = MusicLookup::album_key(found);
+            if found.released.is_some()
+                || self.music.years.contains_key(key)
+                || self.music.asked_years.contains(key)
+                || albums.iter().any(|a| a == key)
+            {
+                continue;
+            }
+            albums.push(key.to_owned());
+        }
+        if albums.is_empty() {
+            return;
+        }
+        self.music.asked_years.extend(albums.iter().cloned());
+        if ctx.service.is_instant() {
+            for album in albums {
+                if let Ok(Some(released)) = ctx.service.album_released(&album) {
+                    self.music.years.insert(album, released);
+                }
+            }
+            return;
+        }
+        self.pending.push(Pending::MusicYears {
+            albums,
+            epoch: self.music.epoch.clone(),
+            generation: self.search_generation,
+        });
+    }
+
+    /// The music lookup's scope changed (the switch, Shift+arrows or the
+    /// form's "Album or song"): the list is asked again for it.
+    fn set_scope(&mut self, kind: EntryKind, ctx: &Context) {
+        if self.kind == kind {
+            return;
+        }
+        self.kind = kind;
+        let lookup_open = self.editing.is_none() || self.again;
+        if lookup_open && (!self.query.trim().is_empty() || self.music.artist.is_some()) {
+            self.picked = None;
+            self.music_search(ctx, true);
+        }
+    }
+
     /// The debounce ran out with the query unchanged: the search starts.
     fn start_search(&mut self, generation: u64, ctx: &Context) {
         if generation != self.search_generation || self.query.trim().is_empty() {
+            return;
+        }
+        if self.media == MediaType::Music {
+            self.pending.push(Pending::Music {
+                generation,
+                request: MusicRequest {
+                    list: self.music_list(),
+                    scope: self.scope(),
+                    cursor: 0,
+                },
+            });
             return;
         }
         self.pending.push(Pending::Search {
@@ -1576,6 +1935,12 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             app.lookup = lookup::LookupState::Results;
             return form_update(app, Message::RetryLookup);
         }
+        // The switch moves only while the search field has the focus;
+        // the field took the key, so the focus is asked.
+        Message::ScopeKeyPressed(step) => {
+            return iced::widget::operation::is_focused(LOOKUP_ID)
+                .map(move |focused| AppMessage::Entry(Message::ScopeKey { step, focused }));
+        }
         Message::RetryPlatforms => app.artwork.retry_platforms(),
         Message::KeepSeason => {
             if let Some(Dialog::SeasonDropped { id, season }) = app.dialog.take() {
@@ -1821,6 +2186,45 @@ fn start_pending(service: &Arc<Service>, pending: Vec<Pending>) -> Task<AppMessa
                 },
             )
         }
+        Pending::Music {
+            generation,
+            request,
+        } => {
+            let service = service.clone();
+            let asked = request.clone();
+            Task::perform(
+                crate::app::blocking(move || Ok(service.music_page(&request))),
+                move |result| {
+                    AppMessage::Entry(Message::MusicPage {
+                        generation,
+                        request: asked.clone(),
+                        result: result.unwrap_or_else(|e| Err(lookup::Failure::other(e))),
+                    })
+                },
+            )
+        }
+        Pending::MusicYears {
+            albums,
+            epoch,
+            generation,
+        } => {
+            let service = service.clone();
+            crate::app::steps(move |step: &mut dyn FnMut((String, Option<Released>))| {
+                for album in albums {
+                    if !epoch.is(generation) {
+                        return;
+                    }
+                    if let Ok(released) = service.album_released(&album) {
+                        step((album, released));
+                    }
+                }
+            })
+            .map(|(album, released)| AppMessage::Entry(Message::MusicYear { album, released }))
+        }
+        Pending::ScrollTop => iced::widget::operation::snap_to(
+            form::LOOKUP_LIST_ID,
+            iced::widget::scrollable::RelativeOffset::START,
+        ),
         Pending::CoverChoices {
             title,
             media,
@@ -1901,6 +2305,11 @@ pub fn wanted(app: &App, wants: &mut Wants) {
             wants.images.push(url.clone());
         }
     }
+    for artist in &form.music.artists {
+        if let Some(url) = &artist.picture_url {
+            wants.images.push(url.clone());
+        }
+    }
     match form.cover_url() {
         Some(url) => wants.images.push(url),
         None => {
@@ -1954,10 +2363,20 @@ fn change_cover(app: &mut App) -> Task<AppMessage> {
     )
 }
 
+/// Whether the music lookup is on screen, so Shift+← and Shift+→ move
+/// its switch.
+pub fn music_lookup_open(app: &App) -> bool {
+    matches!(&app.dialog, Some(Dialog::Form(form))
+        if form.media == MediaType::Music
+            && (form.editing.is_none() || form.again)
+            && form.picker.is_none()
+            && !form.cover_dialog)
+}
+
 /// Whether the form waits on a lookup, so the window ticks for its
 /// spinner.
 pub fn is_busy(app: &App) -> bool {
-    matches!(&app.dialog, Some(Dialog::Form(form)) if form.fetching.is_some() || form.searching || form.choices_loading)
+    matches!(&app.dialog, Some(Dialog::Form(form)) if form.fetching.is_some() || form.searching || form.choices_loading || form.music.loading_more)
 }
 
 /// The details' picker's Done: the tags the form holds go on the entry
@@ -2034,13 +2453,60 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
             form.platform_filter = None;
             form.platform_open = false;
             form.ebook_note = false;
+            form.music.artist = None;
+            form.music.artists.clear();
             form.ensure_season();
             form.search(ctx);
         }
         Message::Query(query) => {
             form.query = query;
             form.picked = None;
+            // Typing goes back to the search from an artist's list.
+            if form.music.artist.take().is_some() {
+                form.music_search(ctx, true);
+                return None;
+            }
             form.search(ctx);
+        }
+        Message::LookupScrolled(near_end) => {
+            if near_end {
+                form.more_music(ctx);
+            }
+        }
+        Message::MusicPage {
+            generation,
+            request,
+            result,
+        } => form.music_answer(generation, request, result, ctx),
+        Message::MusicYear {
+            album,
+            released: Some(released),
+        } => {
+            form.music.years.insert(album, released);
+        }
+        Message::MusicYear { released: None, .. } => {}
+        Message::OpenArtist(index) => {
+            if let Some(artist) = form.music.artists.get(index).cloned() {
+                form.music.artist = Some(artist);
+                form.picked = None;
+                form.music_search(ctx, true);
+            }
+        }
+        Message::BackToResults => {
+            if form.music.artist.take().is_some() {
+                form.picked = None;
+                form.music_search(ctx, true);
+            }
+        }
+        Message::ScopeKey { step, focused } => {
+            if focused && form.media == MediaType::Music && (form.editing.is_none() || form.again) {
+                let kind = if step < 0 {
+                    EntryKind::Album
+                } else {
+                    EntryKind::Song
+                };
+                form.set_scope(kind, ctx);
+            }
         }
         Message::Debounce(generation) => form.start_search(generation, ctx),
         Message::SearchStep { generation, result } => form.searched(generation, result, ctx),
@@ -2103,10 +2569,15 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
                 let next = form.picked.map_or(0, |i| {
                     (i as isize + step).rem_euclid(count as isize) as usize
                 });
+                // Near the end of the music list, its next page comes.
+                if next + 3 >= count {
+                    form.more_music(ctx);
+                }
                 return update_form(form, Message::Pick(next), ctx);
             }
         }
         Message::Manual => {
+            form.music.artist = None;
             form.query.clear();
             form.picked = None;
             form.picked_match = None;
@@ -2148,6 +2619,7 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
                 form.formats.insert(format);
             }
         }
+        Message::Kind(kind) if form.media == MediaType::Music => form.set_scope(kind, ctx),
         Message::Kind(kind) => form.kind = kind,
         Message::Album(album) => form.album = album,
         Message::Status(status) => {
@@ -3923,6 +4395,164 @@ mod tests {
             wants
                 .covers
                 .contains(&"music/dirt-alice-in-chains".to_owned())
+        );
+    }
+
+    /// The Add dialog on Music with `query` typed.
+    fn music_search(app: &mut App, query: &str) {
+        send(app, Message::Add);
+        send(app, Message::Type(MediaType::Music));
+        send(app, Message::Query(query.into()));
+    }
+
+    #[test]
+    fn the_music_switch_and_album_or_song_are_one_and_ask_again() {
+        let mut app = app();
+        music_search(&mut app, "ghost");
+        let f = form(&app);
+        assert_eq!(f.scope(), MusicScope::Albums, "albums by default");
+        assert!(f.matches().iter().all(|m| m.kind == Some(EntryKind::Album)));
+        assert_eq!(f.music.total, Some(f.matches().len()));
+        let names: Vec<&str> = f.music.artists.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["Ghost", "Ghostface Killah", "Ghost Town"]);
+
+        // The switch is the form's field: Songs lists songs and the form
+        // says Song; the field back on Album lists albums again.
+        send(&mut app, Message::Kind(EntryKind::Song));
+        let f = form(&app);
+        assert_eq!(f.kind, EntryKind::Song);
+        assert!(f.matches().iter().all(|m| m.kind == Some(EntryKind::Song)));
+        assert_eq!(f.music.total, Some(42));
+        assert_eq!(f.matches().len(), lookup::MUSIC_PAGE, "one page at first");
+        // Shift+arrows move it only while the search field has focus.
+        send(
+            &mut app,
+            Message::ScopeKey {
+                step: -1,
+                focused: false,
+            },
+        );
+        assert_eq!(form(&app).kind, EntryKind::Song);
+        send(
+            &mut app,
+            Message::ScopeKey {
+                step: -1,
+                focused: true,
+            },
+        );
+        assert_eq!(form(&app).kind, EntryKind::Album);
+        assert!(
+            form(&app)
+                .matches()
+                .iter()
+                .all(|m| m.kind == Some(EntryKind::Album))
+        );
+    }
+
+    #[test]
+    fn the_music_list_pages_when_scrolled_to_its_end() {
+        let mut app = app();
+        music_search(&mut app, "ghost");
+        send(&mut app, Message::Kind(EntryKind::Song));
+        send(&mut app, Message::LookupScrolled(false));
+        assert_eq!(form(&app).matches().len(), lookup::MUSIC_PAGE);
+        send(&mut app, Message::LookupScrolled(true));
+        let f = form(&app);
+        assert_eq!(f.matches().len(), 42, "the next page is added");
+        assert_eq!(f.music.next, None);
+        assert!(f.music.artists.len() == 3, "the artists stay");
+    }
+
+    #[test]
+    fn an_artist_lists_only_their_music_newest_first_and_goes_back() {
+        let mut app = app();
+        music_search(&mut app, "ghost");
+        send(&mut app, Message::OpenArtist(0));
+        let f = form(&app);
+        assert_eq!(f.music.artist.as_ref().unwrap().name, "Ghost");
+        assert!(f.music.artists.is_empty());
+        let titles: Vec<&str> = f.matches().iter().map(|m| m.title.as_str()).collect();
+        assert_eq!(titles[0], "Skeletá");
+        assert_eq!(titles.len(), 7);
+        assert!(
+            f.matches()
+                .iter()
+                .all(|m| m.creator.as_deref() == Some("Ghost"))
+        );
+        // The switch keeps working inside the artist, and pages.
+        send(&mut app, Message::Kind(EntryKind::Song));
+        let f = form(&app);
+        assert_eq!(f.music.artist.as_ref().unwrap().name, "Ghost");
+        assert_eq!(f.matches()[0].title, "Peacefield");
+        assert_eq!(f.music.total, Some(31));
+        send(&mut app, Message::LookupScrolled(true));
+        assert_eq!(form(&app).matches().len(), 31);
+        // Back to the search's songs, with the artists.
+        send(&mut app, Message::BackToResults);
+        let f = form(&app);
+        assert!(f.music.artist.is_none());
+        assert_eq!(f.music.artists.len(), 3);
+        assert_eq!(f.music.total, Some(42));
+        // Typing in an artist's list goes back to the search too.
+        send(&mut app, Message::OpenArtist(1));
+        send(&mut app, Message::Query("ghost town".into()));
+        assert!(form(&app).music.artist.is_none());
+    }
+
+    #[test]
+    fn editing_a_song_looks_it_up_among_songs() {
+        let mut app = app();
+        let id = "music/bad-moon-rising-creedence-clearwater-revival";
+        assert!(app.repo.library().entry(id).is_some());
+        send(&mut app, Message::Edit(id.into()));
+        send(&mut app, Message::LookAgain);
+        let f = form(&app);
+        assert_eq!(f.scope(), MusicScope::Songs);
+    }
+
+    #[test]
+    fn music_rows_without_a_date_take_their_albums_when_it_comes() {
+        let mut app = app();
+        app.lookups = Arc::new(Service::with(vec![Arc::new(lookup::fake::Fake)], false));
+        music_search(&mut app, "ghost");
+        let generation = form(&app).search_generation;
+        let request = MusicRequest {
+            list: MusicList::Search("ghost".into()),
+            scope: MusicScope::Songs,
+            cursor: 0,
+        };
+        send(&mut app, Message::Kind(EntryKind::Song));
+        let generation = generation + 1;
+        assert_eq!(form(&app).search_generation, generation);
+        assert!(form(&app).searching);
+        // Deezer's search rows carry no date.
+        let mut page = lookup::fake::music_page(&request, lookup::MUSIC_PAGE);
+        for found in &mut page.matches {
+            found.released = None;
+        }
+        send(
+            &mut app,
+            Message::MusicPage {
+                generation,
+                request,
+                result: Ok(page),
+            },
+        );
+        let f = form(&app);
+        let first = f.matches()[0].clone();
+        let album = first.album_source.clone().unwrap();
+        assert!(f.music.asked_years.contains(&album));
+        assert_eq!(f.music.released(&first), None);
+        send(
+            &mut app,
+            Message::MusicYear {
+                album,
+                released: Released::parse("2025-04-25"),
+            },
+        );
+        assert_eq!(
+            form(&app).music.released(&first).map(|r| r.year),
+            Some(2025)
         );
     }
 }

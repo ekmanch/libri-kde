@@ -1731,6 +1731,21 @@ impl App {
                 _ => None,
             }));
         }
+        // Shift+← and Shift+→ in the music lookup's search field, which
+        // takes them for its selection.
+        if entry::music_lookup_open(self) {
+            subscriptions.push(event::listen_with(|event, _status, _window| match event {
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: Key::Named(named @ (Named::ArrowLeft | Named::ArrowRight)),
+                    modifiers,
+                    ..
+                }) if modifiers == keyboard::Modifiers::SHIFT => {
+                    let step = if named == Named::ArrowLeft { -1 } else { 1 };
+                    Some(Message::Entry(entry::Message::ScopeKeyPressed(step)))
+                }
+                _ => None,
+            }));
+        }
         // The splash's bar, and the setup's ring while GitHub is asked.
         if self.screen == Screen::Splash
             || (self.screen == Screen::Setup && self.setup.busy.is_some())

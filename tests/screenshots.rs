@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use libri::app::{self, App, Message};
 use libri::browse::Sort;
 use libri::lookup::LookupState;
-use libri::model::{Date, EntryStatus, MediaType, Released, Season, TagCategory};
+use libri::model::{Date, EntryKind, EntryStatus, MediaType, Released, Season, TagCategory};
 use libri::repo::Operation;
 use libri::screens::library::{self, DetailsPop, Page, SeasonMenu, View};
 use libri::screens::setup::{self, Step, Which};
@@ -122,6 +122,22 @@ fn add_from(app: &mut App, media: MediaType, query: &str) {
     let _ = app.update(Message::Entry(entry::Message::Add));
     let _ = app.update(Message::Entry(entry::Message::Type(media)));
     let _ = app.update(Message::Entry(entry::Message::Query(query.into())));
+    let _ = app.update(Message::Entry(entry::Message::Pick(0)));
+}
+
+/// The Add dialog on Music with `query` typed, on Songs with `songs`, in
+/// the matching artist at `artist`, and the first row picked.
+fn music_lookup(app: &mut App, query: &str, songs: bool, artist: Option<usize>) {
+    show_type(app, MediaType::Music);
+    let _ = app.update(Message::Entry(entry::Message::Add));
+    let _ = app.update(Message::Entry(entry::Message::Type(MediaType::Music)));
+    let _ = app.update(Message::Entry(entry::Message::Query(query.into())));
+    if songs {
+        let _ = app.update(Message::Entry(entry::Message::Kind(EntryKind::Song)));
+    }
+    if let Some(index) = artist {
+        let _ = app.update(Message::Entry(entry::Message::OpenArtist(index)));
+    }
     let _ = app.update(Message::Entry(entry::Message::Pick(0)));
 }
 
@@ -1161,6 +1177,34 @@ fn capture_every_screen() {
             Screen::Library,
             ("add-partial-none", |app| {
                 add_in_state(app, LookupState::PartialNone)
+            }),
+        ),
+        // The music lookup (canvas 2026-11-08, "Add: music, …").
+        (
+            Screen::Library,
+            ("add-music-albums", |app| {
+                music_lookup(app, "ghost", false, None)
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-music-songs", |app| {
+                music_lookup(app, "ghost", true, None)
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-music-artist-albums", |app| {
+                music_lookup(app, "ghost", false, Some(0))
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-music-artist-songs", |app| {
+                music_lookup(app, "ghost", true, Some(0));
+                if let Some(entry::Dialog::Form(form)) = &mut app.dialog {
+                    form.music.loading_more = true;
+                }
             }),
         ),
         (

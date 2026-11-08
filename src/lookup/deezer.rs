@@ -5,6 +5,8 @@
 //! album when a match is picked. Deezer answers errors as 200 with an
 //! `error` object, which `data` turns into failures.
 
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -12,8 +14,8 @@ use serde_json::Value;
 use super::http::{self, Http, int_at, objects_at, str_at};
 use super::text::{pick_by_title_and_year, same_title};
 use super::{
-    CreatorMatch, Failure, FailureKind, FollowKind, Hits, Match, Reply, Source, TrackInfo,
-    is_recent_or_ahead,
+    ArtistHit, CreatorMatch, Failure, FailureKind, FollowKind, Hits, MATCHING_ARTISTS, Match,
+    MusicList, MusicPage, MusicRequest, MusicScope, Reply, Source, TrackInfo, is_recent_or_ahead,
 };
 use crate::model::{Date, EntryKind, MediaType, Released};
 
@@ -24,12 +26,28 @@ pub const NO_PHOTO: [&str; 2] = ["various artists", "unknown artist"];
 
 pub struct Deezer {
     http: Http,
+    /// The album records asked this session, by Deezer's id: a search
+    /// row's year and a pick's details read the same record.
+    albums: Mutex<HashMap<String, Value>>,
+    /// An artist's albums, newest first, by Deezer's id: paged through
+    /// without asking again.
+    discographies: Mutex<HashMap<String, Vec<Value>>>,
 }
+
+/// How many album records are kept before the cache starts over.
+const ALBUM_CACHE: usize = 500;
+/// How many artists a search asks for, to pick the known ones from.
+const ARTIST_HITS: &str = "25";
+/// An artist this far below the best known match is left out (a
+/// hundredth of its fans).
+const ARTIST_FAN_SHARE: i64 = 100;
 
 impl Deezer {
     pub fn new() -> Deezer {
         Deezer {
             http: Http::new(Duration::from_millis(120)),
+            albums: Mutex::new(HashMap::new()),
+            discographies: Mutex::new(HashMap::new()),
         }
     }
 
@@ -113,15 +131,169 @@ impl Deezer {
     fn album_of(&self, source: &str) -> Reply<Option<Value>> {
         let (kind, id) = Deezer::parse(source)?;
         if kind == "album" {
-            return self.data(&format!("/album/{id}"), &[]);
+            return self.album_record(id);
         }
         let Some(track) = self.data(&format!("/track/{id}"), &[])? else {
             return Ok(None);
         };
         match int_at(&track["album"], "id") {
-            Some(album_id) => self.data(&format!("/album/{album_id}"), &[]),
+            Some(album_id) => self.album_record(&album_id.to_string()),
             None => Ok(None),
         }
+    }
+
+    /// The album with Deezer's id `id`, asked once a session.
+    fn album_record(&self, id: &str) -> Reply<Option<Value>> {
+        if let Some(album) = self
+            .albums
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+        {
+            return Ok(Some(album.clone()));
+        }
+        let album = self.data(&format!("/album/{id}"), &[])?;
+        if let Some(album) = &album {
+            let mut albums = self.albums.lock().unwrap_or_else(|e| e.into_inner());
+            if albums.len() >= ALBUM_CACHE {
+                albums.clear();
+            }
+            albums.insert(id.to_owned(), album.clone());
+        }
+        Ok(album)
+    }
+
+    /// A page of one of Deezer's lists: its items, its `total` and
+    /// whether a `next` page follows. A page may hold fewer items than
+    /// asked (Deezer drops what is not available) and the next still
+    /// starts a whole page on.
+    fn page(&self, path: &str, query: &[(&str, &str)]) -> Reply<(Vec<Value>, Option<usize>, bool)> {
+        Ok(self
+            .data(path, query)?
+            .map(|json| {
+                let items = objects_at(&json, "data").cloned().collect();
+                let total = int_at(&json, "total").and_then(|t| usize::try_from(t).ok());
+                (items, total, str_at(&json, "next").is_some())
+            })
+            .unwrap_or_default())
+    }
+
+    /// Up to three artists for a search, the best known first: Deezer
+    /// ranks a search's artists poorly ("Ghost & Gale" before Ghost), so
+    /// the hits go by their fans, and one with a hundredth of the best's
+    /// fans or fewer is left out.
+    fn matching_artists(&self, query: &str) -> Reply<Vec<ArtistHit>> {
+        let hits = self.list("/search/artist", &[("q", query), ("limit", ARTIST_HITS)])?;
+        Ok(Deezer::best_artists(&hits))
+    }
+
+    fn best_artists(hits: &[Value]) -> Vec<ArtistHit> {
+        let mut hits: Vec<(i64, &Value)> = hits
+            .iter()
+            .map(|hit| (int_at(hit, "nb_fan").unwrap_or_default(), hit))
+            .collect();
+        // Stable, so equal fans keep Deezer's order.
+        hits.sort_by_key(|(fans, _)| std::cmp::Reverse(*fans));
+        let best = hits.first().map_or(0, |(fans, _)| *fans);
+        hits.into_iter()
+            .filter(|(fans, _)| *fans * ARTIST_FAN_SHARE > best)
+            .filter_map(|(_, hit)| {
+                let name = str_at(hit, "name")?;
+                if NO_PHOTO.contains(&name.trim().to_lowercase().as_str()) {
+                    return None;
+                }
+                Some(ArtistHit {
+                    source: format!("deezer:artist:{}", int_at(hit, "id")?),
+                    name: name.to_owned(),
+                    picture_url: str_at(hit, "picture_medium").map(str::to_owned),
+                    albums: int_at(hit, "nb_album").and_then(|n| u32::try_from(n).ok()),
+                })
+            })
+            .take(MATCHING_ARTISTS)
+            .collect()
+    }
+
+    /// Every album, EP and single of the artist with Deezer's id `id`,
+    /// newest first (Deezer lists the albums, then the EPs, then the
+    /// singles, each newest first); asked once a session.
+    fn discography(&self, id: &str) -> Reply<Vec<Value>> {
+        if let Some(albums) = self
+            .discographies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+        {
+            return Ok(albums.clone());
+        }
+        let mut albums = self.list(&format!("/artist/{id}/albums"), &[("limit", "1000")])?;
+        Deezer::newest_first(&mut albums);
+        self.discographies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id.to_owned(), albums.clone());
+        Ok(albums)
+    }
+
+    /// Newest first by the release date; undated last, in Deezer's order.
+    fn newest_first(albums: &mut [Value]) {
+        albums.sort_by_key(|album| {
+            std::cmp::Reverse(Deezer::released(album).map(Released::available_from))
+        });
+    }
+
+    /// An album of an artist's list, which names no artist: `artist`'s.
+    fn artist_album(item: &Value, artist: &str) -> Option<Match> {
+        let mut album = Deezer::album(item)?;
+        album.creator = Some(artist.to_owned());
+        album.released = Deezer::released(item);
+        Some(album)
+    }
+
+    /// The artist's songs from their albums, newest album first, from the
+    /// album at `cursor` until `limit` songs are found; songs by others
+    /// on the artist's records (a soundtrack's) are left out.
+    fn artist_songs(
+        &self,
+        artist_id: &str,
+        artist: &str,
+        cursor: usize,
+        limit: usize,
+    ) -> Reply<MusicPage> {
+        let albums = self.discography(artist_id)?;
+        let mut page = MusicPage::default();
+        let mut at = cursor;
+        while at < albums.len() && page.matches.len() < limit {
+            let album = &albums[at];
+            at += 1;
+            let Some(album_id) = int_at(album, "id") else {
+                continue;
+            };
+            let tracks = self.list(&format!("/album/{album_id}/tracks"), &[("limit", "200")])?;
+            for item in &tracks {
+                if int_at(&item["artist"], "id")
+                    .map(|id| id.to_string())
+                    .as_deref()
+                    != Some(artist_id)
+                {
+                    continue;
+                }
+                let (Some(id), Some(title)) = (int_at(item, "id"), str_at(item, "title")) else {
+                    continue;
+                };
+                page.matches.push(Match {
+                    creator: Some(artist.to_owned()),
+                    kind: Some(EntryKind::Song),
+                    album: str_at(album, "title").map(str::to_owned),
+                    album_source: Some(format!("deezer:album:{album_id}")),
+                    released: Deezer::released(album),
+                    cover_url: str_at(album, "cover_medium").map(str::to_owned),
+                    large_cover_url: str_at(album, "cover_big").map(str::to_owned),
+                    ..Match::new(MediaType::Music, title, format!("deezer:track:{id}"))
+                });
+            }
+        }
+        page.next = (at < albums.len()).then_some(at);
+        Ok(page)
     }
 
     fn released(album: &Value) -> Option<Released> {
@@ -241,6 +413,62 @@ impl Source for Deezer {
                 })
             })
             .collect())
+    }
+
+    fn music_page(&self, request: &MusicRequest, limit: usize) -> Reply<MusicPage> {
+        let cursor = request.cursor;
+        match &request.list {
+            MusicList::Search(query) => {
+                let (path, read): (&str, fn(&Value) -> Option<Match>) = match request.scope {
+                    MusicScope::Albums => ("/search/album", Deezer::album),
+                    MusicScope::Songs => ("/search/track", Deezer::track),
+                };
+                let (index, count) = (cursor.to_string(), limit.to_string());
+                let (items, total, more) =
+                    self.page(path, &[("q", query), ("index", &index), ("limit", &count)])?;
+                let artists = if cursor == 0 {
+                    self.matching_artists(query)?
+                } else {
+                    Vec::new()
+                };
+                Ok(MusicPage {
+                    matches: items.iter().filter_map(read).collect(),
+                    total,
+                    next: more.then_some(cursor + limit),
+                    artists,
+                })
+            }
+            MusicList::Artist { source, name } => {
+                let Some(id) = source.strip_prefix("deezer:artist:") else {
+                    return Err(Failure::other(format!("not a Deezer artist id: {source}")));
+                };
+                match request.scope {
+                    MusicScope::Albums => {
+                        let albums = self.discography(id)?;
+                        let end = (cursor + limit).min(albums.len());
+                        Ok(MusicPage {
+                            matches: albums
+                                .get(cursor..end)
+                                .unwrap_or_default()
+                                .iter()
+                                .filter_map(|item| Deezer::artist_album(item, name))
+                                .collect(),
+                            total: Some(albums.len()),
+                            next: (end < albums.len()).then_some(end),
+                            artists: Vec::new(),
+                        })
+                    }
+                    MusicScope::Songs => self.artist_songs(id, name, cursor, limit),
+                }
+            }
+        }
+    }
+
+    fn album_released(&self, album_source: &str) -> Reply<Option<Released>> {
+        Ok(self
+            .album_of(album_source)?
+            .as_ref()
+            .and_then(Deezer::released))
     }
 
     fn artist_photo_url(&self, name: &str) -> Reply<Option<String>> {
@@ -367,5 +595,36 @@ mod tests {
             Deezer::album_query("Dirt", Some("Alice in Chains")),
             "artist:\"Alice in Chains\" album:\"Dirt\""
         );
+    }
+
+    #[test]
+    fn a_searchs_artists_go_by_their_fans_and_albums_newest_first() {
+        let hits: Vec<Value> = serde_json::from_str(
+            r#"[{"id": 1, "name": "Ghost & Gale", "nb_fan": 45, "nb_album": 1},
+                {"id": 2, "name": "Ghost", "nb_fan": 615851, "nb_album": 30,
+                 "picture_medium": "p.jpg"},
+                {"id": 3, "name": "Ghostface Killah", "nb_fan": 402118, "nb_album": 17},
+                {"id": 4, "name": "Various Artists", "nb_fan": 900000},
+                {"id": 5, "name": "Ghost Town", "nb_fan": 52340, "nb_album": 3},
+                {"id": 6, "name": "Ghost B.C.", "nb_fan": 6000}]"#,
+        )
+        .unwrap();
+        let best = Deezer::best_artists(&hits);
+        let names: Vec<&str> = best.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["Ghost", "Ghostface Killah", "Ghost Town"]);
+        assert_eq!(best[0].source, "deezer:artist:2");
+        assert_eq!(best[0].albums, Some(30));
+        assert_eq!(best[0].picture_url.as_deref(), Some("p.jpg"));
+
+        let mut albums: Vec<Value> = serde_json::from_str(
+            r#"[{"title": "Impera", "release_date": "2022-03-11", "record_type": "album"},
+                {"title": "Popestar", "release_date": "2016-09-16", "record_type": "ep"},
+                {"title": "Undated"},
+                {"title": "It's A Sin", "release_date": "2026-01-16", "record_type": "single"}]"#,
+        )
+        .unwrap();
+        Deezer::newest_first(&mut albums);
+        let titles: Vec<&str> = albums.iter().filter_map(|a| str_at(a, "title")).collect();
+        assert_eq!(titles, ["It's A Sin", "Impera", "Popestar", "Undated"]);
     }
 }

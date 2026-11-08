@@ -412,6 +412,88 @@ pub struct TrackInfo {
     pub title: String,
 }
 
+/// What the music lookup lists: albums or songs. It is the form's
+/// "Album or song" field, so the two always agree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum MusicScope {
+    #[default]
+    Albums,
+    Songs,
+}
+
+impl MusicScope {
+    /// Songs for a song, albums for anything else.
+    pub fn of(kind: EntryKind) -> MusicScope {
+        if kind == EntryKind::Song {
+            MusicScope::Songs
+        } else {
+            MusicScope::Albums
+        }
+    }
+
+    pub fn kind(self) -> EntryKind {
+        match self {
+            MusicScope::Albums => EntryKind::Album,
+            MusicScope::Songs => EntryKind::Song,
+        }
+    }
+
+    /// "album" or "albums", by `n`.
+    pub fn noun(self, n: usize) -> &'static str {
+        match (self, n == 1) {
+            (MusicScope::Albums, true) => "album",
+            (MusicScope::Albums, false) => "albums",
+            (MusicScope::Songs, true) => "song",
+            (MusicScope::Songs, false) => "songs",
+        }
+    }
+}
+
+/// An artist whose name matches a music search: the music source's id
+/// for them ("deezer:artist:8506054"), the name, a photo and how many
+/// albums the source lists (singles and EPs among them).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArtistHit {
+    pub source: String,
+    pub name: String,
+    pub picture_url: Option<String>,
+    pub albums: Option<u32>,
+}
+
+/// The list the music lookup pages through: a search, or one artist's
+/// albums or songs, newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum MusicList {
+    Search(String),
+    Artist { source: String, name: String },
+}
+
+/// One page of a music list: the list, albums or songs, and where the
+/// page starts (an offset, or for an artist's songs the album the walk
+/// is at; whatever `MusicPage::next` gave).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MusicRequest {
+    pub list: MusicList,
+    pub scope: MusicScope,
+    pub cursor: usize,
+}
+
+/// A page of a music list: its matches, how many the list holds when the
+/// source says, where the next page starts (`None` at the end) and, on a
+/// search's first page, the artists whose names match.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MusicPage {
+    pub matches: Vec<Match>,
+    pub total: Option<usize>,
+    pub next: Option<usize>,
+    pub artists: Vec<ArtistHit>,
+}
+
+/// How many matches a music page asks for.
+pub const MUSIC_PAGE: usize = 25;
+/// How many matching artists a music search shows above its results.
+pub const MATCHING_ARTISTS: usize = 3;
+
 /// One provider of matches. Every method fails with a [`Failure`] and
 /// never returns a match of a type outside `types`.
 pub trait Source: Send + Sync {
@@ -540,6 +622,18 @@ pub trait Source: Send + Sync {
     /// The tracks of the album with lookup id `album_source`, in order.
     fn album_tracks(&self, _album_source: &str) -> Reply<Vec<TrackInfo>> {
         Ok(Vec::new())
+    }
+
+    /// A page of a music list (the music source only): `limit` matches
+    /// at most, and on a search's first page the matching artists.
+    fn music_page(&self, _request: &MusicRequest, _limit: usize) -> Reply<MusicPage> {
+        Err(Failure::other("this source lists no music"))
+    }
+
+    /// When the album with lookup id `album_source` came out, for a
+    /// search row that has no date (the music source only).
+    fn album_released(&self, _album_source: &str) -> Reply<Option<Released>> {
+        Ok(None)
     }
 
     /// A photo of the artist called `name`, or `None` when the source has
@@ -703,6 +797,9 @@ const CACHE_SIZE: usize = 50;
 pub struct Service {
     sources: Vec<Arc<dyn Source>>,
     cache: Mutex<Vec<(String, SearchResult)>>,
+    /// The music pages answered this session, so switching between albums
+    /// and songs, or going back from an artist, asks nothing again.
+    music_cache: Mutex<Vec<(MusicRequest, MusicPage)>>,
     /// The fake answers at once and never touches the network, so the
     /// app asks it on the spot instead of from a task.
     instant: bool,
@@ -748,6 +845,7 @@ impl Service {
         Service {
             sources,
             cache: Mutex::new(Vec::new()),
+            music_cache: Mutex::new(Vec::new()),
             instant,
         }
     }
@@ -968,6 +1066,45 @@ impl Service {
             }
         }
         result
+    }
+
+    /// A remembered page of a music list.
+    pub fn cached_music(&self, request: &MusicRequest) -> Option<MusicPage> {
+        let cache = self.music_cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache
+            .iter()
+            .find(|(r, _)| r == request)
+            .map(|(_, page)| page.clone())
+    }
+
+    /// A page of a music list from the music source, remembered for the
+    /// session; "not set up" when there is no music source.
+    pub fn music_page(&self, request: &MusicRequest) -> Reply<MusicPage> {
+        if let Some(page) = self.cached_music(request) {
+            return Ok(page);
+        }
+        let Some(source) = self.music() else {
+            return Err(Failure::new(
+                FailureKind::NotConfigured,
+                "no music source is set up",
+            ));
+        };
+        let page = source.music_page(request, MUSIC_PAGE)?;
+        let mut cache = self.music_cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.retain(|(r, _)| r != request);
+        cache.push((request.clone(), page.clone()));
+        while cache.len() > CACHE_SIZE * 4 {
+            cache.remove(0);
+        }
+        Ok(page)
+    }
+
+    /// When the album with `album_source` came out, from its source.
+    pub fn album_released(&self, album_source: &str) -> Reply<Option<Released>> {
+        match self.source_of(album_source) {
+            Some(source) => source.album_released(album_source),
+            None => Ok(None),
+        }
     }
 
     /// The platforms games can be narrowed to: the first configured game

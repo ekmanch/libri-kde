@@ -14,7 +14,7 @@ use iced::{Background, Border, Center, Color, Element, Fill, Padding};
 use super::{CategoriesDialog, Form, Message, NewTag, Replace};
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
-use crate::lookup::{self, GamePlatform, Match};
+use crate::lookup::{self, ArtistHit, GamePlatform, Match, MusicScope};
 use crate::model::{BookFormat, EntryKind, EntryStatus, MediaType, TagCategory, text as rules};
 use crate::screens::entry::SeasonDraft;
 use crate::tags::PickerState;
@@ -279,11 +279,16 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
     let noun = form.media.label().to_lowercase();
     let platform = form.platform_filter.as_deref();
 
-    let head = if again {
+    let music = form.media == MediaType::Music;
+    let scope = form.scope();
+    let artist = form.music.artist.as_ref();
+    let head = if music && state.shows_rows() && !matches.is_empty() && !query.is_empty() {
+        music_head(form, scope)
+    } else if again {
         "Pick a match. It replaces the creator, year, description and pages; your title, note, \
          status and tags stay."
             .to_owned()
-    } else if query.is_empty() {
+    } else if query.is_empty() && artist.is_none() {
         "Type a title to look it up online.".to_owned()
     } else if state == lookup::LookupState::Loading {
         format!("Looking up \u{201c}{query}\u{201d}\u{2026}")
@@ -304,8 +309,12 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
 
     // The rows, a message, or the loading placeholders.
     let mut list = Column::new().spacing(4);
+    // Inside an artist's list, the way back to the search's.
+    if artist.is_some() {
+        list = list.push(back_to_results(query, tokens));
+    }
     let message: Option<(String, bool)> = match state {
-        _ if query.is_empty() => None,
+        _ if query.is_empty() && artist.is_none() => None,
         lookup::LookupState::Loading => None,
         lookup::LookupState::Offline => Some((
             "Could not reach the lookup. Check your connection and try again.".into(),
@@ -331,13 +340,14 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         _ if matches.is_empty() => Some((
             match platform {
                 Some(platform) => format!("No games called that on {platform}."),
+                None if music => format!("No {} found.", scope.noun(2)),
                 None => format!("No matches among {noun}."),
             },
             false,
         )),
         _ => None,
     };
-    if state == lookup::LookupState::Loading && !query.is_empty() {
+    if state == lookup::LookupState::Loading && (!query.is_empty() || artist.is_some()) {
         for _ in 0..3 {
             list = list.push(placeholder_row(form.media, tokens));
         }
@@ -355,8 +365,38 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         }
         list = list.push(container(block).padding([8, 4]));
     } else {
+        // The artists whose names match, above a music search's rows.
+        if music && artist.is_none() && !form.music.artists.is_empty() {
+            for (index, hit) in form.music.artists.iter().enumerate() {
+                list = list.push(artist_row(app, hit, index, scope, tokens));
+            }
+            list = list.push(space().height(4));
+        }
         for (index, found) in matches.iter().enumerate() {
             list = list.push(match_row(app, form, index, found, platform, tokens));
+        }
+        if music && !matches.is_empty() {
+            if form.music.more_failed {
+                list = list.push(
+                    container(
+                        row![
+                            text("Could not load more.").size(12.5).color(tokens.sub),
+                            ui::labeled_button(
+                                "Try again",
+                                ButtonKind::Text,
+                                *tokens,
+                                Some(msg(Message::LookupScrolled(true))),
+                            ),
+                        ]
+                        .spacing(6)
+                        .align_y(Center),
+                    )
+                    .center_x(Fill)
+                    .padding([6, 8]),
+                );
+            } else if form.music.loading_more {
+                list = list.push(loading_more(app, tokens));
+            }
         }
         if state == lookup::LookupState::Partial && !matches.is_empty() {
             list = list.push(
@@ -411,9 +451,23 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
     if form.media == MediaType::Games {
         pane = pane.push(platform_filter(app, form, tokens));
     }
+    if music {
+        let scopes = [("Albums", MusicScope::Albums), ("Songs", MusicScope::Songs)]
+            .map(|(label, s)| (label, scope == s, msg(Message::Kind(s.kind()))));
+        pane = pane.push(container(ui::segmented(scopes, 30.0, tokens)).width(192));
+    }
+    let rows = ui::scroll(list)
+        .id(LOOKUP_LIST_ID)
+        .height(Fill)
+        .on_scroll(|viewport| {
+            let bounds = viewport.bounds();
+            let content = viewport.content_bounds();
+            let left = content.height - bounds.height - viewport.absolute_offset().y;
+            msg(Message::LookupScrolled(left < NEAR_END))
+        });
     pane = pane
         .push(text(head).size(12).color(tokens.sub))
-        .push(ui::scroll(list).height(Fill))
+        .push(rows)
         .push(container(foot).center_x(Fill));
     let chrome = tokens.dialog_chrome;
     container(pane)
@@ -442,8 +496,13 @@ fn match_row<'a>(
         .and_then(|url| app.artwork.image(url));
     // An album's thumbnail is square, at the same width.
     let cover = ui::plain_cover(handle, tint, 44.0, match_thumb_height(form.media), 5.0);
-    let mut parts = vec![found.creator.clone().unwrap_or_default()];
-    if let Some(platform) = platform {
+    let music = form.media == MediaType::Music;
+    let mut parts = if music {
+        music_line(form, found)
+    } else {
+        vec![found.creator.clone().unwrap_or_default()]
+    };
+    if let Some(platform) = platform.filter(|_| !music) {
         let others = found.platforms.len().saturating_sub(1);
         parts.push(match others {
             0 => platform.to_owned(),
@@ -451,7 +510,9 @@ fn match_row<'a>(
             n => format!("{platform} and {n} more"),
         });
     }
-    parts.push(found.year_text());
+    if !music {
+        parts.push(found.year_text());
+    }
     if let Some(edition) = &found.edition {
         parts.push(edition.clone());
     }
@@ -474,6 +535,151 @@ fn match_row<'a>(
         .style(ui::row_style(tokens, picked, 10.0))
         .focusable(10.0, tokens)
 }
+
+/// The music lookup's count line: "412 albums · ↑ ↓ to move, Enter to
+/// pick" for a search, "Ghost · 98 songs, newest first" in an artist's.
+fn music_head(form: &Form, scope: MusicScope) -> String {
+    let shown = form.matches().len();
+    match (&form.music.artist, form.music.total) {
+        (Some(artist), Some(total)) => {
+            format!(
+                "{} · {} {}, newest first",
+                artist.name,
+                grouped(total),
+                scope.noun(total)
+            )
+        }
+        (Some(artist), None) => format!("{} · {}, newest first", artist.name, scope.noun(2)),
+        (None, total) => {
+            let total = total.unwrap_or(shown).max(shown);
+            format!(
+                "{} {} · ↑ ↓ to move, Enter to pick",
+                grouped(total),
+                scope.noun(total)
+            )
+        }
+    }
+}
+
+/// 9800 as "9,800".
+fn grouped(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// A music row's subline: "Album · Ghost · 2025" in a search, "Album ·
+/// 2025" in an artist's list; "Song · Ghost · Prequelle · 2018" and "Song
+/// · Prequelle · 2018". The year is the album's, once asked.
+fn music_line(form: &Form, found: &Match) -> Vec<String> {
+    let song = found.kind == Some(EntryKind::Song);
+    let mut parts = vec![if song { "Song" } else { "Album" }.to_owned()];
+    if form.music.artist.is_none() {
+        parts.extend(found.creator.clone());
+    }
+    if song {
+        parts.extend(found.album.clone());
+    }
+    parts.extend(form.music.released(found).map(|r| r.year.to_string()));
+    parts
+}
+
+/// A matching artist above a music search's rows: the round photo, the
+/// name, "Artist · 30 albums", and "All albums ›" or "All songs ›" by the
+/// switch; it opens the artist's list.
+fn artist_row<'a>(
+    app: &'a App,
+    hit: &'a ArtistHit,
+    index: usize,
+    scope: MusicScope,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let photo = hit
+        .picture_url
+        .as_deref()
+        .and_then(|url| app.artwork.image(url));
+    let line = match hit.albums {
+        Some(n) => format!("Artist · {n} {}", MusicScope::Albums.noun(n as usize)),
+        None => "Artist".to_owned(),
+    };
+    let all = row![
+        text(format!("All {}", scope.noun(2)))
+            .size(13)
+            .font(font::SEMIBOLD)
+            .color(tokens.ink),
+        ui::icon(Icon::ChevronRight, 12.0, tokens.ink),
+    ]
+    .spacing(4)
+    .align_y(Center);
+    let content = row![
+        ui::music::artist_disc(photo, &hit.name, 44.0),
+        column![
+            text(&hit.name).size(14.5).font(font::SEMIBOLD),
+            text(line).size(12.5).color(tokens.sub),
+        ]
+        .spacing(2)
+        .width(Fill),
+        all,
+    ]
+    .spacing(12)
+    .align_y(Center);
+    button(content)
+        .width(Fill)
+        .padding(8)
+        .on_press(msg(Message::OpenArtist(index)))
+        .style(ui::row_style(tokens, false, 10.0))
+        .focusable(10.0, tokens)
+}
+
+/// "‹ Back to results for “ghost”" at the top of an artist's list.
+fn back_to_results<'a>(query: &str, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let label = if query.is_empty() {
+        "Back to results".to_owned()
+    } else {
+        format!("Back to results for \u{201c}{query}\u{201d}")
+    };
+    let content = row![
+        ui::icon(Icon::ChevronLeft, 16.0, tokens.sub),
+        text(label).size(13.5).color(tokens.sub),
+    ]
+    .spacing(4)
+    .align_y(Center)
+    .height(Fill);
+    container(
+        button(content)
+            .height(30)
+            .padding(Padding::new(0.0).left(2).right(10))
+            .on_press(msg(Message::BackToResults))
+            .style(ui::row_style(tokens, false, 8.0))
+            .focusable(8.0, tokens),
+    )
+    .padding(Padding::new(0.0).bottom(2))
+    .into()
+}
+
+/// "Loading more…" under the music rows while the next page comes.
+fn loading_more<'a>(app: &App, tokens: &Tokens) -> Element<'a, AppMessage> {
+    container(
+        row![
+            ui::spinner(14.0, tokens.accent, app.splash_phase),
+            text("Loading more\u{2026}").size(12.5).color(tokens.sub),
+        ]
+        .spacing(8)
+        .align_y(Center),
+    )
+    .center_x(Fill)
+    .center_y(44)
+    .into()
+}
+
+/// How close to the end of the music rows the next page is asked for.
+const NEAR_END: f32 = 240.0;
 
 /// A match's thumbnail is 44 px wide: 62 tall, or square for an album.
 fn match_thumb_height(media: MediaType) -> f32 {
@@ -683,6 +889,8 @@ fn platform_picker<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element
 
 /// The lookup field's id, focused when the dialog opens.
 pub const LOOKUP_ID: &str = "entry-lookup";
+/// The lookup's list of rows.
+pub const LOOKUP_LIST_ID: &str = "entry-lookup-list";
 
 /// The cover and the fields, in two columns where they pair up.
 fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppMessage> {
