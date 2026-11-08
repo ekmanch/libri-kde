@@ -226,9 +226,14 @@ fn shelf<'a>(
     .style(text_button(tokens.sub))
     .focusable(6.0, tokens);
     let selected = app.library.selected.as_deref();
-    let row = Row::with_children(list.iter().take(covers).map(|entry| {
+    let shown = &list[..covers.min(list.len())];
+    // A shelf of albums only is as tall as its squares; one mixing types
+    // keeps the 2:3 slot, so the details stay on one line.
+    let all_square = shown.iter().all(|e| ui::cover::is_square(e.media));
+    let row = Row::with_children(shown.iter().map(|entry| {
         let dimmed = selected.is_some_and(|id| id != entry.id);
-        shelf_cover(app, entry, meta(entry, section, app.today), dimmed, tokens)
+        let meta = meta(entry, section, app.today);
+        shelf_cover(app, entry, meta, all_square, dimmed, tokens)
     }))
     .spacing(COVER_GAP);
     Some(column![header, row].spacing(10).into())
@@ -236,11 +241,13 @@ fn shelf<'a>(
 
 /// A 100 × 150 cover with the title on it, the detail under it. An
 /// album's is 100 × 100 at the bottom of the same slot, so the details
-/// stay on one line.
+/// stay on one line; on a shelf of albums only (`all_square`) the slot is
+/// the square itself.
 fn shelf_cover<'a>(
     app: &'a App,
     entry: &'a Entry,
     meta: String,
+    all_square: bool,
     dimmed: bool,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
@@ -255,10 +262,10 @@ fn shelf_cover<'a>(
             ui::cover::height_for(COVER_WIDTH, square),
             14.0,
         ),
-        square,
+        square && !all_square,
     ))
     .width(COVER_WIDTH)
-    .height(COVER_WIDTH * 1.5);
+    .height(ui::cover::height_for(COVER_WIDTH, all_square));
     let content = column![
         cover,
         ui::mono(meta, 12.0, tokens.sub).wrapping(text::Wrapping::None)
