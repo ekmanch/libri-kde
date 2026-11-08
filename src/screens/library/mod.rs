@@ -1132,8 +1132,25 @@ impl State {
 
     /// The covers the list draws, in its order: as [`Self::display_order`],
     /// but a series folded into one row wants only the part whose cover
-    /// stands for it (the one picked, else the first in the series).
+    /// stands for it (the one picked, else the first in the series). The
+    /// Songs tab wants one cover per tile, an album's track with its
+    /// album's cover, so the scroll position maps onto the tiles drawn.
     pub fn cover_order(&self, library: &Library, today: Date) -> Vec<String> {
+        if self.page.is_none()
+            && !self.soon
+            && self.artist.is_none()
+            && self.music_tab == MusicTab::Songs
+            && self.single() == Some(MediaType::Music)
+        {
+            let listing = self.listing(library, today);
+            return crate::music::songs_matching(&listing.shown, &self.query)
+                .iter()
+                .map(|song| match song {
+                    crate::music::Song::Entry(e) => e.id.clone(),
+                    crate::music::Song::Track { album, .. } => album.id.clone(),
+                })
+                .collect();
+        }
         if self.page.is_none()
             && !self.is_overview()
             && self.single().is_some_and(|m| m != MediaType::Music)
@@ -1775,5 +1792,30 @@ mod tests {
         assert!(wants.covers.contains(&last));
         assert!(!wants.covers.contains(&order[0]));
         assert_eq!(wants.covers.len(), 4);
+    }
+
+    #[test]
+    fn the_songs_tab_asks_for_a_cover_per_tile_tracks_with_their_albums() {
+        let mut app = App::new(crate::screens::Screen::Library);
+        app.library
+            .update(Message::ShowType(Some(MediaType::Music)));
+        app.library.update(Message::MusicTab(MusicTab::Songs));
+        let library = app.repo.library();
+        let listing = app.library.listing(library, app.today);
+        let tiles: Vec<String> = crate::music::songs(&listing.shown)
+            .iter()
+            .map(|song| song.entry().id.clone())
+            .collect();
+        assert!(tiles.len() > 5, "the fixture's songs and album tracks");
+        let order = app.library.cover_order(library, app.today);
+        // Before, only the song entries were counted, so the scroll mapped
+        // onto the wrong tiles and a song's cover was never asked for.
+        assert_eq!(order, tiles);
+        app.library.update(Message::Scrolled(Scroll {
+            offset: 0.0,
+            viewport: 100.0,
+            content: 100.0 * tiles.len() as f32,
+        }));
+        assert!(crate::screens::wanted(&app).covers.contains(&tiles[0]));
     }
 }
