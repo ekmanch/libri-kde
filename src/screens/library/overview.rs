@@ -8,7 +8,9 @@
 //! soon and Recently added in the lists), so the layout never changes.
 //! The left part scrolls on its own, since the details scroll too.
 
-use iced::widget::{Column, Row, button, column, container, progress_bar, row, space, text};
+use iced::widget::{
+    Column, Row, button, column, container, opaque, progress_bar, row, space, text,
+};
 use iced::{Background, Border, Center, Color, Element, Fill, Padding};
 
 use super::{Message, View};
@@ -85,7 +87,9 @@ pub fn wanted(app: &App, view: View, wants: &mut crate::artwork::Wants) {
 pub fn body<'a>(app: &'a App) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
     let overview = Overview::of(app.repo.library(), app.today);
-    let details = super::panel::details(app);
+    // The details are part of Home's body here: a click on their empty
+    // space stays in them, rather than closing them as the list's does.
+    let details = super::panel::details(app).map(opaque);
     let scroll = |content: Element<'a, AppMessage>| {
         ui::scroll(container(content).padding(Padding::new(0.0).top(10).bottom(PADDING)))
             .height(Fill)
@@ -486,7 +490,7 @@ pub(super) fn short_day(date: Date, today: Date) -> String {
 }
 
 /// A release at its own precision: "Nov 19", "Oct 2027" or "2027".
-pub(super) fn short_release(released: Released, today: Date) -> String {
+pub fn short_release(released: Released, today: Date) -> String {
     match (released.month, released.day) {
         (Some(month), Some(day)) => short_day(
             Date {

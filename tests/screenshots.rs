@@ -133,6 +133,26 @@ fn add_in_state(app: &mut App, state: LookupState) {
     let _ = app.update(Message::Entry(entry::Message::Query("castlevania".into())));
 }
 
+/// Runs the daily check against the fake, so Discover has rows.
+fn check(app: &mut App) {
+    let _ = app.update(Message::Discover(libri::discover::Message::Check));
+}
+
+/// The Coming soon page on `slice` with Discover's rows and Stranger
+/// Things' second season announced, as the lists have it.
+fn soon(app: &mut App, slice: library::Slice) {
+    check(app);
+    announced(app, None);
+    let _ = app.update(Message::Library(library::Message::ShowSoon));
+    let _ = app.update(Message::Library(library::Message::SoonSlice(slice)));
+    let _ = app.update(Message::Library(library::Message::SetView(View::List)));
+    measure(app);
+}
+
+fn hide(app: &mut App, key: &str) {
+    let _ = app.update(Message::Library(library::Message::HideFound(key.into())));
+}
+
 fn season(n: u32, released: &str, status: Option<EntryStatus>) -> Season {
     Season {
         season: n,
@@ -624,6 +644,81 @@ fn capture_every_screen() {
                 let _ = app.update(Message::Entry(entry::Message::ViewCover(
                     "books/berserk-vol-42-2021".into(),
                 )));
+            }),
+        ),
+        // The Coming soon page (canvas "Coming soon" and its states): the
+        // three slices, the views, a Discover title open, one type, the
+        // type panel's popover and nothing to show.
+        (
+            Screen::Library,
+            ("coming-soon", |app| {
+                soon(app, library::Slice::Library);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("coming-soon-discover", |app| {
+                soon(app, library::Slice::Discover);
+                hide(app, "fake:album:alice-in-chains");
+            }),
+        ),
+        (
+            Screen::Library,
+            ("coming-soon-all-grid", |app| {
+                soon(app, library::Slice::All);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                measure(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("coming-soon-text", |app| {
+                soon(app, library::Slice::All);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Text)));
+                measure(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("coming-soon-discover-title", |app| {
+                soon(app, library::Slice::Discover);
+                let _ = app.update(Message::Library(library::Message::SelectFound(
+                    "fake:movie:hunt-for-gollum".into(),
+                )));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("coming-soon-games", |app| {
+                soon(app, library::Slice::All);
+                let _ = app.update(Message::Library(library::Message::SoonType(
+                    MediaType::Games,
+                )));
+                measure(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("coming-soon-hidden", |app| {
+                soon(app, library::Slice::All);
+                hide(app, "fake:album:alice-in-chains");
+                let _ = app.update(Message::Library(library::Message::ShowHidden));
+                measure(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("coming-soon-type-popover", |app| {
+                check(app);
+                show_type(app, MediaType::Movies);
+                let _ = app.update(Message::Library(library::Message::OpenTypePop));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("coming-soon-empty", |app| {
+                app.today = Date::parse("2030-01-01").unwrap();
+                soon(app, library::Slice::Library);
             }),
         ),
         (Screen::Library, ("edit-tag-picker", edit_baby_tags)),

@@ -226,6 +226,7 @@ fn view_key(key: ViewKey) -> &'static str {
     match key {
         ViewKey::All => "all",
         ViewKey::Several => "several",
+        ViewKey::Soon => "soon",
         ViewKey::Type(media) => media.key(),
     }
 }
@@ -234,6 +235,7 @@ fn view_key_from(key: &str) -> Option<ViewKey> {
     match key {
         "all" => Some(ViewKey::All),
         "several" => Some(ViewKey::Several),
+        "soon" => Some(ViewKey::Soon),
         _ => MediaType::ALL
             .into_iter()
             .find(|media| media.key() == key)
@@ -332,7 +334,6 @@ impl PreferencesFile {
             Err(error) => {
                 let message = format!("could not write {}: {error}", path.display());
                 eprintln!("libri: {message}");
-                crate::trace::line(message);
             }
         }
     }

@@ -65,7 +65,7 @@ impl PendingQueue {
             Ok(Some(text)) => text,
             Ok(None) => return queue,
             Err(error) => {
-                crate::trace::line(format_args!("could not read {}: {error}", path.display()));
+                eprintln!("libri: could not read {}: {error}", path.display());
                 return queue;
             }
         };
@@ -83,7 +83,6 @@ impl PendingQueue {
                     aside.display()
                 );
                 eprintln!("libri: {message}");
-                crate::trace::line(message);
                 let _ = fs::rename(&path, &aside);
             }
         }
@@ -198,7 +197,6 @@ impl PendingQueue {
         if let Err(error) = storage::write_atomically(path, &text) {
             let message = format!("could not write {}: {error}", path.display());
             eprintln!("libri: {message}");
-            crate::trace::line(message);
         }
     }
 }

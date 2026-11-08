@@ -851,6 +851,19 @@ pub fn kind_label(entry: &Entry) -> &'static str {
     }
 }
 
+/// "Movie", "Album", "Anime": a type's kind for a title with no entry
+/// (a Discover item).
+pub fn kind_label_of(media: MediaType) -> &'static str {
+    match media {
+        MediaType::Movies => "Movie",
+        MediaType::Shows => "Show",
+        MediaType::Books => "Book",
+        MediaType::Games => "Game",
+        MediaType::Music => "Album",
+        MediaType::Anime => "Anime",
+    }
+}
+
 /// What the creator column is called: "Director", "Author".
 pub fn creator_label(media: Option<MediaType>) -> &'static str {
     match media {

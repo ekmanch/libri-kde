@@ -12,6 +12,7 @@ pub enum Icon {
     ChevronDown,
     ChevronLeft,
     ChevronRight,
+    Clock,
     Close,
     Dnf,
     Document,
@@ -36,12 +37,13 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Icon; 25] = [
+    pub const ALL: [Icon; 26] = [
         Icon::Calendar,
         Icon::Check,
         Icon::ChevronDown,
         Icon::ChevronLeft,
         Icon::ChevronRight,
+        Icon::Clock,
         Icon::Close,
         Icon::Dnf,
         Icon::Document,
@@ -76,6 +78,7 @@ impl Icon {
             Icon::ChevronDown => file!("chevron-down"),
             Icon::ChevronLeft => file!("chevron-left"),
             Icon::ChevronRight => file!("chevron-right"),
+            Icon::Clock => file!("clock"),
             Icon::Close => file!("close"),
             Icon::Dnf => file!("dnf"),
             Icon::Document => file!("document"),

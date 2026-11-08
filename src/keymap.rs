@@ -20,11 +20,14 @@ pub enum Action {
     Back,
     Forward,
     Settings,
+    /// Coming soon: the slice before (Library ← Discover ← All) and after.
+    SoonPrev,
+    SoonNext,
 }
 
 impl Action {
     /// In the order Settings lists them.
-    pub const ALL: [Action; 8] = [
+    pub const ALL: [Action; 10] = [
         Action::Search,
         Action::Panel,
         Action::Add,
@@ -33,6 +36,8 @@ impl Action {
         Action::Back,
         Action::Forward,
         Action::Settings,
+        Action::SoonPrev,
+        Action::SoonNext,
     ];
 
     pub fn label(self) -> &'static str {
@@ -45,6 +50,8 @@ impl Action {
             Action::Back => "Back",
             Action::Forward => "Forward",
             Action::Settings => "Settings",
+            Action::SoonPrev => "Coming soon: previous list (Library ← Discover ← All)",
+            Action::SoonNext => "Coming soon: next list",
         }
     }
 
@@ -59,6 +66,8 @@ impl Action {
             Action::Back => "back",
             Action::Forward => "forward",
             Action::Settings => "settings",
+            Action::SoonPrev => "soon_prev",
+            Action::SoonNext => "soon_next",
         }
     }
 
@@ -67,20 +76,22 @@ impl Action {
     }
 
     pub fn default_combo(self) -> Combo {
-        let (ctrl, alt, key) = match self {
-            Action::Search => (true, false, "K"),
-            Action::Panel => (true, false, "I"),
-            Action::Add => (true, false, "N"),
-            Action::Edit => (false, false, "E"),
-            Action::Close => (false, false, "Esc"),
-            Action::Back => (false, true, "←"),
-            Action::Forward => (false, true, "→"),
-            Action::Settings => (true, false, ","),
+        let (ctrl, alt, shift, key) = match self {
+            Action::Search => (true, false, false, "K"),
+            Action::Panel => (true, false, false, "I"),
+            Action::Add => (true, false, false, "N"),
+            Action::Edit => (false, false, false, "E"),
+            Action::Close => (false, false, false, "Esc"),
+            Action::Back => (false, true, false, "←"),
+            Action::Forward => (false, true, false, "→"),
+            Action::Settings => (true, false, false, ","),
+            Action::SoonPrev => (false, false, true, "←"),
+            Action::SoonNext => (false, false, true, "→"),
         };
         Combo {
             ctrl,
             alt,
-            shift: false,
+            shift,
             logo: false,
             key: key.into(),
         }

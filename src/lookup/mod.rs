@@ -12,18 +12,100 @@ mod deezer;
 pub mod fake;
 pub mod http;
 mod igdb;
+mod iso;
 mod keys;
 pub mod store;
 pub mod text;
 mod tmdb;
 pub mod wikidata;
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub use deezer::NO_PHOTO;
 pub use keys::Keys;
 
-use crate::model::{EntryKind, MediaType, Released, Season, Series};
+use crate::model::{Date, EntryKind, MediaType, Released, Season, Series, TagCategory};
+
+/// A creator followed for new releases (the phone's `FollowKind`): the
+/// shows and series have their own checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FollowKind {
+    Authors,
+    Artists,
+    Directors,
+    Studios,
+    Actors,
+}
+
+impl FollowKind {
+    /// In the phone's order.
+    pub const ALL: [FollowKind; 5] = [
+        FollowKind::Authors,
+        FollowKind::Artists,
+        FollowKind::Directors,
+        FollowKind::Studios,
+        FollowKind::Actors,
+    ];
+
+    /// The key in `settings.json`.
+    pub fn key(self) -> &'static str {
+        match self {
+            FollowKind::Authors => "authors",
+            FollowKind::Artists => "artists",
+            FollowKind::Directors => "directors",
+            FollowKind::Studios => "studios",
+            FollowKind::Actors => "actors",
+        }
+    }
+
+    /// Actors are off until ticked: a library tags far more of them than
+    /// anyone wants to follow.
+    pub fn default_on(self) -> bool {
+        self != FollowKind::Actors
+    }
+
+    /// The tag category the creators of this kind come from; artists come
+    /// from the creator field.
+    pub fn category(self) -> Option<TagCategory> {
+        match self {
+            FollowKind::Authors => Some(TagCategory::Authors),
+            FollowKind::Artists => None,
+            FollowKind::Directors => Some(TagCategory::Directors),
+            FollowKind::Studios => Some(TagCategory::Studios),
+            FollowKind::Actors => Some(TagCategory::Actors),
+        }
+    }
+}
+
+/// A creator as a provider knows them: its id for them, and why they are
+/// no longer active when the provider says ("Died 2021").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatorMatch {
+    pub provider_id: String,
+    pub inactive: Option<String>,
+}
+
+/// A work's edition in the languages the owner reads: whether it has one,
+/// the date of the earliest, and its title.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditionRelease {
+    pub in_languages: bool,
+    pub released: Option<Released>,
+    pub title: Option<String>,
+}
+
+/// Whether a release is worth keeping: still ahead on `today`, or out
+/// within the last `days`.
+pub fn is_recent_or_ahead(released: Option<Released>, today: Date, days: i64) -> bool {
+    released.is_some_and(|r| r.available_from() >= today.add_days(-days))
+}
+
+/// Whether a work is new: first published within the last year, or still
+/// to come. A date known to the year counts from the year's end.
+pub fn is_new_work(first: Released, today: Date) -> bool {
+    first.available_from() > today.add_days(-365)
+}
 
 /// One candidate from a title lookup, or the match a cover was resolved
 /// from.
@@ -180,6 +262,21 @@ impl Failure {
 
     pub fn other(message: impl Into<String>) -> Failure {
         Failure::new(FailureKind::Other, message)
+    }
+
+    /// A failure of a service asked along the way (Wikidata, for a book's
+    /// series): no answer for now, but the source itself may be fine, so a
+    /// rate limit there must not read as one of the source's.
+    pub fn from_a_helper(self) -> Failure {
+        if self.is_transient() {
+            Failure {
+                kind: FailureKind::Other,
+                status: Some(self.status.filter(|s| *s >= 500).unwrap_or(503)),
+                message: format!("Wikidata: {self}"),
+            }
+        } else {
+            self
+        }
     }
 
     /// The provider gave no verdict for now: offline, rate limited, not
@@ -448,6 +545,54 @@ pub trait Source: Send + Sync {
     /// A photo of the artist called `name`, or `None` when the source has
     /// no artist of exactly that name.
     fn artist_photo_url(&self, _name: &str) -> Reply<Option<String>> {
+        Ok(None)
+    }
+
+    /// The kinds of creator this source follows for Discover.
+    fn creator_kinds(&self) -> &'static [FollowKind] {
+        &[]
+    }
+
+    /// The creator named `name`: kept with the record, so this is asked
+    /// once and again only every ninety days.
+    fn find_creator(&self, _kind: FollowKind, _name: &str) -> Reply<Option<CreatorMatch>> {
+        Ok(None)
+    }
+
+    /// The releases of the creator `provider_id` (from `find_creator`)
+    /// that are ahead on `today` or came out within the last thirty days.
+    fn creator_releases(
+        &self,
+        _provider_id: &str,
+        _kind: FollowKind,
+        _today: Date,
+    ) -> Reply<Vec<Match>> {
+        Ok(Vec::new())
+    }
+
+    /// The work's edition in `languages`; `None` when this source cannot
+    /// say.
+    fn edition_release(
+        &self,
+        _source: &str,
+        _languages: &[String],
+    ) -> Reply<Option<EditionRelease>> {
+        Ok(None)
+    }
+
+    /// A movie's first date by the kinds that count (cinema or digital);
+    /// `None` when this source cannot say.
+    fn movie_date(&self, _source: &str) -> Reply<Option<Released>> {
+        Ok(None)
+    }
+
+    /// Which of `names` are no longer active, with why, for a source that
+    /// knows; `None` from the others.
+    fn inactive_of(
+        &self,
+        _kind: FollowKind,
+        _names: &[String],
+    ) -> Reply<Option<HashMap<String, String>>> {
         Ok(None)
     }
 }

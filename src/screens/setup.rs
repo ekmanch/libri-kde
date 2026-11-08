@@ -601,7 +601,6 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             if base.is_some() && !from_here && state.choice == Choice::New {
                 app.repo.replace(Library::default());
             }
-            crate::trace::line(format_args!("setup: connecting {}", target.key()));
             return app.connect(target, token, client.0, base);
         }
         Message::ReplaceToken => {

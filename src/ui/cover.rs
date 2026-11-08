@@ -41,8 +41,10 @@ pub fn cover<'a, Message: 'a>(
         )
         .width(width)
         .height(height)
+        // Nothing behind the image: a tinted box under it showed as a
+        // hairline of the type's color at the edge wherever the image
+        // landed a fraction of a pixel off it (after a slide, say).
         .clip(true)
-        .style(move |_| container::background(tint).border(Border::default().rounded(radius)))
         .into(),
         None => {
             let (padding, align, centered) = match &label {

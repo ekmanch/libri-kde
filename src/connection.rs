@@ -132,7 +132,6 @@ impl ConnectionFile {
         if let Err(error) = storage::write_atomically(path, &text) {
             let message = format!("could not write {}: {error}", path.display());
             eprintln!("libri: {message}");
-            crate::trace::line(message);
         }
     }
 

@@ -137,6 +137,7 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
         };
         let state = &app.library;
         let selected = on_library
+            && !state.soon
             && match media {
                 Some(media) => state.types.contains(&media),
                 None => state.types.is_empty(),
@@ -165,6 +166,26 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
             Message::Library(library::Message::ShowType(media)),
         ));
     }
+
+    // Coming soon (decided 2026-11-07): one row under the types, with the
+    // count of the owner's upcoming titles; selected on the page.
+    let upcoming = crate::upcoming::library_upcoming(library, app.today).len();
+    let on_soon = on_library && app.library.soon;
+    let soon_row = row![
+        container(ui::icon(Icon::Clock, 14.0, tokens.sub)).width(9),
+        item_label("Coming soon", on_soon, tokens),
+        ui::mono(upcoming.to_string(), 12.0, tokens.sub),
+    ];
+    items = items.push(
+        container(item(
+            soon_row,
+            34.0,
+            on_soon,
+            tokens,
+            Message::Library(library::Message::ShowSoon),
+        ))
+        .padding(Padding::new(0.0).top(12)),
+    );
 
     // Plans opens New plan from its header; finished plans wait under All
     // plans.

@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 
 use crate::clock::Timestamp;
 use crate::lookup::store::{
-    IMAGE_RETRY, IMAGE_RETRY_OFFLINE, ImageFailure, ImageStore, JsonFile, Stores,
+    self, IMAGE_RETRY, IMAGE_RETRY_OFFLINE, ImageFailure, ImageStore, JsonFile, Stores,
 };
 use crate::lookup::{
     self, Episode, FailureKind, GamePlatform, Reply, SeriesParts, Service, TrackInfo,
@@ -190,9 +190,11 @@ pub enum Message {
         outcome: Reply<Vec<TrackInfo>>,
     },
     Platforms(Reply<Vec<GamePlatform>>),
-    /// The session's prune, due.
+    /// The session's prune, due; the app answers it with `prune` and
+    /// Discover's covers.
     Prune,
-    Pruned,
+    /// The image files the prune removed, by `key_for` of their URLs.
+    Pruned(HashSet<String>),
 }
 
 /// One step of a load that shows what is stored before what is fetched.
@@ -1041,30 +1043,53 @@ impl Artwork {
                 self.platforms_loading = false;
                 self.platforms = Some(result);
             }
-            Message::Prune => return self.prune(library),
-            Message::Pruned => {}
+            Message::Prune => return self.prune(library, &[]),
+            Message::Pruned(removed) => self.pruned_images(&removed),
         }
         self.flush(false);
         Task::none()
     }
 
-    /// The images the records want kept: each cover and photo, and the
-    /// cover viewer's sharper copies of them.
-    fn kept_images(&self) -> Vec<String> {
-        self.records
+    /// The images to keep: each cover and photo the records want, the
+    /// `extra` URLs (Discover's covers, which no entry has), the cover
+    /// viewer's sharper copies of all of them, and every image this
+    /// session has shown or is fetching, so nothing on screen loses its
+    /// file.
+    fn kept_images(&self, extra: &[String]) -> Vec<String> {
+        let wanted = self
+            .records
             .values()
             .chain(self.artists.values())
             .filter_map(|r| r.url.clone())
+            .chain(extra.iter().cloned())
             .flat_map(|url| {
                 let large = lookup::viewer_urls(&url);
                 std::iter::once(url).chain(large)
-            })
-            .collect()
+            });
+        let session = self
+            .image_states
+            .keys()
+            .chain(&self.downloading)
+            .chain(&self.image_queue)
+            .cloned();
+        wanted.chain(session).collect()
+    }
+
+    /// The prune removed these files: an image that was fetched while it
+    /// ran is fetched again rather than drawn from a file that is gone.
+    fn pruned_images(&mut self, removed: &HashSet<String>) {
+        if removed.is_empty() {
+            return;
+        }
+        self.image_states.retain(|url, state| {
+            !matches!(state, ImageState::Ready(_)) || !removed.contains(&store::key_for(url))
+        });
     }
 
     /// Once per session: drops the records and files of entries and
-    /// artists that are gone, and every image whose URL no record wants.
-    fn prune(&mut self, library: &Library) -> Task<Message> {
+    /// artists that are gone, and every image whose URL nothing wants
+    /// (see `kept_images`).
+    pub fn prune(&mut self, library: &Library, extra: &[String]) -> Task<Message> {
         if self.pruned {
             return Task::none();
         }
@@ -1083,7 +1108,7 @@ impl Artwork {
             self.mark_dirty();
         }
         self.flush(true);
-        let keep = self.kept_images();
+        let keep = self.kept_images(extra);
         let sources = |test: &dyn Fn(&Entry) -> bool| -> Vec<String> {
             library
                 .entries
@@ -1102,13 +1127,13 @@ impl Artwork {
         }
         Task::perform(
             crate::app::blocking(move || {
-                images.prune(&keep);
+                let removed = images.prune(&keep);
                 stores.prune("tracks", &albums);
                 stores.prune("episodes", &shows);
                 stores.prune("series", &series);
-                Ok(())
+                Ok(removed)
             }),
-            |_| Message::Pruned,
+            |removed| Message::Pruned(removed.unwrap_or_default()),
         )
     }
 }
@@ -1356,8 +1381,9 @@ mod tests {
             Artwork::key_for(&e),
             Ok((Some(cached.into()), None)),
         );
-        let mut kept = artwork.kept_images();
+        let mut kept = artwork.kept_images(&[]);
         kept.sort();
+        kept.dedup();
         assert_eq!(kept, [cached, "https://image.tmdb.org/t/p/w780/x.jpg"]);
 
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
@@ -1382,6 +1408,44 @@ mod tests {
         );
         let _ = artwork.refresh(&wants, &library, &service);
         assert_eq!(artwork.image_size(cached), Some((342, 513)));
+    }
+
+    #[test]
+    fn the_prune_keeps_discovers_covers_and_what_this_session_shows() {
+        let dir = crate::storage::TempDir::new("artwork-prune");
+        let mut artwork = Artwork::at(None);
+        let library = Library::default();
+        let discover = "https://image.tmdb.org/t/p/w342/discover.jpg";
+        let thumbnail = "https://example.org/match.jpg";
+        let path = dir.path("match.jpg");
+        std::fs::write(&path, b"\xFF\xD8\xFF").unwrap();
+        let _ = artwork.update(
+            Message::ImageFetched {
+                url: thumbnail.into(),
+                outcome: Ok(path),
+            },
+            &library,
+        );
+        let kept = artwork.kept_images(&[discover.into()]);
+        assert!(kept.iter().any(|u| u == discover), "a Discover cover");
+        assert!(
+            kept.iter()
+                .any(|u| u == "https://image.tmdb.org/t/p/w780/discover.jpg"),
+            "and its sharper copy"
+        );
+        assert!(
+            kept.iter().any(|u| u == thumbnail),
+            "an image already shown"
+        );
+
+        // A file the prune took anyway is fetched again, not drawn from
+        // a path that is gone.
+        assert!(artwork.image(thumbnail).is_some());
+        let _ = artwork.update(
+            Message::Pruned(HashSet::from([store::key_for(thumbnail)])),
+            &library,
+        );
+        assert!(artwork.image(thumbnail).is_none());
     }
 
     #[test]
@@ -1471,7 +1535,7 @@ mod tests {
         let berserk = library.entry("books/berserk-vol-43-2025").unwrap();
         assert!(matches!(
             &artwork.series_for(berserk).unwrap().loaded,
-            Loaded::Ready(parts) if parts.parts.len() == 43
+            Loaded::Ready(parts) if parts.parts.len() == 44
         ));
         let dirt = library.entry("music/dirt-alice-in-chains").unwrap();
         assert!(matches!(

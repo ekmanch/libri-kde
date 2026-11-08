@@ -70,7 +70,6 @@ impl LocalLibraryRepository {
                         aside.display()
                     );
                     eprintln!("libri: {message}");
-                    crate::trace::line(message);
                 }
             }
         }
@@ -116,7 +115,6 @@ impl LibraryRepository for LocalLibraryRepository {
         if let Err(error) = self.write() {
             let message = format!("could not write {}: {error}", self.path.display());
             eprintln!("libri: {message}");
-            crate::trace::line(message);
             self.written = None;
         }
         Ok(&self.library)
@@ -133,7 +131,6 @@ impl LibraryRepository for LocalLibraryRepository {
         if let Err(error) = self.write() {
             let message = format!("could not write {}: {error}", self.path.display());
             eprintln!("libri: {message}");
-            crate::trace::line(message);
             self.written = None;
         }
     }

@@ -16,8 +16,7 @@ use std::time::{Duration, Instant};
 use iced::widget::{Column, Row, button, column, container, opaque, responsive, row, space, text};
 use iced::{Background, Border, Center, Color, Element, Fill, Padding, Shadow, Vector};
 
-use super::overview;
-use super::{Listing, Message, OpenSeries, View};
+use super::{Listing, Message, OpenSeries, View, overview, soon};
 use crate::animation::{Easing, Slide};
 use crate::app::{App, KeyPress, Message as AppMessage};
 use crate::browse::{self, ActivePlan, Section};
@@ -73,6 +72,8 @@ pub const CLOSE: Duration = Duration::from_millis(410);
 pub enum Shown {
     Entry(String),
     Series(OpenSeries),
+    /// A Discover item's preview, by its key.
+    Found(String),
 }
 
 /// The drawer's slide (2026-11-04): in from the window's right edge when
@@ -111,9 +112,10 @@ fn shown(app: &App) -> Option<Shown> {
         return None;
     }
     let state = &app.library;
-    match &state.selected {
-        Some(id) => Some(Shown::Entry(id.clone())),
-        None => state.open_series().cloned().map(Shown::Series),
+    match (&state.selected, &state.found) {
+        (Some(id), _) => Some(Shown::Entry(id.clone())),
+        (None, Some(key)) => Some(Shown::Found(key.clone())),
+        (None, None) => state.open_series().cloned().map(Shown::Series),
     }
 }
 
@@ -124,12 +126,17 @@ pub fn drawer_state(app: &App) -> (Panel, Option<Shown>) {
 }
 
 /// Whether a message is one of the drawer's closing actions: its ✕, a
-/// click on the open title, Esc, or Back (the mouse's button, Alt+Left).
+/// click on the open title or the list's empty space, Esc, or Back (the
+/// mouse's button, Alt+Left).
 pub fn closes_drawer(message: &AppMessage) -> bool {
     matches!(
         message,
-        AppMessage::Library(Message::ClosePanel | Message::Select(_))
-            | AppMessage::Key(KeyPress::Escape)
+        AppMessage::Library(
+            Message::ClosePanel
+                | Message::Select(_)
+                | Message::SelectFound(_)
+                | Message::HideFound(_)
+        ) | AppMessage::Key(KeyPress::Escape)
             | AppMessage::History(Direction::Back)
     )
 }
@@ -167,21 +174,40 @@ pub fn slide_drawer(app: &mut App, closes: bool, before: (Panel, Option<Shown>),
 pub(super) fn details<'a>(app: &'a App) -> Option<Element<'a, AppMessage>> {
     let state = &app.library;
     let library = app.repo.library();
-    match (
-        state.selected.as_deref().and_then(|id| library.entry(id)),
-        state.open_series(),
-    ) {
-        (Some(entry), _) => Some(entry::details::view(app, entry, None)),
-        (None, Some(open)) => entry::series::view(app, open),
-        (None, None) => None,
+    if let Some(entry) = state.selected.as_deref().and_then(|id| library.entry(id)) {
+        return Some(entry::details::view(app, entry, None));
     }
+    if let Some(found) = state
+        .found
+        .as_deref()
+        .and_then(|key| app.discover.item(key))
+    {
+        return Some(soon::preview(app, found));
+    }
+    state
+        .open_series()
+        .and_then(|open| entry::series::view(app, open))
 }
 
 /// The pinned panel beside the list: the selection's details, else the
-/// list at a glance, built for the panel's height.
+/// list at a glance (the Coming soon page's own on that page), built for
+/// the panel's height; the type panel's Coming soon popover over it.
 pub fn side<'a>(app: &'a App) -> Element<'a, AppMessage> {
     let content = details(app).unwrap_or_else(|| {
-        responsive(move |size| entry::details::pane(glance(app, size.height), None)).into()
+        responsive(move |size| {
+            let body = if app.library.soon {
+                soon::glance(app, size.height)
+            } else {
+                glance(app, size.height)
+            };
+            let pane = entry::details::pane(body, None);
+            if app.library.type_pop && !app.library.soon {
+                iced::widget::stack![pane, soon::type_popover(app, size.height)].into()
+            } else {
+                pane
+            }
+        })
+        .into()
     });
     container(content).width(entry::details::WIDTH).into()
 }
@@ -194,6 +220,7 @@ fn show<'a>(app: &'a App, shown: &'a Shown) -> Option<Element<'a, AppMessage>> {
             Some(entry::details::view(app, entry, None))
         }
         Shown::Series(open) => entry::series::view(app, open),
+        Shown::Found(key) => Some(soon::preview(app, app.discover.item(key)?)),
     }
 }
 
@@ -1162,6 +1189,66 @@ mod tests {
         assert_eq!(click(shell::SIDEBAR_WIDTH + 200.0, row_y), 1);
     }
 
+    /// Whether a click at the point asks to close the details.
+    fn click_closes(app: &App, x: f32, y: f32) -> bool {
+        let mut ui =
+            iced_test::Simulator::with_size(crate::app::settings(), app.window, app.view());
+        ui.point_at(iced::Point::new(x, y));
+        let _ = ui.simulate(iced_test::simulator::click());
+        ui.into_messages()
+            .any(|m| matches!(m, AppMessage::Library(Message::ClosePanel)))
+    }
+
+    #[test]
+    fn a_click_on_the_lists_empty_space_closes_the_details() {
+        let mut app = app();
+        let ids = movies(&mut app);
+        let _ = app.update(msg(Message::SetView(View::List)));
+        let _ = app.update(msg(Message::TogglePanel));
+        let size = app.window;
+        // The list's left padding, and a row beside it.
+        let empty = shell::SIDEBAR_WIDTH + 6.0;
+        let row_x = shell::SIDEBAR_WIDTH + 200.0;
+        let row_y = 250.0;
+
+        assert_eq!(panel(&app), Panel::Drawer);
+        assert!(!click_closes(&app, empty, row_y), "nothing selected");
+        let _ = app.update(msg(Message::Select(ids[0].clone())));
+        assert!(click_closes(&app, empty, row_y));
+        assert!(!click_closes(&app, row_x, row_y), "a row");
+        assert!(!click_closes(&app, size.width - 40.0, size.height - 60.0));
+
+        // The first click away from a popover only closes the popover.
+        let _ = app.update(msg(Message::Toggle(super::super::Popup::Sort)));
+        assert!(!click_closes(&app, empty, row_y));
+        let _ = app.update(msg(Message::ClosePopup));
+
+        // The same pinned, where the panel is beside the list.
+        let _ = app.update(msg(Message::TogglePanel));
+        assert_eq!(panel(&app), Panel::Pinned);
+        assert!(click_closes(&app, empty, row_y));
+        assert!(!click_closes(&app, size.width - 40.0, size.height - 60.0));
+
+        let _ = app.update(msg(Message::ClosePanel));
+        assert_eq!(app.library.selected, None);
+    }
+
+    #[test]
+    fn a_click_on_homes_details_never_closes_them() {
+        let mut app = app();
+        let id = movies(&mut app)[0].clone();
+        let _ = app.update(msg(Message::ShowType(None)));
+        let _ = app.update(msg(Message::Select(id)));
+        assert_eq!(panel(&app), Panel::Home);
+        let size = app.window;
+        assert!(!click_closes(&app, size.width - 60.0, size.height - 100.0));
+        assert!(click_closes(
+            &app,
+            shell::SIDEBAR_WIDTH + 8.0,
+            size.height - 100.0
+        ));
+    }
+
     #[test]
     fn the_drawer_slides_in_on_a_selection_and_out_on_its_closing_actions() {
         use std::time::Duration;
@@ -1207,7 +1294,7 @@ mod tests {
         at(&mut app, msg(Message::Select(ids[2].clone())), 600);
         assert_eq!(app.library.motion, Motion::Still);
         assert_eq!(app.library.selected.as_deref(), Some(ids[2].as_str()));
-        // Esc and the ✕ close it; Back too.
+        // Esc, the ✕ and a click on the list's empty space close it; Back too.
         at(&mut app, AppMessage::Key(KeyPress::Escape), 600);
         assert!(matches!(app.library.motion, Motion::Closing(..)));
         at(&mut app, msg(Message::Select(ids[2].clone())), 1000);
@@ -1266,11 +1353,10 @@ mod tests {
             Duration::from_millis(200),
             Easing::STANDARD,
         ));
+        // Only its drawing moves (`ui::slide`), so its layout stays put and
+        // nothing in it reports a new place on every frame.
         let start = place(&app, "RATING").expect("still in the tree");
-        assert!(
-            start.x >= size.width,
-            "off the window at the start: {start:?} in {size:?}"
-        );
+        assert_eq!(start, shown, "the layout never moves");
         assert_eq!(place(&app, "Add"), Some(still), "the toolbar never moves");
     }
 

@@ -155,7 +155,7 @@ pub enum Operation {
 impl Operation {
     /// A one-line account of the change in the imperative, worded as on
     /// the phone ("Mark The Mummy as done", "Tick The Mummy in Halloween
-    /// 2026"): the commit messages of phase 3, and the trace meanwhile.
+    /// 2026"): the commit messages and `pending.json`.
     /// `before` is the library the change applies to, for the titles; a
     /// target that is gone is named by its id.
     pub fn summary(&self, before: &Library) -> String {

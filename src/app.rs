@@ -14,6 +14,7 @@ use crate::artwork::{self, Artwork};
 use crate::clock::Timestamp;
 use crate::connection::{Connection, ConnectionFile, Target};
 use crate::decoration::Decoration;
+use crate::discover;
 use crate::github;
 use crate::history::{Direction, History, Place};
 use crate::keymap::{Action, Combo, Keymap};
@@ -41,7 +42,18 @@ pub const MIN_WINDOW_SIZE: Size = Size::new(1280.0, 720.0);
 
 pub fn run() -> iced::Result {
     present_with_mailbox();
-    let window = window::Settings {
+    let window = window_settings();
+    iced::application(App::boot, App::update, App::view)
+        .title(App::title)
+        .theme(App::iced_theme)
+        .subscription(App::subscription)
+        .settings(settings())
+        .window(window)
+        .run()
+}
+
+fn window_settings() -> window::Settings {
+    window::Settings {
         size: WINDOW_SIZE,
         min_size: Some(MIN_WINDOW_SIZE),
         // KDE groups the window and finds its icon by the app id.
@@ -52,18 +64,34 @@ pub fn run() -> iced::Result {
         // Glass paints see-through surfaces over the blurred desktop; the
         // other themes paint every pixel, so they lose nothing by it.
         transparent: true,
+        // A close comes to `App::update` as a message, so `quit` can run.
+        exit_on_close_request: false,
         ..window::Settings::default()
-    };
-    freeze_log();
-    let result = iced::application(App::boot, App::update, App::view)
-        .title(App::title)
-        .theme(App::iced_theme)
-        .subscription(App::subscription)
-        .settings(settings())
-        .window(window)
-        .run();
-    crate::trace::line("exit");
-    result
+    }
+}
+
+/// How long a closing app may take to shut down before the process ends
+/// anyway. Well under the seconds after which KWin calls a window that
+/// does not answer "not responding".
+const EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Closes the app without waiting for the network. Dropping tokio's
+/// runtime waits for every blocking call still running, up to
+/// `lookup::http::TIMEOUT` a request, with the main thread blocked. So the
+/// daily check is told to stop, and if the normal exit has not finished
+/// after `EXIT_GRACE` the process ends where it stands. Nothing is lost:
+/// the library and `pending.json` are on disk before a save is sent, and
+/// the next start settles a save cut off on its way (`sync::Engine`).
+fn quit() -> Task<Message> {
+    Task::future(async {
+        discover::cancel();
+        std::thread::spawn(|| {
+            std::thread::sleep(EXIT_GRACE);
+            std::process::exit(0);
+        });
+    })
+    .discard()
+    .chain(iced::exit())
 }
 
 /// Mailbox presentation instead of iced's FIFO default, unless the
@@ -83,84 +111,6 @@ fn present_with_mailbox() {
     // SAFETY: `run` is called first thing from `main`, before any other
     // thread exists, so nothing can read the environment concurrently.
     unsafe { std::env::set_var("ICED_PRESENT_MODE", "mailbox") };
-}
-
-/// The freeze log of this run (TODO.md 1g, the desktop freeze):
-/// `~/.cache/libri/freeze-<date>.log`, which the trace (`crate::trace`)
-/// and `scripts/freeze-monitor.sh` write together, so every session is
-/// logged without anyone having to remember to. The monitor follows this
-/// process and keeps sampling KWin for 90 s after it exits, in its own
-/// process group so that a Ctrl+C in the terminal does not end it with
-/// Libri: the 2026-10-24 21:42 freeze began the moment Libri's window
-/// was closed. `LIBRI_NO_MONITOR=1` skips both; an installed binary has
-/// no script to start and only writes the trace.
-fn freeze_log() {
-    use std::os::unix::process::CommandExt;
-
-    if std::env::var_os("LIBRI_NO_MONITOR").is_some() {
-        return;
-    }
-    let Some(dir) = std::env::var_os("XDG_CACHE_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".cache"))
-        })
-        .map(|cache| cache.join("libri"))
-    else {
-        return;
-    };
-    if let Err(error) = std::fs::create_dir_all(&dir) {
-        eprintln!(
-            "libri: no freeze log, could not create {}: {error}",
-            dir.display()
-        );
-        return;
-    }
-    let log = dir.join(format!("freeze-{}.log", date_stamp()));
-    if let Err(error) = crate::trace::start(&log) {
-        eprintln!(
-            "libri: no freeze log, could not open {}: {error}",
-            log.display()
-        );
-        return;
-    }
-    eprintln!("libri: freeze log {}", log.display());
-    crate::trace::line(format_args!(
-        "start pid {} build {}",
-        std::process::id(),
-        option_env!("LIBRI_BUILD").unwrap_or("unknown")
-    ));
-    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/freeze-monitor.sh");
-    if !script.is_file() {
-        return;
-    }
-    if let Err(error) = std::process::Command::new(&script)
-        .arg(&log)
-        .arg(std::process::id().to_string())
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .process_group(0)
-        .spawn()
-    {
-        eprintln!("libri: could not start the freeze monitor: {error}");
-    }
-}
-
-/// `20261024-212503`, from `date`, or the seconds since the epoch when
-/// that fails.
-fn date_stamp() -> String {
-    std::process::Command::new("date")
-        .arg("+%Y%m%d-%H%M%S")
-        .output()
-        .ok()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-        .filter(|stamp| !stamp.is_empty())
-        .unwrap_or_else(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs().to_string())
-                .unwrap_or_default()
-        })
 }
 
 /// The bundled fonts with Figtree as the default. Shared with the headless
@@ -226,10 +176,12 @@ pub struct App {
     /// Plasma's animation speed, read from `kdeglobals` at the start;
     /// instant in the tests and `App::new`.
     pub speed: animation::Speed,
+    /// Device pixels per logical pixel (2 at 200 %), asked when the window
+    /// opens and kept up with `Rescaled`: a slide lands on whole device
+    /// pixels, so its text and covers stay sharp on the way.
+    pub scale: f32,
     /// The window's logical size, for layouts that give way when narrow.
     pub window: Size,
-    /// The redraw counter of the freeze trace.
-    pub frames: crate::trace::Frames,
     /// The places visited, for Back and Forward.
     pub history: History,
     /// KWin's title bar, once the window is open on Plasma Wayland.
@@ -243,6 +195,9 @@ pub struct App {
     /// Covers, artist photos, episodes, series parts and track lists as
     /// fetched for the screens, with the cache under `~/.cache/libri/`.
     pub artwork: Artwork,
+    /// Discover: what the daily check found for the Coming soon page, and
+    /// the items marked Not interested.
+    pub discover: discover::State,
     /// `preferences.json` on this computer; kept nowhere in the tests.
     pub preferences: PreferencesFile,
     /// `connection.json` on this computer and what it holds: the repo,
@@ -269,6 +224,9 @@ pub struct App {
     /// and a run with a screen switch (`LIBRI_SCREEN`, `LIBRI_SYNC`,
     /// `LIBRI_SETUP`, `LIBRI_FIRST_RUN`, `LIBRI_LOCAL`).
     pub mock: bool,
+    /// When the message being handled arrived (`update_at`), so a slide
+    /// it starts is timed from it.
+    now: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -292,8 +250,10 @@ pub enum Message {
     /// A frame while the details drawer slides.
     Frame(Instant),
     Resized(Size),
-    /// The window's events, for the freeze trace.
+    /// The window's events: focus and the close request.
     Window(window::Event),
+    /// The window's scale factor, asked when it opens.
+    ScaleFactor(f32),
     /// The hold on KWin's title bar, once the window is open.
     Decoration(Option<Box<Decoration>>),
     /// The sync row's and the banner's actions, and the conflict dialog.
@@ -306,6 +266,8 @@ pub enum Message {
     Token(token::Message),
     /// A lookup task came back: a cover, an image, a season's episodes.
     Lookup(artwork::Message),
+    /// The daily check behind Coming soon's Discover.
+    Discover(discover::Message),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -381,6 +343,16 @@ impl Message {
                     | L::JumpToGroup(_)
                     | L::JumpToSection { .. }
                     | L::RailReleased
+                    | L::SoonSlice(_)
+                    | L::SoonStep(_)
+                    | L::SoonWheel(_)
+                    | L::SoonType(_)
+                    | L::SoonToggleType(_)
+                    | L::SoonAllTypes
+                    | L::ShowHidden
+                    | L::RestoreFound(_)
+                    | L::OpenTypePop
+                    | L::CloseTypePop
             ),
             Message::Key(key) => matches!(
                 key,
@@ -418,6 +390,8 @@ impl Message {
                     | L::MusicTab(_)
                     | L::OpenArtist(_)
                     | L::CloseArtist
+                    | L::ShowSoon
+                    | L::OpenSoonForTypes
             ),
             Message::Plans(message) => matches!(
                 message,
@@ -485,6 +459,7 @@ impl App {
             "LIBRI_SETUP",
             "LIBRI_FIRST_RUN",
             "LIBRI_LOCAL",
+            "LIBRI_SOON",
         ]
         .iter()
         .any(|name| var(name).is_some());
@@ -504,13 +479,20 @@ impl App {
                 );
             }
             app.lookups = Arc::new(Service::real(&keys, cache.as_deref()));
+            app.discover = discover::State::at(cache.as_deref(), storage::data_dir().as_deref());
             app.artwork = Artwork::at(cache);
             // Once per session, a little after the start: the records and
-            // files of entries that are gone.
-            lookups = Task::perform(
-                async { tokio::time::sleep(artwork::PRUNE_DELAY).await },
-                |_| Message::Lookup(artwork::Message::Prune),
-            );
+            // files of entries that are gone, and the daily check behind
+            // Discover unless it ran today.
+            lookups = Task::batch([
+                Task::perform(
+                    async { tokio::time::sleep(artwork::PRUNE_DELAY).await },
+                    |_| Message::Lookup(artwork::Message::Prune),
+                ),
+                Task::perform(async { tokio::time::sleep(DISCOVER_DELAY).await }, |_| {
+                    Message::Discover(discover::Message::Check)
+                }),
+            ]);
         }
         if var("LIBRI_FIRST_RUN").is_some() {
             app.source = None;
@@ -545,6 +527,22 @@ impl App {
             app.setup = setup::State::at(step, app.source.as_ref());
         }
         app.library.force_long = var("LIBRI_LONG_LISTS").is_some();
+        // `LIBRI_SOON=library|discover|all`: the Coming soon page on that
+        // slice, with the fake's Discover items.
+        if let Some(slice) = var("LIBRI_SOON") {
+            app.library.update(library::Message::ShowSoon);
+            let slice = match slice.as_str() {
+                "discover" => library::Slice::Discover,
+                "all" => library::Slice::All,
+                _ => library::Slice::Library,
+            };
+            app.library.update(library::Message::SoonSlice(slice));
+        }
+        if app.mock {
+            // The fake answers at once, so the mock screens have Discover
+            // rows to look at.
+            let _ = app.check_discover();
+        }
         if let Some(state) =
             var("LIBRI_LOOKUP").and_then(|value| lookup::LookupState::from_env(&value))
         {
@@ -587,7 +585,6 @@ impl App {
                 let path = dir.join("library.json");
                 match LocalLibraryRepository::open(path.clone(), seed) {
                     Ok(repo) => {
-                        crate::trace::line(format_args!("library {}", path.display()));
                         self.repo = Box::new(repo);
                     }
                     Err(error) => eprintln!(
@@ -616,7 +613,6 @@ impl App {
             }
             Some(connection) => {
                 self.source = Some(Source::of(&connection.target, "…"));
-                crate::trace::line(format_args!("connected to {}", connection.target.key()));
                 Task::perform(blocking(wallet::read_token), |result| {
                     Message::Sync(SyncMessage::TokenLoaded(result))
                 })
@@ -658,13 +654,14 @@ impl App {
             settings_page: screens::settings::State::default(),
             splash_phase: 0.0,
             speed: animation::Speed::INSTANT,
+            scale: 1.0,
             window: WINDOW_SIZE,
-            frames: crate::trace::Frames::new(std::time::Instant::now()),
             history: History::default(),
             decoration: None,
             lookup: lookup::LookupState::Results,
             lookups: Arc::new(Service::fake()),
             artwork: Artwork::default(),
+            discover: discover::State::default(),
             preferences: PreferencesFile::default(),
             connection_file: ConnectionFile::default(),
             connection: None,
@@ -676,11 +673,11 @@ impl App {
             focused: true,
             loading: false,
             mock: true,
+            now: std::time::Instant::now(),
         }
     }
 
-    /// Applies one change to the library and notes its summary in the
-    /// trace. A change that cannot apply (an entry gone meanwhile) or
+    /// Applies one change to the library. A change that cannot apply (an entry gone meanwhile) or
     /// changes nothing leaves the library as it was and is not queued.
     /// With a repository connected the change is queued for GitHub before
     /// the local file applies it, and the gathered edits go out as one
@@ -698,9 +695,8 @@ impl App {
             }
             engine.queue(operation.clone(), summary.clone());
         }
-        match self.repo.apply(operation) {
-            Ok(_) => crate::trace::line(format_args!("change: {summary}")),
-            Err(error) => eprintln!("libri: change not applied ({summary}): {error}"),
+        if let Err(error) = self.repo.apply(operation) {
+            eprintln!("libri: change not applied ({summary}): {error}");
         }
         if self.engine.is_some() {
             self.save_due = Some(Instant::now() + sync::DEBOUNCE);
@@ -741,17 +737,10 @@ impl App {
         let store = self.store_token(token);
         let mut engine = match self.engine.take() {
             Some(mut engine) if *engine.target() == target => {
-                crate::trace::line("reconnected to the same file; the queue stays");
                 engine.restart();
                 engine
             }
             Some(mut engine) => {
-                crate::trace::line(format_args!(
-                    "reconnected from {} to {}; dropping {} queued changes",
-                    engine.target().key(),
-                    target.key(),
-                    engine.status().pending
-                ));
                 engine.discard(true);
                 Engine::open(self.data_dir().as_deref(), target)
             }
@@ -896,7 +885,6 @@ impl App {
     /// computer's, and the next call as a Task.
     fn run(&mut self, outcome: Outcome) -> Task<Message> {
         if let Some(library) = outcome.library {
-            crate::trace::line("sync: taking GitHub's copy");
             self.repo.replace(library);
         }
         let (Some(request), Some(client), Some(engine)) =
@@ -1054,7 +1042,16 @@ impl App {
 
     /// `update` at a given time: the drawer's slide is timed from `now`.
     pub fn update_at(&mut self, message: Message, now: Instant) -> Task<Message> {
+        self.now = now;
         self.library.motion.settle(now);
+        if self
+            .library
+            .slide
+            .as_ref()
+            .is_some_and(|moving| moving.done(now))
+        {
+            self.library.slide = None;
+        }
         let message = match message {
             Message::KeyPressed(key, modifiers) => match self.shortcut(&key, modifiers) {
                 Some(message) => message,
@@ -1148,6 +1145,8 @@ impl App {
                 Message::Entry(entry::Message::ViewCover(id))
             }
             Message::Library(L::ShowType(Some(media))) => Message::Library(L::ToggleType(media)),
+            // A type chip on the Coming soon page adds or removes the type.
+            Message::Library(L::SoonType(media)) => Message::Library(L::SoonToggleType(media)),
             Message::Plans(P::Select(id)) => Message::Plans(P::ToggleDone(id)),
             message => message,
         }
@@ -1180,6 +1179,12 @@ impl App {
                         Screen::Library | Screen::Plans | Screen::Settings
                     ))
                 .then_some(Message::Show(Screen::Settings)),
+                // Only on the Coming soon page.
+                Action::SoonPrev | Action::SoonNext => {
+                    let step = if action == Action::SoonPrev { -1 } else { 1 };
+                    self.soon_page_free()
+                        .then_some(Message::Library(library::Message::SoonStep(step)))
+                }
             };
         }
         let press = match key {
@@ -1196,6 +1201,18 @@ impl App {
             _ => return None,
         };
         Some(Message::Key(press))
+    }
+
+    /// The Coming soon page is on screen with nothing open over it, so a
+    /// key or the wheel may switch its slice.
+    fn soon_page_free(&self) -> bool {
+        self.screen == Screen::Library
+            && self.library.soon
+            && self.library.details_pop.is_none()
+            && !self.library.details_rating_open
+            && self.dialog.is_none()
+            && self.plan_dialog.is_none()
+            && !self.token_warning
     }
 
     /// The tag picker open on screen: the entry dialog's, the plan
@@ -1224,6 +1241,10 @@ impl App {
         }
         if self.library.back_series().is_some() {
             return Some(self.handle(Message::Library(library::Message::BackToSeries)));
+        }
+        if self.library.found.is_some() {
+            self.library.found = None;
+            return Some(Task::none());
         }
         if self.library.pane_open() {
             self.library.update(library::Message::ClosePanel);
@@ -1289,14 +1310,11 @@ impl App {
             Message::SetAccent(accent) => self.settings.accent = accent,
             // No answer from the portal (`None`) keeps the scheme, which
             // is dark at the start: System then means Graphite.
-            Message::SystemTheme(mode) if !self.plasma_fixed => {
-                crate::trace::line(format_args!("plasma scheme {mode:?}"));
-                match mode {
-                    ThemeMode::Dark => self.plasma_dark = true,
-                    ThemeMode::Light => self.plasma_dark = false,
-                    ThemeMode::None => {}
-                }
-            }
+            Message::SystemTheme(mode) if !self.plasma_fixed => match mode {
+                ThemeMode::Dark => self.plasma_dark = true,
+                ThemeMode::Light => self.plasma_dark = false,
+                ThemeMode::None => {}
+            },
             Message::SystemTheme(_) => {}
             // One sweep of the splash's bar takes 1.4 s; the setup's ring
             // turns twice in that time.
@@ -1305,6 +1323,11 @@ impl App {
             Message::Frame(_) => {}
             Message::Resized(size) => self.window = size,
             Message::Window(event) => return self.window_event(event),
+            Message::ScaleFactor(scale) => {
+                if scale.is_finite() && scale > 0.0 {
+                    self.scale = scale;
+                }
+            }
             Message::Decoration(decoration) => self.decoration = decoration,
             Message::Sync(SyncMessage::Retry | SyncMessage::Now) => {
                 // "Check again" in the unreadable dialog closes it; the
@@ -1352,7 +1375,6 @@ impl App {
                 if let Err(error) = result {
                     eprintln!("libri: the token could not be read: {error}");
                 }
-                crate::trace::line("no token: the setup");
                 self.source = None;
                 self.setup = setup::State::real(setup::Step::Connect, self.connection.as_ref());
                 self.screen = Screen::Setup;
@@ -1360,14 +1382,10 @@ impl App {
             Message::Sync(SyncMessage::WalletDone(result)) => {
                 if let Err(error) = result {
                     eprintln!("libri: {error}");
-                    crate::trace::line(format_args!("wallet: {error}"));
                 }
             }
             Message::Sync(SyncMessage::Answer(_, generation))
-                if generation != self.engine_generation =>
-            {
-                crate::trace::line("sync: an answer for an earlier connection, dropped");
-            }
+                if generation != self.engine_generation => {}
             Message::Sync(SyncMessage::Answer(answer, _)) => {
                 self.record_token_expiry();
                 let Some(engine) = &mut self.engine else {
@@ -1542,6 +1560,53 @@ impl App {
             Message::Library(library::Message::PickSeriesCover(id)) => {
                 self.apply(Operation::SetSeriesCover { id });
             }
+            // The Coming soon page's slices: the list slides between them
+            // and each keeps its own scroll offset.
+            Message::Library(
+                library::Message::SoonSlice(_)
+                | library::Message::SoonStep(_)
+                | library::Message::OpenFound(_),
+            ) => return self.switch_slice(message),
+            // Opening the page puts its list back where the slice was left.
+            Message::Library(
+                message @ (library::Message::ShowSoon
+                | library::Message::OpenSoonForTypes
+                | library::Message::SeeAll(crate::browse::Section::ComingSoon)),
+            ) => {
+                self.screen = Screen::Library;
+                self.library.update(message);
+                let offset = scrollable::AbsoluteOffset {
+                    x: None,
+                    y: Some(self.library.scroll.offset),
+                };
+                return operation::scroll_to(library::LIST_ID, offset);
+            }
+            Message::Library(library::Message::SoonWheel(delta)) => {
+                if self.soon_page_free()
+                    && let Some(step) =
+                        self.library
+                            .soon_wheel
+                            .feed(delta, self.modifiers.shift(), self.now)
+                {
+                    return self.switch_slice(Message::Library(library::Message::SoonStep(step)));
+                }
+            }
+            Message::Library(library::Message::AddFound(key)) => return self.add_found(&key),
+            Message::Library(library::Message::HideFound(key)) => {
+                self.discover.hide(&key);
+                self.library.update(library::Message::HideFound(key));
+            }
+            Message::Library(library::Message::RestoreFound(key)) => self.discover.restore(&key),
+            Message::Discover(discover::Message::Check) => return self.check_discover(),
+            Message::Discover(discover::Message::Done(outcome)) => {
+                if let Some(why) = &outcome.stopped {
+                    eprintln!(
+                        "libri: the daily check stopped ({why}); asked {}",
+                        outcome.sources.join(", ")
+                    );
+                }
+                self.discover.finish(*outcome, Timestamp::now());
+            }
             Message::Library(message) => {
                 if message.shows_library() {
                     self.screen = Screen::Library;
@@ -1568,6 +1633,21 @@ impl App {
             Message::Setup(message) => return setup::update(self, message),
             Message::Settings(message) => return screens::settings::update(self, message),
             Message::Token(message) => return token::update(self, message),
+            Message::Lookup(artwork::Message::Prune) => {
+                // Discover's covers belong to no entry; the prune keeps
+                // them too, hidden ones included.
+                let covers: Vec<String> = self
+                    .discover
+                    .record
+                    .items
+                    .iter()
+                    .filter_map(|item| item.cover_url.clone())
+                    .collect();
+                return self
+                    .artwork
+                    .prune(self.repo.library(), &covers)
+                    .map(Message::Lookup);
+            }
             Message::Lookup(message) => {
                 return self
                     .artwork
@@ -1638,9 +1718,19 @@ impl App {
             _ => None,
         });
         let resizes = window::resize_events().map(|(_, size)| Message::Resized(size));
-        let traced = window::events().map(|(_, event)| Message::Window(event));
+        let windows = window::events().map(|(_, event)| Message::Window(event));
         let scheme = iced::system::theme_changes().map(Message::SystemTheme);
-        let mut subscriptions = vec![keys, buttons, resizes, traced, scheme];
+        let mut subscriptions = vec![keys, buttons, resizes, windows, scheme];
+        // Side-scrolling or Shift+wheel anywhere on the Coming soon page;
+        // the list may have captured the event, so its status is no matter.
+        if self.screen == Screen::Library && self.library.soon {
+            subscriptions.push(event::listen_with(|event, _status, _window| match event {
+                Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                    Some(Message::Library(library::Message::SoonWheel(delta)))
+                }
+                _ => None,
+            }));
+        }
         // The splash's bar, and the setup's ring while GitHub is asked.
         if self.screen == Screen::Splash
             || (self.screen == Screen::Setup && self.setup.busy.is_some())
@@ -1648,8 +1738,9 @@ impl App {
         {
             subscriptions.push(time::every(Duration::from_millis(16)).map(|_| Message::Tick));
         }
-        // The drawer's slide draws every frame while it runs.
-        if self.library.motion.running() {
+        // The drawer's slide, and the Coming soon page's slice slide, draw
+        // every frame while they run.
+        if self.library.motion.running() || self.library.slide.is_some() {
             subscriptions.push(window::frames().map(Message::Frame));
         }
         // The debounce clock runs only while edits wait; while a
@@ -1658,6 +1749,11 @@ impl App {
         if self.save_due.is_some() {
             subscriptions.push(
                 time::every(Duration::from_millis(250)).map(|_| Message::Sync(SyncMessage::Tick)),
+            );
+        }
+        if !self.mock {
+            subscriptions.push(
+                time::every(DISCOVER_INTERVAL).map(|_| Message::Discover(discover::Message::Check)),
             );
         }
         if self.engine.is_some() {
@@ -1671,33 +1767,177 @@ impl App {
         Subscription::batch(subscriptions)
     }
 
-    /// A window event into the freeze trace: redraws as a rate and
-    /// gaps, everything else as it comes. Focus is remembered for the
-    /// check interval, and the window coming back asks GitHub for
+    /// A window event: the close request quits, focus is remembered for
+    /// the check interval, and the window coming back asks GitHub for
     /// changes unless a check was made moments ago.
     fn window_event(&mut self, event: window::Event) -> Task<Message> {
         match event {
-            window::Event::RedrawRequested(now) => {
-                for line in self.frames.redraw(now) {
-                    crate::trace::line(line);
+            window::Event::CloseRequested => return quit(),
+            window::Event::Focused => {
+                self.focused = true;
+                if self.check_is_stale() {
+                    return self.sync_now();
                 }
             }
-            window::Event::Moved(_) => {}
-            event => {
-                crate::trace::line(format_args!("window {event:?}"));
-                match event {
-                    window::Event::Focused => {
-                        self.focused = true;
-                        if self.check_is_stale() {
-                            return self.sync_now();
-                        }
-                    }
-                    window::Event::Unfocused => self.focused = false,
-                    _ => {}
-                }
+            window::Event::Unfocused => self.focused = false,
+            window::Event::Opened { .. } => {
+                return window::latest()
+                    .and_then(window::scale_factor)
+                    .map(Message::ScaleFactor);
             }
+            window::Event::Rescaled(scale) => {
+                return self.update(Message::ScaleFactor(scale));
+            }
+            _ => {}
         }
         Task::none()
+    }
+}
+
+/// How long after the start the daily check behind Discover runs.
+const DISCOVER_DELAY: Duration = Duration::from_secs(5);
+/// How often an open app sees whether the check is due: a new day, or a
+/// run that did not finish. Focus has no part in it.
+const DISCOVER_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
+impl App {
+    /// A slice switch on the Coming soon page (a segment, Shift+arrows, a
+    /// side-scroll or Shift+wheel, a row of New in Discover): the list slides from the
+    /// slice left to the new one as KWin switches desktops, on its spring
+    /// at Plasma's speed and from wherever a slide under way has it (a
+    /// plain swap at Instant), and the new slice is scrolled back to
+    /// where it was left.
+    fn switch_slice(&mut self, message: Message) -> Task<Message> {
+        let Message::Library(message) = message else {
+            return Task::none();
+        };
+        if !self.library.soon {
+            return Task::none();
+        }
+        let from = self.library.slice;
+        self.library.update(message);
+        let to = self.library.slice;
+        if from == to {
+            return Task::none();
+        }
+        if let Some(spring) = animation::Spring::desktop_switch(self.speed) {
+            let width = if self.library.list_width > 0.0 {
+                self.library.list_width
+            } else {
+                screens::shell::content_width(self, 0.0)
+            };
+            self.library.slide = Some(library::SliceSlide::toward(
+                self.library.slide.as_ref(),
+                from,
+                to,
+                spring.slowed(library::soon::SLOWER),
+                (width + library::soon::GAP) * self.scale,
+                self.now,
+            ));
+        }
+        let offset = scrollable::AbsoluteOffset {
+            x: None,
+            y: Some(self.library.scroll.offset),
+        };
+        operation::scroll_to(library::LIST_ID, offset)
+    }
+
+    /// Runs the daily check behind Discover, unless it ran today or is
+    /// running: at once on the fake, else on the blocking pool.
+    fn check_discover(&mut self) -> Task<Message> {
+        let now = Timestamp::now();
+        if !self.discover.is_due(now) {
+            return Task::none();
+        }
+        self.discover.start();
+        let service = self.lookups.clone();
+        let library = self.repo.library().clone();
+        let today = self.today;
+        let previous = self.discover.record.clone();
+        if service.is_instant() {
+            let settings = discover::Settings::default();
+            let outcome = discover::run(&service, &library, today, &settings, &previous, None);
+            self.discover.finish(outcome, now);
+            return Task::none();
+        }
+        let github = self.github.clone();
+        let target = self.engine.as_ref().map(|engine| engine.target().clone());
+        let file = self.discover.file().map(std::path::Path::to_path_buf);
+        let settings_file = self
+            .discover
+            .settings_file()
+            .map(std::path::Path::to_path_buf);
+        Task::perform(
+            blocking(move || {
+                let remote = github.as_deref().zip(target.as_ref());
+                let settings = discover::read_settings(remote, settings_file.as_deref())?;
+                Ok(discover::run(
+                    &service,
+                    &library,
+                    today,
+                    &settings,
+                    &previous,
+                    file.as_deref(),
+                ))
+            }),
+            move |result| {
+                let outcome = result.unwrap_or_else(|error| {
+                    eprintln!("libri: the daily check did not finish: {error}");
+                    discover::Outcome::failed(error)
+                });
+                Message::Discover(discover::Message::Done(Box::new(outcome)))
+            },
+        )
+    }
+
+    /// "+ Add" or "Add to library" on a Discover item: a season goes onto
+    /// its show as Want at once (the show is in the library already);
+    /// anything else opens the Add dialog prefilled from the item, with
+    /// the status Want.
+    fn add_found(&mut self, key: &str) -> Task<Message> {
+        let Some(found) = self.discover.item(key).cloned() else {
+            return Task::none();
+        };
+        match &found.kind {
+            discover::Kind::Season { show, number } => {
+                let Some(entry) = self.repo.library().entry(show) else {
+                    return Task::none();
+                };
+                let mut seasons = entry.season_list().to_vec();
+                if seasons.iter().any(|s| s.season == *number) {
+                    return Task::none();
+                }
+                seasons.push(crate::model::Season {
+                    season: *number,
+                    released: found.released,
+                    status: Some(crate::model::EntryStatus::Want),
+                    fresh: None,
+                    manual: None,
+                });
+                seasons.sort_by_key(|s| s.season);
+                self.apply(Operation::SetSeasons {
+                    id: show.clone(),
+                    seasons,
+                    today: self.today,
+                });
+                self.library
+                    .update(library::Message::HideFound(key.to_owned()));
+                Task::none()
+            }
+            _ => {
+                let mut probe =
+                    lookup::Match::new(found.media, found.title.clone(), found.source.clone());
+                probe.creator = found.creator.clone();
+                probe.released = found.released;
+                probe.description = found.description.clone();
+                probe.cover_url = found.cover_url.clone();
+                if found.media == crate::model::MediaType::Music {
+                    probe.kind = Some(crate::model::EntryKind::Album);
+                }
+                let task = entry::update(self, entry::Message::AddFromMatch(Box::new(probe)));
+                Task::batch([task, operation::focus(entry::LOOKUP_ID)])
+            }
+        }
     }
 }
 
@@ -1783,6 +2023,20 @@ mod tests {
     use super::*;
     use crate::model::MediaType;
     use crate::theme;
+
+    #[test]
+    fn regaining_focus_never_starts_the_daily_check() {
+        let mut app = App::new(Screen::Library);
+        let _ = app.update(Message::Window(window::Event::Focused));
+        assert_eq!(app.discover.record.checked, None, "not on focus");
+        let _ = app.update(Message::Discover(discover::Message::Check));
+        assert!(app.discover.record.checked.is_some(), "when asked");
+    }
+
+    #[test]
+    fn a_close_comes_to_the_app_so_it_never_waits_for_the_network() {
+        assert!(!window_settings().exit_on_close_request);
+    }
 
     #[test]
     fn starts_on_the_library_in_graphite_and_peach() {
@@ -2394,6 +2648,18 @@ mod tests {
         let _ = app.update(Message::Sync(SyncMessage::Tick));
         assert!(app.save_due.is_none());
         assert!(app.engine.as_ref().unwrap().running());
+    }
+
+    #[test]
+    fn the_scale_factor_is_kept_for_sharp_slides() {
+        let mut app = App::new(Screen::Library);
+        assert_eq!(app.scale, 1.0);
+        let _ = app.update(Message::Window(window::Event::Rescaled(2.0)));
+        assert_eq!(app.scale, 2.0);
+        let _ = app.update(Message::ScaleFactor(1.5));
+        assert_eq!(app.scale, 1.5);
+        let _ = app.update(Message::ScaleFactor(0.0));
+        assert_eq!(app.scale, 1.5, "nonsense is ignored");
     }
 
     #[test]

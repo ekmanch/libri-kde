@@ -476,10 +476,6 @@ impl Engine {
         };
         let now = self.now();
         if raw.blob_sha == in_flight.blob_sha {
-            log(format_args!(
-                "the save \"{}\" landed; dropping its operations",
-                first_line(&in_flight.message)
-            ));
             self.save_base(Base {
                 target: self.target.key(),
                 etag: raw.etag,
@@ -514,10 +510,6 @@ impl Engine {
             .iter()
             .any(|c| c.message == in_flight.message && c.date > since);
         if landed {
-            log(format_args!(
-                "the save \"{}\" landed under later changes",
-                first_line(&in_flight.message)
-            ));
             self.pending.remove(&in_flight.ids);
             // The base moves to the save: the later changes are GitHub's
             // alone, and the check that follows pulls them.
@@ -807,12 +799,8 @@ fn summaries(operations: &[Pending]) -> String {
         .join("\n")
 }
 
-fn first_line(message: &str) -> &str {
-    message.lines().next().unwrap_or_default()
-}
-
 fn log(what: impl std::fmt::Display) {
-    crate::trace::line(format_args!("sync: {what}"));
+    eprintln!("libri: sync: {what}");
 }
 
 #[cfg(test)]
