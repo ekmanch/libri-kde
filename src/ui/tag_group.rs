@@ -23,31 +23,7 @@ pub fn tag_group<'a, Message: Clone + 'a>(
     } else {
         Icon::ChevronRight
     };
-    let picked = if selected > 0 {
-        format!("{selected} selected")
-    } else {
-        String::new()
-    };
-    let header = button(
-        row![
-            icon(chevron, 14.0, tokens.sub),
-            text(name.to_uppercase())
-                .size(size::SECTION)
-                .font(font::BOLD)
-                .color(tokens.sub),
-            mono(count.to_string(), 11.0, tokens.sub),
-            space::horizontal(),
-            text(picked).size(12).color(tokens.text),
-        ]
-        .spacing(8)
-        .align_y(Center),
-    )
-    .width(Fill)
-    .height(36)
-    .padding([0, 4])
-    .on_press(on_toggle)
-    .style(row_style(tokens, false, 8.0))
-    .focusable(8.0, tokens);
+    let header = tag_group_header(chevron, name, count, selected, None, on_toggle, tokens);
 
     let mut group = Column::new().push(header).spacing(4);
     if open {
@@ -61,7 +37,50 @@ pub fn tag_group<'a, Message: Clone + 'a>(
             );
         }
         body = body.extend(rows);
-        group = group.push(container(body).padding(Padding::new(0.0).left(26).right(4).bottom(12)));
+        group = group.push(container(body).padding(Padding::new(0.0).left(30).right(8).bottom(12)));
     }
     group.into()
+}
+
+/// A tag group's header row: `leading`, the category in gray caps, its
+/// count, "n selected" on the right, and `trailing` after it (the long
+/// group's "Show all ›"). The row fills the button's height so its content
+/// sits centered in the hover fill.
+pub fn tag_group_header<'a, Message: Clone + 'a>(
+    leading: Icon,
+    name: &str,
+    count: usize,
+    selected: usize,
+    trailing: Option<Element<'a, Message>>,
+    on_press: Message,
+    tokens: &Tokens,
+) -> Element<'a, Message> {
+    let picked = if selected > 0 {
+        format!("{selected} selected")
+    } else {
+        String::new()
+    };
+    let mut line = row![
+        icon(leading, 14.0, tokens.sub),
+        text(name.to_uppercase())
+            .size(size::SECTION)
+            .font(font::BOLD)
+            .color(tokens.sub),
+        mono(count.to_string(), 11.0, tokens.sub),
+        space::horizontal(),
+        text(picked).size(12).color(tokens.text),
+    ]
+    .spacing(8)
+    .height(Fill)
+    .align_y(Center);
+    if let Some(trailing) = trailing {
+        line = line.push(trailing);
+    }
+    button(line)
+        .width(Fill)
+        .height(36)
+        .padding([0, 8])
+        .on_press(on_press)
+        .style(row_style(tokens, false, 8.0))
+        .focusable(8.0, tokens)
 }

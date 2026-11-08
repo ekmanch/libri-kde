@@ -18,7 +18,7 @@ use std::rc::Rc;
 use iced::widget::{Column, Row, button, column, container, mouse_area, row, space, text};
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
-use super::{FocusExt, Icon, Popover, icon, mono, panel_style, row_style, section_header};
+use super::{FocusExt, Icon, Popover, icon, panel_style, row_style, section_header};
 use crate::model::{TagCategory, sort_tags, tag_display_name, tag_sort_key};
 use crate::tags::{DRILL_ID, PickerMessage, PickerState};
 use crate::theme::{Tokens, font, size};
@@ -295,33 +295,21 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
         selected: usize,
         tokens: &Tokens,
     ) -> Element<'a, M> {
-        let picked = if selected > 0 {
-            format!("{selected} selected")
-        } else {
-            String::new()
-        };
-        button(
-            row![
-                icon(Icon::ViewList, 14.0, tokens.sub),
-                text(category.name().to_uppercase())
-                    .size(size::SECTION)
-                    .font(font::BOLD)
-                    .color(tokens.sub),
-                mono(count.to_string(), 11.0, tokens.sub),
-                space::horizontal(),
-                text(picked).size(12).color(tokens.text),
-                text("Show all").size(12.5).color(tokens.sub),
-                icon(Icon::ChevronRight, 14.0, tokens.sub),
-            ]
-            .spacing(8)
-            .align_y(Center),
+        let show_all = row![
+            text("Show all").size(12.5).color(tokens.sub),
+            icon(Icon::ChevronRight, 14.0, tokens.sub),
+        ]
+        .spacing(8)
+        .align_y(Center);
+        super::tag_group::tag_group_header(
+            Icon::ViewList,
+            category.name(),
+            count,
+            selected,
+            Some(show_all.into()),
+            self.send(PickerMessage::Drill(category)),
+            tokens,
         )
-        .width(Fill)
-        .height(36)
-        .padding([0, 4])
-        .on_press(self.send(PickerMessage::Drill(category)))
-        .style(row_style(tokens, false, 8.0))
-        .focusable(8.0, tokens)
     }
 
     /// Search hits from the other categories of `category`'s kind, under
