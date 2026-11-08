@@ -959,11 +959,39 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
                 tokens,
             ),
             tokens,
-        ));
+        ))
+        .push(seasonal_only(form.seasonal_only, tokens));
 
     container(row![cover, grid].spacing(24))
         .padding([22, 26])
         .into()
+}
+
+/// "Seasonal only", the form's last field: the name and help on the
+/// left, a 38 px switch on the right; the whole row toggles it.
+fn seasonal_only<'a>(on: bool, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let text_color = tokens.text;
+    let label = column![
+        text("Seasonal only").size(14).font(font::SEMIBOLD),
+        text("Only wanted in its season; hidden from the main lists.")
+            .size(12.5)
+            .color(tokens.sub),
+    ]
+    .spacing(3)
+    .width(Fill);
+    button(
+        row![label, ui::switch::track(on, 38.0, tokens)]
+            .spacing(16)
+            .align_y(Center),
+    )
+    .width(Fill)
+    .padding(Padding::default().top(4))
+    .on_press(msg(Message::ToggleSeasonalOnly))
+    .style(move |_, _| button::Style {
+        text_color,
+        ..button::Style::default()
+    })
+    .focusable(6.0, tokens)
 }
 
 /// Pick a cover: the match's own cover first, then the other matches for

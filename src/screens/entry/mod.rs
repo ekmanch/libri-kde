@@ -150,6 +150,9 @@ pub struct Form {
     pub ebook_note: bool,
     pub description: text_editor::Content,
     pub note: String,
+    /// Only wanted in its season: hidden from the main lists unless the
+    /// Seasonal filter is on. Off for a new entry.
+    pub seasonal_only: bool,
     /// "Also add to plan", a plan id.
     pub also_plan: Option<String>,
     pub picker: Option<PickerState>,
@@ -436,6 +439,7 @@ pub enum Message {
     AddSuggested(String),
     Description(text_editor::Action),
     Note(String),
+    ToggleSeasonalOnly,
     AlsoPlan(Option<String>),
     Save,
     // The form's tag picker, the new-tag confirmation and the categories
@@ -545,6 +549,7 @@ impl Form {
             ebook_note: false,
             description: text_editor::Content::new(),
             note: String::new(),
+            seasonal_only: false,
             also_plan: None,
             picker: None,
             new_tag: None,
@@ -599,6 +604,7 @@ impl Form {
                 .collect(),
             description: text_editor::Content::with_text(&entry.description),
             note: entry.note.clone(),
+            seasonal_only: entry.seasonal_only,
             ..Form::add(entry.media)
         }
     }
@@ -1434,6 +1440,7 @@ impl Form {
             .collect();
         entry.tag_categories = (!picks.is_empty()).then_some(TagPicks(picks));
         entry.note = self.note.trim().to_owned();
+        entry.seasonal_only = self.seasonal_only;
         entry.description = self.description.text().trim().to_owned();
         entry.platform =
             (is(MediaType::Games) && !platform.is_empty()).then(|| platform.join(", "));
@@ -2227,6 +2234,7 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
         }
         Message::Description(action) => form.description.perform(action),
         Message::Note(note) => form.note = note,
+        Message::ToggleSeasonalOnly => form.seasonal_only = !form.seasonal_only,
         Message::AlsoPlan(plan) => form.also_plan = plan,
         Message::OpenPicker => form.picker = Some(form.picker_state(library)),
         Message::ClosePicker => form.picker = None,
@@ -2576,6 +2584,30 @@ mod tests {
         app.settings.platform = Some("Steam Deck".into());
         send(&mut app, Message::Pick(0));
         assert_eq!(form(&app).platforms_on.len(), 4);
+    }
+
+    #[test]
+    fn seasonal_only_is_read_toggled_and_saved() {
+        let mut app = app();
+        let id = "books/a-christmas-carol-1843";
+        send(&mut app, Message::Edit(id.into()));
+        assert!(form(&app).seasonal_only, "read from the entry");
+        send(&mut app, Message::ToggleSeasonalOnly);
+        send(&mut app, Message::Save);
+        assert!(!app.repo.library().entry(id).unwrap().seasonal_only);
+
+        send(&mut app, Message::Add);
+        assert!(!form(&app).seasonal_only, "off for a new entry");
+        send(&mut app, Message::Type(MediaType::Games));
+        send(&mut app, Message::Query("castlevania".into()));
+        send(&mut app, Message::Pick(0));
+        send(&mut app, Message::ToggleSeasonalOnly);
+        send(&mut app, Message::Save);
+        let saved = app.repo.library();
+        let saved = saved
+            .entry("games/castlevania-belmonts-curse-2026")
+            .unwrap();
+        assert!(saved.seasonal_only);
     }
 
     #[test]
