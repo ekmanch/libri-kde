@@ -54,7 +54,7 @@ pub use search::search_field;
 pub use season::{season_pill, status_pill};
 pub use section_rail::{RailLabel, SectionRail};
 pub use segmented::segmented;
-pub use slide::{slide, slide_by};
+pub use slide::{scrolled, slide, slide_by};
 pub use spinner::spinner;
 pub use switch::{setting_switch, switch};
 pub use tag_group::tag_group;

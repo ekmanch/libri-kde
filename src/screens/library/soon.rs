@@ -711,11 +711,7 @@ fn list_area<'a>(app: &'a App, lists: &Lists<'a>, tokens: &Tokens) -> Element<'a
             }
             let n = Slice::ALL.len() as isize;
             let slice = Slice::ALL[(place as isize).rem_euclid(n) as usize];
-            let scroll = state.slice_scroll.get(&slice).copied().unwrap_or(0.0);
-            let still = ui::slide_by(
-                list(app, lists, slice, true, tokens),
-                Vector::new(0.0, -scroll),
-            );
+            let still = list(app, lists, slice, true, tokens);
             layers.push(ui::slide_by(still, Vector::new(shift, 0.0)).into());
         }
     }
@@ -800,10 +796,13 @@ fn list<'a>(
         );
     }
     if still {
-        return container(Column::with_children(children))
+        // At the offset it was left at, laid out as the scroll area lays
+        // out the live list, so it starts to slide from where it was.
+        let scroll = state.slice_scroll.get(&slice).copied().unwrap_or(0.0);
+        let column = container(Column::with_children(children))
             .padding(Padding::new(rail::LEFT).top(4).right(room))
-            .width(Fill)
-            .into();
+            .width(Fill);
+        return ui::scrolled(column, scroll).into();
     }
     let mut overlays = Vec::new();
     if view != View::Grid

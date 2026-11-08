@@ -18,6 +18,9 @@ use iced::{Element, Event, Length, Point, Rectangle, Size, Vector, mouse};
 pub struct Slide<'a, Message, Theme, Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
     offset: Vector,
+    /// Laid out as a vertical scroll area lays out its content, at its
+    /// full height, and cut to the slide's place.
+    scrolled: bool,
 }
 
 /// `content` placed `offset` px to the right of where it would be.
@@ -36,6 +39,25 @@ pub fn slide_by<'a, Message, Theme, Renderer>(
     Slide {
         content: content.into(),
         offset,
+        scrolled: false,
+    }
+}
+
+/// `content` as a vertical scroll area shows it scrolled to `y`, without
+/// the scroll area: laid out at its full height, moved up by `y` and cut
+/// to the slide's place. The still copies of the Coming soon page's
+/// slices pass through it. Laid out in the place's height instead, a
+/// container whose content is taller gives up its padding (iced's
+/// `Padding::fit`), so a long grid lost its top padding and jumped up as
+/// it started to slide.
+pub fn scrolled<'a, Message, Theme, Renderer>(
+    content: impl Into<Element<'a, Message, Theme, Renderer>>,
+    y: f32,
+) -> Slide<'a, Message, Theme, Renderer> {
+    Slide {
+        content: content.into(),
+        offset: Vector::new(0.0, -y),
+        scrolled: true,
     }
 }
 
@@ -70,6 +92,16 @@ where
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
+        if self.scrolled {
+            let tall = layout::Limits::new(
+                Size::new(limits.min().width, 0.0),
+                Size::new(limits.max().width, f32::INFINITY),
+            );
+            let node = self.content.as_widget_mut().layout(tree, renderer, &tall);
+            let own = self.content.as_widget().size();
+            let size = limits.resolve(own.width, own.height, node.size());
+            return layout::Node::with_children(size, vec![node.move_to(Point::ORIGIN)]);
+        }
         let node = self.content.as_widget_mut().layout(tree, renderer, limits);
         let size = node.size();
         layout::Node::with_children(size, vec![node.move_to(Point::ORIGIN)])
@@ -135,13 +167,14 @@ where
         let Some(inner) = layout.children().next() else {
             return;
         };
-        if self.offset == Vector::ZERO {
+        if self.offset == Vector::ZERO && !self.scrolled {
             self.content
                 .as_widget()
                 .draw(tree, renderer, theme, style, inner, cursor, viewport);
             return;
         }
-        // Moved, the content is cut to where the slide itself is: iced's
+        // Moved or laid out at full height, the content is cut to where
+        // the slide itself is: iced's
         // `clip` on a container only narrows the viewport it hands down,
         // and a scroll area whose content fits draws it without a clip of
         // its own, so a short Coming soon list slid over the panel.
@@ -209,7 +242,7 @@ mod tests {
     use iced::{Element, Point};
     use iced_test::simulator;
 
-    use super::slide;
+    use super::{scrolled, slide};
 
     #[derive(Debug, Clone, PartialEq)]
     struct Pressed;
@@ -240,6 +273,28 @@ mod tests {
         assert!(ui.into_messages().next().is_none());
         let mut ui = simulator(moved(200.0));
         ui.point_at(Point::new(250.0, 20.0));
+        let _ = ui.simulate(iced_test::simulator::click());
+        assert_eq!(ui.into_messages().collect::<Vec<_>>(), vec![Pressed]);
+    }
+
+    fn padded(content: Element<'static, Pressed>) -> Element<'static, Pressed> {
+        container(content).width(400).height(30).into()
+    }
+
+    #[test]
+    fn a_scrolled_copy_is_laid_out_at_full_height_with_its_padding() {
+        let tall = || {
+            container(button("Go").width(100).height(60).on_press(Pressed))
+                .padding(iced::Padding::ZERO.top(12))
+        };
+        // Laid out as a scroll area lays it out, it keeps its full height
+        // and its padding in the 30 px place, and moves up by the offset.
+        let mut ui = simulator(padded(scrolled(tall(), 0.0).into()));
+        // The label, inside the button's 5 px padding.
+        let bounds = ui.find("Go").unwrap().bounds();
+        assert_eq!((bounds.y, bounds.height), (12.0 + 5.0, 60.0 - 10.0));
+        let mut ui = simulator(padded(scrolled(tall(), 5.0).into()));
+        ui.point_at(Point::new(50.0, 8.0));
         let _ = ui.simulate(iced_test::simulator::click());
         assert_eq!(ui.into_messages().collect::<Vec<_>>(), vec![Pressed]);
     }
