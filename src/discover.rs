@@ -436,11 +436,15 @@ pub struct CreatorStatus {
     pub checked_on: Date,
 }
 
-const RECORD_VERSION: u64 = 1;
+/// Version 2 (2026-11-09): version 1 recorded a creator as active when
+/// Wikidata refused to say, so its authors, artists and studios without
+/// a reason are dropped on reading and asked again.
+const RECORD_VERSION: u64 = 2;
 
 impl Record {
     fn from_json(json: &Value) -> Option<Record> {
-        if json.get("version").and_then(Value::as_u64) != Some(RECORD_VERSION) {
+        let version = json.get("version").and_then(Value::as_u64)?;
+        if version != 1 && version != RECORD_VERSION {
             return None;
         }
         let items = json
@@ -479,7 +483,19 @@ impl Record {
                 .get("asked_on")
                 .and_then(Value::as_str)
                 .and_then(Date::parse),
-            creators: serde_json::from_value(json["creators"].clone()).unwrap_or_default(),
+            creators: {
+                let mut creators: BTreeMap<String, CreatorStatus> =
+                    serde_json::from_value(json["creators"].clone()).unwrap_or_default();
+                if version == 1 {
+                    // TMDB says who died itself; the rest asked Wikidata.
+                    creators.retain(|key, status| {
+                        status.inactive.is_some()
+                            || key.starts_with("directors/")
+                            || key.starts_with("actors/")
+                    });
+                }
+                creators
+            },
         })
     }
 
@@ -838,6 +854,33 @@ enum Asked<T> {
     /// No verdict for now: what is known of this one stands, and a later
     /// run asks again.
     NoAnswer,
+}
+
+/// What Wikidata said of the creators due, by creator key: why each one
+/// it knows is no longer active, and who it was not asked about because
+/// the ask failed.
+#[derive(Default)]
+struct Classified {
+    found: BTreeMap<String, String>,
+    unknown: BTreeSet<String>,
+}
+
+/// What Wikidata said of one creator.
+#[derive(Clone, Copy)]
+enum Classification<'a> {
+    /// Asked: why they are no longer active, or `None` while they are.
+    Known(Option<&'a String>),
+    /// The ask failed: nothing learned.
+    Unknown,
+}
+
+impl<'a> Classification<'a> {
+    fn found(self) -> Option<&'a String> {
+        match self {
+            Classification::Known(why) => why,
+            Classification::Unknown => None,
+        }
+    }
 }
 
 /// A creator followed for new work.
@@ -1342,9 +1385,11 @@ impl Check<'_> {
     }
 
     /// Who is no longer active, for many names at once, before the creators
-    /// are gone through one by one. Not knowing is no reason to skip them.
-    fn inactive(&mut self, due: &[&Creator]) -> Result<BTreeMap<String, String>, Stopped> {
-        let mut result = BTreeMap::new();
+    /// are gone through one by one. Not knowing is no reason to skip them,
+    /// but a batch Wikidata did not answer leaves the run incomplete and
+    /// its creators in `Classified::unknown`, to be asked again.
+    fn inactive(&mut self, due: &[&Creator]) -> Result<Classified, Stopped> {
+        let mut result = Classified::default();
         for kind in FollowKind::ALL {
             // TMDB says it itself for people it credits.
             if matches!(kind, FollowKind::Directors | FollowKind::Actors) {
@@ -1366,14 +1411,36 @@ impl Check<'_> {
                 if cancelled() {
                     return Err(Stopped);
                 }
-                // Wikidata's answer, or none: a refusal here says nothing
-                // about the provider it is asked through.
-                let answer = sources
-                    .iter()
-                    .find_map(|source| source.inactive_of(kind, &names).ok().flatten());
+                // Wikidata's answer through the source that has it. A
+                // refusal says nothing about that source itself, so it is
+                // not marked down, but the run is not complete either.
+                let mut answer = None;
+                for source in &sources {
+                    match source.inactive_of(kind, &names) {
+                        Ok(Some(found)) => {
+                            answer = Some(found);
+                            break;
+                        }
+                        Ok(None) => {}
+                        Err(failure) => {
+                            eprintln!("Discover: who died: {failure}");
+                            if failure.kind != FailureKind::NotConfigured {
+                                self.complete = false;
+                            }
+                            break;
+                        }
+                    }
+                }
                 for creator in batch {
-                    if let Some(why) = answer.as_ref().and_then(|a| a.get(&creator.name)) {
-                        result.insert(creator.key(), why.clone());
+                    match &answer {
+                        Some(found) => {
+                            if let Some(why) = found.get(&creator.name) {
+                                result.found.insert(creator.key(), why.clone());
+                            }
+                        }
+                        None => {
+                            result.unknown.insert(creator.key());
+                        }
                     }
                 }
             }
@@ -1401,14 +1468,20 @@ impl Check<'_> {
             .iter()
             .filter(|c| self.in_share(&c.key()) && self.fresh(&c.key()))
             .collect();
-        let inactive = self.inactive(&due)?;
+        let classified = self.inactive(&due)?;
         for creator in due {
-            self.creator(creator, inactive.get(&creator.key()))?;
+            let key = creator.key();
+            let inactive = if classified.unknown.contains(&key) {
+                Classification::Unknown
+            } else {
+                Classification::Known(classified.found.get(&key))
+            };
+            self.creator(creator, inactive)?;
         }
         Ok(())
     }
 
-    fn creator(&mut self, creator: &Creator, inactive: Option<&String>) -> Result<(), Stopped> {
+    fn creator(&mut self, creator: &Creator, inactive: Classification) -> Result<(), Stopped> {
         let key = creator.key();
         let sources: Vec<&dyn Source> = self
             .service
@@ -1440,10 +1513,16 @@ impl Check<'_> {
                     .map(|hit| hit.provider_id.clone())
                     .or_else(|| known.as_ref().and_then(|k| k.provider_id.clone())),
                 inactive: inactive
+                    .found()
                     .cloned()
                     .or_else(|| found.and_then(|hit| hit.inactive))
                     .or_else(|| known.and_then(|k| k.inactive)),
-                checked_on: self.today,
+                // Not asked of Wikidata: already due again, so the next
+                // run asks rather than taking them as alive for 90 days.
+                checked_on: match inactive {
+                    Classification::Unknown => self.today.add_days(-STATUS_DAYS),
+                    Classification::Known(_) => self.today,
+                },
             };
             self.record.creators.insert(key.clone(), status);
         }
@@ -1749,11 +1828,14 @@ mod tests {
         assert!(state.is_due(Timestamp(now.0 + 86_400)));
     }
 
-    /// The fake with its requests counted, and refusing while `limited`.
+    /// The fake with its requests counted, and refusing while `limited`;
+    /// its Wikidata knows Miles Davis died, and refuses while
+    /// `wikidata_limited`.
     #[derive(Default)]
     struct Counting {
         asked: Mutex<Vec<String>>,
         limited: AtomicBool,
+        wikidata_limited: AtomicBool,
     }
 
     impl Counting {
@@ -1829,6 +1911,22 @@ mod tests {
         ) -> Reply<Vec<Match>> {
             self.note(format!("releases {provider_id}"))?;
             Fake.creator_releases(provider_id, kind, today)
+        }
+        fn inactive_of(
+            &self,
+            _kind: FollowKind,
+            names: &[String],
+        ) -> Reply<Option<std::collections::HashMap<String, String>>> {
+            if self.wikidata_limited.load(Ordering::Relaxed) {
+                return Err(lookup::Failure::new(FailureKind::RateLimited, "429"));
+            }
+            Ok(Some(
+                names
+                    .iter()
+                    .filter(|name| *name == "Miles Davis")
+                    .map(|name| (name.clone(), "Died 1991".to_owned()))
+                    .collect(),
+            ))
         }
     }
 
@@ -1982,6 +2080,63 @@ mod tests {
         let resumed = run(&service, &library, today(), &settings, &partway, None);
         assert!(resumed.complete);
         assert!(counting.asked.lock().unwrap().is_empty(), "all asked today");
+    }
+
+    #[test]
+    fn who_died_is_skipped_and_a_refused_ask_is_asked_again() {
+        let (counting, service) = counting();
+        let library = library();
+        let settings = Settings::default();
+        let davis = "artists/miles davis";
+        let found_by =
+            |outcome: &Outcome, owner: &str| outcome.items.iter().any(|item| item.owner == owner);
+        // Wikidata refuses: Miles Davis is still checked (not knowing is
+        // no reason to skip), but the run is not complete and his status
+        // is already due again rather than alive for ninety days.
+        counting.wikidata_limited.store(true, Ordering::Relaxed);
+        let refused = run(
+            &service,
+            &library,
+            today(),
+            &settings,
+            &Record::default(),
+            None,
+        );
+        assert!(!refused.complete);
+        let record = refused.record.clone().unwrap();
+        let status = &record.creators[davis];
+        assert_eq!(status.inactive, None);
+        assert_eq!(status.checked_on.days_until(today()), STATUS_DAYS);
+        // The next run asks again and learns he died: not followed, and
+        // nothing of his is listed.
+        counting.wikidata_limited.store(false, Ordering::Relaxed);
+        let next_day = today().add_days(1);
+        let answered = run(&service, &library, next_day, &settings, &record, None);
+        let record = answered.record.clone().unwrap();
+        assert_eq!(
+            record.creators[davis].inactive.as_deref(),
+            Some("Died 1991")
+        );
+        assert_eq!(record.creators[davis].checked_on, next_day);
+        assert!(!found_by(&answered, davis));
+        assert!(record.creators["artists/metallica"].inactive.is_none());
+    }
+
+    #[test]
+    fn a_version_1_record_asks_again_who_died() {
+        let json = json!({
+            "version": 1,
+            "creators": {
+                "artists/eva cassidy": {"checked_on": "2026-11-07", "inactive": null},
+                "artists/miles davis": {"checked_on": "2026-11-07", "inactive": "Died 1991"},
+                "directors/clint-eastwood": {"checked_on": "2026-11-07", "inactive": null},
+            },
+        });
+        let record = Record::from_json(&json).unwrap();
+        let keys: Vec<&str> = record.creators.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["artists/miles davis", "directors/clint-eastwood"]);
+        assert_eq!(record.to_json()["version"], RECORD_VERSION);
+        assert!(Record::from_json(&json!({"version": 3})).is_none());
     }
 
     #[test]

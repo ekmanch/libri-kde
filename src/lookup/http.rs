@@ -20,6 +20,14 @@ const BACKOFF_BASE: Duration = Duration::from_secs(2);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// How much of an answer is read at most.
 const BODY_LIMIT: u64 = 20 * 1024 * 1024;
+/// Who is asking, with a link back, as Wikimedia's User-Agent policy
+/// wants: Wikidata throttled a bare "Libri" from this machine (429 with
+/// a two-minute `Retry-After`), so nobody was ever found to have died.
+pub const USER_AGENT: &str = concat!(
+    "Libri/",
+    env!("CARGO_PKG_VERSION"),
+    " (https://github.com/ekmanch/libri-kde)"
+);
 
 /// Keeps at least `min_gap` between the starts of the requests run through
 /// it, in the order they asked.
@@ -78,7 +86,7 @@ impl Http {
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(TIMEOUT))
             .http_status_as_error(false)
-            .user_agent("Libri")
+            .user_agent(USER_AGENT)
             .build();
         Http {
             agent: config.into(),

@@ -265,3 +265,19 @@ fn deezer_pages_a_search_and_an_artists_albums_and_songs() {
     );
     assert!(songs.matches.len() >= 25);
 }
+
+#[test]
+#[ignore = "asks the real providers; run with --ignored"]
+fn wikidata_knows_who_died() {
+    use libri::lookup::FollowKind;
+    let wikidata = libri::lookup::wikidata::Wikidata::new();
+    let names = ["Eva Cassidy".to_owned(), "Massive Attack".to_owned()];
+    let found = wikidata.inactive_of(FollowKind::Artists, &names);
+    println!("{found:?}");
+    let found = found.expect("an answer");
+    assert_eq!(
+        found.get("Eva Cassidy").map(String::as_str),
+        Some("Died 1996")
+    );
+    assert!(!found.contains_key("Massive Attack"));
+}
