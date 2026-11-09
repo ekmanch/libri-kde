@@ -1968,9 +1968,10 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         }
         Message::AddWithTitle(media, title) => {
             let mut form = Form::add(media);
-            form.query = title.clone();
-            form.title = title;
+            form.title = title.clone();
             app.dialog = Some(Dialog::Form(Box::new(form)));
+            // The lookup searches for the title as if it had been typed.
+            return form_update(app, Message::Query(title));
         }
         Message::AddFromMatch(found) => {
             let mut form = Form::add(found.media);
@@ -3135,6 +3136,17 @@ mod tests {
             Some(Dialog::Form(form) | Dialog::Tags(form)) => form,
             other => panic!("no form: {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_series_add_searches_for_the_title_it_fills_in() {
+        let mut app = app();
+        send(
+            &mut app,
+            Message::AddWithTitle(MediaType::Games, "castlevania".into()),
+        );
+        assert_eq!(form(&app).query, "castlevania");
+        assert!(!form(&app).matches().is_empty(), "searched at once");
     }
 
     #[test]
