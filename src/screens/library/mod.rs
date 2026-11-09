@@ -226,6 +226,8 @@ pub struct State {
     /// how tall the list's visible part is.
     pub group_tops: Vec<f32>,
     pub viewport: f32,
+    /// How tall the measured groups are together, for the type rail.
+    pub groups_height: f32,
     /// How wide the list's scroll area is, for the rows of a grid.
     pub list_width: f32,
     /// The section last jumped to from the section rail, by its label:
@@ -315,8 +317,9 @@ pub enum Message {
     CloseArtist,
     Scrolled(Scroll),
     GroupsMeasured(ui::Measure),
-    /// A click on the type rail: the app scrolls the list there.
-    JumpToGroup(usize),
+    /// A press or drag on the type rail: the app scrolls the list to
+    /// this offset, in px.
+    ScrollList(f32),
     /// A label of the section rail, by a press, the held button moving
     /// onto it (`held`) or Enter: the app scrolls the list to `offset`.
     JumpToSection {
@@ -805,7 +808,7 @@ impl State {
             },
             Message::UnpinAll => self.pins.clear(),
             Message::Add
-            | Message::JumpToGroup(_)
+            | Message::ScrollList(_)
             | Message::PickSeriesCover(_)
             | Message::RailReleased => {}
             Message::JumpToSection {
@@ -880,6 +883,7 @@ impl State {
             Message::CloseArtist => self.artist = None,
             Message::GroupsMeasured(measure) => {
                 self.group_tops = measure.tops;
+                self.groups_height = measure.height;
                 self.viewport = measure.viewport;
                 self.list_width = measure.width;
             }

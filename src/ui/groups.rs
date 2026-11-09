@@ -1,6 +1,6 @@
 //! A column that reports where each of its children starts. The grouped
 //! library list uses it to know where each type's group is, for the
-//! type-colored scrollbar's jumps and the pinned group header.
+//! type-colored scrollbar and the pinned group header.
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Tree, Widget, tree};
@@ -13,6 +13,8 @@ use iced::{Element, Event, Length, Point, Rectangle, Size, Vector, mouse};
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Measure {
     pub tops: Vec<f32>,
+    /// The column's own height, its children together.
+    pub height: f32,
     pub viewport: f32,
     pub width: f32,
 }
@@ -92,7 +94,9 @@ where
                 node
             })
             .collect();
-        tree.state.downcast_mut::<State>().measure.tops = tops;
+        let measure = &mut tree.state.downcast_mut::<State>().measure;
+        measure.tops = tops;
+        measure.height = y;
         layout::Node::with_children(Size::new(width, y), nodes)
     }
 

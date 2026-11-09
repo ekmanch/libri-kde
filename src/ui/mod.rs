@@ -27,6 +27,7 @@ pub mod switch;
 pub mod tag_group;
 pub mod tag_picker;
 pub mod toolbar;
+pub mod type_rail;
 
 use iced::alignment::Vertical;
 use iced::widget::{self, Text, button, container, scrollable, text};
@@ -60,6 +61,7 @@ pub use switch::{setting_switch, switch};
 pub use tag_group::tag_group;
 pub use tag_picker::Picker;
 pub use toolbar::{add_button, icon_switch, menu_button};
+pub use type_rail::TypeRail;
 
 /// A section header in small gray caps.
 pub fn section_header<'a, Message>(label: &str, tokens: &Tokens) -> Element<'a, Message> {

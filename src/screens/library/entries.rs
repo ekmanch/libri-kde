@@ -1,8 +1,8 @@
 //! The list itself: the entries in the chosen view, grouped by type when
 //! everything is shown, or an empty state.
 
-use iced::widget::{Column, button, column, container, grid, row, scrollable, space, stack, text};
-use iced::{Background, Border, Element, Fill, FillPortion, Padding, Shadow, Vector};
+use iced::widget::{Column, column, container, grid, row, scrollable, space, stack, text};
+use iced::{Background, Border, Element, Fill, Padding, Shadow, Vector};
 
 use super::{Listing, Message, View, rail};
 use crate::app::{App, Message as AppMessage};
@@ -61,6 +61,8 @@ pub fn body<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> 
 /// The list's padding left and right of its rows; the right is wider
 /// beside the section rail.
 const SIDE: f32 = rail::LEFT;
+/// The list's padding above its first row.
+const TOP: f32 = 4.0;
 
 /// A long list of one type in the phone's sections, which follow the sort
 /// (`browse::sections`), with the section rail and the room the list
@@ -181,7 +183,7 @@ pub(super) fn scrolling<'a>(
     } else {
         scrollable::Scrollbar::hidden()
     };
-    let scroll = ui::scroll(container(list).padding(Padding::new(SIDE).top(4).right(right)))
+    let scroll = ui::scroll(container(list).padding(Padding::new(SIDE).top(TOP).right(right)))
         .direction(scrollable::Direction::Vertical(scrollbar))
         .id(super::LIST_ID)
         .on_scroll(|viewport| {
@@ -326,65 +328,81 @@ pub(super) fn pinned_bar<'a>(
     column![bar, space::vertical()].into()
 }
 
-/// The type-colored scrollbar: one segment per group, sized by its count,
-/// that jumps there on a click, and an outlined thumb for the view.
+/// The type-colored scrollbar (`ui::TypeRail`): one segment per group,
+/// as tall as the group is in the list by the measured tops (by count
+/// until the list is measured), and an outlined thumb that is dragged
+/// like any scrollbar's.
 fn rail<'a>(
     state: &super::State,
     groups: &[(Option<MediaType>, Vec<&Entry>)],
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
-    let segments =
-        Column::with_children(groups.iter().enumerate().map(|(index, (media, entries))| {
-            let color = media.map_or(tokens.sub, |m| tokens.type_color(m));
-            let portion = u16::try_from(entries.len()).unwrap_or(u16::MAX).max(1);
-            button(space())
-                .width(5)
-                .height(FillPortion(portion))
-                .padding(0)
-                .on_press(msg(Message::JumpToGroup(index)))
-                .style(move |_, _| button::Style {
-                    background: Some(Background::Color(color)),
-                    border: Border::default().rounded(2),
-                    ..button::Style::default()
-                })
-                .into()
-        }))
-        .spacing(2)
-        .height(Fill);
-
-    // The thumb, as parts of a thousand of the rail.
-    let scroll = state.scroll;
-    let (top, size) = if scroll.content > scroll.viewport && scroll.content > 0.0 {
-        let top = (scroll.offset / scroll.content * 1000.0)
-            .round()
-            .clamp(0.0, 1000.0) as u16;
-        let size = (scroll.viewport / scroll.content * 1000.0)
-            .round()
-            .clamp(1.0, 1000.0) as u16;
-        (top, size.min(1000 - top))
-    } else {
-        (0, 1000)
-    };
-    let edge = tokens.rail_thumb;
-    let thumb = column![
-        space().height(FillPortion(top)),
-        container(space())
-            .width(11)
-            .height(FillPortion(size.max(1)))
-            .style(move |_| container::Style::default()
-                .border(Border::default().rounded(5).width(1.5).color(edge))),
-        space().height(FillPortion(1000 - top - size)),
-    ]
-    .height(Fill);
-    let rail = stack![container(segments).center_x(11), thumb]
-        .width(11)
-        .height(Fill);
+    let colors: Vec<iced::Color> = groups
+        .iter()
+        .map(|(media, _)| media.map_or(tokens.sub, |m| tokens.type_color(m)))
+        .collect();
+    let counts: Vec<usize> = groups.iter().map(|(_, entries)| entries.len()).collect();
+    let track = rail_track(state, &colors, &counts);
+    let rail = ui::TypeRail::new(track, tokens.rail_thumb, |offset| {
+        msg(Message::ScrollList(offset))
+    });
     container(rail)
         .width(Fill)
         .height(Fill)
         .align_right(Fill)
-        .padding(Padding::new(0.0).top(44).right(5).bottom(10))
+        .padding(Padding::new(0.0).top(44).bottom(10))
         .into()
+}
+
+/// The type rail's track: each group from its measured top to the next,
+/// in the scroll area's px, the list's padding above and below its groups
+/// going to the first and the last; before the list is measured, by
+/// `counts`.
+fn rail_track(
+    state: &super::State,
+    colors: &[iced::Color],
+    counts: &[usize],
+) -> ui::type_rail::Track {
+    let scroll = state.scroll;
+    if state.group_tops.len() == colors.len() && state.groups_height > 0.0 {
+        let content = if scroll.content > 0.0 {
+            scroll.content
+        } else {
+            state.groups_height + TOP + SIDE
+        };
+        let starts: Vec<f32> = state.group_tops.iter().map(|top| top + TOP).collect();
+        let segments = colors
+            .iter()
+            .enumerate()
+            .map(|(index, &color)| {
+                let start = if index == 0 { 0.0 } else { starts[index] };
+                let end = starts.get(index + 1).copied().unwrap_or(content);
+                (color, start, end)
+            })
+            .collect();
+        ui::type_rail::Track {
+            segments,
+            content,
+            offset: scroll.offset,
+            viewport: scroll.viewport.max(state.viewport),
+        }
+    } else {
+        let mut at = 0.0;
+        let segments = colors
+            .iter()
+            .zip(counts)
+            .map(|(&color, &count)| {
+                let start = at;
+                at += count.max(1) as f32;
+                (color, start, at)
+            })
+            .collect();
+        ui::type_rail::Track {
+            segments,
+            content: at,
+            ..ui::type_rail::Track::default()
+        }
+    }
 }
 
 /// `block` for plain entries (the music lists).
@@ -649,6 +667,29 @@ mod tests {
         assert_eq!(measure.tops.len(), 2);
         assert!(measure.tops[0] == 0.0 && measure.tops[1] > 0.0);
         assert!(measure.viewport > 0.0, "and how tall its visible part is");
+    }
+
+    #[test]
+    fn the_type_rail_is_as_tall_as_each_group_is_in_the_list() {
+        // Movies take 4000 px and music 2000, however many there are of
+        // each: the line between them is where Music's header is.
+        let mut app = grouped_app();
+        app.library.group_tops = vec![0.0, 4000.0];
+        app.library.groups_height = 6000.0;
+        app.library.scroll = super::super::Scroll {
+            offset: 4004.0,
+            viewport: 800.0,
+            content: 6028.0,
+        };
+        let colors = [iced::Color::WHITE, iced::Color::BLACK];
+        let track = rail_track(&app.library, &colors, &[246, 578]);
+        assert_eq!(track.segments[0].1..track.segments[0].2, 0.0..4004.0);
+        assert_eq!(track.segments[1].1..track.segments[1].2, 4004.0..6028.0);
+        assert_eq!(track.offset, 4004.0, "the thumb's top on the line");
+        // Not measured yet: by count.
+        app.library.group_tops.clear();
+        let track = rail_track(&app.library, &colors, &[246, 578]);
+        assert_eq!(track.segments[1].1, 246.0);
     }
 
     #[test]

@@ -340,7 +340,7 @@ impl Message {
                     | L::SeasonMenu(_)
                     | L::Picker(_)
                     | L::Search(_)
-                    | L::JumpToGroup(_)
+                    | L::ScrollList(_)
                     | L::JumpToSection { .. }
                     | L::RailReleased
                     | L::SoonSlice(_)
@@ -1499,14 +1499,12 @@ impl App {
             Message::Modifiers(modifiers) => self.modifiers = modifiers,
             // Turned into what it does at the top of `update`.
             Message::KeyPressed(..) => {}
-            Message::Library(library::Message::JumpToGroup(index)) => {
-                if let Some(&top) = self.library.group_tops.get(index) {
-                    let offset = scrollable::AbsoluteOffset {
-                        x: None,
-                        y: Some(top),
-                    };
-                    return operation::scroll_to(library::LIST_ID, offset);
-                }
+            Message::Library(library::Message::ScrollList(y)) => {
+                let offset = scrollable::AbsoluteOffset {
+                    x: None,
+                    y: Some(y),
+                };
+                return operation::scroll_to(library::LIST_ID, offset);
             }
             Message::Library(library::Message::JumpToSection {
                 label,

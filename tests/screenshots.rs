@@ -539,8 +539,14 @@ fn capture_every_screen() {
                     MediaType::Shows,
                 )));
                 let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                // The type rail by the groups' heights: movies two thirds.
                 app.library.group_tops = vec![0.0, 2000.0];
-                app.library.scroll.offset = 40.0;
+                app.library.groups_height = 3000.0;
+                app.library.scroll = library::Scroll {
+                    offset: 40.0,
+                    viewport: 700.0,
+                    content: 3028.0,
+                };
             }),
         ),
         // Phase 1h: tags in several categories, the long groups and the
