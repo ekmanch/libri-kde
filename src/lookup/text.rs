@@ -284,7 +284,7 @@ pub const MAX_BOOK_TAGS: usize = 6;
 
 /// Spellings a lookup uses for a tag the library spells otherwise, so a
 /// synonym is never offered as a new tag beside the one that is there.
-const TAG_ALIASES: [(&str, &str); 24] = [
+const TAG_ALIASES: [(&str, &str); 27] = [
     ("science-fiction", "scifi"),
     ("sci-fi", "scifi"),
     ("sf", "scifi"),
@@ -309,6 +309,10 @@ const TAG_ALIASES: [(&str, &str); 24] = [
     ("real-time-strategy-rts", "strategy"),
     ("slice-of-life", "slice-of-life"),
     ("adventure", "adventure"),
+    // Deezer's "Rap/Hip Hop", and the spellings other catalogs use.
+    ("rap-hip-hop", "hiphop"),
+    ("hip-hop-rap", "hiphop"),
+    ("hip-hop", "hiphop"),
 ];
 
 /// A lookup's genre as the library's tag: normalized with any brackets
@@ -753,6 +757,7 @@ mod tests {
         assert_eq!(canonical_tag("Science Fiction"), "scifi");
         assert_eq!(canonical_tag("Role-playing (RPG)"), "rpg");
         assert_eq!(canonical_tag("Dark"), "dark");
+        assert_eq!(canonical_tag("Rap/Hip Hop"), "hiphop");
     }
 
     #[test]
