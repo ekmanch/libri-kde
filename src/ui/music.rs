@@ -122,14 +122,14 @@ pub fn artist_card<'a, Message: Clone + 'a>(
         .focusable(12.0, tokens)
 }
 
-/// What a song row shows.
+/// What a song row shows: a song entry or a rated album track.
 pub struct SongLook<'a> {
     pub title: &'a str,
     /// "Artist · Year".
     pub subtitle: String,
     /// "9/10" or "—".
     pub rating: String,
-    /// The color of the song's placeholder cover, and the
+    /// The color of the song's (or its album's) placeholder cover, and the
     /// fetched cover once it is on this computer.
     pub cover: Color,
     pub image: Option<image::Handle>,

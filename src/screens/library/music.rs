@@ -7,7 +7,7 @@ use iced::{Element, Padding};
 use super::{Listing, Message, MusicTab, View, rail};
 use crate::app::{App, Message as AppMessage};
 use crate::model::{Entry, MediaType};
-use crate::music;
+use crate::music::{self, Song};
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, Icon, music::SongLook};
 
@@ -90,7 +90,7 @@ pub fn body<'a>(
                 super::entries::block_entries(app, &albums, view, tokens)
             }
             MusicTab::Songs => {
-                let songs = music::songs(&listing.shown);
+                let songs = music::songs_matching(&listing.shown, &state.query);
                 if songs.is_empty() {
                     return empty("No songs here", tokens);
                 }
@@ -182,32 +182,38 @@ fn artist_block<'a>(
 /// ("Album · Year"); elsewhere its artist ("Artist · Year").
 fn song_block<'a>(
     app: &'a App,
-    songs: &[&'a Entry],
+    songs: &[Song<'a>],
     view: View,
     on_artist_page: bool,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let selected = app.library.selected.as_deref();
-    let rows = songs.iter().map(|&entry| {
+    let rows = songs.iter().map(|song| {
+        let entry = song.entry();
         let subtitle = if on_artist_page {
-            match (entry.album.as_deref(), entry.year()) {
+            let album = match song {
+                Song::Entry(e) => e.album.as_deref(),
+                Song::Track { album, .. } => Some(album.title.as_str()),
+            };
+            match (album, entry.year()) {
                 (Some(album), Some(year)) => format!("{album} · {year}"),
                 (Some(album), None) => album.to_owned(),
                 (None, Some(year)) => year.to_string(),
                 (None, None) => String::new(),
             }
         } else {
-            music::song_subtitle(entry)
+            song.subtitle()
         };
         let look = SongLook {
-            title: &entry.title,
+            title: song.title(),
             subtitle,
-            rating: entry.rating.map_or("—".into(), |r| format!("{r}/10")),
+            rating: song.rating().map_or("—".into(), |r| format!("{r}/10")),
             cover: theme::cover_color(&entry.id),
             image: app.artwork.cover(entry),
             type_color: tokens.type_color(MediaType::Music),
-            selected: selected == Some(entry.id.as_str()),
+            selected: selected == Some(entry.id.as_str()) && matches!(song, Song::Entry(_)),
         };
+        // A track opens its album.
         let open = msg(Message::Select(entry.id.clone()));
         match view {
             View::Text => column![
@@ -257,9 +263,10 @@ fn artist_page<'a>(
             ));
     }
     if !artist.songs.is_empty() {
+        let songs: Vec<Song<'a>> = artist.songs.iter().map(|&e| Song::Entry(e)).collect();
         page = page
-            .push(section("Songs", artist.songs.len(), tokens))
-            .push(song_block(app, &artist.songs, view, true, tokens));
+            .push(section("Songs", songs.len(), tokens))
+            .push(song_block(app, &songs, view, true, tokens));
     }
     page.into()
 }
