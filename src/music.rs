@@ -1,6 +1,6 @@
-//! Music by artist: the artist list, the Songs list (song entries and
-//! rated album tracks together), and the matching behind the phone's
-//! replace dialogs (DESIGN.md section 5 of the phone's design).
+//! Music by artist: the artist list, the Songs list (song entries only;
+//! a rated album track stays on its album), and the matching behind the
+//! phone's replace dialogs (DESIGN.md section 5 of the phone's design).
 
 use crate::model::{Entry, EntryKind, MediaType, Track};
 
@@ -87,81 +87,23 @@ pub fn artists<'a>(entries: &[&'a Entry]) -> Vec<Artist<'a>> {
     artists
 }
 
-/// A row on the Songs tab: a song entry, or a rated track of an album.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Song<'a> {
-    Entry(&'a Entry),
-    Track { album: &'a Entry, track: &'a Track },
-}
-
-impl<'a> Song<'a> {
-    pub fn title(&self) -> &'a str {
-        match self {
-            Song::Entry(entry) => &entry.title,
-            Song::Track { track, .. } => &track.title,
-        }
-    }
-
-    /// The song entry, or the album a track is on: what a click opens.
-    pub fn entry(&self) -> &'a Entry {
-        match self {
-            Song::Entry(entry) | Song::Track { album: entry, .. } => entry,
-        }
-    }
-
-    pub fn rating(&self) -> Option<u8> {
-        match self {
-            Song::Entry(entry) => entry.rating,
-            Song::Track { track, .. } => Some(track.rating),
-        }
-    }
-
-    /// "Artist · Year": the year the song, or the album it is on, came
-    /// out.
-    pub fn subtitle(&self) -> String {
-        let entry = self.entry();
-        match entry.year() {
-            Some(year) => format!("{} · {year}", artist_of(entry)),
-            None => artist_of(entry).to_owned(),
-        }
+/// "Artist · Year" under a song outside its artist's page.
+pub fn song_subtitle(entry: &Entry) -> String {
+    match entry.year() {
+        Some(year) => format!("{} · {year}", artist_of(entry)),
+        None => artist_of(entry).to_owned(),
     }
 }
 
-/// The Songs tab: song entries and the rated tracks of albums, in the
-/// order of `entries` (the current sort), a track right after its album
-/// would have been.
-pub fn songs<'a>(entries: &[&'a Entry]) -> Vec<Song<'a>> {
-    let mut songs = Vec::new();
-    for &entry in entries.iter().filter(|e| e.media == MediaType::Music) {
-        if is_song(entry) {
-            songs.push(Song::Entry(entry));
-        } else {
-            songs.extend(entry.tracks.iter().flatten().map(|track| Song::Track {
-                album: entry,
-                track,
-            }));
-        }
-    }
-    songs
-}
-
-/// The Songs tab under a search: a track shows when its title holds the
-/// search or its album matches on its own (title, artist, tags), so
-/// searching an artist lists every song of theirs and searching a song
-/// lists that song, not the rest of its album.
-pub fn songs_matching<'a>(entries: &[&'a Entry], query: &str) -> Vec<Song<'a>> {
-    let needle = crate::browse::search_needle(query);
-    let mut songs = songs(entries);
-    if !needle.is_empty() {
-        songs.retain(|song| match song {
-            Song::Entry(_) => true,
-            Song::Track { album, track } => {
-                crate::browse::matches_entry(album, &needle)
-                    || track.title.to_lowercase().contains(&needle)
-            }
-        });
-    }
-    songs
+/// The Songs tab: song entries only, in the order of `entries` (the
+/// current sort). A track rated on an album stays on its album and shows
+/// only there; a song entry is a song liked on its own.
+pub fn songs<'a>(entries: &[&'a Entry]) -> Vec<&'a Entry> {
+    entries
+        .iter()
+        .copied()
+        .filter(|e| e.media == MediaType::Music && is_song(e))
+        .collect()
 }
 
 fn norm(text: Option<&str>) -> String {
@@ -272,44 +214,34 @@ mod tests {
     }
 
     #[test]
-    fn songs_mix_song_entries_and_rated_tracks() {
+    fn songs_are_song_entries_never_rated_tracks() {
         let library = library();
         let entries: Vec<&Entry> = library.entries.iter().collect();
         let songs = songs(&entries);
-        let rooster = songs.iter().find(|s| s.title() == "Rooster").unwrap();
-        assert_eq!(rooster.entry().title, "Dirt", "a track opens its album");
-        assert_eq!(rooster.subtitle(), "Alice in Chains · 1992");
-        assert!(songs.iter().any(|s| s.title() == "Human Fly"));
+        assert!(songs.iter().all(|s| is_song(s)));
+        let human_fly = songs.iter().find(|s| s.title == "Human Fly").unwrap();
+        assert_eq!(song_subtitle(human_fly), "The Cramps · 1981");
+        let dirt = library.entries.iter().find(|e| e.title == "Dirt").unwrap();
+        assert!(
+            dirt.tracks.iter().flatten().any(|t| t.title == "Rooster"),
+            "the fixture rates Rooster on Dirt"
+        );
+        assert!(
+            songs.iter().all(|s| s.title != "Rooster"),
+            "a rated track stays on its album"
+        );
     }
 
     #[test]
-    fn a_search_lists_an_artists_songs_or_the_matching_track() {
+    fn a_search_for_a_rated_track_finds_its_album_not_a_song() {
         let library = library();
-        let entries: Vec<&Entry> = library
-            .entries
-            .iter()
-            .filter(|e| crate::browse::matches_search(e, "alice in"))
-            .collect();
-        let titles: Vec<&str> = songs_matching(&entries, "alice in")
-            .iter()
-            .map(|s| s.title())
-            .collect();
-        assert_eq!(
-            titles,
-            ["Them Bones", "Rooster", "Down in a Hole"],
-            "every track by the artist"
-        );
-
         let entries: Vec<&Entry> = library
             .entries
             .iter()
             .filter(|e| crate::browse::matches_search(e, "rooster"))
             .collect();
-        let titles: Vec<&str> = songs_matching(&entries, "rooster")
-            .iter()
-            .map(|s| s.title())
-            .collect();
-        assert_eq!(titles, ["Rooster"], "not the rest of the album");
+        assert!(entries.iter().any(|e| e.title == "Dirt"));
+        assert!(songs(&entries).is_empty());
     }
 
     #[test]

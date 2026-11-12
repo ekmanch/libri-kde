@@ -294,7 +294,7 @@ fn answer_words(overlap: &Overlap, choice: ReplaceChoice, editing: bool) -> Answ
                 "Rate it on the album",
                 match rating {
                     Some(rating) => format!(
-                        "Saves your {rating}/10 for {song} in {album}'s tracks. No new entry; it shows under Songs and opens the album."
+                        "Saves your {rating}/10 for {song} in {album}'s tracks. No new entry; it shows on the album, not under Songs."
                     ),
                     None => format!(
                         "Give {song} a rating first: only rated tracks are kept on an album."

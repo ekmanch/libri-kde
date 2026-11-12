@@ -1161,8 +1161,8 @@ impl State {
     /// The covers the list draws, in its order: as [`Self::display_order`],
     /// but a series folded into one row wants only the part whose cover
     /// stands for it (the one picked, else the first in the series). The
-    /// Songs tab wants one cover per tile, an album's track with its
-    /// album's cover, so the scroll position maps onto the tiles drawn.
+    /// Songs tab wants one cover per tile (its song entries), so the
+    /// scroll position maps onto the tiles drawn.
     pub fn cover_order(&self, library: &Library, today: Date) -> Vec<String> {
         if self.page.is_none()
             && !self.soon
@@ -1171,12 +1171,9 @@ impl State {
             && self.single() == Some(MediaType::Music)
         {
             let listing = self.listing(library, today);
-            return crate::music::songs_matching(&listing.shown, &self.query)
+            return crate::music::songs(&listing.shown)
                 .iter()
-                .map(|song| match song {
-                    crate::music::Song::Entry(e) => e.id.clone(),
-                    crate::music::Song::Track { album, .. } => album.id.clone(),
-                })
+                .map(|song| song.id.clone())
                 .collect();
         }
         if self.page.is_none()
@@ -1231,10 +1228,7 @@ impl State {
                     .collect(),
                 (None, MusicTab::Songs) => crate::music::songs(&listing.shown)
                     .iter()
-                    .filter_map(|song| match song {
-                        crate::music::Song::Entry(e) => Some(e.id.clone()),
-                        crate::music::Song::Track { .. } => None,
-                    })
+                    .map(|song| song.id.clone())
                     .collect(),
             };
         }
@@ -1823,7 +1817,7 @@ mod tests {
     }
 
     #[test]
-    fn the_songs_tab_asks_for_a_cover_per_tile_tracks_with_their_albums() {
+    fn the_songs_tab_asks_for_a_cover_per_song_entry() {
         let mut app = App::new(crate::screens::Screen::Library);
         app.library
             .update(Message::ShowType(Some(MediaType::Music)));
@@ -1832,12 +1826,17 @@ mod tests {
         let listing = app.library.listing(library, app.today);
         let tiles: Vec<String> = crate::music::songs(&listing.shown)
             .iter()
-            .map(|song| song.entry().id.clone())
+            .map(|song| song.id.clone())
             .collect();
-        assert!(tiles.len() > 5, "the fixture's songs and album tracks");
+        assert!(!tiles.is_empty(), "the fixture's songs");
+        // A track rated on an album is no tile: its album's id is not in
+        // the Songs tab's order.
+        assert!(
+            tiles
+                .iter()
+                .all(|id| library.entry(id).is_some_and(crate::music::is_song))
+        );
         let order = app.library.cover_order(library, app.today);
-        // Before, only the song entries were counted, so the scroll mapped
-        // onto the wrong tiles and a song's cover was never asked for.
         assert_eq!(order, tiles);
         app.library.update(Message::Scrolled(Scroll {
             offset: 0.0,
