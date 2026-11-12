@@ -1363,7 +1363,8 @@ impl Form {
     }
 
     /// Ticks the match's tags the library has and offers the rest: the
-    /// genres in the library's spelling, the creator (an author, a
+    /// genres in the library's spelling (one made of the library's tags,
+    /// "Indie Pop", as those tags), the creator (an author, a
     /// director, a studio; a brand studio over its director), the top
     /// billed cast as actors (a person the library has under another
     /// people category is offered with the new role), the language (never
@@ -1392,7 +1393,10 @@ impl Form {
             }
         };
         for tag in found.tags.iter().take(lookup::text::MAX_BOOK_TAGS) {
-            offer(self, lookup::text::canonical_tag(tag), None);
+            let known = |tag: &str| !library.categories_of(tag).is_empty();
+            for tag in lookup::text::library_tags(tag, known) {
+                offer(self, tag, None);
+            }
         }
         if matches!(self.media, MediaType::Movies | MediaType::Shows) {
             for name in found.cast.iter().take(MAX_ACTOR_TAGS) {

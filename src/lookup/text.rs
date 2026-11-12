@@ -284,7 +284,7 @@ pub const MAX_BOOK_TAGS: usize = 6;
 
 /// Spellings a lookup uses for a tag the library spells otherwise, so a
 /// synonym is never offered as a new tag beside the one that is there.
-const TAG_ALIASES: [(&str, &str); 30] = [
+const TAG_ALIASES: [(&str, &str); 31] = [
     ("science-fiction", "scifi"),
     ("sci-fi", "scifi"),
     ("sf", "scifi"),
@@ -318,17 +318,54 @@ const TAG_ALIASES: [(&str, &str); 30] = [
     ("alternativmusik", "alternative"),
     ("filmmusik", "movie-music"),
     ("film-scores", "movie-music"),
+    ("electro", "electronic"),
 ];
 
 /// A lookup's genre as the library's tag: normalized with any brackets
 /// dropped ("Role-playing (RPG)"), then the library's spelling when the
 /// alias table has one.
 pub fn canonical_tag(raw: &str) -> String {
-    let name = text::normalize_tag(&raw.replace(['(', ')', '[', ']'], " "));
+    aliased(text::normalize_tag(&raw.replace(['(', ')', '[', ']'], " ")))
+}
+
+/// The library's spelling of a normalized name, when the alias table has
+/// one.
+fn aliased(name: String) -> String {
     TAG_ALIASES
         .iter()
         .find(|(alias, _)| *alias == name)
         .map_or(name, |(_, tag)| (*tag).to_owned())
+}
+
+/// A lookup's genre as the tags to offer for it: [`canonical_tag`], or,
+/// when the library (`has`) lacks that tag but has every tag the name is
+/// made of, those instead: "Indie Pop" is #indie and #pop, "Indie
+/// Rock/Rock pop" is #indie, #rock and #pop. A name with a word the
+/// library has no tag for stays whole.
+pub fn library_tags(raw: &str, has: impl Fn(&str) -> bool) -> Vec<String> {
+    let name = canonical_tag(raw);
+    if has(&name) {
+        return vec![name];
+    }
+    let words: Vec<&str> = name.split('-').collect();
+    let mut tags: Vec<String> = Vec::new();
+    let mut start = 0;
+    while start < words.len() {
+        // The longest run of words that is a tag, so "hack-and-slash"
+        // is found before "hack".
+        let run = (start + 1..=words.len()).rev().find_map(|end| {
+            let tag = aliased(words[start..end].join("-"));
+            has(&tag).then_some((tag, end))
+        });
+        let Some((tag, end)) = run else {
+            return vec![name];
+        };
+        if !tags.contains(&tag) {
+            tags.push(tag);
+        }
+        start = end;
+    }
+    tags
 }
 
 /// The tag a language code names (#japanese for "ja"), keyed by the
@@ -766,6 +803,21 @@ mod tests {
         assert_eq!(canonical_tag("Alternativmusik"), "alternative");
         assert_eq!(canonical_tag("Filmmusik"), "movie-music");
         assert_eq!(canonical_tag("Film Scores"), "movie-music");
+        assert_eq!(canonical_tag("Electro"), "electronic");
+    }
+
+    #[test]
+    fn a_genre_made_of_the_librarys_tags_becomes_those_tags() {
+        let library = ["indie", "pop", "rock", "electronic", "hack-and-slash"];
+        let tags = |raw: &str| library_tags(raw, |tag| library.contains(&tag));
+        assert_eq!(tags("Indie Pop"), ["indie", "pop"]);
+        assert_eq!(tags("Indie Rock/Rock pop"), ["indie", "rock", "pop"]);
+        assert_eq!(tags("Electro Pop"), ["electronic", "pop"]);
+        assert_eq!(tags("Hack and slash rock"), ["hack-and-slash", "rock"]);
+        assert_eq!(tags("Rock"), ["rock"]);
+        // A word the library has no tag for keeps the name whole.
+        assert_eq!(tags("Indie Folk"), ["indie-folk"]);
+        assert_eq!(tags("Grunge"), ["grunge"]);
     }
 
     #[test]
