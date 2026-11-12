@@ -55,7 +55,12 @@ impl Deezer {
     /// (quota is rate limited, "no data" is `None`), else the JSON.
     fn data(&self, path: &str, query: &[(&str, &str)]) -> Reply<Option<Value>> {
         let url = http::url(&format!("{API}{path}"), query);
-        let response = self.http.get(&url, &[("Accept", "application/json")])?;
+        // Deezer names genres in the language of the caller's country
+        // ("Alternativmusik" from Sweden) unless told which one to use.
+        let response = self.http.get(
+            &url,
+            &[("Accept", "application/json"), ("Accept-Language", "en")],
+        )?;
         self.http.check(&response, &[200])?;
         let json = response.object()?;
         if let Some(error) = json.get("error").filter(|e| e.is_object()) {

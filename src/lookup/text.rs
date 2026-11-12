@@ -284,7 +284,7 @@ pub const MAX_BOOK_TAGS: usize = 6;
 
 /// Spellings a lookup uses for a tag the library spells otherwise, so a
 /// synonym is never offered as a new tag beside the one that is there.
-const TAG_ALIASES: [(&str, &str); 27] = [
+const TAG_ALIASES: [(&str, &str); 30] = [
     ("science-fiction", "scifi"),
     ("sci-fi", "scifi"),
     ("sf", "scifi"),
@@ -313,6 +313,11 @@ const TAG_ALIASES: [(&str, &str); 27] = [
     ("rap-hip-hop", "hiphop"),
     ("hip-hop-rap", "hiphop"),
     ("hip-hop", "hiphop"),
+    // Deezer's genres in Swedish, as it named them by the caller's
+    // country before the lookup asked for English, and "Film Scores".
+    ("alternativmusik", "alternative"),
+    ("filmmusik", "movie-music"),
+    ("film-scores", "movie-music"),
 ];
 
 /// A lookup's genre as the library's tag: normalized with any brackets
@@ -758,6 +763,9 @@ mod tests {
         assert_eq!(canonical_tag("Role-playing (RPG)"), "rpg");
         assert_eq!(canonical_tag("Dark"), "dark");
         assert_eq!(canonical_tag("Rap/Hip Hop"), "hiphop");
+        assert_eq!(canonical_tag("Alternativmusik"), "alternative");
+        assert_eq!(canonical_tag("Filmmusik"), "movie-music");
+        assert_eq!(canonical_tag("Film Scores"), "movie-music");
     }
 
     #[test]
