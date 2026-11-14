@@ -4,7 +4,7 @@
 use iced::widget::{Column, Row, button, column, container, row, space, text};
 use iced::{Background, Border, Center, Element, Fill, Padding};
 
-use super::{Listing, Message, MusicTab, Popup, SEARCH_ID, TOP_TAGS, View};
+use super::{Listing, Message, MusicTab, Popup, SEARCH_ID, State, TOP_TAGS, View};
 use crate::app::{App, Message as AppMessage};
 use crate::browse::{self, Decade};
 use crate::model::{Entry, MediaType};
@@ -92,14 +92,15 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         .on_dismiss(msg(Message::ClosePopup));
 
     // The overview counts the whole library, an artist's page the artist's
-    // entries, a list what it shows.
+    // entries, a list what it shows: on Music's tabs the artists, the
+    // albums or the songs.
     let count = if state.is_overview() {
         app.repo.library().count(None)
     } else if let Some(artist) = &state.artist {
         let of_artist = |e: &&&Entry| crate::music::artist_of(e).eq_ignore_ascii_case(artist);
         listing.shown.iter().filter(of_artist).count()
     } else {
-        listing.shown.len()
+        state.count_shown(&listing.shown)
     };
 
     let current = state.view_mode();
@@ -264,7 +265,7 @@ fn filter_panel<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessa
 
     let result = text(format!(
         "{} shown",
-        count_noun(state.single(), listing.shown.len())
+        shown_noun(state, state.count_shown(&listing.shown))
     ))
     .size(13)
     .color(tokens.sub)
@@ -310,6 +311,20 @@ fn filter_panel<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessa
         .padding(14)
         .style(move |_| ui::panel_style(&tokens, 12.0))
         .into()
+}
+
+/// What the list on screen counts: Music's tabs their artists, albums or
+/// songs, every other list its entries.
+fn shown_noun(state: &State, n: usize) -> String {
+    if !super::music_tabs_shown(state) {
+        return count_noun(state.single(), n);
+    }
+    let (one, many) = match state.music_tab {
+        MusicTab::Artists => ("artist", "artists"),
+        MusicTab::Albums => ("album", "albums"),
+        MusicTab::Songs => ("song", "songs"),
+    };
+    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// "1 movie", "9 movies", "3 entries".
@@ -401,16 +416,23 @@ pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage>
                 .is_none_or(|artist| crate::music::artist_of(e).eq_ignore_ascii_case(artist))
         })
         .collect();
+    // Music's tabs count what they list: an artist under each status
+    // they have an album or a song in.
     let all = ui::status_chip(
         "All",
-        base.len(),
+        state.count_shown(&base),
         state.status.is_none(),
         &tokens,
         msg(Message::Status(None)),
     );
     chips = chips.push(all);
     for status in browse::status_options(&state.types) {
-        let count = base.iter().filter(|e| e.status == status).count();
+        let with_status: Vec<&Entry> = base
+            .iter()
+            .copied()
+            .filter(|e| e.status == status)
+            .collect();
+        let count = state.count_shown(&with_status);
         let label = browse::status_label(state.single(), status);
         let on = state.status == Some(status);
         chips = chips.push(ui::status_chip(
@@ -516,5 +538,13 @@ mod tests {
         assert_eq!(count_noun(Some(MediaType::Movies), 1), "1 movie");
         assert_eq!(count_noun(None, 3), "3 entries");
         assert_eq!(count_noun(Some(MediaType::Music), 2), "2 albums and songs");
+
+        let mut state = State::default();
+        state.update(Message::ShowType(Some(MediaType::Music)));
+        assert_eq!(shown_noun(&state, 1), "1 artist");
+        state.update(Message::MusicTab(MusicTab::Songs));
+        assert_eq!(shown_noun(&state, 4), "4 songs");
+        state.update(Message::OpenArtist("Metallica".into()));
+        assert_eq!(shown_noun(&state, 4), "4 albums and songs");
     }
 }

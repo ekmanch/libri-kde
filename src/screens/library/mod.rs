@@ -1168,6 +1168,25 @@ impl State {
         shown
     }
 
+    /// How many things of `entries` the list on screen shows, for the
+    /// header and the status chips: on Music's tabs the artists, the
+    /// albums or the songs (with the rated tracks a search brings in),
+    /// everywhere else the entries themselves.
+    pub fn count_shown(&self, entries: &[&Entry]) -> usize {
+        if !music_tabs_shown(self) {
+            return entries.len();
+        }
+        let music = entries.iter().filter(|e| e.media == MediaType::Music);
+        match self.music_tab {
+            MusicTab::Artists => music
+                .map(|e| crate::music::artist_of(e).to_ascii_lowercase())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            MusicTab::Albums => music.filter(|e| !crate::music::is_song(e)).count(),
+            MusicTab::Songs => crate::music::songs_matching(entries, &self.query).len(),
+        }
+    }
+
     pub fn single(&self) -> Option<MediaType> {
         match self.types.len() {
             1 => self.types.first().copied(),
@@ -1767,6 +1786,39 @@ mod tests {
         by_rating.update(Message::MusicTab(MusicTab::Songs));
         assert_eq!(beside, by_rating.listing(library, app.today).shown);
         assert_ne!(beside, listing.shown);
+    }
+
+    #[test]
+    fn musics_tabs_count_what_they_list() {
+        let library = library();
+        let today = today();
+        let mut state = State::default();
+        state.update(Message::ShowType(Some(MediaType::Music)));
+        let listing = state.listing(&library, today);
+        let entries = listing.shown.len();
+        let albums = listing
+            .shown
+            .iter()
+            .filter(|e| !crate::music::is_song(e))
+            .count();
+        let artists = crate::music::artists(&listing.shown, Sort::TitleAz).len();
+        assert!(albums > 0 && albums < entries);
+
+        // An artist counts once, however many albums and songs they have.
+        assert_eq!(state.count_shown(&listing.shown), artists);
+        let (first, second) = (listing.shown[0], listing.shown[1]);
+        assert_eq!(state.count_shown(&[first, first, second]), 2);
+        state.update(Message::MusicTab(MusicTab::Albums));
+        assert_eq!(state.count_shown(&listing.shown), albums);
+        state.update(Message::MusicTab(MusicTab::Songs));
+        assert_eq!(state.count_shown(&listing.shown), entries - albums);
+
+        // An artist's page and every other list count their entries.
+        state.update(Message::OpenArtist("Metallica".into()));
+        assert_eq!(state.count_shown(&listing.shown), entries);
+        state.update(Message::ShowType(Some(MediaType::Movies)));
+        let movies = state.listing(&library, today);
+        assert_eq!(state.count_shown(&movies.shown), movies.shown.len());
     }
 
     #[test]
