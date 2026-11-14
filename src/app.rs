@@ -1358,6 +1358,7 @@ impl App {
         let from = (message.navigates() && self.screen.in_history()).then(|| self.place());
         let selected = self.library.selected.clone();
         let page = self.library.page.is_some();
+        let artist = self.library.artist.is_some();
         let drawer = library::drawer_state(self);
         let closes = library::closes_drawer(&message);
         let plan_drawer = plans::drawer_state(self);
@@ -1373,8 +1374,12 @@ impl App {
         if !library::music_tabs_shown(&self.library) {
             self.library.tab_slide = None;
         }
-        // Back from a page, the list or Home is where it was left.
-        let task = if page && self.library.page.is_none() && self.screen == Screen::Library {
+        // Back from a page, the list or Home is where it was left; so is
+        // Music's tab back from an artist, whose page starts at the top.
+        let back = page && self.library.page.is_none();
+        let turned = artist != self.library.artist.is_some()
+            && (!artist || library::music_tabs_shown(&self.library));
+        let task = if (back || turned) && self.screen == Screen::Library {
             Task::batch([task, library::restore_scroll(&self.library)])
         } else {
             task
@@ -2555,6 +2560,32 @@ mod tests {
         assert_eq!(app.library.query, "met");
         forward(&mut app);
         assert_eq!(app.library.artist.as_deref(), Some("Metallica"));
+    }
+
+    #[test]
+    fn closing_an_artist_page_returns_to_where_the_list_was_scrolled() {
+        let mut app = App::new(Screen::Library);
+        let _ = app.update(Message::Library(library::Message::ShowType(Some(
+            MediaType::Music,
+        ))));
+        let open = || Message::Library(library::Message::OpenArtist("Metallica".into()));
+        app.library.scroll.offset = 640.0;
+        let _ = app.update(open());
+        assert_eq!(app.library.scroll.offset, 0.0, "the page starts at the top");
+        app.library.scroll.offset = 90.0;
+        back(&mut app);
+        assert_eq!(app.library.scroll.offset, 640.0, "Back");
+        forward(&mut app);
+        assert_eq!(app.library.scroll.offset, 0.0, "Forward");
+        let _ = app.update(Message::Library(library::Message::CloseArtist));
+        assert_eq!(app.library.scroll.offset, 640.0, "the header's arrow");
+
+        // Each tab's own place, also when the page closes onto another.
+        let _ = app.update(open());
+        let _ = app.update(Message::Library(library::Message::MusicTab(
+            library::MusicTab::Albums,
+        )));
+        assert_eq!(app.library.scroll.offset, 0.0, "a tab not seen yet");
     }
 
     #[test]

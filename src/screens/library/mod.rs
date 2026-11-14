@@ -592,6 +592,7 @@ impl State {
         if place != self.place() {
             self.list_changed();
         }
+        let (artist, left) = (self.artist.is_some(), self.scroll.offset);
         self.types = place.types;
         self.status = place.status;
         self.filter = place.filter;
@@ -609,17 +610,39 @@ impl State {
         self.picker = None;
         self.season_menu = None;
         self.cover_dialog = None;
+        self.artist_turned(artist, left);
     }
 
     pub fn update(&mut self, message: Message) {
         let before = self.place();
+        let (artist, left) = (self.artist.is_some(), self.scroll.offset);
         self.handle(message);
+        self.artist_turned(artist, left);
         // Another list: its size is not known until it reports it, and a
         // list that fits on screen never does (iced reports a scroll area
         // only when it scrolls), so the covers asked for would follow the
         // last list's size. The offset stays for Back to restore.
         if self.place() != before {
             self.list_changed();
+        }
+    }
+
+    /// An artist's page opening or closing (`open` and `left`: whether one
+    /// was open before, and where the list was scrolled): the page starts
+    /// at the top, and the tab it came from is back where it was left, as
+    /// after a switch of tab. The page is a scroll area of its own, so
+    /// `App::update` scrolls the new one there.
+    fn artist_turned(&mut self, open: bool, left: f32) {
+        if open == self.artist.is_some() {
+            return;
+        }
+        if open {
+            if music_tabs_shown(self) {
+                self.scroll.offset = self.tab_scroll.get(&self.music_tab).copied().unwrap_or(0.0);
+            }
+        } else {
+            self.tab_scroll.insert(self.music_tab, left);
+            self.scroll.offset = 0.0;
         }
     }
 
