@@ -1353,6 +1353,80 @@ fn capture_every_screen() {
                 )));
             }),
         ),
+        // The plan page's panel (2026-11-14): the header is the same on
+        // both tabs; the All tab's glance and its popover, a title's
+        // details pinned, and the drawer while unpinned.
+        (
+            Screen::Plans,
+            ("plan-all", |app| {
+                let _ = app.update(Message::Plans(plans::Message::ShowCollection(
+                    "halloween-2026".into(),
+                )));
+            }),
+        ),
+        (
+            Screen::Plans,
+            ("plan-all-covers", |app| {
+                let _ = app.update(Message::Plans(plans::Message::ShowCollection(
+                    "halloween-2026".into(),
+                )));
+                let _ = app.update(Message::Plans(plans::Message::SetCovers(true)));
+            }),
+        ),
+        (
+            Screen::Plans,
+            ("plan-all-seeall", |app| {
+                let _ = app.update(Message::Plans(plans::Message::ShowCollection(
+                    "halloween-2026".into(),
+                )));
+                let _ = app.update(Message::Plans(plans::Message::ToggleGlancePop(
+                    plans::GlancePop::Left,
+                )));
+            }),
+        ),
+        (
+            Screen::Plans,
+            ("plan-all-entry", |app| {
+                let _ = app.update(Message::Plans(plans::Message::ShowCollection(
+                    "halloween-2026".into(),
+                )));
+                let _ = app.update(Message::Plans(plans::Message::Select(
+                    "movies/the-thing-1982".into(),
+                )));
+            }),
+        ),
+        (
+            Screen::Plans,
+            ("plan-entry", |app| {
+                let _ = app.update(Message::Plans(plans::Message::ShowPlan(
+                    "halloween-2026".into(),
+                )));
+                let _ = app.update(Message::Plans(plans::Message::Select(
+                    "movies/the-thing-1982".into(),
+                )));
+            }),
+        ),
+        (
+            Screen::Plans,
+            ("plan-drawer", |app| {
+                let _ = app.update(Message::Plans(plans::Message::ShowPlan(
+                    "halloween-2026".into(),
+                )));
+                let _ = app.update(Message::Plans(plans::Message::TogglePanel));
+                let _ = app.update(Message::Plans(plans::Message::Select(
+                    "movies/the-thing-1982".into(),
+                )));
+            }),
+        ),
+        (
+            Screen::Plans,
+            ("plan-unpinned", |app| {
+                let _ = app.update(Message::Plans(plans::Message::ShowCollection(
+                    "halloween-2026".into(),
+                )));
+                let _ = app.update(Message::Plans(plans::Message::TogglePanel));
+            }),
+        ),
         (
             Screen::Plans,
             ("plan-note-draft", |app| {

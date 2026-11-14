@@ -3,7 +3,8 @@
 //! phase 2). What is kept: Settings' choices (theme, background style,
 //! accent, timeline default, seasonal touches, default platform), the
 //! sidebar's tag mode, pins and type checkboxes, the view and the details
-//! panel's pin per type, each plan's look and the changed shortcuts. The file is written whenever one of them changes.
+//! panel's pin per type, the plan page's pin, each plan's look and the
+//! changed shortcuts. The file is written whenever one of them changes.
 //!
 //! The file is plain JSON with readable words, so a hand edit or an
 //! older file reads back: a key that is missing or holds a value Libri
@@ -47,6 +48,9 @@ pub struct Preferences {
     /// Whether the details panel is pinned, per list as `views`; a list
     /// not in it is pinned.
     pub panels: BTreeMap<String, bool>,
+    /// Whether the plan page's details panel is pinned: one choice for
+    /// every plan and both of its tabs.
+    pub plan_panel: bool,
     /// Each plan's look, by plan id.
     pub plans: BTreeMap<String, PlanLook>,
     /// The shortcuts changed in Settings: "panel": "Ctrl+P".
@@ -76,6 +80,7 @@ impl Default for Preferences {
             type_boxes: false,
             views: BTreeMap::new(),
             panels: BTreeMap::new(),
+            plan_panel: true,
             plans: BTreeMap::new(),
             keys: BTreeMap::new(),
         }
@@ -110,6 +115,7 @@ impl Preferences {
                 .map(|(key, pinned)| (view_key(*key).to_owned(), *pinned))
                 .collect(),
             keys: app.keymap.to_prefs(),
+            plan_panel: !app.plans.unpinned,
             plans: app
                 .plans
                 .styles
@@ -157,6 +163,7 @@ impl Preferences {
             .filter_map(|(key, pinned)| Some((view_key_from(key)?, *pinned)))
             .collect();
         app.keymap = crate::keymap::Keymap::from_prefs(&self.keys);
+        app.plans.unpinned = !self.plan_panel;
         app.plans.styles = self
             .plans
             .iter()

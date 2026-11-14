@@ -1,19 +1,24 @@
 //! One plan: the seasonal banner, the header (year menu, state, dates,
-//! This plan or All, View, Edit plan), progress, then the checklist or the
-//! timeline, and on the right the details or "Add to this plan". The
-//! collection ("All Halloween") shares the header and lists everything
-//! with the plan's tags.
+//! This plan or All, View, Edit plan, the panel button) and the progress
+//! row, the same on both tabs so nothing moves between them; under them
+//! the list (the checklist or the timeline, or on All everything with the
+//! plan's tags) and the details panel, the library's: pinned beside the
+//! list ("Add to this plan" or the All tab's glance while nothing is
+//! selected) or a drawer over it while a title is open.
+
+use std::time::Instant;
 
 use iced::widget::{Column, Row, Space, button, column, container, row, space, stack, svg, text};
 use iced::{Background, Border, Center, Element, Fill, FillPortion, Padding};
 
 use super::overview::{card_style, footer, pill, plan_accent, progress};
-use super::{Message, Page, Popup, collection_title};
+use super::{Message, Page, Popup, glance};
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
 use crate::model::{Entry, EntryStatus, MediaType, Plan, PlanItem};
 use crate::plans::{self as rules, Season, TimelineState};
 use crate::screens::entry;
+use crate::screens::library::{self, Motion, Shown};
 use crate::screens::shell::{self, shell};
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, Align, ButtonKind, FocusExt, Icon, Popover, seasonal::Art};
@@ -38,11 +43,13 @@ pub fn view<'a>(app: &'a App, plan: &'a Plan) -> Element<'a, AppMessage> {
     let on_collection = matches!(app.plans.page, Page::Collection(_));
     let season = super::shown_season(app, plan);
 
-    let mut main = Column::new();
+    // The banner and the header span the content's full width and never
+    // move; the panel starts under them.
+    let mut top = Column::new();
     if let Some(season) = season {
-        main = main.push(banner(season, &tokens));
+        top = top.push(banner(season, &tokens));
     }
-    main = main
+    top = top
         .push(header(app, plan, on_collection, &tokens))
         .push(ui::rule(tokens.line.scale_alpha(0.5)));
     let style = app.plans.style(&plan.id, tokens.light);
@@ -53,29 +60,67 @@ pub fn view<'a>(app: &'a App, plan: &'a Plan) -> Element<'a, AppMessage> {
     } else {
         checklist(app, plan, style, &tokens)
     };
-    main = main
-        .push(ui::scroll(container(body).padding(Padding::new(28.0).top(20))).height(Fill))
-        .push(footer(app));
+    let list = column![
+        ui::scroll(container(body).padding(Padding::new(28.0).top(20))).height(Fill),
+        footer(app)
+    ];
+    // Unpinned, the details slide in as a drawer over the list's right
+    // side; the layer is there either way, so the list keeps its place in
+    // the tree. Pinned, only the list and the footer narrow for the panel.
+    let pinned = !app.plans.unpinned;
+    let over = if pinned { None } else { drawer(app, plan) };
+    let under = stack![list, over.unwrap_or_else(|| space().into())];
+    let mut lower = row![container(under).width(Fill)];
+    if pinned {
+        lower = lower.push(side(app, plan, on_collection, style.covers, &tokens));
+    }
+    shell(app, column![top, lower])
+}
 
-    let side: Option<Element<'a, AppMessage>> = match app
+/// The pinned panel, as wide on both tabs: the selected title's details,
+/// else "Add to this plan" on This plan and the glance on All.
+fn side<'a>(
+    app: &'a App,
+    plan: &'a Plan,
+    on_collection: bool,
+    covers: bool,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let selected = app
         .plans
         .selected
         .as_deref()
-        .and_then(|id| app.repo.library().entry(id))
-    {
-        Some(selected) => Some(
-            container(entry::details::view(app, selected, Some(plan)))
-                .width(entry::details::WIDTH)
-                .into(),
-        ),
-        None if !on_collection => Some(pool(app, plan, style.covers, &tokens)),
-        None => None,
+        .and_then(|id| app.repo.library().entry(id));
+    let content = match selected {
+        Some(entry) => entry::details::view(app, entry, Some(plan)),
+        None if on_collection => glance::view(app, plan, *tokens),
+        None => pool(app, plan, covers, tokens),
     };
-    let content: Element<'a, AppMessage> = match side {
-        Some(side) => row![container(main).width(Fill), side].into(),
-        None => main.into(),
+    container(content)
+        .width(entry::details::WIDTH)
+        .height(Fill)
+        .into()
+}
+
+/// The drawer over the list while a title is open and the panel is
+/// unpinned: the library's, with its pin, its ✕ and its slide.
+fn drawer<'a>(app: &'a App, plan: &'a Plan) -> Option<Element<'a, AppMessage>> {
+    let now = Instant::now();
+    let library = app.repo.library();
+    let selected = || library.entry(app.plans.selected.as_deref()?);
+    let (entry, progress) = match &app.plans.motion {
+        Motion::Still => (selected()?, 1.0),
+        Motion::Opening(slide) => (selected()?, slide.progress(now)),
+        Motion::Closing(slide, Shown::Entry(id)) => (library.entry(id)?, 1.0 - slide.progress(now)),
+        Motion::Closing(..) => return None,
     };
-    shell(app, content)
+    Some(library::drawer_face(
+        entry::details::view(app, entry, Some(plan)),
+        progress,
+        Some(msg(Message::TogglePanel)),
+        msg(Message::ClosePanel),
+        &app.tokens(),
+    ))
 }
 
 /// The 120 px strip: its own row, nothing on top of it but Halloween's
@@ -102,11 +147,7 @@ fn header<'a>(
 ) -> Element<'a, AppMessage> {
     let state = &app.plans;
     let library = app.repo.library();
-    let crumb_text = if on_collection {
-        collection_title(plan)
-    } else {
-        plan.title()
-    };
+    let season = super::shown_season(app, plan);
     let ink_sub = tokens.sub;
     let crumb = row![
         button(text("All plans").size(13))
@@ -118,40 +159,35 @@ fn header<'a>(
             })
             .focusable(4.0, tokens),
         text("›").size(13).color(tokens.sub),
-        text(crumb_text).size(13).color(tokens.sub),
+        text(plan.title()).size(13).color(tokens.sub),
     ]
     .spacing(6);
 
+    // What the title row needs, to know when the actions get their own
+    // row: the same on both tabs, since nothing in it differs.
+    let mut needed = 2.0 * 28.0;
     let mut title = Row::new().spacing(12).align_y(Center);
-    if let Some(season) = super::shown_season(app, plan) {
+    if let Some(season) = season {
         title = title.push(ui::seasonal::art(season, Art::Icon, 34, 34, tokens));
+        needed += 34.0 + 12.0;
     }
-    let name = if on_collection {
-        collection_title(plan)
-    } else {
-        plan.name.clone()
-    };
-    title = title.push(text(name).size(30).font(font::EXTRABOLD));
-    if let (false, Some(year)) = (on_collection, plan.year) {
-        title = title.push(year_menu(app, plan, year, tokens));
+    title = title.push(text(&plan.name).size(30).font(font::EXTRABOLD));
+    needed += ui::text_width(&plan.name, 30.0, font::EXTRABOLD) + 12.0;
+    if let Some(year) = plan.year {
+        title = title.push(year_menu(app, plan, year, on_collection, tokens));
+        needed += 12.0 + ui::text_width(&year.to_string(), 17.0, font::SEMIBOLD) + 4.0 + 15.0 + 8.0;
+        needed += 12.0;
     }
-    if !on_collection {
-        title = title.push(pill(rules::plan_state(plan, app.today).label(), tokens));
-    }
-    let dates = if on_collection {
-        plan.tags
-            .iter()
-            .map(|t| format!("#{t}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    } else {
-        rules::date_span(plan)
-            .map(|s| rules::format_when(s, plan.year))
-            .unwrap_or_default()
-    };
+    let state_label = rules::plan_state(plan, app.today).label();
+    title = title.push(pill(state_label, tokens));
+    needed += ui::text_width(state_label, 12.0, font::SEMIBOLD) + 20.0 + 12.0;
+    let dates = rules::date_span(plan)
+        .map(|s| rules::format_when(s, plan.year))
+        .unwrap_or_default();
+    needed += ui::text_width(&dates, 13.0, font::MONO) + 12.0;
     title = title.push(ui::mono(dates, 13.0, tokens.sub));
-    // The scope tabs, View and Edit plan: beside the title, or on a row of
-    // their own when the window is narrow.
+    // The scope tabs, View, Edit plan and the panel button: beside the
+    // title, or on a row of their own when the window is narrow.
     let mut actions = Row::new().spacing(12).align_y(Center);
     if !plan.tags.is_empty() {
         let scope = [
@@ -167,6 +203,7 @@ fn header<'a>(
             ),
         ];
         actions = actions.push(container(ui::segmented(scope, 32.0, tokens)).width(200));
+        needed += 200.0 + 12.0;
     }
     let view_button = ui::menu_button(
         Some(Icon::Sliders),
@@ -178,78 +215,65 @@ fn header<'a>(
     );
     let view_popover =
         (state.popup == Some(Popup::View)).then(|| view_options(app, plan, on_collection, tokens));
-    actions = actions.push(
-        Popover::new(view_button, view_popover)
-            .align(Align::End)
-            .on_dismiss(msg(Message::ClosePopup)),
-    );
-    if !on_collection {
-        actions = actions.push(ui::labeled_button(
+    actions = actions
+        .push(
+            Popover::new(view_button, view_popover)
+                .align(Align::End)
+                .on_dismiss(msg(Message::ClosePopup)),
+        )
+        .push(ui::labeled_button(
             "Edit plan",
             ButtonKind::Outline,
             *tokens,
             Some(msg(Message::EditPlan)),
+        ))
+        .push(library::toggle_button(
+            !state.unpinned,
+            tokens,
+            msg(Message::TogglePanel),
         ));
-    }
-    let narrow = shell::content_width(app, entry::details::WIDTH) < 1000.0;
+    needed += ACTIONS_WIDTH;
+    let narrow = shell::content_width(app, 0.0) < needed;
     let mut header = Column::new().spacing(12).push(crumb);
     if narrow {
         header = header.push(title).push(row![space::horizontal(), actions]);
     } else {
         header = header.push(title.push(space::horizontal()).push(actions));
     }
-    if on_collection {
-        let all = rules::collection(plan, library).len();
-        let tags = plan
-            .tags
-            .iter()
-            .map(|t| format!("#{t}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        header = header.push(
-            text(format!(
-                "Everything tagged {tags} · {all} titles · {} in {}",
-                plan.items.len(),
-                plan.title()
-            ))
-            .size(13.5)
-            .color(tokens.sub),
-        );
+    let linked = if plan.tags.is_empty() {
+        "No tag".to_owned()
     } else {
-        let linked = if plan.tags.is_empty() {
-            "No tag".to_owned()
-        } else {
-            format!(
-                "Linked to {}",
-                plan.tags
-                    .iter()
-                    .map(|t| format!("#{t}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-        header = header.push(
-            row![
-                progress_with_marker(app, plan, tokens),
-                text(rules::progress_label(plan))
-                    .size(14)
-                    .font(font::SEMIBOLD),
-                text(linked).size(13).color(tokens.sub),
-            ]
-            .spacing(14)
-            .align_y(Center)
-            .padding(Padding::new(0.0).top(4)),
-        );
-    }
-    let top = if super::shown_season(app, plan).is_some() {
-        8.0
-    } else {
-        20.0
+        format!(
+            "Linked to {} · {} tagged",
+            plan.tags
+                .iter()
+                .map(|t| format!("#{t}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            rules::collection(plan, library).len()
+        )
     };
+    header = header.push(
+        row![
+            progress_with_marker(app, plan, tokens),
+            text(rules::progress_label(plan))
+                .size(14)
+                .font(font::SEMIBOLD),
+            text(linked).size(13).color(tokens.sub),
+        ]
+        .spacing(14)
+        .align_y(Center)
+        .padding(Padding::new(0.0).top(4)),
+    );
+    let top = if season.is_some() { 8.0 } else { 20.0 };
     container(header)
         .padding(Padding::new(28.0).top(top).bottom(16))
         .into()
 }
+
+/// About what View, Edit plan and the panel button take in the title row,
+/// with the gaps between them.
+const ACTIONS_WIDTH: f32 = 96.0 + 12.0 + 92.0 + 12.0 + 38.0;
 
 /// The year chip: the other years of the same plan, then "New year…",
 /// which copies this plan to the year after.
@@ -257,6 +281,7 @@ fn year_menu<'a>(
     app: &'a App,
     plan: &'a Plan,
     year: i32,
+    on_collection: bool,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let open = app.plans.popup == Some(Popup::Year);
@@ -301,7 +326,12 @@ fn year_menu<'a>(
                 .width(Fill)
                 .height(36)
                 .padding([0, 10])
-                .on_press(msg(Message::ShowPlan(other.id.clone())))
+                // Another year opens on the tab this one is on.
+                .on_press(msg(if on_collection && !other.tags.is_empty() {
+                    Message::ShowCollection(other.id.clone())
+                } else {
+                    Message::ShowPlan(other.id.clone())
+                }))
                 .style(ui::row_style(tokens, other.id == plan.id, 8.0))
                 .focusable(8.0, tokens),
             );
@@ -722,7 +752,8 @@ fn timeline_item<'a>(
         .focusable(8.0, &tokens)
 }
 
-/// All of the plan's tags: by type, with "In plan" or a + to add.
+/// All of the plan's tags: by type, with "In plan" or a + to add. A
+/// click on a row opens its details; the + only adds.
 fn collection<'a>(
     app: &'a App,
     plan: &'a Plan,
@@ -762,8 +793,14 @@ fn collection<'a>(
                 } else {
                     content.push(plus(tokens, msg(Message::AddItem(entry.id.clone()))))
                 };
+                let selected = app.plans.selected.as_deref() == Some(entry.id.as_str());
                 column![
-                    container(content).padding([6, 4]),
+                    button(content)
+                        .width(Fill)
+                        .padding([6, 4])
+                        .on_press(msg(Message::Select(entry.id.clone())))
+                        .style(ui::row_style(tokens, selected, 8.0))
+                        .focusable(8.0, tokens),
                     ui::rule(tokens.line.scale_alpha(0.5))
                 ]
                 .into()
@@ -902,7 +939,6 @@ fn pool<'a>(
         ]
         .spacing(14),
     )
-    .width(entry::details::WIDTH)
     .height(Fill)
     .padding([22, 20])
     .into()

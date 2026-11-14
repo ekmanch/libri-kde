@@ -31,7 +31,10 @@ use crate::settings::Source;
 use crate::tags::{PickerMessage, PickerState};
 use crate::ui;
 
-pub use panel::{Motion, Panel, Shown, closes_drawer, drawer_state, narrow, panel, slide_drawer};
+pub use panel::{
+    CLOSE, Motion, OPEN, Panel, Shown, closes_drawer, drawer_face, drawer_state, narrow, panel,
+    slide_drawer, spread, toggle_button,
+};
 
 /// The row of the Coming soon page the arrow keys and a click address.
 pub use soon::row_key;

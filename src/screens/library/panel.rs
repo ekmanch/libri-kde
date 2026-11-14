@@ -236,21 +236,37 @@ pub fn drawer<'a>(app: &'a App) -> Option<Element<'a, AppMessage>> {
         Motion::Opening(slide) => (details(app)?, slide.progress(now)),
         Motion::Closing(slide, shown) => (show(app, shown)?, 1.0 - slide.progress(now)),
     };
-    let tokens = app.tokens();
+    let pin = (!narrow(app)).then(|| msg(Message::TogglePanel));
+    Some(drawer_face(
+        details,
+        progress,
+        pin,
+        msg(Message::ClosePanel),
+        &app.tokens(),
+    ))
+}
+
+/// The drawer's face, `progress` of the way in from the right edge: the
+/// `details` under a pin (when there is a choice) and a close button, a
+/// shadow to the left that fades with the slide, and no scrim. Shared
+/// with the plan page, whose drawer is this one.
+pub fn drawer_face<'a>(
+    details: Element<'a, AppMessage>,
+    progress: f32,
+    pin: Option<AppMessage>,
+    close: AppMessage,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
     let mut buttons = Row::new().spacing(4);
-    if !narrow(app) {
-        buttons = buttons.push(small_button(
-            Icon::Panel,
-            &tokens,
-            msg(Message::TogglePanel),
-        ));
+    if let Some(pin) = pin {
+        buttons = buttons.push(small_button(Icon::Panel, tokens, pin));
     }
-    buttons = buttons.push(small_button(Icon::Close, &tokens, msg(Message::ClosePanel)));
+    buttons = buttons.push(small_button(Icon::Close, tokens, close));
     let head = container(buttons)
         .width(Fill)
         .align_x(iced::Right)
         .padding(Padding::new(0.0).top(10).right(10));
-    let t = tokens;
+    let t = *tokens;
     // No outline: the shadow alone sets the drawer off the list.
     let face = container(column![head, details])
         .width(entry::details::WIDTH)
@@ -272,13 +288,11 @@ pub fn drawer<'a>(app: &'a App) -> Option<Element<'a, AppMessage>> {
             ..container::Style::default()
         });
     let offset = entry::details::WIDTH * (1.0 - progress);
-    Some(
-        container(ui::slide(opaque(face), offset))
-            .width(Fill)
-            .height(Fill)
-            .align_x(iced::Right)
-            .into(),
-    )
+    container(ui::slide(opaque(face), offset))
+        .width(Fill)
+        .height(Fill)
+        .align_x(iced::Right)
+        .into()
 }
 
 /// A 32 px borderless icon button in the secondary color.
@@ -299,33 +313,43 @@ pub fn toggle<'a>(app: &App) -> Option<Element<'a, AppMessage>> {
     if panel(app) == Panel::Home || narrow(app) {
         return None;
     }
-    let tokens = app.tokens();
-    let pinned = app.library.pinned();
+    Some(toggle_button(
+        app.library.pinned(),
+        &app.tokens(),
+        msg(Message::TogglePanel),
+    ))
+}
+
+/// The panel button itself: 38 px wide, filled while `pinned`. The plan
+/// page's header has the same one after Edit plan.
+pub fn toggle_button<'a>(
+    pinned: bool,
+    tokens: &Tokens,
+    on_press: AppMessage,
+) -> Element<'a, AppMessage> {
     let (which, color) = if pinned {
         (Icon::PanelPinned, tokens.text)
     } else {
         (Icon::Panel, tokens.sub)
     };
-    let t = tokens;
-    Some(
-        button(container(ui::icon(which, 17.0, color)).center(Fill))
-            .width(38)
-            .height(36)
-            .padding(0)
-            .on_press(msg(Message::TogglePanel))
-            .style(move |_, status| button::Style {
-                background: if pinned {
-                    Some(Background::Color(t.selection))
-                } else if matches!(status, button::Status::Hovered) {
-                    Some(Background::Color(t.hover))
-                } else {
-                    None
-                },
-                border: Border::default().rounded(8).width(1).color(t.line),
-                ..button::Style::default()
-            })
-            .focusable(8.0, &tokens),
-    )
+    let t = *tokens;
+    button(container(ui::icon(which, 17.0, color)).center(Fill))
+        .width(38)
+        .height(36)
+        .padding(0)
+        .on_press(on_press)
+        .style(move |_, status| button::Style {
+            background: if pinned {
+                Some(Background::Color(t.selection))
+            } else if matches!(status, button::Status::Hovered) {
+                Some(Background::Color(t.hover))
+            } else {
+                None
+            },
+            border: Border::default().rounded(8).width(1).color(t.line),
+            ..button::Style::default()
+        })
+        .focusable(8.0, tokens)
 }
 
 /// How many rows the glance's sections show at most, and how many tags.
@@ -600,9 +624,14 @@ pub fn pick<'a>(listing: &Listing<'a>, pick: u64, today: Date) -> Option<&'a cra
     if wants.is_empty() {
         return None;
     }
-    // A spread, so "Another" does not just step to the neighbor.
+    Some(wants[spread(pick, wants.len())])
+}
+
+/// Which of `len` titles the pick `pick` is: a spread, so "Another" does
+/// not just step to the neighbor. `len` is never 0.
+pub fn spread(pick: u64, len: usize) -> usize {
     let mixed = pick.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(17);
-    Some(wants[(mixed % wants.len() as u64) as usize])
+    (mixed % len as u64) as usize
 }
 
 /// The covers the glance may show, for the lookups: whatever its

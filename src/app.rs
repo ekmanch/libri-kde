@@ -318,6 +318,7 @@ impl Message {
                     | P::Month(_)
                     | P::TogglePopup(_)
                     | P::ClosePopup
+                    | P::TogglePanel
             ),
             _ => self.leaves_pane(),
         }
@@ -1044,6 +1045,7 @@ impl App {
     pub fn update_at(&mut self, message: Message, now: Instant) -> Task<Message> {
         self.now = now;
         self.library.motion.settle(now);
+        self.plans.motion.settle(now);
         if self
             .library
             .slide
@@ -1089,11 +1091,14 @@ impl App {
         let page = self.library.page.is_some();
         let drawer = library::drawer_state(self);
         let closes = library::closes_drawer(&message);
+        let plan_drawer = plans::drawer_state(self);
+        let plan_closes = plans::closes_drawer(&message);
         let task = self.handle(message);
         if self.library.selected != selected {
             self.library.selection_moved();
         }
         library::slide_drawer(self, closes, drawer, now);
+        plans::slide_drawer(self, plan_closes, plan_drawer, now);
         if !library::music_tabs_shown(&self.library) {
             self.library.tab_slide = None;
         }
@@ -1193,8 +1198,16 @@ impl App {
                 Action::Close => Some(Message::Key(KeyPress::Escape)),
                 Action::Back => Some(Message::History(Direction::Back)),
                 Action::Forward => Some(Message::History(Direction::Forward)),
-                Action::Panel => (free && self.screen == Screen::Library)
-                    .then_some(Message::Library(library::Message::TogglePanel)),
+                // The library's panel, or the plan page's.
+                Action::Panel => match self.screen {
+                    Screen::Library if free => {
+                        Some(Message::Library(library::Message::TogglePanel))
+                    }
+                    Screen::Plans if free && self.plans.plan_id().is_some() => {
+                        Some(Message::Plans(plans::Message::TogglePanel))
+                    }
+                    _ => None,
+                },
                 Action::Settings => (free
                     && matches!(
                         self.screen,
@@ -1271,9 +1284,13 @@ impl App {
 
     /// Esc and Back on the library close the details panel first: a part
     /// picked from a series goes back to the series, anything else in the
-    /// panel closes (the drawer goes, Home's plan comes back). None when
+    /// panel closes (the drawer goes, Home's plan comes back). On a plan
+    /// page they close the open title's details the same way. None when
     /// the panel holds nothing.
     fn close_panel(&mut self) -> Option<Task<Message>> {
+        if self.screen == Screen::Plans && self.plans.selected.is_some() {
+            return Some(plans::update(self, plans::Message::ClosePanel));
+        }
         if self.screen != Screen::Library {
             return None;
         }
@@ -1798,6 +1815,7 @@ impl App {
         // The drawer's slide, the Coming soon page's slice slide and the
         // slide between Music's tabs draw every frame while they run.
         if self.library.motion.running()
+            || self.plans.motion.running()
             || self.library.slide.is_some()
             || self.library.tab_slide.is_some()
         {

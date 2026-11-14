@@ -159,6 +159,41 @@ pub fn done_count(plan: &Plan) -> usize {
     plan.items.iter().filter(|i| i.done).count()
 }
 
+/// The items not done yet, in the plan's order.
+pub fn left(plan: &Plan) -> impl Iterator<Item = &PlanItem> {
+    plan.items.iter().filter(|i| !i.done)
+}
+
+/// A type's share of a plan: how many of its items are done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TypeProgress {
+    pub media: MediaType,
+    pub done: usize,
+    pub total: usize,
+}
+
+/// The plan's progress per type, for the types it has: those with titles
+/// left first, most left on top, then the finished ones, each group in
+/// the types' own order.
+pub fn by_type(plan: &Plan, library: &Library) -> Vec<TypeProgress> {
+    let mut rows: Vec<TypeProgress> = MediaType::ALL
+        .into_iter()
+        .filter_map(|media| {
+            let (mut done, mut total) = (0, 0);
+            for item in &plan.items {
+                if library.entry(&item.entry).is_some_and(|e| e.media == media) {
+                    total += 1;
+                    done += usize::from(item.done);
+                }
+            }
+            (total > 0).then_some(TypeProgress { media, done, total })
+        })
+        .collect();
+    // Stable, so equal rows keep the types' order.
+    rows.sort_by_key(|row| std::cmp::Reverse(row.total - row.done));
+    rows
+}
+
 /// "2 of 6 done".
 pub fn progress_label(plan: &Plan) -> String {
     format!("{} of {} done", done_count(plan), plan.items.len())
@@ -442,6 +477,32 @@ mod tests {
 
     fn date(text: &str) -> Date {
         Date::parse(text).unwrap()
+    }
+
+    #[test]
+    fn progress_by_type_puts_the_types_with_most_left_first() {
+        let library = library();
+        let mut plan = library.plan("halloween-2026").unwrap().clone();
+        let rows = by_type(&plan, &library);
+        let done: usize = rows.iter().map(|r| r.done).sum();
+        let total: usize = rows.iter().map(|r| r.total).sum();
+        assert_eq!((done, total), (done_count(&plan), plan.items.len()));
+        assert_eq!(left(&plan).count(), total - done);
+        let lefts: Vec<usize> = rows.iter().map(|r| r.total - r.done).collect();
+        assert!(lefts.is_sorted_by(|a, b| a >= b), "{lefts:?}");
+
+        // A finished type goes under the ones with titles left.
+        let first = rows[0].media;
+        for item in &mut plan.items {
+            if library.entry(&item.entry).is_some_and(|e| e.media == first) {
+                item.done = true;
+            }
+        }
+        let rows = by_type(&plan, &library);
+        let at = rows.iter().position(|r| r.media == first).unwrap();
+        assert!(at > 0, "the fixture's plan has several types");
+        assert!(rows[..at].iter().any(|r| r.done < r.total));
+        assert!(rows[at..].iter().all(|r| r.done == r.total));
     }
 
     #[test]

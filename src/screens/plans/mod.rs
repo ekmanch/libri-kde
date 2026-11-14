@@ -1,19 +1,24 @@
 //! Plans: the overview ("All plans"), one plan as a checklist or a
-//! timeline, its "All <season>" collection, and the New and Edit plan
-//! dialog.
+//! timeline, its All tab (everything with the plan's tags), the details
+//! panel beside them and the New and Edit plan dialog.
 
 mod form;
+mod glance;
 mod overview;
 mod plan;
 
 pub use overview::plan_accent;
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use iced::{Element, Task};
 
-use crate::app::{App, Message as AppMessage};
+use super::library::{self, Motion, Shown};
+use crate::animation::{Easing, Slide};
+use crate::app::{App, KeyPress, Message as AppMessage};
 use crate::artwork::Wants;
+use crate::history::Direction;
 use crate::model::{Date, EntryStatus, MediaType, Plan, PlanItem, Season, TagCategory};
 use crate::plans::{self as rules, PlanState};
 use crate::repo::Operation;
@@ -26,7 +31,7 @@ pub enum Page {
     #[default]
     Overview,
     Plan(String),
-    /// Everything with the plan's tags: "All Halloween".
+    /// The plan's All tab: everything with its tags.
     Collection(String),
 }
 
@@ -44,9 +49,27 @@ pub enum Popup {
     View,
 }
 
+/// A "See all" popover over the All tab's panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlancePop {
+    /// What's left: every item not done.
+    Left,
+    /// By type: every type's progress.
+    Types,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct State {
     pub page: Page,
+    /// The details panel unpinned: one choice for every plan and both
+    /// tabs, kept in the preferences. Pinned until changed.
+    pub unpinned: bool,
+    /// The drawer's slide, as the library's.
+    pub motion: Motion,
+    /// The All tab's panel: its open popover, and which title Pick
+    /// something shows ("Another" moves it on).
+    pub glance_pop: Option<GlancePop>,
+    pub pick: u64,
     pub styles: HashMap<String, Style>,
     pub popup: Option<Popup>,
     pub pool_query: String,
@@ -87,8 +110,15 @@ impl State {
         })
     }
 
+    /// Whether a plan is open with the panel unpinned, so a selection
+    /// shows in a drawer.
+    pub fn drawer_mode(&self) -> bool {
+        self.unpinned && self.plan_id().is_some()
+    }
+
     fn close_popovers(&mut self) {
         self.popup = None;
+        self.glance_pop = None;
         self.when_open = false;
         self.anchor = None;
     }
@@ -103,8 +133,9 @@ impl State {
 }
 
 /// What the Plans screen draws from the lookups now: the details' entry,
-/// the five covers on each plan card, and with covers in its view a
-/// plan's rows and "Add to this plan", or every row of its collection.
+/// the five covers on each plan card, the All tab's Pick something, and
+/// with covers in its view a plan's rows and "Add to this plan", or every
+/// row of its All tab and of What's left.
 pub fn wanted(app: &App, wants: &mut Wants) {
     let library = app.repo.library();
     if let Some(id) = &app.plans.selected {
@@ -124,11 +155,19 @@ pub fn wanted(app: &App, wants: &mut Wants) {
             let Some(plan) = library.plan(id) else {
                 return;
             };
+            let on_collection = matches!(app.plans.page, Page::Collection(_));
+            if on_collection && let Some(pick) = glance::pick(app, plan) {
+                wants.covers.push(pick.id.clone());
+            }
             if !app.plans.style(id, app.tokens().light).covers {
                 return;
             }
-            if matches!(app.plans.page, Page::Collection(_)) {
-                // Everything with the plan's tags, in the plan or not.
+            if on_collection {
+                // Everything with the plan's tags, in the plan or not,
+                // and the items left, tagged or not.
+                wants
+                    .covers
+                    .extend(rules::left(plan).map(|item| item.entry.clone()));
                 wants.covers.extend(
                     plan::collection_sections(app, plan)
                         .iter()
@@ -257,6 +296,15 @@ pub enum Message {
     AddItem(String),
     PoolQuery(String),
     Select(String),
+    /// The header's panel button, the drawer's pin and Ctrl+I.
+    TogglePanel,
+    /// The drawer's ✕.
+    ClosePanel,
+    /// "See all N ›" in the All tab's panel.
+    ToggleGlancePop(GlancePop),
+    CloseGlancePop,
+    /// "Another" in Pick something.
+    AnotherPick,
     ToggleWhen,
     Month(i32),
     PickDay(Date),
@@ -347,8 +395,12 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             }
         }
         Message::ToggleDone(entry) => {
-            if let Some(plan) = current_plan(app) {
-                let done = plan.item_for(&entry).is_some_and(|i| !i.done);
+            // Only an item of the plan has a tick: Ctrl+click on a title
+            // the All tab lists from outside it does nothing.
+            if let Some(plan) = current_plan(app)
+                && let Some(item) = plan.item_for(&entry)
+            {
+                let done = !item.done;
                 let plan = plan.id.clone();
                 toggle_done(app, plan, entry, done);
             }
@@ -381,6 +433,24 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             state.close_popovers();
             app.library.details_rating_open = false;
         }
+        Message::TogglePanel => {
+            state.unpinned = !state.unpinned;
+            state.glance_pop = None;
+        }
+        Message::ClosePanel => {
+            state.selected = None;
+            state.close_popovers();
+            app.library.details_rating_open = false;
+        }
+        Message::ToggleGlancePop(pop) => {
+            state.glance_pop = if state.glance_pop == Some(pop) {
+                None
+            } else {
+                Some(pop)
+            };
+        }
+        Message::CloseGlancePop => state.glance_pop = None,
+        Message::AnotherPick => state.pick = state.pick.wrapping_add(1),
         Message::ToggleWhen => {
             state.when_open = !state.when_open;
             state.anchor = None;
@@ -693,6 +763,8 @@ pub fn dismiss_top(app: &mut App) -> bool {
                 state.when_open = false;
             } else if state.popup.is_some() {
                 state.popup = None;
+            } else if state.glance_pop.is_some() {
+                state.glance_pop = None;
             } else if state.item_note_draft.is_some() {
                 state.item_note_draft = None;
             } else {
@@ -713,19 +785,61 @@ pub fn confirm(app: &mut App) -> Task<AppMessage> {
     update(app, message)
 }
 
-/// The window title's part: "All plans", "Halloween 2026", "All Halloween".
+/// The window title's part: "All plans", or "Halloween 2026" on both of
+/// a plan's tabs.
 pub fn title(app: &App) -> String {
-    match (&app.plans.page, current_plan(app)) {
-        (Page::Plan(_), Some(plan)) => plan.title(),
-        (Page::Collection(_), Some(plan)) => collection_title(plan),
-        _ => "All plans".into(),
+    match current_plan(app) {
+        Some(plan) => plan.title(),
+        None => "All plans".into(),
     }
 }
 
-/// "All Halloween", or "All" and the plan's name without a season.
-pub fn collection_title(plan: &Plan) -> String {
-    let season = rules::season_for_tags(&plan.tags);
-    format!("All {}", season.map_or(plan.name.as_str(), |s| s.name()))
+/// Before a message: the plan page and the drawer's title while the panel
+/// is a drawer, for `slide_drawer` after it. None with the panel pinned,
+/// on the overview and on another screen.
+pub fn drawer_state(app: &App) -> Option<(Page, Option<String>)> {
+    (app.screen == super::Screen::Plans && app.plans.drawer_mode())
+        .then(|| (app.plans.page.clone(), app.plans.selected.clone()))
+}
+
+/// Whether a message is one of the drawer's closing actions: its ✕, a
+/// click on the open title, Esc, or Back (the mouse's button, Alt+Left).
+pub fn closes_drawer(message: &AppMessage) -> bool {
+    matches!(
+        message,
+        AppMessage::Plans(Message::ClosePanel | Message::Select(_))
+            | AppMessage::Key(KeyPress::Escape)
+            | AppMessage::History(Direction::Back)
+    )
+}
+
+/// After a message moved the plan page from `before`: starts the drawer's
+/// slide in when a selection opened it, or out when one of the closing
+/// actions (`closes`) closed it, with the library's timing. Another title
+/// while it is open changes its content alone; pinning, unpinning and
+/// another tab or plan never slide.
+pub fn slide_drawer(
+    app: &mut App,
+    closes: bool,
+    before: Option<(Page, Option<String>)>,
+    now: Instant,
+) {
+    if app.speed.instant() {
+        app.plans.motion = Motion::Still;
+        return;
+    }
+    let start = |time| Slide::start(now, app.speed.scale(time), Easing::STANDARD);
+    let motion = match (before, drawer_state(app)) {
+        (Some((was, None)), Some((page, Some(_)))) if was == page => {
+            Motion::Opening(start(library::OPEN))
+        }
+        (Some((was, Some(id))), Some((page, None))) if closes && was == page => {
+            Motion::Closing(start(library::CLOSE), Shown::Entry(id))
+        }
+        (Some((was, _)), Some((page, _))) if was == page => return,
+        _ => Motion::Still,
+    };
+    app.plans.motion = motion;
 }
 
 pub fn view(app: &App) -> Element<'_, AppMessage> {
@@ -748,15 +862,21 @@ pub fn shown_season(app: &App, plan: &Plan) -> Option<rules::Season> {
     }
 }
 
-/// An arrow key on the plan page: moves the selection through the items
-/// in the order shown, the checklist's (by type, then the plan's order)
-/// or the timeline's.
+/// An arrow key on the plan page: moves the selection through the rows
+/// in the order shown, the All tab's (by type), the checklist's (by type,
+/// then the plan's order) or the timeline's.
 pub fn step_selection(app: &mut App, step: isize) {
     let Some(plan) = current_plan(app) else {
         return;
     };
     let library = app.repo.library();
-    let order: Vec<String> = if plan.timeline {
+    let order: Vec<String> = if matches!(app.plans.page, Page::Collection(_)) {
+        plan::collection_sections(app, plan)
+            .iter()
+            .flat_map(|(_, entries)| entries)
+            .map(|e| e.id.clone())
+            .collect()
+    } else if plan.timeline {
         rules::timeline(plan, library, app.today)
             .into_iter()
             .flat_map(|group| group.items.into_iter().map(|item| item.entry.clone()))
@@ -799,6 +919,8 @@ pub fn by_state(app: &App, state: PlanState) -> Vec<&Plan> {
 
 #[cfg(test)]
 mod tests {
+    use iced::keyboard::Modifiers;
+
     use super::*;
     use crate::screens::Screen;
 
@@ -978,7 +1100,7 @@ mod tests {
                 app.view(),
             );
             assert!(ui.find("2 of 8 done").is_ok());
-            assert!(ui.find("Linked to #halloween").is_ok());
+            assert!(ui.find("Linked to #halloween · 16 tagged").is_ok());
             let _ = ui.click("Edit plan");
             ui.into_messages().collect()
         };
@@ -988,6 +1110,220 @@ mod tests {
         assert!(
             matches!(&app.plan_dialog, Some(Dialog::Form(f)) if f.editing.as_deref() == Some("halloween-2026"))
         );
+    }
+
+    fn see(app: &App, there: &[&str], gone: &[&str]) {
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        for text in there {
+            assert!(ui.find(*text).is_ok(), "{text} is missing");
+        }
+        for text in gone {
+            assert!(ui.find(*text).is_err(), "{text} shows");
+        }
+    }
+
+    /// 2026-11-14: nothing in the header differs between the tabs, so
+    /// nothing moves; the panel under it changes its contents.
+    #[test]
+    fn the_header_is_the_same_on_this_plan_and_on_all() {
+        let mut app = app();
+        let tagged = {
+            let library = app.repo.library();
+            rules::collection(library.plan("halloween-2026").unwrap(), library).len()
+        };
+        let linked = format!("Linked to #halloween · {tagged} tagged");
+        let header = ["Halloween", "2 of 8 done", linked.as_str(), "Edit plan"];
+        send(&mut app, Message::ShowPlan("halloween-2026".into()));
+        see(&app, &header, &["WHAT'S LEFT"]);
+        see(&app, &["Add to this plan"], &[]);
+        send(&mut app, Message::ShowCollection("halloween-2026".into()));
+        see(&app, &header, &["All Halloween", "Add to this plan"]);
+        see(&app, &["WHAT'S LEFT", "BY TYPE", "See all 6"], &[]);
+        assert_eq!(title(&app), "Halloween 2026");
+    }
+
+    /// The pin is one choice for the plan screen: every plan, both tabs,
+    /// kept in the preferences. Unpinned, the panel is only the drawer of
+    /// an open title.
+    #[test]
+    fn the_panel_pin_is_one_setting_for_the_plan_screen() {
+        use iced::keyboard::{Key, Modifiers};
+
+        let mut app = app();
+        send(&mut app, Message::ShowPlan("halloween-2026".into()));
+        let _ = app.update(AppMessage::KeyPressed(
+            Key::Character("i".into()),
+            Modifiers::CTRL,
+        ));
+        assert!(app.plans.unpinned, "Ctrl+I unpins");
+        see(&app, &["2 of 8 done"], &["Add to this plan"]);
+        send(&mut app, Message::ShowCollection("halloween-2026".into()));
+        assert!(app.plans.unpinned);
+        see(&app, &["2 of 8 done"], &["WHAT'S LEFT"]);
+        send(&mut app, Message::ShowPlan("christmas-2026".into()));
+        assert!(app.plans.unpinned);
+
+        let saved = crate::preferences::Preferences::of(&app);
+        assert!(!saved.plan_panel);
+        let mut again = App::new(Screen::Plans);
+        assert!(!again.plans.unpinned, "pinned until changed");
+        saved.apply_to(&mut again);
+        assert!(again.plans.unpinned);
+    }
+
+    /// A row of the All tab opens its details, in the plan or not; the
+    /// same row again, Esc, Back and the drawer's ✕ close them. The +
+    /// only adds.
+    #[test]
+    fn a_row_on_all_opens_its_details_and_the_closing_actions_close_them() {
+        let mut app = app();
+        send(&mut app, Message::ShowCollection("halloween-2026".into()));
+        let outside = {
+            let library = app.repo.library();
+            let plan = library.plan("halloween-2026").unwrap();
+            rules::collection(plan, library)
+                .into_iter()
+                .find(|e| plan.item_for(&e.id).is_none())
+                .unwrap()
+                .id
+                .clone()
+        };
+        let select = |app: &mut App| {
+            let _ = app.update(AppMessage::Plans(Message::Select(outside.clone())));
+        };
+        select(&mut app);
+        assert_eq!(app.plans.selected.as_deref(), Some(outside.as_str()));
+        see(&app, &["Not in this plan"], &["WHAT'S LEFT"]);
+        select(&mut app);
+        assert_eq!(app.plans.selected, None, "the open row closes it");
+
+        select(&mut app);
+        let _ = app.update(AppMessage::Key(KeyPress::Escape));
+        assert_eq!(app.plans.selected, None, "Esc");
+        select(&mut app);
+        let _ = app.update(AppMessage::History(Direction::Back));
+        assert_eq!(app.plans.selected, None, "Back");
+        assert_eq!(app.plans.page, Page::Collection("halloween-2026".into()));
+        select(&mut app);
+        send(&mut app, Message::ClosePanel);
+        assert_eq!(app.plans.selected, None, "the ✕");
+
+        // Adding from the row leaves the details closed, and Ctrl+click
+        // on a title outside the plan ticks nothing.
+        let _ = app.update(AppMessage::Modifiers(Modifiers::CTRL));
+        select(&mut app);
+        let _ = app.update(AppMessage::Modifiers(Modifiers::empty()));
+        let item = |app: &App| {
+            app.repo
+                .library()
+                .plan("halloween-2026")
+                .unwrap()
+                .item_for(&outside)
+                .cloned()
+        };
+        assert!(item(&app).is_none() && app.plans.selected.is_none());
+        send(&mut app, Message::AddItem(outside.clone()));
+        assert!(item(&app).is_some() && app.plans.selected.is_none());
+    }
+
+    #[test]
+    fn the_drawer_slides_as_the_librarys_and_only_while_unpinned() {
+        use std::time::Duration;
+
+        let mut app = app();
+        app.speed = crate::animation::Speed::factor(1.0);
+        let start = Instant::now();
+        let at = |app: &mut App, message: Message, ms: u64| {
+            let _ = app.update_at(
+                AppMessage::Plans(message),
+                start + Duration::from_millis(ms),
+            );
+        };
+        let id = "movies/the-thing-1982";
+        at(&mut app, Message::ShowPlan("halloween-2026".into()), 0);
+        at(&mut app, Message::Select(id.into()), 0);
+        assert_eq!(app.plans.motion, Motion::Still, "pinned");
+        at(&mut app, Message::TogglePanel, 0);
+        assert_eq!(app.plans.motion, Motion::Still, "unpinning never slides");
+        at(&mut app, Message::ClosePanel, 10);
+        assert!(
+            matches!(&app.plans.motion, Motion::Closing(_, Shown::Entry(was)) if was == id),
+            "{:?}",
+            app.plans.motion
+        );
+        at(&mut app, Message::Select(id.into()), 2000);
+        assert!(matches!(app.plans.motion, Motion::Opening(_)));
+        // Another tab closes it at once.
+        at(
+            &mut app,
+            Message::ShowCollection("halloween-2026".into()),
+            2010,
+        );
+        assert_eq!(app.plans.motion, Motion::Still);
+        assert_eq!(app.plans.selected, None);
+    }
+
+    /// "See all N ›" opens the whole list over the panel; Esc or a row
+    /// closes it, and the row opens its details.
+    #[test]
+    fn see_all_opens_a_popover_whose_rows_open_details() {
+        let mut app = app();
+        send(&mut app, Message::ShowCollection("halloween-2026".into()));
+        let messages: Vec<_> = {
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            let _ = ui.click("See all 6");
+            ui.into_messages().collect()
+        };
+        for message in messages {
+            let _ = app.update(message);
+        }
+        assert_eq!(app.plans.glance_pop, Some(GlancePop::Left));
+        let _ = app.update(AppMessage::Key(KeyPress::Escape));
+        assert_eq!(app.plans.glance_pop, None);
+        assert_eq!(app.plans.page, Page::Collection("halloween-2026".into()));
+
+        send(&mut app, Message::ToggleGlancePop(GlancePop::Left));
+        let left = {
+            let plan = app.repo.library().plan("halloween-2026").unwrap();
+            rules::left(plan).last().unwrap().entry.clone()
+        };
+        send(&mut app, Message::Select(left.clone()));
+        assert_eq!(app.plans.glance_pop, None);
+        assert_eq!(app.plans.selected, Some(left));
+    }
+
+    /// Pick something offers a tagged Want title that is not in the
+    /// plan; a finished plan has nothing left to list.
+    #[test]
+    fn pick_something_is_a_tagged_want_title_outside_the_plan() {
+        let mut app = app();
+        send(&mut app, Message::ShowCollection("halloween-2026".into()));
+        for _ in 0..4 {
+            let library = app.repo.library();
+            let plan = library.plan("halloween-2026").unwrap();
+            if let Some(pick) = glance::pick(&app, plan) {
+                assert_eq!(pick.status, EntryStatus::Want);
+                assert!(plan.item_for(&pick.id).is_none());
+                assert!(pick.tags.iter().any(|t| plan.tags.contains(t)));
+            }
+            send(&mut app, Message::AnotherPick);
+        }
+        let left: Vec<String> = {
+            let plan = app.repo.library().plan("halloween-2026").unwrap();
+            rules::left(plan).map(|i| i.entry.clone()).collect()
+        };
+        for entry in left {
+            send(&mut app, Message::ToggleDone(entry));
+        }
+        see(&app, &["8 of 8 done", "BY TYPE"], &["WHAT'S LEFT"]);
     }
 
     #[test]
