@@ -1412,8 +1412,28 @@ impl App {
             let now = Preferences::of(self);
             self.preferences.save_if_changed(now);
         }
+        self.keep_matches();
         let lookups = self.refresh_lookups();
         Task::batch([task, lookups])
+    }
+
+    /// Writes the online matches found on this computer for albums with
+    /// no `source` into the library (`Artwork::take_matches`), all that
+    /// are known in one go, so they leave as one commit. Not in a mock
+    /// run, nor before the library is here.
+    fn keep_matches(&mut self) {
+        if self.mock || self.loading {
+            return;
+        }
+        for (id, source) in self.artwork.take_matches(self.repo.library()) {
+            self.apply(Operation::SetSource {
+                id: id.clone(),
+                source,
+            });
+            if let Some(entry) = self.repo.library().entry(&id) {
+                self.artwork.match_kept(entry);
+            }
+        }
     }
 
     /// What the screens show now that the lookups have not fetched yet

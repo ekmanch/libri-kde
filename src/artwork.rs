@@ -296,6 +296,8 @@ pub struct Artwork {
     episodes: HashMap<(String, u32), EpisodesState>,
     tracks: HashMap<String, TracksState>,
     pub forced_tracks: Option<ForcedTracks>,
+    /// A match was found, or the library changed, since `take_matches`.
+    matches_changed: bool,
     platforms: Option<Reply<Vec<GamePlatform>>>,
     platforms_loading: bool,
     dirty: bool,
@@ -350,6 +352,7 @@ impl Artwork {
             episodes: HashMap::new(),
             tracks: HashMap::new(),
             forced_tracks: None,
+            matches_changed: true,
             platforms: None,
             platforms_loading: false,
             dirty: false,
@@ -476,6 +479,36 @@ impl Artwork {
     /// again.
     pub fn library_changed(&mut self) {
         self.albums.clear();
+        self.matches_changed = true;
+    }
+
+    /// The albums with no `source` whose match on this computer found
+    /// one, with the id found, when a match or the library changed since
+    /// the last call: the app writes them into the library, so every
+    /// device reads the same match and a wrong one is corrected once, in
+    /// Edit. The fake's matches are never kept.
+    pub fn take_matches(&mut self, library: &Library) -> Vec<(String, String)> {
+        if !std::mem::take(&mut self.matches_changed) {
+            return Vec::new();
+        }
+        library
+            .entries
+            .iter()
+            .filter(|e| e.media == MediaType::Music && !crate::music::is_song(e))
+            .filter(|e| e.source.is_none())
+            .filter_map(|e| Some((e.id.clone(), self.record_of(e)?.source.clone()?)))
+            .filter(|(_, source)| !source.starts_with("fake:"))
+            .collect()
+    }
+
+    /// The entry's match is in its `source` now: its record follows, so
+    /// the cover it found is not looked for again.
+    pub fn match_kept(&mut self, entry: &Entry) {
+        if let Some(record) = self.records.get_mut(&entry.id) {
+            record.key = Artwork::key_for(entry);
+            record.source = None;
+            self.mark_dirty();
+        }
     }
 
     /// The owner's covers the screens asked for since the last call that
@@ -933,6 +966,7 @@ impl Artwork {
         match outcome {
             Ok((url, source)) => {
                 self.failures.remove(&format!("entry:{id}"));
+                self.matches_changed |= source.is_some();
                 if let Some(url) = &url {
                     self.want_image(url);
                 }
@@ -1608,6 +1642,7 @@ fn load_series(
 mod tests {
     use super::*;
     use crate::model::{Date, EntryStatus};
+    use crate::repo::Operation;
 
     fn entry(id: &str, title: &str, source: Option<&str>) -> Entry {
         Entry {
@@ -1768,6 +1803,58 @@ mod tests {
         artwork.retry_tracks(&album.id);
         let _ = artwork.refresh(&wants, &library, &service);
         assert_eq!(artwork.track_list(&album), TrackList::Loading);
+    }
+
+    #[test]
+    fn an_albums_match_is_handed_over_once_and_its_record_follows() {
+        let mut library = Library::default();
+        let mut album = entry("music/live-adele", "Live", None);
+        album.media = MediaType::Music;
+        let mut movie = entry("movies/heat-1995", "Heat", None);
+        movie.media = MediaType::Movies;
+        library.entries = vec![album.clone(), movie.clone()];
+        let mut artwork = Artwork::at(None);
+        assert!(artwork.take_matches(&library).is_empty());
+
+        // Both are matched; only the album's match is kept.
+        let found = |n: u32| {
+            Ok((
+                Some(format!("https://e.test/{n}.jpg")),
+                Some(format!("deezer:album:{n}")),
+            ))
+        };
+        artwork.cover_resolved(album.id.clone(), Artwork::key_for(&album), found(1));
+        artwork.cover_resolved(movie.id.clone(), Artwork::key_for(&movie), found(2));
+        assert_eq!(
+            artwork.take_matches(&library),
+            [(album.id.clone(), "deezer:album:1".to_owned())]
+        );
+        assert!(artwork.take_matches(&library).is_empty(), "asked once");
+
+        // With the id in the entry the cover found stays the entry's.
+        Operation::SetSource {
+            id: album.id.clone(),
+            source: "deezer:album:1".into(),
+        }
+        .apply_to(&mut library)
+        .unwrap();
+        let kept = library.entry(&album.id).unwrap();
+        artwork.match_kept(kept);
+        artwork.library_changed();
+        assert_eq!(artwork.cover_url(kept), Some("https://e.test/1.jpg"));
+        assert!(artwork.take_matches(&library).is_empty());
+
+        // A match the owner picked is never replaced.
+        Operation::SetSource {
+            id: album.id.clone(),
+            source: "deezer:album:9".into(),
+        }
+        .apply_to(&mut library)
+        .unwrap();
+        assert_eq!(
+            library.entry(&album.id).unwrap().source.as_deref(),
+            Some("deezer:album:1")
+        );
     }
 
     #[test]

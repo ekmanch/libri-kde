@@ -23,6 +23,9 @@ pub fn encode(operation: &Operation) -> Value {
         Operation::SetStatus { id, status } => {
             ("setStatus", json!({ "entryId": id, "status": status }))
         }
+        Operation::SetSource { id, source } => {
+            ("setSource", json!({ "entryId": id, "source": source }))
+        }
         Operation::SetRating { id, rating } => {
             ("setRating", json!({ "entryId": id, "rating": rating }))
         }
@@ -155,6 +158,10 @@ pub fn decode(value: &Value) -> Result<Operation, String> {
         "setStatus" => Operation::SetStatus {
             id: string("entryId")?,
             status: field::<EntryStatus>(op, value, "status")?,
+        },
+        "setSource" => Operation::SetSource {
+            id: string("entryId")?,
+            source: string("source")?,
         },
         "setRating" => Operation::SetRating {
             id: string("entryId")?,
@@ -342,6 +349,10 @@ mod tests {
                 title: "Enter Sandman".into(),
                 track_id: None,
                 rating: None,
+            },
+            Operation::SetSource {
+                id: id(),
+                source: "deezer:album:302127".into(),
             },
             Operation::SetTracks {
                 album: "music/album".into(),

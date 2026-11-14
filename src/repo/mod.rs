@@ -51,6 +51,13 @@ pub enum Operation {
         id: String,
         status: EntryStatus,
     },
+    /// Keeps the online match found for an entry that had none, so every
+    /// device reads the same one: `source` is set only while it is null,
+    /// and a match the owner picked meanwhile stays.
+    SetSource {
+        id: String,
+        source: String,
+    },
     SetRating {
         id: String,
         rating: Option<u8>,
@@ -183,6 +190,7 @@ impl Operation {
             Operation::SetStatus { id, status } => {
                 format!("Mark {} as {}", title(id), status_word(Some(*status)))
             }
+            Operation::SetSource { id, .. } => format!("Keep the online match of {}", title(id)),
             Operation::SetRating {
                 id,
                 rating: Some(rating),
@@ -333,6 +341,9 @@ impl Operation {
                 library.remove_unused_tags();
             }
             Operation::SetStatus { id, status } => entry_mut(library, &id)?.status = status,
+            Operation::SetSource { id, source } => {
+                entry_mut(library, &id)?.source.get_or_insert(source);
+            }
             Operation::SetRating { id, rating } => {
                 if rating.is_some_and(|r| !(1..=10).contains(&r)) {
                     return Err(RepoError::InvalidRating(rating.unwrap_or_default()));
