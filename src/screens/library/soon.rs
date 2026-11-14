@@ -1997,7 +1997,7 @@ mod tests {
         let wheel = |app: &mut App, x: f32, y: f32, after: u64| {
             let delta = ScrollDelta::Lines { x, y };
             let _ = app.update_at(
-                lib(Message::SoonWheel(delta)),
+                lib(Message::Wheel(delta)),
                 start + Duration::from_millis(after),
             );
         };

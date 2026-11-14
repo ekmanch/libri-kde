@@ -126,6 +126,7 @@ The rules are the phone's (section 7). Desktop-specific:
 - The mouse's Back and Forward buttons (and Alt+Left, Alt+Right) move through the places visited, as in a browser. On the library Back first closes the details panel (a series part goes back to its series).
 - Ctrl+click on a sidebar type adds it to the types shown; Ctrl+click on a plan's row ticks it or unticks it.
 - Ctrl+click on a title in the library opens its cover in the cover viewer; Ctrl+Shift+click on a title, in the library or on a plan's row, opens its Edit dialog. Neither selects the title. Ctrl+click on a series' row opens the cover the row shows.
+- On Music, with the Artists | Albums | Songs tabs on screen (not on an artist's page) and nothing open over them, the Coming soon shortcuts step through the tabs, wrapping: Shift+← and Shift+→ (the same two rebindable actions), a side-scroll and Shift+wheel, one step per wheel gesture (2026-11-14). The step is a click on the segment (`library::Message::MusicTab`), so Back returns to the tab before; the list changes at once, with no slide. With the search field focused the arrows keep selecting text.
 - In the Add and Edit dialog's music lookup, Shift+← and Shift+→ move the Albums | Songs switch while the search field has the focus (fixed keys, not in the keymap).
 - In the cover viewer, Left and Right step through the covers of a series' parts, as ‹ and › beside the cover do.
 - Rating is always click → picker, never a slider or a drag.

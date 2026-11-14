@@ -65,6 +65,30 @@ pub enum MusicTab {
     Songs,
 }
 
+impl MusicTab {
+    pub const ALL: [MusicTab; 3] = [MusicTab::Artists, MusicTab::Albums, MusicTab::Songs];
+
+    /// The tab `by` steps on, wrapping.
+    pub fn step(self, by: isize) -> MusicTab {
+        let n = MusicTab::ALL.len() as isize;
+        let at = MusicTab::ALL
+            .iter()
+            .position(|tab| *tab == self)
+            .unwrap_or(0) as isize;
+        MusicTab::ALL[(at + by).rem_euclid(n) as usize]
+    }
+}
+
+/// Whether Music's Artists | Albums | Songs tabs are on screen: the Music
+/// list itself, not an artist's page, a tag's page or Coming soon.
+pub fn music_tabs_shown(state: &State) -> bool {
+    state.single() == Some(MediaType::Music)
+        && state.artist.is_none()
+        && state.page.is_none()
+        && !state.soon
+        && !state.is_overview()
+}
+
 /// What a view choice is remembered for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewKey {
@@ -241,8 +265,8 @@ pub struct State {
     /// The Coming soon page (decided 2026-11-07) is open, on `slice`.
     pub soon: bool,
     pub slice: Slice,
-    /// The wheel events towards the next slice switch.
-    pub soon_wheel: soon::WheelGesture,
+    /// The wheel events towards the next slice or music tab switch.
+    pub wheel: soon::WheelGesture,
     /// The type chips picked, per slice.
     pub slice_types: HashMap<Slice, BTreeSet<MediaType>>,
     /// Where each slice's list was scrolled to, in px.
@@ -354,8 +378,9 @@ pub enum Message {
     /// Shift+← and Shift+→ (rebindable), or the wheel: the slice before or
     /// after, wrapping.
     SoonStep(isize),
-    /// A wheel event anywhere on the Coming soon page, side-scroll or not.
-    SoonWheel(iced::mouse::ScrollDelta),
+    /// A wheel event anywhere on the Coming soon page or on Music's tabs,
+    /// side-scroll or not.
+    Wheel(iced::mouse::ScrollDelta),
     /// A type chip: only that type (a second click on the only one
     /// clears), or with Ctrl adds or removes it.
     SoonType(MediaType),
@@ -699,7 +724,7 @@ impl State {
                 }
             }
             // The app does the work; the page just redraws.
-            Message::AddFound(_) | Message::RestoreFound(_) | Message::SoonWheel(_) => {}
+            Message::AddFound(_) | Message::RestoreFound(_) | Message::Wheel(_) => {}
             Message::ShowHidden => self.show_hidden = true,
             Message::PickTag(tag) => {
                 self.leave_soon();
@@ -1878,5 +1903,68 @@ mod tests {
         let order = app.library.cover_order(app.repo.library(), app.today);
         let wants = crate::screens::wanted(&app);
         assert!(order.iter().all(|id| wants.covers.contains(id)));
+    }
+
+    /// Shift+← and Shift+→, a side-scroll and Shift+wheel step through
+    /// Music's tabs, wrapping, as on the Coming soon page; an artist's page
+    /// and the other types have no tabs to step.
+    #[test]
+    fn keys_and_the_wheel_step_through_musics_tabs() {
+        use crate::app::Message as AppMessage;
+        use iced::keyboard::key::Named;
+        use iced::keyboard::{Key, Modifiers};
+        use iced::mouse::ScrollDelta;
+        use std::time::{Duration, Instant};
+
+        let mut app = App::new(crate::screens::Screen::Library);
+        let _ = app.update(AppMessage::Library(Message::ShowType(Some(
+            MediaType::Music,
+        ))));
+        assert_eq!(app.library.music_tab, MusicTab::Artists);
+        let key = |app: &mut App, named| {
+            let _ = app.update(AppMessage::KeyPressed(Key::Named(named), Modifiers::SHIFT));
+        };
+        key(&mut app, Named::ArrowRight);
+        assert_eq!(app.library.music_tab, MusicTab::Albums);
+        key(&mut app, Named::ArrowRight);
+        key(&mut app, Named::ArrowRight);
+        assert_eq!(app.library.music_tab, MusicTab::Artists, "wraps forward");
+        key(&mut app, Named::ArrowLeft);
+        assert_eq!(app.library.music_tab, MusicTab::Songs, "wraps back");
+
+        let start = Instant::now();
+        let wheel = |app: &mut App, x: f32, y: f32, after: u64| {
+            let delta = ScrollDelta::Lines { x, y };
+            let _ = app.update_at(
+                AppMessage::Library(Message::Wheel(delta)),
+                start + Duration::from_millis(after),
+            );
+        };
+        wheel(&mut app, 0.0, -1.0, 0);
+        assert_eq!(app.library.music_tab, MusicTab::Songs, "plain scrolling");
+        wheel(&mut app, -1.0, 0.0, 1000);
+        assert_eq!(app.library.music_tab, MusicTab::Artists, "a side-scroll");
+        wheel(&mut app, -1.0, 0.0, 1050);
+        assert_eq!(app.library.music_tab, MusicTab::Artists, "one gesture");
+        let _ = app.update(AppMessage::Modifiers(Modifiers::SHIFT));
+        wheel(&mut app, 0.0, 1.0, 2000);
+        assert_eq!(app.library.music_tab, MusicTab::Songs, "Shift+wheel");
+        let _ = app.update(AppMessage::Modifiers(Modifiers::empty()));
+
+        // Back goes to the tab before, as after a click on a segment.
+        let _ = app.update(AppMessage::History(crate::history::Direction::Back));
+        assert_eq!(app.library.music_tab, MusicTab::Artists);
+
+        // No tabs on an artist's page or on another type.
+        app.library.artist = Some("Adele".into());
+        key(&mut app, Named::ArrowRight);
+        wheel(&mut app, -1.0, 0.0, 3000);
+        assert_eq!(app.library.music_tab, MusicTab::Artists);
+        app.library.artist = None;
+        let _ = app.update(AppMessage::Library(Message::ShowType(Some(
+            MediaType::Movies,
+        ))));
+        key(&mut app, Named::ArrowRight);
+        assert_eq!(app.library.music_tab, MusicTab::Artists);
     }
 }

@@ -370,7 +370,7 @@ pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage>
     let mut chips = Row::new().spacing(6).align_y(Center);
 
     // Music's tabs come first, outside an artist's page.
-    if state.single() == Some(MediaType::Music) && state.artist.is_none() {
+    if super::music_tabs_shown(state) {
         let tabs = [
             ("Artists", MusicTab::Artists),
             ("Albums", MusicTab::Albums),

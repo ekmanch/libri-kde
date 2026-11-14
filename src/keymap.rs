@@ -20,7 +20,8 @@ pub enum Action {
     Back,
     Forward,
     Settings,
-    /// Coming soon: the slice before (Library ← Discover ← All) and after.
+    /// Coming soon: the slice before (Library ← Discover ← All) and after;
+    /// on Music the tab before (Artists ← Albums ← Songs) and after.
     SoonPrev,
     SoonNext,
 }
@@ -50,8 +51,8 @@ impl Action {
             Action::Back => "Back",
             Action::Forward => "Forward",
             Action::Settings => "Settings",
-            Action::SoonPrev => "Coming soon: previous list (Library ← Discover ← All)",
-            Action::SoonNext => "Coming soon: next list",
+            Action::SoonPrev => "Coming soon and Music: previous list or tab",
+            Action::SoonNext => "Coming soon and Music: next list or tab",
         }
     }
 

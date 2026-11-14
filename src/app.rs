@@ -345,7 +345,7 @@ impl Message {
                     | L::RailReleased
                     | L::SoonSlice(_)
                     | L::SoonStep(_)
-                    | L::SoonWheel(_)
+                    | L::Wheel(_)
                     | L::SoonType(_)
                     | L::SoonToggleType(_)
                     | L::SoonAllTypes
@@ -1057,6 +1057,17 @@ impl App {
                 Some(message) => message,
                 None => return Task::none(),
             },
+            // A side-scroll or Shift+wheel over Music's tabs is the tab
+            // before or after, as a click on its segment.
+            Message::Library(library::Message::Wheel(delta)) if self.music_tabs_free() => {
+                let shift = self.modifiers.shift();
+                match self.library.wheel.feed(delta, shift, now) {
+                    Some(step) => Message::Library(library::Message::MusicTab(
+                        self.library.music_tab.step(step),
+                    )),
+                    None => return Task::none(),
+                }
+            }
             message => self.click_with_modifiers(message),
         };
         if self.library.note_draft.is_some() && message.leaves_note() {
@@ -1179,9 +1190,13 @@ impl App {
                         Screen::Library | Screen::Plans | Screen::Settings
                     ))
                 .then_some(Message::Show(Screen::Settings)),
-                // Only on the Coming soon page.
+                // Only on the Coming soon page and over Music's tabs.
                 Action::SoonPrev | Action::SoonNext => {
                     let step = if action == Action::SoonPrev { -1 } else { 1 };
+                    if self.music_tabs_free() {
+                        let tab = self.library.music_tab.step(step);
+                        return Some(Message::Library(library::Message::MusicTab(tab)));
+                    }
                     self.soon_page_free()
                         .then_some(Message::Library(library::Message::SoonStep(step)))
                 }
@@ -1208,6 +1223,18 @@ impl App {
     fn soon_page_free(&self) -> bool {
         self.screen == Screen::Library
             && self.library.soon
+            && self.library.details_pop.is_none()
+            && !self.library.details_rating_open
+            && self.dialog.is_none()
+            && self.plan_dialog.is_none()
+            && !self.token_warning
+    }
+
+    /// Music's Artists | Albums | Songs tabs are on screen with nothing
+    /// open over them, so a key or the wheel may switch the tab.
+    fn music_tabs_free(&self) -> bool {
+        self.screen == Screen::Library
+            && library::music_tabs_shown(&self.library)
             && self.library.details_pop.is_none()
             && !self.library.details_rating_open
             && self.dialog.is_none()
@@ -1579,11 +1606,11 @@ impl App {
                 };
                 return operation::scroll_to(library::LIST_ID, offset);
             }
-            Message::Library(library::Message::SoonWheel(delta)) => {
+            Message::Library(library::Message::Wheel(delta)) => {
                 if self.soon_page_free()
                     && let Some(step) =
                         self.library
-                            .soon_wheel
+                            .wheel
                             .feed(delta, self.modifiers.shift(), self.now)
                 {
                     return self.switch_slice(Message::Library(library::Message::SoonStep(step)));
@@ -1719,12 +1746,15 @@ impl App {
         let windows = window::events().map(|(_, event)| Message::Window(event));
         let scheme = iced::system::theme_changes().map(Message::SystemTheme);
         let mut subscriptions = vec![keys, buttons, resizes, windows, scheme];
-        // Side-scrolling or Shift+wheel anywhere on the Coming soon page;
-        // the list may have captured the event, so its status is no matter.
-        if self.screen == Screen::Library && self.library.soon {
+        // Side-scrolling or Shift+wheel anywhere on the Coming soon page
+        // or under Music's tabs; the list may have captured the event, so
+        // its status is no matter.
+        if self.screen == Screen::Library
+            && (self.library.soon || library::music_tabs_shown(&self.library))
+        {
             subscriptions.push(event::listen_with(|event, _status, _window| match event {
                 Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
-                    Some(Message::Library(library::Message::SoonWheel(delta)))
+                    Some(Message::Library(library::Message::Wheel(delta)))
                 }
                 _ => None,
             }));
