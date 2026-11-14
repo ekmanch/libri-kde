@@ -317,6 +317,9 @@ pub struct State {
     pub slide: Option<SliceSlide>,
     /// The list on its way to another of Music's tabs, the same way.
     pub tab_slide: Option<SliceSlide>,
+    /// The tab switch on its way came from a gesture or Shift+arrow, so
+    /// the list slides to it; a click on a segment swaps at once.
+    pub tab_step: bool,
     /// Where each of Music's tabs was left scrolled.
     pub tab_scroll: HashMap<MusicTab, f32>,
     /// The type panel's Coming soon popover is open.
@@ -2147,8 +2150,16 @@ mod tests {
         key(&mut app, Named::ArrowRight);
         assert_eq!(app.library.music_tab, MusicTab::Artists);
         assert!(app.library.tab_slide.as_ref().unwrap().forward());
+        // A click on a segment swaps at once, also in the middle of a
+        // slide.
+        let _ = app.update(AppMessage::Library(Message::MusicTab(MusicTab::Songs)));
+        assert_eq!(app.library.music_tab, MusicTab::Songs);
+        assert_eq!(app.library.tab_slide, None, "a click");
+        key(&mut app, Named::ArrowRight);
+        assert!(app.library.tab_slide.is_some(), "a step after a click");
+        let _ = app.update(AppMessage::Library(Message::MusicTab(MusicTab::Artists)));
+        assert_eq!(app.library.tab_slide, None, "the same tab, clicked");
         app.speed = crate::animation::Speed::factor(0.0);
-        app.library.tab_slide = None;
 
         // No tabs on an artist's page or on another type.
         app.library.artist = Some("Adele".into());

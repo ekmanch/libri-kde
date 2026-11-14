@@ -1320,6 +1320,15 @@ impl App {
                         let back = action == Some(Action::SoonPrev);
                         self.plans.tab_step = Some(if back { -1 } else { 1 });
                     }
+                    // And over Music's tabs it slides, where a click on a
+                    // segment swaps at once.
+                    if let (
+                        Message::Library(library::Message::MusicTab(_)),
+                        Some(Action::SoonPrev | Action::SoonNext),
+                    ) = (&message, action)
+                    {
+                        self.library.tab_step = true;
+                    }
                     message
                 }
                 None => return Task::none(),
@@ -1329,9 +1338,12 @@ impl App {
             Message::Library(library::Message::Wheel(delta)) if self.music_tabs_free() => {
                 let shift = self.modifiers.shift();
                 match self.library.wheel.feed(delta, shift, now) {
-                    Some(step) => Message::Library(library::Message::MusicTab(
-                        self.library.music_tab.step(step),
-                    )),
+                    Some(step) => {
+                        self.library.tab_step = true;
+                        Message::Library(library::Message::MusicTab(
+                            self.library.music_tab.step(step),
+                        ))
+                    }
                     None => return Task::none(),
                 }
             }
@@ -2226,11 +2238,16 @@ impl App {
         operation::scroll_to(library::LIST_ID, offset)
     }
 
-    /// A switch of Music's tab (a segment, Shift+arrows, a side-scroll or
-    /// Shift+wheel): the list slides to the new tab exactly as the Coming
-    /// soon page's does between its slices (`switch_slice`), and the new
-    /// tab is scrolled back to where it was left.
+    /// A switch of Music's tab: the new tab is scrolled back to where it
+    /// was left. By Shift+arrows, a side-scroll or Shift+wheel
+    /// (`tab_step`) the list slides to it exactly as the Coming soon
+    /// page's does between its slices (`switch_slice`); a click on a
+    /// segment swaps at once, ending any slide on its way.
     fn switch_tab(&mut self, tab: library::MusicTab) -> Task<Message> {
+        let stepped = std::mem::take(&mut self.library.tab_step);
+        if !stepped {
+            self.library.tab_slide = None;
+        }
         let shown = self.screen == Screen::Library && library::music_tabs_shown(&self.library);
         let from = self.library.music_tab;
         self.screen = Screen::Library;
@@ -2238,7 +2255,7 @@ impl App {
         if !shown || from == tab {
             return Task::none();
         }
-        if let Some(spring) = animation::Spring::desktop_switch(self.speed) {
+        if stepped && let Some(spring) = animation::Spring::desktop_switch(self.speed) {
             let width = if self.library.list_width > 0.0 {
                 self.library.list_width
             } else {
