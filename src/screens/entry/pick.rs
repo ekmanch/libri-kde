@@ -1410,7 +1410,7 @@ fn avail_view<'a>(
     let square = subject.square();
     let year = subject.year.map(|y| format!(" · {y}")).unwrap_or_default();
     let lead = format!(
-        "{}{year}. The lookup has a cover now. You've been using your own.",
+        "{}{year} has an online cover now. You've been using your own.",
         subject.title
     );
     let mine = subject.current.clone().unwrap_or_default();
