@@ -399,7 +399,9 @@ fn view_options<'a>(
 
 /// The progress bar, with the season's marker riding on it.
 fn progress_with_marker<'a>(app: &App, plan: &Plan, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let bar = container(progress(plan, tokens.accent, 8.0, tokens)).center_y(22);
+    // The bar and the marker share one height and both center in it.
+    const HEIGHT: f32 = 22.0;
+    let bar = container(progress(plan, tokens.accent, 8.0, tokens)).center_y(HEIGHT);
     let marker = match super::shown_season(app, plan) {
         Some(Season::Halloween) => Icon::MarkerGhost,
         Some(Season::Christmas) => Icon::MarkerStar,
@@ -410,7 +412,7 @@ fn progress_with_marker<'a>(app: &App, plan: &Plan, tokens: &Tokens) -> Element<
     // FillPortion splits the bar; the marker sits at the end of the done
     // part, flush with the bar's left end at 0 and its right end at 100.
     let before = u16::try_from(done * 100 / total).unwrap_or(100);
-    let mut marker_row = Row::new();
+    let mut marker_row = Row::new().height(HEIGHT).align_y(Center);
     if before > 0 {
         marker_row = marker_row.push(Space::new().width(FillPortion(before)));
     }
