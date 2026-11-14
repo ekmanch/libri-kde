@@ -10,6 +10,7 @@ mod dialogs;
 mod form;
 pub mod seasons;
 pub mod series;
+pub mod tracks;
 
 pub use form::LOOKUP_ID;
 
@@ -63,6 +64,8 @@ pub enum Dialog {
     /// The details' cover, large in the middle of the window, with Pick a
     /// cover beside it once Change cover… is pressed.
     Cover(Box<CoverView>),
+    /// An album's own track list, made by hand (`tracks`).
+    Tracks(Box<tracks::Form>),
 }
 
 /// The cover viewer: the entry, and Pick a cover's state.
@@ -495,6 +498,12 @@ pub enum Message {
         title: String,
         rating: Option<u8>,
     },
+    /// Retry on "Couldn't load the track list.".
+    RetryTracks(String),
+    /// "+ Add tracks manually" and Edit tracks: the Tracks dialog on an
+    /// album without an online match, and what happens in it.
+    EditTracks(String),
+    Tracks(tracks::Message),
     Add,
     /// Add with the type and the title typed: a series' "+ Add".
     AddWithTitle(MediaType, String),
@@ -2021,6 +2030,9 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             });
             app.library.track_rating_open = None;
         }
+        Message::RetryTracks(id) => app.artwork.retry_tracks(&id),
+        Message::EditTracks(id) => tracks::open(app, &id),
+        Message::Tracks(message) => return tracks::update(app, message),
         Message::Add => {
             let media = app.library.single().unwrap_or(MediaType::Movies);
             app.dialog = Some(Dialog::Form(Box::new(Form::add(media))));
@@ -3247,6 +3259,7 @@ pub fn overlay<'a>(app: &'a App, base: Element<'a, AppMessage>) -> Element<'a, A
         Dialog::AddToPlan { id } => dialogs::add_to_plan(app, id),
         Dialog::SeasonDropped { id, season } => dialogs::season_dropped(app, id, *season),
         Dialog::Cover(view) => cover::view(app, view),
+        Dialog::Tracks(form) => tracks::view(app, form),
     });
     ui::modal(base, dialog, AppMessage::Entry(on_dismiss), &tokens)
 }
@@ -3594,7 +3607,7 @@ mod tests {
         let track = tracks.iter().find(|t| t.title == "Angry Chair").unwrap();
         assert_eq!(
             (track.rating, track.id.as_deref()),
-            (8, Some("deezer:track:42"))
+            (Some(8), Some("deezer:track:42"))
         );
         assert_eq!(
             app.library.selected.as_deref(),
@@ -3627,7 +3640,7 @@ mod tests {
         assert_eq!(rooster.len(), 1);
         assert_eq!(
             (rooster[0].rating, rooster[0].id.as_deref()),
-            (7, Some("mb:7c9a7")),
+            (Some(7), Some("mb:7c9a7")),
             "the stored id stays"
         );
     }
@@ -3744,6 +3757,124 @@ mod tests {
                 .any(|m| matches!(m, AppMessage::Entry(Message::ToggleTrackRating(_)))),
             "{messages:?}"
         );
+    }
+
+    fn select(app: &mut App, id: &str) {
+        let _ = app.update(AppMessage::Library(
+            crate::screens::library::Message::Select(id.into()),
+        ));
+    }
+
+    fn shows(app: &App, label: &str) -> bool {
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        ui.find(label).is_ok()
+    }
+
+    #[test]
+    fn an_album_without_a_match_gets_its_tracks_by_hand() {
+        use tracks::Message as T;
+        // The fake has no list for Kind of Blue, and it has no source.
+        let mut app = app();
+        let id = "music/kind-of-blue-miles-davis";
+        select(&mut app, id);
+        assert!(shows(&app, "+ Add tracks manually"));
+        assert!(!shows(&app, "Loading the track list…"));
+
+        send(&mut app, Message::EditTracks(id.into()));
+        assert!(shows(
+            &app,
+            "No tracks yet. Add them one by one, or paste a whole list below."
+        ));
+        send(&mut app, Message::Tracks(T::Add));
+        send(&mut app, Message::Tracks(T::Title(0, "So What".into())));
+        send(&mut app, Message::Tracks(T::Length(0, "9m:22s".into())));
+        send(&mut app, Message::Tracks(T::Add));
+        let paste = "2. Freddie Freeloader 9:46\n3. Blue in Green (5:37)";
+        send(
+            &mut app,
+            Message::Tracks(T::Paste(text_editor::Action::Edit(
+                text_editor::Edit::Paste(std::sync::Arc::new(paste.to_owned())),
+            ))),
+        );
+        assert!(shows(&app, "Add 2 tracks"));
+        send(&mut app, Message::Tracks(T::AddPasted));
+        assert!(shows(&app, "Add from paste"));
+        send(&mut app, Message::Tracks(T::Save));
+        assert!(app.dialog.is_none());
+        let stored = |app: &App| {
+            let tracks = app.repo.library().entry(id).unwrap().tracks.clone();
+            tracks
+                .unwrap_or_default()
+                .into_iter()
+                .map(|t| (t.n.unwrap(), t.title, t.length, t.rating))
+                .collect::<Vec<_>>()
+        };
+        let len = |l: &str| Some(l.to_owned());
+        assert_eq!(
+            stored(&app),
+            [
+                (1, "So What".to_owned(), len("9:22"), None),
+                (2, "Freddie Freeloader".to_owned(), len("9:46"), None),
+                (3, "Blue in Green".to_owned(), len("5:37"), None),
+            ]
+        );
+        assert!(shows(&app, "Edit tracks"));
+        assert!(shows(&app, "Blue in Green"));
+
+        // A rating follows its track through a rename and a move.
+        send(
+            &mut app,
+            Message::RateTrack {
+                album: id.into(),
+                title: "Blue in Green".into(),
+                rating: Some(9),
+            },
+        );
+        send(&mut app, Message::EditTracks(id.into()));
+        send(
+            &mut app,
+            Message::Tracks(T::Title(2, "Blue in Green (take 5)".into())),
+        );
+        send(&mut app, Message::Tracks(T::Grab(2)));
+        send(&mut app, Message::Tracks(T::DragTo(3.0)));
+        send(&mut app, Message::Tracks(T::Drop));
+        send(&mut app, Message::Tracks(T::Remove(1)));
+        send(&mut app, Message::Tracks(T::Save));
+        assert_eq!(
+            stored(&app),
+            [
+                (1, "Blue in Green (take 5)".to_owned(), len("5:37"), Some(9)),
+                (2, "Freddie Freeloader".to_owned(), len("9:46"), None),
+            ]
+        );
+
+        // Saving with no titled rows stores none.
+        send(&mut app, Message::EditTracks(id.into()));
+        send(&mut app, Message::Tracks(T::Remove(0)));
+        send(&mut app, Message::Tracks(T::Title(0, "  ".into())));
+        send(&mut app, Message::Tracks(T::Save));
+        assert_eq!(app.repo.library().entry(id).unwrap().tracks, None);
+        assert!(shows(&app, "+ Add tracks manually"));
+    }
+
+    #[test]
+    fn a_track_list_that_could_not_be_loaded_says_so_with_retry() {
+        let mut app = app();
+        let id = "music/dirt-alice-in-chains";
+        app.artwork.forced_tracks = Some(crate::artwork::ForcedTracks::Failed);
+        select(&mut app, id);
+        assert!(shows(&app, "Couldn’t load the track list."));
+        assert!(!shows(&app, "Sickman"));
+        // The rated tracks are stored, so they show without the list.
+        assert!(shows(&app, "Rooster"));
+        // Through the app, which asks the lookups again after it.
+        let _ = app.update(AppMessage::Entry(Message::RetryTracks(id.into())));
+        assert!(shows(&app, "Sickman"));
+        assert!(!shows(&app, "Retry"));
     }
 
     /// Edit Million Dollar Baby with the form's tag picker open.

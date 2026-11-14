@@ -289,6 +289,39 @@ fn albums(app: &mut App, view: View) {
     let _ = app.update(Message::Library(library::Message::SetView(view)));
 }
 
+const KIND_OF_BLUE: &str = "music/kind-of-blue-miles-davis";
+
+fn track(app: &mut App, message: entry::tracks::Message) {
+    let _ = app.update(Message::Entry(entry::Message::Tracks(message)));
+}
+
+/// The Tracks dialog on Kind of Blue with three rows typed and two lines
+/// pasted.
+fn tracks_dialog(app: &mut App) {
+    use entry::tracks::Message as T;
+    use iced::widget::text_editor::{Action, Edit};
+    let _ = app.update(Message::Entry(entry::Message::EditTracks(
+        KIND_OF_BLUE.into(),
+    )));
+    for (index, (title, length)) in [
+        ("So What", "9:22"),
+        ("Freddie Freeloader", "9:46"),
+        ("Blue in Green", ""),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        track(app, T::Add);
+        track(app, T::Title(index, title.into()));
+        track(app, T::Length(index, length.into()));
+    }
+    let paste = "4. All Blues 11:33\n5. Flamenco Sketches 9:26";
+    track(
+        app,
+        T::Paste(Action::Edit(Edit::Paste(std::sync::Arc::new(paste.into())))),
+    );
+}
+
 /// Runs the daily check against the fake, so Discover has rows.
 fn check(app: &mut App) {
     let _ = app.update(Message::Discover(libri::discover::Message::Check));
@@ -1067,6 +1100,47 @@ fn capture_every_screen() {
                     library::MusicTab::Albums,
                 )));
                 select(app, "music/master-of-puppets-metallica");
+            }),
+        ),
+        // Album tracks (canvas 2026-11-14): a list that could not be
+        // loaded, an album without an online match, the Tracks dialog and
+        // the list made in it.
+        (
+            Screen::Library,
+            ("tracks-failed", |app| {
+                albums(app, View::List);
+                app.artwork.forced_tracks = Some(libri::artwork::ForcedTracks::Failed);
+                select(app, DIRT);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("tracks-unmatched", |app| {
+                albums(app, View::List);
+                select(app, KIND_OF_BLUE);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("tracks-dialog", |app| {
+                albums(app, View::List);
+                select(app, KIND_OF_BLUE);
+                tracks_dialog(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("tracks-own", |app| {
+                albums(app, View::List);
+                select(app, KIND_OF_BLUE);
+                tracks_dialog(app);
+                track(app, entry::tracks::Message::AddPasted);
+                track(app, entry::tracks::Message::Save);
+                let _ = app.update(Message::Entry(entry::Message::RateTrack {
+                    album: KIND_OF_BLUE.into(),
+                    title: "Blue in Green".into(),
+                    rating: Some(9),
+                }));
             }),
         ),
         (

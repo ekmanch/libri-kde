@@ -18,6 +18,8 @@ pub enum Icon {
     Document,
     ExternalLink,
     Filter,
+    /// The six dots a row is dragged by.
+    Grip,
     Key,
     MarkerGhost,
     MarkerStar,
@@ -37,7 +39,7 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Icon; 26] = [
+    pub const ALL: [Icon; 27] = [
         Icon::Calendar,
         Icon::Check,
         Icon::ChevronDown,
@@ -49,6 +51,7 @@ impl Icon {
         Icon::Document,
         Icon::ExternalLink,
         Icon::Filter,
+        Icon::Grip,
         Icon::Key,
         Icon::MarkerGhost,
         Icon::MarkerStar,
@@ -84,6 +87,7 @@ impl Icon {
             Icon::Document => file!("document"),
             Icon::ExternalLink => file!("external-link"),
             Icon::Filter => file!("filter"),
+            Icon::Grip => file!("grip"),
             Icon::Key => file!("key"),
             Icon::MarkerGhost => file!("marker-ghost"),
             Icon::MarkerStar => file!("marker-star"),

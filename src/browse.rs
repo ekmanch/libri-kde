@@ -852,6 +852,7 @@ pub fn matches_search(entry: &Entry, query: &str) -> bool {
             .tracks
             .iter()
             .flatten()
+            .filter(|track| track.rating.is_some())
             .any(|track| track.title.to_lowercase().contains(&query))
 }
 
@@ -1249,11 +1250,7 @@ mod tests {
         album.title = "Merry Christmas".into();
         album.creator = Some("Mariah Carey".into());
         album.tags = Vec::new();
-        album.tracks = Some(vec![crate::model::Track {
-            title: "Silent Night".into(),
-            id: None,
-            rating: 8,
-        }]);
+        album.tracks = Some(vec![crate::model::Track::rated("Silent Night", None, 8)]);
         assert!(matches_search(&album, "mariah"));
         assert!(matches_search(&album, "CAREY"));
         assert!(matches_search(&album, "silent"));

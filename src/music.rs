@@ -123,7 +123,7 @@ impl<'a> Song<'a> {
     pub fn rating(&self) -> Option<u8> {
         match self {
             Song::Entry(entry) => entry.rating,
-            Song::Track { track, .. } => Some(track.rating),
+            Song::Track { track, .. } => track.rating,
         }
     }
 
@@ -160,6 +160,7 @@ pub fn songs_matching<'a>(entries: &[&'a Entry], query: &str) -> Vec<Song<'a>> {
                     .tracks
                     .iter()
                     .flatten()
+                    .filter(|track| track.rating.is_some())
                     .filter(|track| by_artist || track.title.to_lowercase().contains(&needle))
                     .map(|track| Song::Track {
                         album: entry,
@@ -216,17 +217,16 @@ pub fn absorb_songs(mut album: Entry, songs: &[&Entry]) -> Entry {
     let mut tracks = album.tracks.take().unwrap_or_default();
     for song in songs {
         let Some(rating) = song.rating else { continue };
-        if tracks
-            .iter()
-            .any(|t| norm(Some(&t.title)) == norm(Some(&song.title)))
+        match tracks
+            .iter_mut()
+            .find(|t| norm(Some(&t.title)) == norm(Some(&song.title)))
         {
-            continue;
+            // A track of the album's own list, not rated yet.
+            Some(track) => {
+                track.rating.get_or_insert(rating);
+            }
+            None => tracks.push(Track::rated(song.title.clone(), None, rating)),
         }
-        tracks.push(Track {
-            title: song.title.clone(),
-            id: None,
-            rating,
-        });
     }
     album.tracks = (!tracks.is_empty()).then_some(tracks);
     album
@@ -387,7 +387,7 @@ mod tests {
         let found = songs_from_album(&library.entries, &album);
         assert_eq!(found.len(), 1);
         let absorbed = absorb_songs(album.clone(), &found);
-        assert_eq!(absorbed.tracks.unwrap()[0].rating, 9);
+        assert_eq!(absorbed.tracks.unwrap()[0].rating, Some(9));
 
         let mut entries = library.entries.clone();
         entries.push(album);

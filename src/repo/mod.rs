@@ -116,6 +116,13 @@ pub enum Operation {
         track_id: Option<String>,
         rating: Option<u8>,
     },
+    /// Replaces an album's own track list, made by hand for an album
+    /// without an online match: the tracks in order, numbered from 1 here,
+    /// each with the rating it carries. An empty list stores none.
+    SetTracks {
+        album: String,
+        tracks: Vec<Track>,
+    },
     /// Sets one season's status (`None` clears it); the show's status
     /// follows. A season given a status is no longer "new".
     SetSeasonStatus {
@@ -253,6 +260,10 @@ impl Operation {
                 rating: None,
                 ..
             } => format!("Clear the rating of {track} on {}", title(album)),
+            Operation::SetTracks { album, tracks } if tracks.is_empty() => {
+                format!("Remove the tracks of {}", title(album))
+            }
+            Operation::SetTracks { album, .. } => format!("Edit the tracks of {}", title(album)),
             Operation::SetSeasonStatus {
                 id,
                 season,
@@ -431,17 +442,39 @@ impl Operation {
                     _ => t.title.eq_ignore_ascii_case(&title),
                 });
                 match (found, rating) {
-                    (Some(index), Some(rating)) => tracks[index].rating = rating,
+                    (Some(index), Some(rating)) => tracks[index].rating = Some(rating),
+                    // A track of the album's own list stays, unrated.
+                    (Some(index), None) if tracks[index].n.is_some() => {
+                        tracks[index].rating = None;
+                    }
                     (Some(index), None) => {
                         tracks.remove(index);
                     }
-                    (None, Some(rating)) => tracks.push(Track {
-                        title,
-                        id: track_id,
-                        rating,
-                    }),
+                    (None, Some(rating)) => tracks.push(Track::rated(title, track_id, rating)),
                     (None, None) => {}
                 }
+                if tracks.is_empty() {
+                    album.tracks = None;
+                }
+            }
+            Operation::SetTracks { album, tracks } => {
+                if let Some(rating) = tracks
+                    .iter()
+                    .filter_map(|t| t.rating)
+                    .find(|r| !(1..=10).contains(r))
+                {
+                    return Err(RepoError::InvalidRating(rating));
+                }
+                let album = entry_mut(library, &album)?;
+                let tracks: Vec<Track> = tracks
+                    .into_iter()
+                    .zip(1..)
+                    .map(|(track, n)| Track {
+                        n: Some(n),
+                        ..track
+                    })
+                    .collect();
+                album.tracks = (!tracks.is_empty()).then_some(tracks);
             }
             Operation::SetSeasonStatus {
                 id,
@@ -807,6 +840,13 @@ mod summary_tests {
                     rating: None,
                 },
                 format!("Clear the rating of Would? on {dirt}"),
+            ),
+            (
+                Operation::SetTracks {
+                    album: id(DIRT),
+                    tracks: vec![Track::default()],
+                },
+                format!("Edit the tracks of {dirt}"),
             ),
             (
                 Operation::SetSeasonStatus {

@@ -206,6 +206,55 @@ mod tests {
     }
 
     #[test]
+    fn an_albums_own_tracks_are_numbered_and_keep_their_ratings() {
+        use crate::model::Track;
+        let mut repo = repo();
+        let album = "music/kind-of-blue-miles-davis";
+        let track = |title: &str, length: Option<&str>, rating| Track {
+            title: title.into(),
+            length: length.map(str::to_owned),
+            rating,
+            ..Track::default()
+        };
+        let library = repo
+            .apply(Operation::SetTracks {
+                album: album.into(),
+                tracks: vec![
+                    track("So What", Some("9:22"), Some(10)),
+                    track("Freddie Freeloader", None, None),
+                ],
+            })
+            .unwrap();
+        let entry = library.entry(album).unwrap();
+        assert_eq!(
+            serde_json::to_string(&entry.tracks).unwrap(),
+            r#"[{"n":1,"title":"So What","length":"9:22","rating":10},{"n":2,"title":"Freddie Freeloader"}]"#
+        );
+        // A rating cleared on a track of the list leaves the track.
+        let rate = |title: &str, rating| Operation::SetTrackRating {
+            album: album.into(),
+            title: title.into(),
+            track_id: None,
+            rating,
+        };
+        repo.apply(rate("Freddie Freeloader", Some(8))).unwrap();
+        let library = repo.apply(rate("So What", None)).unwrap();
+        let tracks = library.entry(album).unwrap().tracks.clone().unwrap();
+        assert_eq!(
+            tracks.iter().map(|t| (t.n, t.rating)).collect::<Vec<_>>(),
+            [(Some(1), None), (Some(2), Some(8))]
+        );
+        // No tracks left: none are stored.
+        let library = repo
+            .apply(Operation::SetTracks {
+                album: album.into(),
+                tracks: Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(library.entry(album).unwrap().tracks, None);
+    }
+
+    #[test]
     fn track_ratings_are_added_changed_and_cleared() {
         let mut repo = repo();
         let dirt = "music/dirt-alice-in-chains";
@@ -225,7 +274,11 @@ mod tests {
             .collect();
         assert_eq!(
             titles,
-            [("Rooster", 8), ("Down in a Hole", 9), ("Would?", 10)]
+            [
+                ("Rooster", Some(8)),
+                ("Down in a Hole", Some(9)),
+                ("Would?", Some(10))
+            ]
         );
     }
 

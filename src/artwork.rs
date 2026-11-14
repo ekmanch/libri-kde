@@ -63,6 +63,11 @@ const SERIES_REFRESH: i64 = 7 * 86_400;
 /// How long after a season's last episode its stored list is trusted for
 /// good.
 const EPISODES_SETTLE: i64 = 30;
+/// The source of a track list state for an album the fake has no match
+/// for.
+const FAKE_UNMATCHED: &str = "fake:unmatched";
+/// And for one it answers for.
+const FAKE_MATCHED: &str = "fake";
 /// The session's prune runs this long after the start.
 pub const PRUNE_DELAY: Duration = Duration::from_secs(15);
 
@@ -167,6 +172,41 @@ pub struct TracksState {
     loading: bool,
 }
 
+/// An album's track list as the details show it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TrackList<'a> {
+    /// The lookup, or the match that gives the album its id, is on its
+    /// way.
+    Loading,
+    /// The lookup or the match gave no answer: "Couldn't load the track
+    /// list." with Retry.
+    Failed,
+    /// The album has no online match, so nothing is looked up: its
+    /// tracks are the owner's own, in `Entry::tracks`.
+    Unmatched,
+    /// The album is matched and its source has no track list.
+    Missing,
+    Ready(&'a [TrackInfo]),
+}
+
+/// A track list state forced for a look (`LIBRI_TRACKS`, the captures),
+/// on every album with an online match until Retry is pressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForcedTracks {
+    Loading,
+    Failed,
+}
+
+impl ForcedTracks {
+    pub fn from_env(value: &str) -> Option<ForcedTracks> {
+        match value {
+            "loading" => Some(ForcedTracks::Loading),
+            "failed" => Some(ForcedTracks::Failed),
+            _ => None,
+        }
+    }
+}
+
 /// What a lookup task hands back.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -255,6 +295,7 @@ pub struct Artwork {
     series: HashMap<String, SeriesState>,
     episodes: HashMap<(String, u32), EpisodesState>,
     tracks: HashMap<String, TracksState>,
+    pub forced_tracks: Option<ForcedTracks>,
     platforms: Option<Reply<Vec<GamePlatform>>>,
     platforms_loading: bool,
     dirty: bool,
@@ -308,6 +349,7 @@ impl Artwork {
             series: HashMap::new(),
             episodes: HashMap::new(),
             tracks: HashMap::new(),
+            forced_tracks: None,
             platforms: None,
             platforms_loading: false,
             dirty: false,
@@ -541,6 +583,50 @@ impl Artwork {
 
     pub fn tracks_for(&self, entry: &Entry) -> Option<&TracksState> {
         self.tracks.get(&entry.id)
+    }
+
+    /// The album's track list as the details show it. An album is
+    /// without an online match once it has no `source` and the match on
+    /// this computer was made and found none; a match that failed is a
+    /// list that could not be loaded, never an album without one.
+    pub fn track_list(&self, entry: &Entry) -> TrackList<'_> {
+        let state = self.tracks.get(&entry.id);
+        if self.source_of(entry).is_none() {
+            if self.unmatched(entry) {
+                return TrackList::Unmatched;
+            }
+            if self.failures.contains_key(&format!("entry:{}", entry.id)) {
+                return TrackList::Failed;
+            }
+        }
+        match (self.forced_tracks, state.map(|s| &s.loaded)) {
+            (Some(ForcedTracks::Loading), _) => TrackList::Loading,
+            (Some(ForcedTracks::Failed), _) => TrackList::Failed,
+            (None, None | Some(Loaded::Loading)) => TrackList::Loading,
+            (None, Some(Loaded::Failed(_))) => TrackList::Failed,
+            (None, Some(Loaded::None)) => TrackList::Missing,
+            (None, Some(Loaded::Ready(tracks))) => TrackList::Ready(tracks),
+        }
+    }
+
+    /// The album has no `source` and the match on this computer found
+    /// none.
+    fn unmatched(&self, entry: &Entry) -> bool {
+        entry.source.is_none()
+            && match self.tracks.get(&entry.id) {
+                // The fake answers on the spot and knows no such album.
+                Some(state) if state.source == FAKE_UNMATCHED => true,
+                Some(state) if state.source == FAKE_MATCHED => false,
+                _ => self.record_of(entry).is_some_and(|r| r.source.is_none()),
+            }
+    }
+
+    /// Retry on "Couldn't load the track list.": the failed lookup, or
+    /// the failed match, is forgotten, so the next refresh asks again.
+    pub fn retry_tracks(&mut self, id: &str) {
+        self.forced_tracks = None;
+        self.tracks.remove(id);
+        self.failures.remove(&format!("entry:{id}"));
     }
 
     /// An album's track list as if a lookup had just answered.
@@ -1023,8 +1109,15 @@ impl Artwork {
         if service.is_instant() {
             self.tracks.entry(entry.id.clone()).or_insert_with(|| {
                 let tracks = lookup::fake::track_list(crate::music::artist_of(entry), &entry.title);
+                // An album the fake has no list for and that was added
+                // by hand has no online match.
+                let source = if tracks.is_none() && entry.source.is_none() {
+                    FAKE_UNMATCHED
+                } else {
+                    FAKE_MATCHED
+                };
                 TracksState {
-                    source: "fake".into(),
+                    source: source.into(),
                     loaded: tracks.map_or(Loaded::None, Loaded::Ready),
                     loading: false,
                 }
@@ -1032,6 +1125,9 @@ impl Artwork {
             return None;
         }
         let Some(source) = self.source_of(entry) else {
+            // The match gives the id; it is asked for here too, so the
+            // list never waits on a cover nothing shows.
+            self.want_cover(entry);
             self.tracks.entry(entry.id.clone()).or_insert(TracksState {
                 source: String::new(),
                 loaded: Loaded::Loading,
@@ -1620,6 +1716,58 @@ mod tests {
             &library,
         );
         assert!(artwork.image(thumbnail).is_none());
+    }
+
+    #[test]
+    fn a_track_list_ends_as_failed_or_unmatched_instead_of_loading_for_good() {
+        let mut library = Library::default();
+        let mut album = entry("music/live-adele", "Live", None);
+        album.media = MediaType::Music;
+        library.entries.push(album.clone());
+        // Not the fake; the tasks are dropped unrun.
+        let service = Arc::new(Service::with(Vec::new(), false));
+        let mut artwork = Artwork::at(None);
+        let wants = Wants {
+            tracks: vec![album.id.clone()],
+            ..Wants::default()
+        };
+        // The match that gives the album its id is asked for.
+        let _ = artwork.refresh(&wants, &library, &service);
+        assert_eq!(artwork.track_list(&album), TrackList::Loading);
+        assert!(artwork.resolving.contains("entry:music/live-adele"));
+
+        // It failed: the list could not be loaded, and Retry asks again.
+        let key = Artwork::key_for(&album);
+        artwork.cover_resolved(album.id.clone(), key.clone(), Err(FailureKind::Offline));
+        assert_eq!(artwork.track_list(&album), TrackList::Failed);
+        artwork.retry_tracks(&album.id);
+        let _ = artwork.refresh(&wants, &library, &service);
+        assert_eq!(artwork.track_list(&album), TrackList::Loading);
+        assert!(artwork.resolving.contains("entry:music/live-adele"));
+
+        // It found nothing: the album has no online match.
+        artwork.cover_resolved(album.id.clone(), key.clone(), Ok((None, None)));
+        let _ = artwork.refresh(&wants, &library, &service);
+        assert_eq!(artwork.track_list(&album), TrackList::Unmatched);
+
+        // It found the album: its list is asked for, and a failure there
+        // is a list that could not be loaded too.
+        let source = "deezer:album:1".to_owned();
+        artwork.cover_resolved(album.id.clone(), key, Ok((None, Some(source.clone()))));
+        let _ = artwork.refresh(&wants, &library, &service);
+        assert_eq!(artwork.track_list(&album), TrackList::Loading);
+        let _ = artwork.update(
+            Message::Tracks {
+                id: album.id.clone(),
+                source,
+                outcome: Err(lookup::Failure::new(FailureKind::Offline, "")),
+            },
+            &library,
+        );
+        assert_eq!(artwork.track_list(&album), TrackList::Failed);
+        artwork.retry_tracks(&album.id);
+        let _ = artwork.refresh(&wants, &library, &service);
+        assert_eq!(artwork.track_list(&album), TrackList::Loading);
     }
 
     #[test]

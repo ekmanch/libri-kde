@@ -395,14 +395,36 @@ impl Entry {
     }
 }
 
-/// A rated track on an album entry. Only rated tracks are stored; `id` is
-/// the lookup id, when known.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A track on an album entry. An album with an online match stores only
+/// its rated tracks (`title`, `id` when known, `rating`): its list is
+/// fetched, never stored. An album without one keeps its own list, made
+/// by hand: every track with its number `n` and an optional `length`
+/// ("4:31"), rated or not. The keys are written in this order, each only
+/// when present.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Track {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n: Option<u32>,
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
-    pub rating: u8,
+    /// 1 to 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rating: Option<u8>,
+}
+
+impl Track {
+    /// A rated track of an album with an online match.
+    pub fn rated(title: impl Into<String>, id: Option<String>, rating: u8) -> Track {
+        Track {
+            title: title.into(),
+            id,
+            rating: Some(rating),
+            ..Track::default()
+        }
+    }
 }
 
 /// One season of a show. `status` is null when not set and never changes

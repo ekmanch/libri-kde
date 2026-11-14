@@ -573,6 +573,8 @@ impl App {
             // rows to look at.
             let _ = app.check_discover();
         }
+        app.artwork.forced_tracks =
+            var("LIBRI_TRACKS").and_then(|value| artwork::ForcedTracks::from_env(&value));
         if let Some(state) =
             var("LIBRI_LOOKUP").and_then(|value| lookup::LookupState::from_env(&value))
         {
@@ -2085,6 +2087,16 @@ impl App {
         let windows = window::events().map(|(_, event)| Message::Window(event));
         let scheme = iced::system::theme_changes().map(Message::SystemTheme);
         let mut subscriptions = vec![keys, buttons, resizes, windows, scheme];
+        // A track dragged in the Tracks dialog is let go wherever the
+        // button comes up.
+        if entry::tracks::dragging(self) {
+            subscriptions.push(event::listen_with(|event, _status, _window| match event {
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => Some(
+                    Message::Entry(entry::Message::Tracks(entry::tracks::Message::Drop)),
+                ),
+                _ => None,
+            }));
+        }
         // Side-scrolling or Shift+wheel anywhere on the Coming soon page
         // or under Music's tabs; the list may have captured the event, so
         // its status is no matter.

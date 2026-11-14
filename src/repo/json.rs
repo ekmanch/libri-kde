@@ -8,7 +8,9 @@
 
 use serde_json::{Map, Value, json};
 
-use crate::model::{Date, Entry, EntryStatus, Plan, PlanItem, Season, TagCategory, TagPicks};
+use crate::model::{
+    Date, Entry, EntryStatus, Plan, PlanItem, Season, TagCategory, TagPicks, Track,
+};
 
 use super::Operation;
 
@@ -76,6 +78,9 @@ pub fn encode(operation: &Operation) -> Value {
             "clearTrackRating",
             json!({ "entryId": album, "trackId": track_id, "title": title }),
         ),
+        Operation::SetTracks { album, tracks } => {
+            ("setTracks", json!({ "entryId": album, "tracks": tracks }))
+        }
         Operation::SetSeasonStatus {
             id,
             season,
@@ -210,6 +215,10 @@ pub fn decode(value: &Value) -> Result<Operation, String> {
             track_id: value["trackId"].as_str().map(str::to_owned),
             rating: None,
         },
+        "setTracks" => Operation::SetTracks {
+            album: string("entryId")?,
+            tracks: field::<Vec<Track>>(op, value, "tracks")?,
+        },
         "setSeasonStatus" => Operation::SetSeasonStatus {
             id: string("entryId")?,
             season: number("season")?,
@@ -333,6 +342,16 @@ mod tests {
                 title: "Enter Sandman".into(),
                 track_id: None,
                 rating: None,
+            },
+            Operation::SetTracks {
+                album: "music/album".into(),
+                tracks: vec![Track {
+                    n: Some(1),
+                    title: "Hometown Glory".into(),
+                    length: Some("4:31".into()),
+                    id: None,
+                    rating: Some(9),
+                }],
             },
             Operation::SetSeasonStatus {
                 id: id(),

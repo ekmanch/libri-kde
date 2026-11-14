@@ -1160,51 +1160,68 @@ fn labeled<'a>(
         .into()
 }
 
-/// An album's tracks: the track list with a rating per track, rated
-/// tracks the list lacks after it, in `height` px; a list taller than
-/// that scrolls within it, so the pane itself never does. Only rated
-/// tracks are stored.
+/// An album's tracks, in `height` px; a list taller than that scrolls
+/// within it, so the pane itself never does. An album with an online
+/// match shows the fetched list with a rating per track, rated tracks the
+/// list lacks after it, and only the rated ones are stored; while the
+/// list is on its way it says so, and when it could not be loaded it says
+/// that with Retry. An album without a match is never looked up: it shows
+/// its own list (`Entry::tracks`, made in the Tracks dialog) with Edit
+/// tracks in the header, or the line that says so with "+ Add tracks
+/// manually".
 fn tracks<'a>(
     app: &'a App,
     album: &'a Entry,
     height: f32,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
-    let rated = album.tracks.as_deref().unwrap_or_default();
-    // A stored rating is matched to a listed track by its title with case,
-    // punctuation and edition notes set aside.
-    let rating_of = |title: &str| {
-        rated
-            .iter()
-            .find(|t| {
-                crate::lookup::text::track_title_key(&t.title)
-                    == crate::lookup::text::track_title_key(title)
-            })
-            .map(|t| t.rating)
-    };
-    use crate::artwork::Loaded;
-    use crate::lookup::FailureKind;
-    let state = app.artwork.tracks_for(album);
+    use crate::artwork::TrackList;
+    let stored = album.tracks.as_deref().unwrap_or_default();
+    let rated = stored.iter().filter(|t| t.rating.is_some()).count();
     let key = crate::lookup::text::track_title_key;
-    let listed: Vec<&str> = match state.map(|s| &s.loaded) {
-        Some(Loaded::Ready(tracks)) => tracks.iter().map(|t| t.title.as_str()).collect(),
-        _ => Vec::new(),
-    };
-    let extra = rated
-        .iter()
-        .filter(|t| !listed.iter().any(|l| key(l) == key(&t.title)))
-        .map(|t| t.title.as_str());
+    let list = app.artwork.track_list(album);
+    let own = list == TrackList::Unmatched;
+    // The number, the title, the length and the rating of every row.
+    let mut listed: Vec<(String, &str, Option<&str>, Option<u8>)> = Vec::new();
+    match list {
+        // The owner's list: every stored track as it is.
+        TrackList::Unmatched => {
+            for (index, track) in stored.iter().enumerate() {
+                listed.push((
+                    (index + 1).to_string(),
+                    &track.title,
+                    track.length.as_deref(),
+                    track.rating,
+                ));
+            }
+        }
+        _ => {
+            let fetched = match list {
+                TrackList::Ready(tracks) => tracks,
+                _ => &[],
+            };
+            // A stored rating is matched to a listed track by its title
+            // with case, punctuation and edition notes set aside.
+            for (index, track) in fetched.iter().enumerate() {
+                let rating = stored
+                    .iter()
+                    .find(|t| key(&t.title) == key(&track.title))
+                    .and_then(|t| t.rating);
+                listed.push(((index + 1).to_string(), &track.title, None, rating));
+            }
+            for track in stored.iter().filter(|t| t.rating.is_some()) {
+                if !fetched.iter().any(|l| key(&l.title) == key(&track.title)) {
+                    listed.push((String::new(), &track.title, None, track.rating));
+                }
+            }
+        }
+    }
     let open = app.library.track_rating_open;
 
     let mut rows = Column::new();
-    for (index, title) in listed.iter().copied().chain(extra).enumerate() {
-        let number = if index < listed.len() {
-            (index + 1).to_string()
-        } else {
-            String::new()
-        };
+    for (index, (number, title, length, rating)) in listed.into_iter().enumerate() {
         let picker = ui::track_rating(
-            rating_of(title),
+            rating,
             open == Some(index),
             msg(Message::ToggleTrackRating(index)),
             move |rating| {
@@ -1216,45 +1233,77 @@ fn tracks<'a>(
             },
             tokens,
         );
-        rows = rows.push(
-            row![
-                container(ui::mono(number, 12.0, tokens.sub)).width(22),
-                container(text(title).size(14).wrapping(text::Wrapping::None))
-                    .width(Fill)
-                    .clip(true),
-                picker,
-            ]
-            .spacing(8)
-            .align_y(iced::Center)
-            .height(TRACK_H),
-        );
+        let mut line = row![
+            container(ui::mono(number, 12.0, tokens.sub)).width(22),
+            container(text(title).size(14).wrapping(text::Wrapping::None))
+                .width(Fill)
+                .clip(true),
+        ]
+        .spacing(8)
+        .align_y(iced::Center)
+        .height(TRACK_H);
+        if let Some(length) = length {
+            line = line.push(ui::mono(length, 12.0, tokens.sub));
+        }
+        rows = rows.push(line.push(picker));
     }
-    let note = match state.map(|s| &s.loaded) {
-        None | Some(Loaded::Loading) => Some("Loading the track list…"),
-        Some(Loaded::Failed(FailureKind::Offline)) => {
-            Some("The full track list needs a connection.")
-        }
-        Some(Loaded::Failed(_)) | Some(Loaded::None) => {
-            Some("No track list was found for this album.")
-        }
-        Some(Loaded::Ready(_)) if rated.is_empty() => Some("No tracks rated yet."),
-        Some(Loaded::Ready(_)) => None,
+    let note = |line: &'static str| -> Element<'a, AppMessage> {
+        text(line).size(13).color(tokens.sub).into()
     };
     let mut body = Column::new().spacing(6);
-    if let Some(note) = note {
-        body = body.push(text(note).size(13).color(tokens.sub));
+    match list {
+        TrackList::Loading => body = body.push(note("Loading the track list…")),
+        TrackList::Failed => {
+            body = body.push(
+                row![
+                    note("Couldn’t load the track list."),
+                    ui::header_link(
+                        "Retry",
+                        false,
+                        tokens,
+                        msg(Message::RetryTracks(album.id.clone())),
+                    ),
+                ]
+                .spacing(10)
+                .align_y(iced::Center),
+            );
+        }
+        TrackList::Missing => body = body.push(note("No track list was found for this album.")),
+        TrackList::Unmatched if stored.is_empty() => {
+            body = body.push(
+                column![
+                    text("This album has no online match, so its tracks aren’t looked up.")
+                        .size(13)
+                        .line_height(1.45)
+                        .color(tokens.sub),
+                    ui::sized_button(
+                        "+ Add tracks manually",
+                        ButtonKind::Outline,
+                        32.0,
+                        *tokens,
+                        Some(msg(Message::EditTracks(album.id.clone()))),
+                    ),
+                ]
+                .spacing(8),
+            );
+        }
+        TrackList::Ready(_) if rated == 0 => body = body.push(note("No tracks rated yet.")),
+        TrackList::Unmatched | TrackList::Ready(_) => {}
     }
     body = body.push(rows);
-    let header = header_with(
-        "Tracks",
-        Some(
-            text(format!("{} rated", rated.len()))
-                .size(12.5)
-                .color(tokens.sub)
-                .into(),
-        ),
-        tokens,
-    );
+    let mut right = Row::new().spacing(14).align_y(iced::Center);
+    if !(own && stored.is_empty()) {
+        right = right.push(text(format!("{rated} rated")).size(12.5).color(tokens.sub));
+    }
+    if own && !stored.is_empty() {
+        right = right.push(ui::header_link(
+            "Edit tracks",
+            false,
+            tokens,
+            msg(Message::EditTracks(album.id.clone())),
+        ));
+    }
+    let header = header_with("Tracks", Some(right.into()), tokens);
     column![header, ui::scroll(body).height(height)]
         .spacing(6)
         .into()
