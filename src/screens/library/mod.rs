@@ -57,7 +57,7 @@ pub enum View {
 }
 
 /// Music's three tabs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum MusicTab {
     #[default]
     Artists,
@@ -68,14 +68,17 @@ pub enum MusicTab {
 impl MusicTab {
     pub const ALL: [MusicTab; 3] = [MusicTab::Artists, MusicTab::Albums, MusicTab::Songs];
 
+    pub fn index(self) -> usize {
+        MusicTab::ALL
+            .iter()
+            .position(|tab| *tab == self)
+            .unwrap_or(0)
+    }
+
     /// The tab `by` steps on, wrapping.
     pub fn step(self, by: isize) -> MusicTab {
         let n = MusicTab::ALL.len() as isize;
-        let at = MusicTab::ALL
-            .iter()
-            .position(|tab| *tab == self)
-            .unwrap_or(0) as isize;
-        MusicTab::ALL[(at + by).rem_euclid(n) as usize]
+        MusicTab::ALL[(self.index() as isize + by).rem_euclid(n) as usize]
     }
 }
 
@@ -277,6 +280,10 @@ pub struct State {
     pub found: Option<String>,
     /// The list sliding to another slice.
     pub slide: Option<SliceSlide>,
+    /// The list on its way to another of Music's tabs, the same way.
+    pub tab_slide: Option<SliceSlide>,
+    /// Where each of Music's tabs was left scrolled.
+    pub tab_scroll: HashMap<MusicTab, f32>,
     /// The type panel's Coming soon popover is open.
     pub type_pop: bool,
 }
@@ -897,6 +904,12 @@ impl State {
             Message::Scrolled(scroll) => self.scroll = scroll,
             Message::MusicTab(tab) => {
                 self.leave_soon();
+                // Each tab keeps its own place, as Coming soon's slices do.
+                if tab != self.music_tab && music_tabs_shown(self) {
+                    self.tab_scroll.insert(self.music_tab, self.scroll.offset);
+                    self.rail_pick = None;
+                    self.scroll.offset = self.tab_scroll.get(&tab).copied().unwrap_or(0.0);
+                }
                 self.music_tab = tab;
                 self.artist = None;
             }
@@ -1954,6 +1967,35 @@ mod tests {
         // Back goes to the tab before, as after a click on a segment.
         let _ = app.update(AppMessage::History(crate::history::Direction::Back));
         assert_eq!(app.library.music_tab, MusicTab::Artists);
+
+        // The list slides to the tab at Plasma's speed, as Coming soon's
+        // does, and each tab keeps where it was scrolled.
+        assert_eq!(app.library.tab_slide, None, "instant in the tests");
+        app.speed = crate::animation::Speed::factor(0.5);
+        app.library.scroll.offset = 120.0;
+        let at = start + Duration::from_secs(10);
+        wheel(&mut app, -1.0, 0.0, 10_000);
+        assert_eq!(app.library.music_tab, MusicTab::Albums);
+        assert_eq!(app.library.scroll.offset, 0.0, "a tab not seen yet");
+        let moving = app.library.tab_slide.clone().expect("a slide");
+        assert_eq!(moving.position(at), 0.0, "from Artists");
+        assert_eq!(moving.anchor, 1.0);
+        assert!(moving.forward());
+        let _ = app.view();
+        let _ = app.update_at(AppMessage::Frame(at), at + Duration::from_secs(5));
+        assert_eq!(app.library.tab_slide, None, "settled");
+        key(&mut app, Named::ArrowLeft);
+        assert_eq!(app.library.scroll.offset, 120.0, "where Artists was left");
+        assert!(!app.library.tab_slide.as_ref().unwrap().forward());
+        // Songs to Artists wraps forward.
+        app.library.tab_slide = None;
+        key(&mut app, Named::ArrowLeft);
+        app.library.tab_slide = None;
+        key(&mut app, Named::ArrowRight);
+        assert_eq!(app.library.music_tab, MusicTab::Artists);
+        assert!(app.library.tab_slide.as_ref().unwrap().forward());
+        app.speed = crate::animation::Speed::factor(0.0);
+        app.library.tab_slide = None;
 
         // No tabs on an artist's page or on another type.
         app.library.artist = Some("Adele".into());

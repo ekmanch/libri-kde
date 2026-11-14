@@ -1052,6 +1052,14 @@ impl App {
         {
             self.library.slide = None;
         }
+        if self
+            .library
+            .tab_slide
+            .as_ref()
+            .is_some_and(|moving| moving.done(now))
+        {
+            self.library.tab_slide = None;
+        }
         let message = match message {
             Message::KeyPressed(key, modifiers) => match self.shortcut(&key, modifiers) {
                 Some(message) => message,
@@ -1086,6 +1094,9 @@ impl App {
             self.library.selection_moved();
         }
         library::slide_drawer(self, closes, drawer, now);
+        if !library::music_tabs_shown(&self.library) {
+            self.library.tab_slide = None;
+        }
         // Back from a page, the list or Home is where it was left.
         let task = if page && self.library.page.is_none() && self.screen == Screen::Library {
             Task::batch([task, library::restore_scroll(&self.library)])
@@ -1606,6 +1617,9 @@ impl App {
                 };
                 return operation::scroll_to(library::LIST_ID, offset);
             }
+            // Music's tabs: the list slides between them as the Coming
+            // soon page's does, and each keeps its own scroll offset.
+            Message::Library(library::Message::MusicTab(tab)) => return self.switch_tab(tab),
             Message::Library(library::Message::Wheel(delta)) => {
                 if self.soon_page_free()
                     && let Some(step) =
@@ -1781,9 +1795,12 @@ impl App {
         {
             subscriptions.push(time::every(Duration::from_millis(16)).map(|_| Message::Tick));
         }
-        // The drawer's slide, and the Coming soon page's slice slide, draw
-        // every frame while they run.
-        if self.library.motion.running() || self.library.slide.is_some() {
+        // The drawer's slide, the Coming soon page's slice slide and the
+        // slide between Music's tabs draw every frame while they run.
+        if self.library.motion.running()
+            || self.library.slide.is_some()
+            || self.library.tab_slide.is_some()
+        {
             subscriptions.push(window::frames().map(Message::Frame));
         }
         // The debounce clock runs only while edits wait; while a
@@ -1871,8 +1888,44 @@ impl App {
             };
             self.library.slide = Some(library::SliceSlide::toward(
                 self.library.slide.as_ref(),
-                from,
-                to,
+                from.index(),
+                to.index(),
+                library::Slice::ALL.len(),
+                spring.slowed(library::soon::SLOWER),
+                (width + library::soon::GAP) * self.scale,
+                self.now,
+            ));
+        }
+        let offset = scrollable::AbsoluteOffset {
+            x: None,
+            y: Some(self.library.scroll.offset),
+        };
+        operation::scroll_to(library::LIST_ID, offset)
+    }
+
+    /// A switch of Music's tab (a segment, Shift+arrows, a side-scroll or
+    /// Shift+wheel): the list slides to the new tab exactly as the Coming
+    /// soon page's does between its slices (`switch_slice`), and the new
+    /// tab is scrolled back to where it was left.
+    fn switch_tab(&mut self, tab: library::MusicTab) -> Task<Message> {
+        let shown = self.screen == Screen::Library && library::music_tabs_shown(&self.library);
+        let from = self.library.music_tab;
+        self.screen = Screen::Library;
+        self.library.update(library::Message::MusicTab(tab));
+        if !shown || from == tab {
+            return Task::none();
+        }
+        if let Some(spring) = animation::Spring::desktop_switch(self.speed) {
+            let width = if self.library.list_width > 0.0 {
+                self.library.list_width
+            } else {
+                screens::shell::content_width(self, 0.0)
+            };
+            self.library.tab_slide = Some(library::SliceSlide::toward(
+                self.library.tab_slide.as_ref(),
+                from.index(),
+                tab.index(),
+                library::MusicTab::ALL.len(),
                 spring.slowed(library::soon::SLOWER),
                 (width + library::soon::GAP) * self.scale,
                 self.now,

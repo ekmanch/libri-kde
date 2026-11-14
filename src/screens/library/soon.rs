@@ -62,7 +62,7 @@ impl Slice {
         }
     }
 
-    fn index(self) -> usize {
+    pub fn index(self) -> usize {
         Slice::ALL.iter().position(|s| *s == self).unwrap_or(0)
     }
 
@@ -91,8 +91,9 @@ pub const SLOWER: f32 = 3.0;
 pub const GAP: f32 = 45.0;
 
 /// The list on its way to another slice, moved as KWin moves the desktops:
-/// the page is a row of slices, Library, Discover, All and round again,
-/// and the list's position along it (in slices) rides
+/// the page is a row of slices, Library, Discover, All and round again
+/// (Music's Artists, Albums and Songs tabs slide the same way, as a row of
+/// their own), and the list's position along it (in slices) rides
 /// `animation::Spring::desktop_switch`, slowed by `SLOWER`, toward the
 /// slice picked. A switch
 /// during a switch starts from where the list is, at the speed it has, as
@@ -113,16 +114,17 @@ pub struct SliceSlide {
 }
 
 impl SliceSlide {
-    /// A slide to `to` from `from` at rest, or from wherever `moving` has
-    /// the list, keeping its speed. `slot` is a slice's width with the
+    /// A slide to `to` from `from` at rest (their places in a row of `n`),
+    /// or from wherever `moving` has the list, keeping its speed. `slot` is a slice's width with the
     /// gap, in device pixels: the slide ends once the list is within half
     /// a device pixel of rest and slower than 30 a second, when the drawn
     /// offset (rounded to device pixels) has reached its last value, so
     /// no sub-pixel crawl is left; KWin waits for 1 px and 1 px a second.
     pub fn toward(
         moving: Option<&SliceSlide>,
-        from: Slice,
-        to: Slice,
+        from: usize,
+        to: usize,
+        n: usize,
         spring: Spring,
         slot: f32,
         now: Instant,
@@ -132,11 +134,11 @@ impl SliceSlide {
                 let (start, velocity) = moving.at(now);
                 (start, velocity, moving.anchor)
             }
-            None => (from.index() as f32, 0.0, from.index() as f32),
+            None => (from as f32, 0.0, from as f32),
         };
         // The step from the slice the list is headed for, so Discover to
         // All goes on forward even while the list is still nearer Library.
-        let anchor = nearest(to, heading);
+        let anchor = nearest(to, n, heading);
         let pixel = 1.0 / slot.max(1.0);
         SliceSlide {
             since: now,
@@ -173,10 +175,10 @@ impl SliceSlide {
     }
 }
 
-/// The place of `slice` in the endless row nearest `position`.
-fn nearest(slice: Slice, position: f32) -> f32 {
-    let n = Slice::ALL.len() as f32;
-    let index = slice.index() as f32;
+/// The place of the slice at `index` of `n` in the endless row nearest
+/// `position`.
+fn nearest(index: usize, n: usize, position: f32) -> f32 {
+    let (index, n) = (index as f32, n as f32);
     index + ((position - index) / n).round() * n
 }
 
@@ -712,19 +714,36 @@ fn chips<'a>(
 fn list_area<'a>(app: &'a App, lists: &Lists<'a>, tokens: &Tokens) -> Element<'a, AppMessage> {
     let state = &app.library;
     let current = list(app, lists, state.slice, false, tokens);
+    sliding(
+        app,
+        state.slide.as_ref(),
+        state.slice.index(),
+        Slice::ALL.len(),
+        current,
+        |index| list(app, lists, Slice::ALL[index], true, tokens),
+    )
+}
+
+/// `current`, the live list of the slice at `at` of `n`, where `slide` has
+/// it, with the still copies of the slices passing beside it (`still`
+/// builds the one at an index). Music's tabs slide through it too.
+pub(super) fn sliding<'a>(
+    app: &'a App,
+    slide: Option<&SliceSlide>,
+    at: usize,
+    n: usize,
+    current: Element<'a, AppMessage>,
+    mut still: impl FnMut(usize) -> Element<'a, AppMessage>,
+) -> Element<'a, AppMessage> {
+    let state = &app.library;
     let width = if state.list_width > 0.0 {
         state.list_width
     } else {
         crate::screens::shell::content_width(app, 0.0)
     };
     let slot = width + GAP;
-    let position = state
-        .slide
-        .as_ref()
-        .map_or(state.slice.index() as f32, |moving| {
-            moving.position(Instant::now())
-        });
-    let live = nearest(state.slice, position);
+    let position = slide.map_or(at as f32, |moving| moving.position(Instant::now()));
+    let live = nearest(at, n, position);
     // On whole device pixels: at a fraction the text is laid out anew
     // between glyph positions on every frame and the covers resampled,
     // which reads as smudging while the list moves slowly.
@@ -732,17 +751,15 @@ fn list_area<'a>(app: &'a App, lists: &Lists<'a>, tokens: &Tokens) -> Element<'a
     let snap = |x: f32| (x * scale).round() / scale;
     let mut layers =
         vec![ui::slide_by(current, Vector::new(snap((live - position) * slot), 0.0)).into()];
-    if state.slide.is_some() {
+    if slide.is_some() {
         let first = position.floor();
         for place in [first, first + 1.0] {
             let shift = snap((place - position) * slot);
             if place == live || shift.abs() >= slot {
                 continue;
             }
-            let n = Slice::ALL.len() as isize;
-            let slice = Slice::ALL[(place as isize).rem_euclid(n) as usize];
-            let still = list(app, lists, slice, true, tokens);
-            layers.push(ui::slide_by(still, Vector::new(shift, 0.0)).into());
+            let index = (place as isize).rem_euclid(n as isize) as usize;
+            layers.push(ui::slide_by(still(index), Vector::new(shift, 0.0)).into());
         }
     }
     container(Stack::with_children(layers).width(Fill).height(Fill))

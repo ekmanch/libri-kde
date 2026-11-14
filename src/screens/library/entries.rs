@@ -62,7 +62,7 @@ pub fn body<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> 
 /// beside the section rail.
 const SIDE: f32 = rail::LEFT;
 /// The list's padding above its first row.
-const TOP: f32 = 4.0;
+pub(super) const TOP: f32 = 4.0;
 
 /// A long list of one type in the phone's sections, which follow the sort
 /// (`browse::sections`), with the section rail and the room the list
@@ -199,23 +199,6 @@ pub(super) fn scrolling<'a>(
         layers = layers.push(overlay);
     }
     layers.into()
-}
-
-/// A long list in sections with the section rail: `children` are the
-/// sections, each with its header, and `names` their short labels;
-/// `alphabet` when they are letters, so the rail lists the whole
-/// alphabet.
-pub(super) fn sectioned_list<'a>(
-    app: &'a App,
-    children: impl IntoIterator<Item = Element<'a, AppMessage>>,
-    names: Vec<String>,
-    alphabet: bool,
-    tokens: &Tokens,
-) -> Element<'a, AppMessage> {
-    let state = &app.library;
-    let on_rail = rail::Sections::new(names, alphabet).in_list(state);
-    let room = on_rail.room();
-    scrolling(children, vec![on_rail.view(state, tokens)], room)
 }
 
 /// A long-list section's heading: the decade, letter or rating in gray

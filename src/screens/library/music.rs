@@ -2,7 +2,7 @@
 //! their albums and songs.
 
 use iced::widget::{Column, column, container, grid, row, text};
-use iced::{Element, Padding};
+use iced::{Element, Fill, Padding};
 
 use super::{Listing, Message, MusicTab, View, rail};
 use crate::app::{App, Message as AppMessage};
@@ -29,78 +29,142 @@ pub fn body<'a>(
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let state = &app.library;
-    let content: Element<'a, AppMessage> = match &state.artist {
-        Some(name) => artist_page(app, listing, name, view, tokens),
-        None => match state.music_tab {
-            MusicTab::Artists => {
-                let artists = music::artists(&listing.shown);
-                if artists.is_empty() {
-                    return empty("No artists here", tokens);
-                }
-                // A long list gets letter sections and the section rail;
-                // a long grid the rail alone.
-                if view == View::Grid {
-                    let sections = artist_sections(artists);
-                    let names = sections.iter().map(|s| s.1.clone()).collect();
-                    let on_rail = rail::Sections::new(names, true);
-                    let room = on_rail.room();
-                    let rows = rail::GridRows::new(
-                        state.list_width - rail::LEFT - room,
-                        CELL_MAX_WIDTH,
-                        CELL_SPACING,
-                        CELL_WIDTH / ARTIST_HEIGHT,
-                    );
-                    let counts: Vec<usize> = sections.iter().map(|s| s.2.len()).collect();
-                    let long = state.is_tall(rows.height(counts.iter().sum()));
-                    let cards = artist_block(app, artist_sections_flat(sections), view, tokens);
-                    if counts.len() >= 2 && long {
+    if let Some(name) = &state.artist {
+        let page = artist_page(app, listing, name, view, tokens);
+        // The same scroll area as the other types' lists, so it reports
+        // its size and where it is scrolled: the long-list rule goes by
+        // them.
+        return super::entries::scrolling([page], Vec::new(), rail::LEFT);
+    }
+    // The tabs side by side, the list sliding between them as the Coming
+    // soon page's does between its slices: the picked tab is the live
+    // list, the others pass as still copies where they were left.
+    let current = tab_list(app, listing, state.music_tab, view, None, tokens);
+    super::soon::sliding(
+        app,
+        state.tab_slide.as_ref(),
+        state.music_tab.index(),
+        MusicTab::ALL.len(),
+        current,
+        |index| {
+            let tab = MusicTab::ALL[index];
+            let left = state.tab_scroll.get(&tab).copied().unwrap_or(0.0);
+            tab_list(app, listing, tab, view, Some(left), tokens)
+        },
+    )
+}
+
+/// One tab's list: the scroll area with its rail, or with `still` the
+/// copy that slides past, scrolled to that offset and without the rail.
+fn tab_list<'a>(
+    app: &'a App,
+    listing: &Listing<'a>,
+    tab: MusicTab,
+    view: View,
+    still: Option<f32>,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let state = &app.library;
+    let mut overlays = Vec::new();
+    let mut room = rail::LEFT;
+    let children: Vec<Element<'a, AppMessage>> = match tab {
+        MusicTab::Artists => {
+            let artists = music::artists(&listing.shown);
+            if artists.is_empty() {
+                return empty("No artists here", tokens);
+            }
+            // A long list gets letter sections and the section rail; a
+            // long grid the rail alone.
+            if view == View::Grid {
+                let sections = artist_sections(artists);
+                let names = sections.iter().map(|s| s.1.clone()).collect();
+                let on_rail = rail::Sections::new(names, true);
+                let rows = rail::GridRows::new(
+                    state.list_width - rail::LEFT - on_rail.room(),
+                    CELL_MAX_WIDTH,
+                    CELL_SPACING,
+                    CELL_WIDTH / ARTIST_HEIGHT,
+                );
+                let counts: Vec<usize> = sections.iter().map(|s| s.2.len()).collect();
+                let long = state.is_tall(rows.height(counts.iter().sum()));
+                if counts.len() >= 2 && long {
+                    room = on_rail.room();
+                    if still.is_none() {
                         let on_rail = on_rail.in_grid(state, &counts, rows);
-                        let rail = on_rail.view(state, tokens);
-                        return super::entries::scrolling([cards], vec![rail], room);
+                        overlays.push(on_rail.view(state, tokens));
                     }
-                    cards
-                } else if state.is_long(artists.len(), view) {
-                    let sections = artist_sections(artists);
-                    if sections.len() >= 2 {
-                        let names: Vec<String> = sections.iter().map(|s| s.1.clone()).collect();
-                        let children = sections.into_iter().map(|(label, _, artists)| {
+                }
+                vec![artist_block(
+                    app,
+                    artist_sections_flat(sections),
+                    view,
+                    tokens,
+                )]
+            } else if state.is_long(artists.len(), view) {
+                let sections = artist_sections(artists);
+                if sections.len() >= 2 {
+                    let names: Vec<String> = sections.iter().map(|s| s.1.clone()).collect();
+                    let on_rail = rail::Sections::new(names, true);
+                    room = on_rail.room();
+                    if still.is_none() {
+                        overlays.push(on_rail.in_list(state).view(state, tokens));
+                    }
+                    sections
+                        .into_iter()
+                        .map(|(label, _, artists)| {
                             column![
                                 super::entries::section_header(&label, artists.len(), tokens),
                                 artist_block(app, artists, view, tokens)
                             ]
                             .into()
-                        });
-                        return super::entries::sectioned_list(app, children, names, true, tokens);
-                    }
-                    artist_block(app, artist_sections_flat(sections), view, tokens)
+                        })
+                        .collect()
                 } else {
-                    artist_block(app, artists, view, tokens)
+                    vec![artist_block(
+                        app,
+                        artist_sections_flat(sections),
+                        view,
+                        tokens,
+                    )]
                 }
+            } else {
+                vec![artist_block(app, artists, view, tokens)]
             }
-            MusicTab::Albums => {
-                let albums: Vec<&Entry> = listing
-                    .shown
-                    .iter()
-                    .copied()
-                    .filter(|e| !music::is_song(e))
-                    .collect();
-                if albums.is_empty() {
-                    return empty("No albums here", tokens);
-                }
-                super::entries::block_entries(app, &albums, view, tokens)
+        }
+        MusicTab::Albums => {
+            let albums: Vec<&Entry> = listing
+                .shown
+                .iter()
+                .copied()
+                .filter(|e| !music::is_song(e))
+                .collect();
+            if albums.is_empty() {
+                return empty("No albums here", tokens);
             }
-            MusicTab::Songs => {
-                let songs = music::songs_matching(&listing.shown, &state.query);
-                if songs.is_empty() {
-                    return empty("No songs here", tokens);
-                }
-                song_block(app, &songs, view, false, tokens)
+            vec![super::entries::block_entries(app, &albums, view, tokens)]
+        }
+        MusicTab::Songs => {
+            let songs = music::songs_matching(&listing.shown, &state.query);
+            if songs.is_empty() {
+                return empty("No songs here", tokens);
             }
-        },
+            vec![song_block(app, &songs, view, false, tokens)]
+        }
     };
-    // The same scroll area as the other types' lists, so it reports its
-    // size and where it is scrolled: the long-list rule goes by them.
-    super::entries::scrolling([content], Vec::new(), rail::LEFT)
+    match still {
+        // Laid out as the scroll area lays out the live list, so it
+        // starts to slide from where it was.
+        Some(offset) => {
+            let padding = Padding::new(rail::LEFT)
+                .top(super::entries::TOP)
+                .right(room);
+            let column = container(Column::with_children(children))
+                .padding(padding)
+                .width(Fill);
+            ui::scrolled(column, offset).into()
+        }
+        None => super::entries::scrolling(children, overlays, room),
+    }
 }
 
 /// A tab with nothing in it while Music has entries elsewhere.
