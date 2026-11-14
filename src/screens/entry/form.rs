@@ -18,7 +18,7 @@ use crate::lookup::{self, ArtistHit, GamePlatform, Match, MusicScope};
 use crate::model::{BookFormat, EntryKind, EntryStatus, MediaType, TagCategory, text as rules};
 use crate::screens::entry::SeasonDraft;
 use crate::tags::PickerState;
-use crate::theme::{self, Tokens, font, size};
+use crate::theme::{self, Tokens, font};
 use crate::ui::{self, ButtonKind, FocusExt, Icon, Picker};
 
 fn msg(message: Message) -> AppMessage {
@@ -65,7 +65,8 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
     // open, so the tree keeps its shape and the form keeps its state.
     let with_cover = ui::modal(
         panel,
-        form.cover_dialog.then(|| cover_dialog(app, form, &tokens)),
+        form.cover_dialog
+            .then(|| super::pick::panel(app, Message::CloseCover, &tokens)),
         msg(Message::CloseCover),
         &tokens,
     );
@@ -335,51 +336,15 @@ fn replace_option<'a>(
     tokens: &Tokens,
     on_press: AppMessage,
 ) -> Element<'a, AppMessage> {
-    let tokens = *tokens;
-    let label_color = if words.danger {
-        tokens.danger
-    } else {
-        tokens.text
-    };
-    let (label_color, help_color) = if enabled {
-        (label_color, tokens.sub)
-    } else {
-        (label_color.scale_alpha(0.5), tokens.sub.scale_alpha(0.6))
-    };
-    button(
-        column![
-            text(words.label)
-                .size(size::BODY)
-                .font(font::SEMIBOLD)
-                .color(label_color),
-            text(words.help)
-                .size(12.5)
-                .line_height(1.45)
-                .color(help_color),
-        ]
-        .spacing(3),
+    ui::pick_option(
+        words.label,
+        words.help,
+        picked,
+        enabled,
+        words.danger,
+        tokens,
+        on_press,
     )
-    .width(Fill)
-    .padding([11, 14])
-    .on_press_maybe(enabled.then_some(on_press))
-    .style(move |_, status| {
-        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-        button::Style {
-            background: (picked || hovered).then_some(Background::Color(if picked {
-                tokens.picked
-            } else {
-                tokens.hover
-            })),
-            text_color: tokens.text,
-            border: Border::default().rounded(10).width(1).color(if picked {
-                tokens.accent
-            } else {
-                tokens.line
-            }),
-            ..button::Style::default()
-        }
-    })
-    .focusable(10.0, &tokens)
 }
 
 /// "two", "three": small counts in words, as the phone writes them.
@@ -1089,8 +1054,13 @@ pub const LOOKUP_LIST_ID: &str = "entry-lookup-list";
 /// The cover and the fields, in two columns where they pair up.
 fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppMessage> {
     let library = app.repo.library();
-    let blank = form.title.trim().is_empty() || form.source.is_none();
-    // The cover is the match's, or another match's after Pick a cover.
+    // A click on the cover opens Pick a cover once there is a title: the
+    // owner's own covers need no match.
+    let untitled = form.title.trim().is_empty();
+    let blank = untitled || form.source.is_none();
+    let own_file = crate::covers::is_repo(form.cover_from.as_deref());
+    // The cover is the match's, another match's after Pick a cover, or
+    // one of the owner's files.
     let (handle, tint, has_cover) = form_cover(app, form);
     let cover_title = if form.title.is_empty() {
         "No title yet"
@@ -1103,15 +1073,19 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
     // A click on the cover opens Pick a cover, once there is a match.
     let cover_button = button(cover_face)
         .padding(0)
-        .on_press_maybe((!blank).then(|| msg(Message::OpenCover)))
+        .on_press_maybe((!untitled).then(|| msg(Message::OpenCover)))
         .style(|_, _| button::Style::default())
         .focusable(8.0, tokens);
     // "No cover yet" only when there is none: an entry saved without a
     // match can still have a cover, found by its title.
-    let note = if form.cover_from.is_some() {
+    let note = if own_file {
+        Some("Your cover")
+    } else if form.cover_from.is_some() {
         Some("From another match")
     } else if !blank {
         Some("From the match · click to change")
+    } else if !has_cover && !untitled {
+        Some("No cover yet · click to add")
     } else if !has_cover {
         Some("No cover yet")
     } else {
@@ -1380,82 +1354,6 @@ fn seasonal_only<'a>(on: bool, tokens: &Tokens) -> Element<'a, AppMessage> {
         ..button::Style::default()
     })
     .focusable(6.0, tokens)
-}
-
-/// Pick a cover: the match's own cover first, then the other matches for
-/// the title, each with its year and edition. A click picks at once and
-/// rings the cover; Done closes. Only the cover changes.
-fn cover_dialog<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let choices = form.cover_choices();
-    let own = form.source.as_deref();
-    let tiles = choices.into_iter().map(|found| {
-        let is_own = Some(found.source.as_str()) == own;
-        let id = found.cover_from().to_owned();
-        let on = match &form.cover_from {
-            Some(picked) => *picked == id,
-            None => is_own,
-        };
-        let handle = found
-            .cache_cover_url()
-            .or(found.cover_url.as_deref())
-            .and_then(|url| app.artwork.image(url));
-        let choice = ui::cover::Choice {
-            handle,
-            tint: theme::cover_color(&found.source),
-            title: &found.title,
-            sub: found.year_and_edition(),
-            note: if is_own { "The match's cover" } else { "" },
-            on,
-            square: ui::cover::is_square(form.media),
-        };
-        ui::cover::choice_tile(
-            choice,
-            104.0,
-            msg(Message::PickCover((!is_own).then_some(id))),
-            tokens,
-        )
-    });
-    let mut body = column![
-        text(format!(
-            "Other matches for \u{201c}{}\u{201d}. Only the cover changes; title, year, description \
-             and series stay.",
-            form.title.trim()
-        ))
-        .size(14)
-        .color(tokens.sub),
-        Row::with_children(tiles).spacing(16).wrap().vertical_spacing(16),
-    ]
-    .spacing(16);
-    if form.choices_loading {
-        body = body.push(text("Looking for other covers…").size(13).color(tokens.sub));
-    } else if form
-        .choices
-        .as_ref()
-        .is_some_and(|c| c.partly_failed() || c.all_failed().is_some())
-    {
-        body = body.push(
-            text("Some lookups could not be reached, so a cover may be missing.")
-                .size(13)
-                .color(tokens.sub),
-        );
-    }
-    let footer = row![
-        space::horizontal(),
-        ui::labeled_button(
-            "Done",
-            ButtonKind::Primary,
-            *tokens,
-            Some(msg(Message::CloseCover))
-        ),
-    ];
-    ui::dialog(
-        "Pick a cover",
-        body,
-        footer,
-        560,
-        tokens,
-        msg(Message::CloseCover),
-    )
 }
 
 /// An anime's "Series or movie" control, with what each means. Unpicked

@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use crate::clock::Timestamp;
+use crate::covers::Change;
 use crate::repo::{Operation, json as operation_json};
 use crate::storage;
 
@@ -19,6 +20,17 @@ pub struct Pending {
     pub id: u64,
     pub operation: Operation,
     pub summary: String,
+}
+
+/// A change to the owner's cover files (`covers`), queued for the next
+/// commit: an upload, a delete or a move. One made with no library
+/// change of its own (Settings › Unused covers) carries the summary the
+/// commit is named after.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingFile {
+    pub id: u64,
+    pub change: Change,
+    pub summary: Option<String>,
 }
 
 /// A save that was started: which operations it carries, the blob sha of
@@ -31,6 +43,8 @@ pub struct InFlight {
     pub blob_sha: String,
     pub message: String,
     pub started_at: Timestamp,
+    /// The cover file changes the same commit carries.
+    pub files: Vec<u64>,
 }
 
 #[derive(Debug)]
@@ -38,6 +52,7 @@ pub struct PendingQueue {
     /// `None` keeps the queue in memory only (the tests, the fixture).
     path: Option<PathBuf>,
     operations: Vec<Pending>,
+    files: Vec<PendingFile>,
     in_flight: Option<InFlight>,
     next: u64,
 }
@@ -48,6 +63,7 @@ impl PendingQueue {
         PendingQueue {
             path: None,
             operations: Vec::new(),
+            files: Vec::new(),
             in_flight: None,
             next: 1,
         }
@@ -70,8 +86,9 @@ impl PendingQueue {
             }
         };
         match parse(&text) {
-            Ok((operations, in_flight, next)) => {
+            Ok((operations, files, in_flight, next)) => {
                 queue.operations = operations;
+                queue.files = files;
                 queue.in_flight = in_flight;
                 queue.next = next;
             }
@@ -121,6 +138,38 @@ impl PendingQueue {
         self.operations.last().expect("just pushed")
     }
 
+    pub fn files(&self) -> &[PendingFile] {
+        &self.files
+    }
+
+    pub fn file_ids(&self) -> Vec<u64> {
+        self.files.iter().map(|f| f.id).collect()
+    }
+
+    /// The queued cover file changes, oldest first.
+    pub fn changes(&self) -> Vec<Change> {
+        self.files.iter().map(|f| f.change.clone()).collect()
+    }
+
+    pub fn add_file(&mut self, change: Change, summary: Option<String>) {
+        self.files.push(PendingFile {
+            id: self.next,
+            change,
+            summary,
+        });
+        self.next += 1;
+        self.save();
+    }
+
+    /// Drops the cover file changes with these ids.
+    pub fn remove_files(&mut self, ids: &[u64]) {
+        if ids.is_empty() {
+            return;
+        }
+        self.files.retain(|f| !ids.contains(&f.id));
+        self.save();
+    }
+
     pub fn mark_in_flight(&mut self, in_flight: InFlight) {
         self.in_flight = Some(in_flight);
         self.save();
@@ -150,6 +199,7 @@ impl PendingQueue {
     /// Forgets everything and removes the file (Disconnect).
     pub fn delete(&mut self) {
         self.operations.clear();
+        self.files.clear();
         self.in_flight = None;
         self.next = 1;
         if let Some(path) = &self.path
@@ -173,17 +223,41 @@ impl PendingQueue {
                 Value::Object(object)
             })
             .collect();
-        json!({
+        let mut json = json!({
             "version": 1,
             "next": self.next,
-            "inFlight": self.in_flight.as_ref().map(|f| json!({
-                "ids": f.ids,
-                "blobSha": f.blob_sha,
-                "message": f.message,
-                "startedAt": f.started_at.to_rfc3339(),
-            })),
+            "inFlight": self.in_flight.as_ref().map(|f| {
+                let mut in_flight = json!({
+                    "ids": f.ids,
+                    "blobSha": f.blob_sha,
+                    "message": f.message,
+                    "startedAt": f.started_at.to_rfc3339(),
+                });
+                if !f.files.is_empty() {
+                    in_flight["files"] = json!(f.files);
+                }
+                in_flight
+            }),
             "operations": operations,
-        })
+        });
+        // Written only while there are any, so the file stays as it was
+        // for a library without covers of its own.
+        if !self.files.is_empty() {
+            let files: Vec<Value> = self
+                .files
+                .iter()
+                .map(|f| {
+                    let mut item = f.change.to_json();
+                    item["id"] = json!(f.id);
+                    if let Some(summary) = &f.summary {
+                        item["summary"] = json!(summary);
+                    }
+                    item
+                })
+                .collect();
+            json["files"] = Value::Array(files);
+        }
+        json
     }
 
     fn save(&self) {
@@ -201,7 +275,7 @@ impl PendingQueue {
     }
 }
 
-type Parsed = (Vec<Pending>, Option<InFlight>, u64);
+type Parsed = (Vec<Pending>, Vec<PendingFile>, Option<InFlight>, u64);
 
 fn parse(text: &str) -> Result<Parsed, String> {
     let json: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
@@ -229,13 +303,27 @@ fn parse(text: &str) -> Result<Parsed, String> {
                 .as_str()
                 .and_then(Timestamp::parse)
                 .ok_or("an in-flight save without a start time")?,
+            files: f
+                .get("files")
+                .and_then(Value::as_array)
+                .map(|ids| ids.iter().filter_map(Value::as_u64).collect())
+                .unwrap_or_default(),
         }),
         _ => None,
     };
-    let next = json["next"]
-        .as_u64()
-        .unwrap_or_else(|| operations.iter().map(|o| o.id).max().unwrap_or(0) + 1);
-    Ok((operations, in_flight, next))
+    let mut files = Vec::new();
+    for item in json["files"].as_array().into_iter().flatten() {
+        files.push(PendingFile {
+            id: item["id"].as_u64().ok_or("a file change without an id")?,
+            change: Change::from_json(item).ok_or("a file change that is not understood")?,
+            summary: item["summary"].as_str().map(str::to_owned),
+        });
+    }
+    let next = json["next"].as_u64().unwrap_or_else(|| {
+        let ids = operations.iter().map(|o| o.id);
+        ids.chain(files.iter().map(|f| f.id)).max().unwrap_or(0) + 1
+    });
+    Ok((operations, files, in_flight, next))
 }
 
 #[cfg(test)]
@@ -263,11 +351,26 @@ mod tests {
             blob_sha: "abc".into(),
             message: "Mark A as done".into(),
             started_at: Timestamp(1_700_000_000),
+            files: vec![3],
         });
+        queue.add_file(
+            Change::Upload {
+                path: "Movies/a.1234567.jpg".into(),
+            },
+            None,
+        );
+        queue.add_file(
+            Change::Delete {
+                path: "Movies/old.png".into(),
+            },
+            Some("Delete 1 unused cover".into()),
+        );
         let again = PendingQueue::open(dir.path("pending.json"));
         assert_eq!(again.operations(), queue.operations());
         assert_eq!(again.in_flight(), queue.in_flight());
         assert_eq!(again.ids(), vec![1, 2]);
+        assert_eq!(again.files(), queue.files());
+        assert_eq!(again.file_ids(), vec![3, 4]);
         let text = fs::read_to_string(dir.path("pending.json")).unwrap();
         assert!(text.contains("\"op\": \"setStatus\""));
         assert!(text.contains("\"startedAt\": \"2023-11-14T22:13:20Z\""));
@@ -284,6 +387,7 @@ mod tests {
             blob_sha: "x".into(),
             message: "m".into(),
             started_at: Timestamp(0),
+            files: Vec::new(),
         });
         queue.remove(&[1]);
         assert!(queue.in_flight().is_some(), "2 is still queued");

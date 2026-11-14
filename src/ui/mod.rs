@@ -37,7 +37,7 @@ use crate::theme::{Tokens, font, size};
 
 pub use chip::{add_chip, filter_chip, removable_chip, status_chip, tag_chip};
 pub use cover::{cover, plain_cover, titled_cover};
-pub use dialog::{dialog, modal, panel};
+pub use dialog::{dialog, modal, panel, pick_option};
 pub use empty::empty_state;
 pub use entry::{
     EntryLook, entry_card, entry_list_row, entry_table_header, entry_table_row, new_season_badge,
@@ -283,15 +283,19 @@ pub enum ButtonKind {
     Destructive,
     /// Plain text, no fill or border: Cancel under a stack of choices.
     Text,
+    /// Raised fill, red text: a delete that is the dialog's own action
+    /// (Unused covers). Never a red fill.
+    NeutralDestructive,
 }
 
 impl ButtonKind {
-    pub const ALL: [ButtonKind; 5] = [
+    pub const ALL: [ButtonKind; 6] = [
         ButtonKind::Primary,
         ButtonKind::Outline,
         ButtonKind::Neutral,
         ButtonKind::Destructive,
         ButtonKind::Text,
+        ButtonKind::NeutralDestructive,
     ];
 }
 
@@ -360,6 +364,8 @@ pub fn button_style(kind: ButtonKind, tokens: &Tokens, status: button::Status) -
         ButtonKind::Neutral => (Some(tokens.raised), tokens.text, None),
         ButtonKind::Destructive => (None, tokens.danger, Some(tokens.line)),
         ButtonKind::Text => (None, tokens.text, None),
+        // The selection gray: the raised fill is the dialog's own color.
+        ButtonKind::NeutralDestructive => (Some(tokens.selection), tokens.danger, None),
     };
     let fill = match status {
         button::Status::Hovered | button::Status::Pressed => {

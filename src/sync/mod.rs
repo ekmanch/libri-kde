@@ -16,6 +16,13 @@
 //! computer: push. Only GitHub: pull. Both, or a save refused for a
 //! stale sha: a conflict, and nothing moves until the user picks a side.
 //!
+//! The owner's cover files (`covers`) ride along: an upload, a delete or
+//! a move is queued beside the operations and goes out in the same
+//! commit as the library change it belongs to, through the Git Data API
+//! (`commit`), since the Contents API commits one file at a time. Such a
+//! commit is made on top of the branch as it is and never forced, and is
+//! refused like a stale sha when the library file changed meanwhile.
+//!
 //! The [`Engine`] here is the logic alone and never touches the network:
 //! it hands out one [`Request`] at a time and takes the [`Answer`] back,
 //! so the app runs each request as an iced Task against the real
@@ -23,19 +30,21 @@
 //! answers.
 
 pub mod base;
+pub mod commit;
 pub mod pending;
 
 use std::path::Path;
 
 use crate::clock::Timestamp;
 use crate::connection::Target;
+use crate::covers::Change;
 use crate::github::{CommitInfo, Failure, FailureKind, PutResult, RawFile, RepoInfo, blob_sha};
 use crate::model::{Library, codec};
 use crate::repo::Operation;
 use crate::settings::Missing;
 
 pub use base::{Base, BaseFile};
-pub use pending::{InFlight, Pending, PendingQueue};
+pub use pending::{InFlight, Pending, PendingFile, PendingQueue};
 
 /// How long edits are gathered before they go out as one commit.
 pub const DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(2500);
@@ -73,6 +82,15 @@ pub enum Request {
         bytes: Vec<u8>,
         message: String,
         sha: Option<String>,
+    },
+    /// One commit through the Git Data API: the library file when it
+    /// changed, and the queued cover file changes. `sha` is the blob the
+    /// library file must still be, as for `Put`.
+    Commit {
+        library: Option<Vec<u8>>,
+        message: String,
+        sha: Option<String>,
+        files: Vec<Change>,
     },
     /// The newest commits that touched the file.
     Commits { limit: usize },
@@ -186,9 +204,13 @@ enum Step {
     TakeRemote {
         reapply: bool,
     },
-    /// A save on its way.
+    /// A save on its way: the operations and the cover file changes it
+    /// carries, and whether the library file is in it (a commit of cover
+    /// files alone leaves the base as it is).
     Put {
         ids: Vec<u64>,
+        files: Vec<u64>,
+        library: bool,
         keep_mine: bool,
     },
     /// "Keep mine": the file as it is now, whose sha the save replaces.
@@ -274,7 +296,12 @@ impl Engine {
     pub fn status(&self) -> Status {
         Status {
             phase: self.phase,
-            pending: self.pending.len(),
+            // Cover files queued with no operation of their own (unused
+            // covers deleted) still are a change waiting.
+            pending: self
+                .pending
+                .len()
+                .max(usize::from(!self.pending.files().is_empty())),
             last_synced: self.base.as_ref().and_then(|b| b.last_synced),
             last_checked: self.base.as_ref().and_then(|b| b.last_checked),
             remote_changed_at: self.remote_changed_at,
@@ -301,6 +328,13 @@ impl Engine {
     /// get.
     pub fn queue(&mut self, operation: Operation, summary: String) {
         self.pending.add(operation, summary);
+    }
+
+    /// Queues a change to the cover files for the next commit. One with
+    /// no library change of its own brings the summary the commit is
+    /// named after.
+    pub fn queue_file(&mut self, change: Change, summary: Option<String>) {
+        self.pending.add_file(change, summary);
     }
 
     /// A reconnect to the same file: the round out is forgotten (its
@@ -394,8 +428,7 @@ impl Engine {
                     self.finish(Phase::Conflict)
                 }
                 Step::Put {
-                    ids: _,
-                    keep_mine: false,
+                    keep_mine: false, ..
                 } if failure.kind == FailureKind::Conflict => {
                     // A rejected save never landed. The file changed under
                     // it: both sides changed, unless the check finds this
@@ -439,9 +472,20 @@ impl Engine {
                 log("an unconditional request answered 304");
                 self.finish(Phase::Failed)
             }
-            (Step::Put { ids, .. }, Answer::Put(Ok(result))) => {
-                self.saved(&result);
+            (
+                Step::Put {
+                    ids,
+                    files,
+                    library,
+                    ..
+                },
+                Answer::Put(Ok(result)),
+            ) => {
+                if library {
+                    self.saved(&result);
+                }
                 self.pending.remove(&ids);
+                self.pending.remove_files(&files);
                 self.finish(Phase::Idle)
             }
             (Step::KeepMineFetch, Answer::Raw(Ok(Some(current)))) => {
@@ -486,6 +530,8 @@ impl Engine {
                 last_checked: Some(now),
             });
             self.pending.remove(&in_flight.ids);
+            // The commit is one: its cover files landed with it.
+            self.pending.remove_files(&in_flight.files);
             return self.start_check();
         }
         if self.base.as_ref().map(|b| &b.remote_sha) == Some(&raw.blob_sha) {
@@ -511,6 +557,7 @@ impl Engine {
             .any(|c| c.message == in_flight.message && c.date > since);
         if landed {
             self.pending.remove(&in_flight.ids);
+            self.pending.remove_files(&in_flight.files);
             // The base moves to the save: the later changes are GitHub's
             // alone, and the check that follows pulls them.
             let last_synced = self.base.as_ref().and_then(|b| b.last_synced);
@@ -615,6 +662,12 @@ impl Engine {
         if !dropped.is_empty() {
             self.pending.remove(&dropped);
         }
+        if !reapply {
+            // "Keep GitHub's": the cover files queued here go with the
+            // edits they belonged to.
+            let files = self.pending.file_ids();
+            self.pending.remove_files(&files);
+        }
         let now = self.now();
         let last_synced = if self.pending.is_empty() {
             Some(now)
@@ -650,34 +703,57 @@ impl Engine {
         let bytes = codec::encode(library).into_bytes();
         let sha = blob_sha(&bytes);
         let ids = self.pending.ids();
-        if sha == base.canonical_sha {
+        let files = self.pending.file_ids();
+        let unchanged = sha == base.canonical_sha;
+        if unchanged {
             // Nothing to send: the changes cancel out, or are there
             // already.
             if !ids.is_empty() {
                 self.pending.remove(&ids);
             }
-            return self.finish(Phase::Idle);
+            if files.is_empty() {
+                return self.finish(Phase::Idle);
+            }
         }
-        let message = if self.pending.is_empty() {
-            "Save the changes made on this computer".to_owned()
-        } else {
+        let message = if !unchanged && !self.pending.is_empty() {
             commit_message(self.pending.operations())
+        } else if !files.is_empty() {
+            files_message(self.pending.files())
+        } else {
+            "Save the changes made on this computer".to_owned()
         };
-        self.pending.mark_in_flight(InFlight {
-            ids: ids.clone(),
-            blob_sha: sha,
-            message: message.clone(),
-            started_at: self.now(),
-        });
+        if !unchanged {
+            self.pending.mark_in_flight(InFlight {
+                ids: ids.clone(),
+                blob_sha: sha,
+                message: message.clone(),
+                started_at: self.now(),
+                files: files.clone(),
+            });
+        }
         self.phase = Phase::Saving;
+        let changes = self.pending.changes();
         self.step = Some(Step::Put {
-            ids,
+            ids: if unchanged { Vec::new() } else { ids },
+            files,
+            library: !unchanged,
             keep_mine: false,
         });
-        Outcome::request(Request::Put {
-            bytes,
+        if changes.is_empty() {
+            return Outcome::request(Request::Put {
+                bytes,
+                message,
+                sha: Some(base.remote_sha),
+            });
+        }
+        // A commit of cover files alone is not marked in flight: it is
+        // made from the tree as it is, so sending it again changes
+        // nothing once it has landed.
+        Outcome::request(Request::Commit {
+            library: (!unchanged).then_some(bytes),
             message,
             sha: Some(base.remote_sha),
+            files: changes,
         })
     }
 
@@ -690,20 +766,33 @@ impl Engine {
             message.push_str("\n\n");
             message.push_str(&summaries(self.pending.operations()));
         }
+        let files = self.pending.file_ids();
         self.pending.mark_in_flight(InFlight {
             ids: ids.clone(),
             blob_sha: blob_sha(&bytes),
             message: message.clone(),
             started_at: self.now(),
+            files: files.clone(),
         });
+        let changes = self.pending.changes();
         self.step = Some(Step::Put {
             ids,
+            files,
+            library: true,
             keep_mine: true,
         });
-        Outcome::request(Request::Put {
-            bytes,
+        if changes.is_empty() {
+            return Outcome::request(Request::Put {
+                bytes,
+                message,
+                sha: Some(current.blob_sha.clone()),
+            });
+        }
+        Outcome::request(Request::Commit {
+            library: Some(bytes),
             message,
             sha: Some(current.blob_sha.clone()),
+            files: changes,
         })
     }
 
@@ -797,6 +886,31 @@ fn summaries(operations: &[Pending]) -> String {
         .map(|o| format!("- {}", o.summary))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// The message of a commit of cover files alone: the summaries they
+/// were queued with, each once, or a plain one.
+fn files_message(files: &[PendingFile]) -> String {
+    let mut summaries: Vec<&str> = Vec::new();
+    for summary in files.iter().filter_map(|f| f.summary.as_deref()) {
+        if !summaries.contains(&summary) {
+            summaries.push(summary);
+        }
+    }
+    match summaries.as_slice() {
+        [] => "Update the covers".to_owned(),
+        [only] => (*only).to_owned(),
+        [first, rest @ ..] => format!(
+            "{first} and {} other change{}\n\n{}",
+            rest.len(),
+            if rest.len() == 1 { "" } else { "s" },
+            summaries
+                .iter()
+                .map(|s| format!("- {s}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
+    }
 }
 
 fn log(what: impl std::fmt::Display) {
@@ -988,6 +1102,137 @@ mod tests {
             commit_message(&engine.pending().operations()[..2]),
             "Mark The Mummy as want and 1 other change\n\n- Mark The Mummy as want\n- Mark Die Hard as done"
         );
+    }
+
+    fn upload(path: &str) -> Change {
+        Change::Upload { path: path.into() }
+    }
+
+    #[test]
+    fn a_cover_goes_out_in_the_commit_that_picks_it() {
+        let (mut engine, library) = synced();
+        let base_sha = raw(&library).blob_sha;
+        let operation = flip(&library, MUMMY);
+        engine.queue(operation.clone(), "Edit The Mummy".into());
+        engine.queue_file(upload("Movies/the-mummy-1999.a3f9c2e.jpg"), None);
+        let edited = with(&library, operation);
+        let _ = engine.begin(Kind::Sync);
+        let outcome = engine.answer(Answer::Raw(Ok(None)), &edited);
+        let Some(Request::Commit {
+            library: sent,
+            message,
+            sha,
+            files,
+        }) = outcome.request
+        else {
+            panic!("one commit for both was expected");
+        };
+        assert_eq!(sent, Some(codec::encode(&edited).into_bytes()));
+        assert_eq!(message, "Edit The Mummy");
+        assert_eq!(sha, Some(base_sha));
+        assert_eq!(files, [upload("Movies/the-mummy-1999.a3f9c2e.jpg")]);
+        assert_eq!(engine.status().phase, Phase::Saving);
+        // The save in flight names the files it carries.
+        assert_eq!(engine.pending().in_flight().unwrap().files, vec![2]);
+
+        let saved = sha_of(&edited);
+        let outcome = engine.answer(put_ok(&saved), &edited);
+        assert_eq!(outcome.request, None);
+        assert!(engine.pending().is_empty());
+        assert!(engine.pending().files().is_empty());
+        assert_eq!(engine.status().pending, 0);
+    }
+
+    #[test]
+    fn cover_files_alone_make_a_commit_named_after_them_and_leave_the_base() {
+        let (mut engine, library) = synced();
+        let summary = Some("Delete 2 unused covers".to_owned());
+        engine.queue_file(
+            Change::Delete {
+                path: "Movies/old-poster.png".into(),
+            },
+            summary.clone(),
+        );
+        engine.queue_file(
+            Change::Delete {
+                path: "Movies/scan-2.jpg".into(),
+            },
+            summary,
+        );
+        assert_eq!(engine.status().pending, 1, "a change is waiting");
+        let _ = engine.begin(Kind::Sync);
+        let outcome = engine.answer(Answer::Raw(Ok(None)), &library);
+        let Some(Request::Commit {
+            library: sent,
+            message,
+            files,
+            ..
+        }) = outcome.request
+        else {
+            panic!("a commit of the files was expected");
+        };
+        assert_eq!(sent, None, "the library file is not in it");
+        assert_eq!(message, "Delete 2 unused covers");
+        assert_eq!(files.len(), 2);
+        assert!(
+            engine.pending().in_flight().is_none(),
+            "sending it twice changes nothing, so there is nothing to settle"
+        );
+        let before = engine.status().last_synced;
+        let outcome = engine.answer(put_ok("whatever"), &library);
+        assert_eq!(outcome.request, None);
+        assert!(engine.pending().files().is_empty());
+        assert_eq!(engine.status().last_synced, before);
+        // The next check is still against the library's own blob.
+        let outcome = engine.begin(Kind::Sync);
+        assert_eq!(
+            outcome.request,
+            Some(Request::Raw {
+                etag: raw(&library).etag
+            })
+        );
+    }
+
+    #[test]
+    fn a_refused_commit_keeps_its_cover_files_and_a_lost_one_settles_them() {
+        // The library file changed under the commit: checked again, with
+        // the files still queued.
+        let (mut engine, library) = synced();
+        let operation = flip(&library, MUMMY);
+        engine.queue(operation.clone(), "Edit The Mummy".into());
+        engine.queue_file(upload("Movies/the-mummy-1999.a3f9c2e.jpg"), None);
+        let edited = with(&library, operation);
+        let _ = engine.begin(Kind::Sync);
+        let _ = engine.answer(Answer::Raw(Ok(None)), &edited);
+        let outcome = engine.answer(Answer::Put(Err(failure(FailureKind::Conflict))), &edited);
+        assert!(matches!(outcome.request, Some(Request::Raw { .. })));
+        assert_eq!(engine.pending().files().len(), 1);
+        assert!(engine.pending().in_flight().is_none());
+        let _ = engine.answer(Answer::Raw(Ok(None)), &edited);
+
+        // The answer was lost and the commit landed: the file on GitHub
+        // is the one sent, so the files it carried are done too.
+        let _ = engine.begin(Kind::Sync);
+        let _ = engine.answer(Answer::Raw(Ok(None)), &edited);
+        assert_eq!(engine.pending().in_flight().unwrap().files.len(), 1);
+        let _ = engine.answer(Answer::Put(Err(failure(FailureKind::Offline))), &edited);
+        let outcome = engine.begin(Kind::Sync);
+        assert_eq!(outcome.request, Some(Request::Raw { etag: None }));
+        let _ = engine.answer(Answer::Raw(Ok(Some(raw(&edited)))), &edited);
+        assert!(engine.pending().is_empty());
+        assert!(engine.pending().files().is_empty());
+    }
+
+    #[test]
+    fn keep_githubs_drops_the_queued_cover_files_too() {
+        let (mut engine, library) = synced();
+        engine.queue(flip(&library, MUMMY), "Edit The Mummy".into());
+        engine.queue_file(upload("Movies/the-mummy-1999.a3f9c2e.jpg"), None);
+        let _ = engine.begin(Kind::KeepTheirs);
+        let outcome = engine.answer(Answer::Raw(Ok(Some(raw(&library)))), &library);
+        assert_eq!(outcome.library, Some(library));
+        assert!(engine.pending().is_empty());
+        assert!(engine.pending().files().is_empty());
     }
 
     #[test]

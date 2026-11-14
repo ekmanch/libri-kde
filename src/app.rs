@@ -13,6 +13,7 @@ use crate::animation;
 use crate::artwork::{self, Artwork};
 use crate::clock::Timestamp;
 use crate::connection::{Connection, ConnectionFile, Target};
+use crate::covers::{self, Covers};
 use crate::decoration::Decoration;
 use crate::discover;
 use crate::github;
@@ -195,6 +196,9 @@ pub struct App {
     /// Covers, artist photos, episodes, series parts and track lists as
     /// fetched for the screens, with the cache under `~/.cache/libri/`.
     pub artwork: Artwork,
+    /// The owner's own covers in the library repo: the files GitHub
+    /// lists under `Covers/`, and the copies on this computer.
+    pub covers: Covers,
     /// Discover: what the daily check found for the Coming soon page, and
     /// the items marked Not interested.
     pub discover: discover::State,
@@ -268,6 +272,19 @@ pub enum Message {
     Lookup(artwork::Message),
     /// The daily check behind Coming soon's Discover.
     Discover(discover::Message),
+    /// The owner's own covers: GitHub's list of them, and a file fetched.
+    Covers(CoversMessage),
+}
+
+#[derive(Debug, Clone)]
+pub enum CoversMessage {
+    /// The files under `Covers/`, for the engine of that generation.
+    Listed(Result<Vec<covers::File>, String>, u64),
+    /// A cover file came from GitHub: its blob sha.
+    Fetched {
+        path: String,
+        outcome: Result<String, String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -466,6 +483,11 @@ impl App {
         .any(|name| var(name).is_some());
         let token = app.open_files();
         let mut lookups = Task::none();
+        if app.mock {
+            // The mockup's files, so its cover boards have something to
+            // show.
+            app.covers = Covers::with_files(covers::demo());
+        }
         if !app.mock {
             let cache = storage::cache_dir();
             if let Some(dir) = &cache
@@ -481,6 +503,13 @@ impl App {
             }
             app.lookups = Arc::new(Service::real(&keys, cache.as_deref()));
             app.discover = discover::State::at(cache.as_deref(), storage::data_dir().as_deref());
+            app.covers = Covers::at(
+                storage::data_dir().map(|dir| dir.join(covers::FOLDER)),
+                cache.as_deref(),
+            );
+            if app.kept_locally {
+                app.covers.scan();
+            }
             app.artwork = Artwork::at(cache);
             // Once per session, a little after the start: the records and
             // files of entries that are gone, and the daily check behind
@@ -662,6 +691,7 @@ impl App {
             lookup: lookup::LookupState::Results,
             lookups: Arc::new(Service::fake()),
             artwork: Artwork::default(),
+            covers: Covers::default(),
             discover: discover::State::default(),
             preferences: PreferencesFile::default(),
             connection_file: ConnectionFile::default(),
@@ -699,6 +729,7 @@ impl App {
         if let Err(error) = self.repo.apply(operation) {
             eprintln!("libri: change not applied ({summary}): {error}");
         }
+        self.artwork.library_changed();
         if self.engine.is_some() {
             self.save_due = Some(Instant::now() + sync::DEBOUNCE);
             self.refresh_sync_state();
@@ -761,7 +792,8 @@ impl App {
         } else {
             Screen::Library
         };
-        Task::batch([store, self.sync_now()])
+        let covers = self.list_covers();
+        Task::batch([store, self.sync_now(), covers])
     }
 
     /// The token from KDE Wallet at the start: the client and the engine
@@ -787,7 +819,8 @@ impl App {
         if self.loading {
             self.screen = Screen::Splash;
         }
-        self.sync_now()
+        let covers = self.list_covers();
+        Task::batch([self.sync_now(), covers])
     }
 
     /// A new token for the same connection ("Replace token"): to the
@@ -838,6 +871,17 @@ impl App {
         self.sync = SyncState::Synced;
         self.conflict_open = false;
         self.token_warning = false;
+        self.artwork.forget_repo_images();
+        if keep {
+            // The covers fetched so far stay with the library; the
+            // folder here is the whole list from now on.
+            self.covers.clear(false);
+            if !self.mock {
+                self.covers.scan();
+            }
+        } else {
+            self.covers.clear(true);
+        }
         if keep {
             if let Some(connection) = &mut self.connection {
                 connection.local = true;
@@ -885,8 +929,12 @@ impl App {
     /// Takes what the engine asked for: GitHub's copy in place of this
     /// computer's, and the next call as a Task.
     fn run(&mut self, outcome: Outcome) -> Task<Message> {
+        let mut listing = Task::none();
         if let Some(library) = outcome.library {
             self.repo.replace(library);
+            self.artwork.library_changed();
+            // GitHub's copy came: its covers may have changed with it.
+            listing = self.list_covers();
         }
         let (Some(request), Some(client), Some(engine)) =
             (outcome.request, &self.github, &self.engine)
@@ -896,19 +944,208 @@ impl App {
                 self.loading = false;
                 self.screen = Screen::Library;
             }
-            return Task::none();
+            return listing;
         };
         let (client, target) = (client.clone(), engine.target().clone());
         let generation = self.engine_generation;
-        Task::perform(
-            blocking(move || Ok(perform(&client, &target, request))),
+        let covers_dir = self.covers_dir();
+        let call = Task::perform(
+            blocking(move || Ok(perform(&client, &target, covers_dir.as_deref(), request))),
             move |result| {
                 let answer = result.unwrap_or_else(|error| {
                     Answer::Raw(Err(github::Failure::new(github::FailureKind::Other, error)))
                 });
                 Message::Sync(SyncMessage::Answer(Box::new(answer), generation))
             },
+        );
+        Task::batch([call, listing])
+    }
+
+    // The owner's own covers (`covers`): files in the library repo.
+
+    /// `Covers/` beside the library on this computer; nowhere in a mock
+    /// run.
+    fn covers_dir(&self) -> Option<std::path::PathBuf> {
+        self.data_dir().map(|dir| dir.join(covers::FOLDER))
+    }
+
+    /// Asks GitHub for the files under `Covers/`, one tree call, unless a
+    /// listing is on its way. With the library kept on this computer the
+    /// folder here is read instead.
+    pub fn list_covers(&mut self) -> Task<Message> {
+        let (Some(client), Some(engine)) = (&self.github, &self.engine) else {
+            if self.kept_locally && !self.mock {
+                self.covers.scan();
+                self.artwork.forget_repo_images();
+            }
+            return Task::none();
+        };
+        if self.covers.listing {
+            return Task::none();
+        }
+        self.covers.listing = true;
+        let (client, target) = (client.clone(), engine.target().clone());
+        let generation = self.engine_generation;
+        Task::perform(
+            blocking(move || {
+                covers::list(&client, &target.branch, &target.file).map_err(|f| f.to_string())
+            }),
+            move |result| Message::Covers(CoversMessage::Listed(result, generation)),
         )
+    }
+
+    /// The list again when Pick a cover opens on one that is a while
+    /// old, so a file committed by hand meanwhile is offered.
+    pub fn list_covers_if_stale(&mut self) -> Task<Message> {
+        match self.covers.listed {
+            Some(at) if at.elapsed() < covers::LISTING_AGE => Task::none(),
+            _ => self.list_covers(),
+        }
+    }
+
+    fn covers_update(&mut self, message: CoversMessage) -> Task<Message> {
+        match message {
+            CoversMessage::Listed(result, generation) => {
+                if generation != self.engine_generation {
+                    self.covers.listing = false;
+                    return Task::none();
+                }
+                match result {
+                    Ok(files) => {
+                        let queued = self
+                            .engine
+                            .as_ref()
+                            .map(|engine| engine.pending().changes())
+                            .unwrap_or_default();
+                        self.covers.listed(files, &queued);
+                        // Each cover on screen is looked for again: a
+                        // file replaced on GitHub is fetched anew.
+                        self.artwork.forget_repo_images();
+                    }
+                    Err(error) => {
+                        self.covers.listing = false;
+                        eprintln!("libri: could not list the covers: {error}");
+                    }
+                }
+            }
+            CoversMessage::Fetched { path, outcome } => {
+                self.covers.fetched(&path, &outcome);
+                let url = covers::cover_from(&path);
+                match self.covers.ready(&path) {
+                    Some(local) => self.artwork.set_image(&url, local),
+                    None => self.artwork.set_image_failed(&url),
+                }
+            }
+        }
+        Task::none()
+    }
+
+    /// Hands the owner's covers the screens asked for to `artwork`: the
+    /// copies on this computer at once, the others fetched from GitHub.
+    fn fetch_covers(&mut self) -> Task<Message> {
+        let wanted = self.artwork.take_repo_wanted();
+        if wanted.is_empty() {
+            return Task::none();
+        }
+        let mut missing = Vec::new();
+        for url in wanted {
+            let Some(path) = covers::repo_path(&url) else {
+                continue;
+            };
+            match self.covers.ready(path) {
+                Some(local) => self.artwork.set_image(&url, local),
+                None => missing.push(path.to_owned()),
+            }
+        }
+        let (Some(client), Some(engine)) = (&self.github, &self.engine) else {
+            return Task::none();
+        };
+        let target = engine.target().clone();
+        let tasks = self
+            .covers
+            .to_fetch(&missing)
+            .into_iter()
+            .filter_map(|path| {
+                let to = self.covers.local_path(&path)?;
+                let (client, target) = (client.clone(), target.clone());
+                let fetched = path.clone();
+                Some(Task::perform(
+                    blocking(move || {
+                        Ok(covers::download(
+                            &client,
+                            &target.branch,
+                            &target.file,
+                            &fetched,
+                            &to,
+                        ))
+                    }),
+                    move |result| {
+                        Message::Covers(CoversMessage::Fetched {
+                            path: path.clone(),
+                            outcome: result.unwrap_or_else(Err),
+                        })
+                    },
+                ))
+            });
+        Task::batch(tasks.collect::<Vec<_>>())
+    }
+
+    /// Stores an upload under `Covers/` at `path` and queues it for the
+    /// next commit; the screens show it at once.
+    pub fn add_cover_file(&mut self, path: &str, bytes: &[u8]) -> Option<covers::File> {
+        let file = match self.covers.store(path, bytes) {
+            Ok(file) => file,
+            Err(error) => {
+                eprintln!("libri: could not store the cover {path}: {error}");
+                return None;
+            }
+        };
+        let url = file.url();
+        self.artwork.forget_image(&url);
+        if let Some(local) = self.covers.ready(path) {
+            self.artwork.set_image(&url, local);
+        }
+        if let Some(engine) = &mut self.engine {
+            engine.queue_file(
+                covers::Change::Upload {
+                    path: path.to_owned(),
+                },
+                None,
+            );
+            self.save_due = Some(Instant::now() + sync::DEBOUNCE);
+            self.refresh_sync_state();
+        }
+        Some(file)
+    }
+
+    /// Deletes or moves cover files: on this computer at once, on GitHub
+    /// with the next commit. `summary` names a commit they make on their
+    /// own (no library change goes with them).
+    pub fn change_cover_files(&mut self, changes: Vec<covers::Change>, summary: Option<String>) {
+        if changes.is_empty() {
+            return;
+        }
+        let queued = self.engine.is_some();
+        for change in changes {
+            match &change {
+                covers::Change::Delete { path } => {
+                    self.artwork.forget_image(&covers::cover_from(path));
+                }
+                covers::Change::Move { from, to } => {
+                    self.artwork.forget_image(&covers::cover_from(from));
+                    self.artwork.forget_image(&covers::cover_from(to));
+                }
+                covers::Change::Upload { .. } => {}
+            }
+            self.covers.apply(&change, !queued);
+            if let Some(engine) = &mut self.engine {
+                engine.queue_file(change, summary.clone());
+            }
+        }
+        if queued {
+            self.save_due = Some(Instant::now() + sync::DEBOUNCE);
+            self.refresh_sync_state();
+        }
     }
 
     /// The engine's status as the sidebar row, the banner and Settings
@@ -1164,9 +1401,11 @@ impl App {
     /// a few at a time; the answers come back as `Message::Lookup`.
     fn refresh_lookups(&mut self) -> Task<Message> {
         let wants = screens::wanted(self);
-        self.artwork
+        let lookups = self
+            .artwork
             .refresh(&wants, self.repo.library(), &self.lookups)
-            .map(Message::Lookup)
+            .map(Message::Lookup);
+        Task::batch([lookups, self.fetch_covers()])
     }
 
     /// What a click does with Ctrl held, from the modifiers the keyboard
@@ -1217,6 +1456,17 @@ impl App {
     /// fixed keys (Enter, Ctrl+Enter, Tab, the arrow keys). While Settings
     /// records a shortcut, the press is the new one.
     fn shortcut(&self, key: &Key, modifiers: keyboard::Modifiers) -> Option<Message> {
+        // Ctrl+V in Pick a cover: an image from the clipboard.
+        if modifiers.command()
+            && !modifiers.shift()
+            && !modifiers.alt()
+            && matches!(key.as_ref(), Key::Character("v" | "V"))
+            && entry::pick::takes_paste(self)
+        {
+            return Some(Message::Entry(entry::Message::Covers(
+                entry::pick::Message::Paste,
+            )));
+        }
         let combo = Combo::of(key, modifiers)?;
         if self.screen == Screen::Settings && self.settings_page.recording.is_some() {
             return Some(Message::Settings(screens::settings::Message::Recorded(
@@ -1728,6 +1978,7 @@ impl App {
             Message::Setup(message) => return setup::update(self, message),
             Message::Settings(message) => return screens::settings::update(self, message),
             Message::Token(message) => return token::update(self, message),
+            Message::Covers(message) => return self.covers_update(message),
             Message::Lookup(artwork::Message::Prune) => {
                 // Discover's covers belong to no entry; the prune keeps
                 // them too, hidden ones included.
@@ -2144,7 +2395,12 @@ where
 }
 
 /// One of the engine's requests against the real API.
-fn perform(client: &github::Client, target: &Target, request: Request) -> Answer {
+fn perform(
+    client: &github::Client,
+    target: &Target,
+    covers_dir: Option<&std::path::Path>,
+    request: Request,
+) -> Answer {
     match request {
         Request::Raw { etag } => {
             Answer::Raw(client.file_raw(&target.file, &target.branch, etag.as_deref()))
@@ -2159,6 +2415,20 @@ fn perform(client: &github::Client, target: &Target, request: Request) -> Answer
             &bytes,
             &message,
             sha.as_deref(),
+        )),
+        Request::Commit {
+            library,
+            message,
+            sha,
+            files,
+        } => Answer::Put(sync::commit::run(
+            client,
+            target,
+            covers_dir,
+            library.as_deref(),
+            &message,
+            sha.as_deref(),
+            &files,
         )),
         Request::Commits { limit } => {
             Answer::Commits(client.commits(&target.file, &target.branch, limit))

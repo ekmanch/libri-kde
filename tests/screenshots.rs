@@ -70,6 +70,136 @@ const BERSERK_43: &str = "books/berserk-vol-43-2025";
 const DIRT: &str = "music/dirt-alice-in-chains";
 const FELLOWSHIP: &str = "movies/the-lord-of-the-rings-the-fellowship-of-the-ring-2001";
 
+const DRACULA: &str = "books/dracula-1897";
+const STEELBOOK: &str = "Movies/million-dollar-baby-2004.steelbook.jpg";
+
+/// A picture for the cover captures, as PNG: a diagonal blend of two
+/// colors with a lighter band across it, so a crop and a blur show.
+fn picture(width: u32, height: u32, from: [u8; 3], to: [u8; 3]) -> Vec<u8> {
+    let image = image::RgbImage::from_fn(width, height, |x, y| {
+        let t = (x as f32 / width as f32 + y as f32 / height as f32) / 2.0;
+        let band = if (y as f32 / height as f32 - 0.45).abs() < 0.08 {
+            40.0
+        } else {
+            0.0
+        };
+        let mix = |a: u8, b: u8| (f32::from(a) * (1.0 - t) + f32::from(b) * t + band).min(255.0);
+        image::Rgb([
+            mix(from[0], to[0]) as u8,
+            mix(from[1], to[1]) as u8,
+            mix(from[2], to[2]) as u8,
+        ])
+    });
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgb8(image)
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+    bytes
+}
+
+/// The owner's covers as real files in a folder of their own, so the
+/// captures draw them: a steelbook cover for Million Dollar Baby, one for
+/// Dracula, and a few files in Movies named after no title.
+fn own_covers(app: &mut App) {
+    let dir = std::env::temp_dir().join(format!("libri-shots-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    app.covers = libri::covers::Covers::at(Some(dir.join("Covers")), None);
+    // The path, the size, and the two colors of the blend.
+    type Demo = (&'static str, (u32, u32), [u8; 3], [u8; 3]);
+    let files: [Demo; 6] = [
+        (STEELBOOK, (600, 900), [150, 40, 30], [30, 20, 40]),
+        (
+            "Books/dracula-1897.first-edition.jpg",
+            (600, 900),
+            [90, 20, 20],
+            [20, 10, 10],
+        ),
+        (
+            "Movies/old-poster.png",
+            (600, 900),
+            [40, 90, 130],
+            [20, 30, 60],
+        ),
+        (
+            "Movies/bluray-front.jpg",
+            (600, 760),
+            [50, 110, 80],
+            [20, 40, 30],
+        ),
+        (
+            "Movies/scan-2.jpg",
+            (600, 900),
+            [120, 100, 60],
+            [50, 40, 20],
+        ),
+        (
+            "Movies/untitled.png",
+            (500, 500),
+            [90, 70, 120],
+            [30, 20, 50],
+        ),
+    ];
+    for (path, (w, h), from, to) in files {
+        // Each file in the format its name says, as iced reads it.
+        let png = picture(w, h, from, to);
+        if path.ends_with(".png") {
+            app.add_cover_file(path, &png);
+        } else {
+            let prepared = libri::covers::picture::prepare(&png).unwrap();
+            app.add_cover_file(path, &prepared.bytes);
+        }
+    }
+}
+
+/// The entry shows the owner's file at `path`; with `keep`, no online
+/// cover is offered for it.
+fn show_own(app: &mut App, id: &str, path: &str, keep: bool) {
+    let entry = app.repo.library().entry(id).unwrap();
+    let changed = libri::model::Entry {
+        cover_from: Some(libri::covers::cover_from(path)),
+        cover_keep_mine: keep.then_some(true),
+        ..entry.clone()
+    };
+    app.apply(Operation::UpdateEntry(changed));
+}
+
+fn pick(app: &mut App, message: entry::pick::Message) {
+    let _ = app.update(Message::Entry(entry::Message::Covers(message)));
+}
+
+/// Pick a cover from the viewer on Million Dollar Baby, which shows its
+/// steelbook cover.
+fn pick_a_cover(app: &mut App) {
+    movies(app);
+    own_covers(app);
+    show_own(app, BABY, STEELBOOK, true);
+    select(app, BABY);
+    let _ = app.update(Message::Entry(entry::Message::ViewCover(BABY.into())));
+    let _ = app.update(Message::Entry(entry::Message::ChangeCover));
+}
+
+/// The same with a wide picture uploaded, which the tile offers to
+/// adjust; gives the upload's path.
+fn upload_wide(app: &mut App) -> String {
+    pick_a_cover(app);
+    let original = std::sync::Arc::new(picture(1920, 1080, [200, 120, 40], [30, 40, 90]));
+    let prepared = libri::covers::picture::prepare(&original).unwrap();
+    pick(
+        app,
+        entry::pick::Message::Prepared(Ok(Some(entry::pick::Upload {
+            prepared: std::sync::Arc::new(prepared),
+            original,
+        }))),
+    );
+    let shown = app.repo.library().entry(BABY).unwrap().cover_from.clone();
+    libri::covers::repo_path(&shown.unwrap())
+        .unwrap()
+        .to_owned()
+}
+
 fn show_type(app: &mut App, media: MediaType) {
     let _ = app.update(Message::Library(library::Message::ShowType(Some(media))));
     let _ = app.update(Message::Library(library::Message::SetView(View::List)));
@@ -666,6 +796,107 @@ fn capture_every_screen() {
                 let _ = app.update(Message::Entry(entry::Message::SetCover(Some(
                     "itunes:498187584".into(),
                 ))));
+            }),
+        ),
+        // Your own covers (canvas "Cover: your covers and Upload" and the
+        // boards after it): the picker with the owner's files, a wide
+        // upload that offers Adjust, Fit your cover both ways, the
+        // folder's other files, a song on its album, the online cover
+        // question, the picker from the form, and Delete's offer.
+        (Screen::Library, ("cover-pick-yours", pick_a_cover)),
+        (
+            Screen::Library,
+            ("cover-pick-adjust", |app| {
+                upload_wide(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("cover-pick-fit", |app| {
+                let path = upload_wide(app);
+                pick(app, entry::pick::Message::Adjust(path));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("cover-pick-fit-whole", |app| {
+                let path = upload_wide(app);
+                pick(app, entry::pick::Message::Adjust(path));
+                pick(
+                    app,
+                    entry::pick::Message::FitMode(libri::covers::picture::Fit::Whole),
+                );
+            }),
+        ),
+        (
+            Screen::Library,
+            ("cover-pick-other", |app| {
+                pick_a_cover(app);
+                pick(app, entry::pick::Message::ToggleOther);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("cover-pick-song", |app| {
+                albums(app, View::List);
+                own_covers(app);
+                let song = "music/bad-moon-rising-creedence-clearwater-revival";
+                let album = libri::model::Entry {
+                    id: "music/green-river-creedence-clearwater-revival".into(),
+                    title: "Green River".into(),
+                    kind: Some(EntryKind::Album),
+                    album: None,
+                    ..app.repo.library().entry(song).unwrap().clone()
+                };
+                app.apply(Operation::AddEntry(album));
+                let cover = libri::covers::picture::prepare(&picture(
+                    700,
+                    700,
+                    [60, 110, 60],
+                    [20, 40, 30],
+                ))
+                .unwrap();
+                let path = "Music/green-river-creedence-clearwater-revival.vinyl.jpg";
+                app.add_cover_file(path, &cover.bytes);
+                show_own(
+                    app,
+                    "music/green-river-creedence-clearwater-revival",
+                    path,
+                    true,
+                );
+                let _ = app.update(Message::Entry(entry::Message::ViewCover(song.into())));
+                let _ = app.update(Message::Entry(entry::Message::ChangeCover));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("cover-pick-online", |app| {
+                show_type(app, MediaType::Books);
+                own_covers(app);
+                show_own(app, DRACULA, "Books/dracula-1897.first-edition.jpg", false);
+                select(app, DRACULA);
+                let _ = app.update(Message::Entry(entry::Message::ViewCover(DRACULA.into())));
+                let _ = app.update(Message::Entry(entry::Message::ChangeCover));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("cover-pick-form", |app| {
+                movies(app);
+                own_covers(app);
+                show_own(app, BABY, STEELBOOK, true);
+                let _ = app.update(Message::Entry(entry::Message::Edit(BABY.into())));
+                let _ = app.update(Message::Entry(entry::Message::OpenCover));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("cover-pick-delete", |app| {
+                movies(app);
+                own_covers(app);
+                show_own(app, BABY, STEELBOOK, true);
+                select(app, BABY);
+                let _ = app.update(Message::Entry(entry::Message::Delete(BABY.into())));
             }),
         ),
         // A part of a series: ‹ and › through the parts' covers.
@@ -1441,6 +1672,41 @@ fn capture_every_screen() {
                 )));
             }),
         ),
+        // Library source › Your covers: the group, the check's hits and
+        // the unused files.
+        (
+            Screen::Settings,
+            ("settings-covers", |app| {
+                own_covers(app);
+                show_own(app, BABY, STEELBOOK, true);
+                show_own(app, DRACULA, "Books/dracula-1897.first-edition.jpg", false);
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-covers-found", |app| {
+                own_covers(app);
+                show_own(app, BABY, STEELBOOK, false);
+                show_own(app, DRACULA, "Books/dracula-1897.first-edition.jpg", false);
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::Covers(
+                        libri::screens::your_covers::Message::Check,
+                    ),
+                ));
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-covers-unused", |app| {
+                own_covers(app);
+                show_own(app, BABY, STEELBOOK, true);
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::Covers(
+                        libri::screens::your_covers::Message::Review,
+                    ),
+                ));
+            }),
+        ),
         (Screen::Settings, ("settings", nothing)),
         (
             Screen::Settings,
@@ -1493,12 +1759,13 @@ fn capture_every_screen() {
             };
             let mut ui = iced_test::Simulator::with_size(app::settings(), size, app.view());
             let iced_theme = app.tokens().iced_theme();
-            if screen == Screen::Settings {
-                // iced decodes PNGs (the About logos) on a worker thread and
-                // asks for a redraw when they are ready, which the headless
-                // shell ignores: render once, wait, then take the capture.
+            if screen == Screen::Settings || name.starts_with("cover-pick") {
+                // iced decodes images (the About logos, the owner's own
+                // covers) on a worker thread and asks for a redraw when
+                // they are ready, which the headless shell ignores: render
+                // once, wait, then take the capture.
                 let _ = ui.snapshot(&iced_theme).unwrap();
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                std::thread::sleep(std::time::Duration::from_millis(300));
             }
             let snapshot = ui.snapshot(&iced_theme).unwrap();
 

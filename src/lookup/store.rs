@@ -445,7 +445,7 @@ pub fn image_size_of(path: &Path) -> Option<(u32, u32)> {
 }
 
 /// The width and height a JPEG, PNG, WebP or GIF header gives.
-fn image_size(bytes: &[u8]) -> Option<(u32, u32)> {
+pub fn image_size(bytes: &[u8]) -> Option<(u32, u32)> {
     let be16 = |at: usize| Some(u16::from_be_bytes(bytes.get(at..at + 2)?.try_into().ok()?) as u32);
     let le16 = |at: usize| Some(u16::from_le_bytes(bytes.get(at..at + 2)?.try_into().ok()?) as u32);
     let le24 = |at: usize| {

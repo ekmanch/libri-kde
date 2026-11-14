@@ -16,6 +16,13 @@
 //! server error) is kept in memory only and asked again a little later.
 //! Image files live under `images/<sha1 of the url>.<format>`; a failed
 //! download is not retried for six hours (thirty seconds when offline).
+//!
+//! One of the owner's own covers (`cover_from` naming a file in the
+//! library repo, `covers`) is an image like the others, keyed by that
+//! `repo:` value: it needs no lookup, and its file comes from GitHub or
+//! is on this computer already, which the app sees to (`repo_wanted`,
+//! `set_image`). A song shows the cover of its album when the album is
+//! in the library and has one, whatever the song's own would be.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -27,6 +34,7 @@ use iced::widget::image;
 use serde_json::{Value, json};
 
 use crate::clock::Timestamp;
+use crate::covers;
 use crate::lookup::store::{
     self, IMAGE_RETRY, IMAGE_RETRY_OFFLINE, ImageFailure, ImageStore, JsonFile, Stores,
 };
@@ -230,6 +238,13 @@ pub struct Artwork {
     image_states: HashMap<String, ImageState>,
     downloading: HashSet<String>,
     image_queue: Vec<String>,
+    /// The owner's own covers the screens show that are not on this
+    /// computer yet, by their `repo:` key; the app fetches them.
+    repo_wanted: Vec<String>,
+    /// The album entry each song shown belongs to (none when its album
+    /// is not in the library), found once and kept until the library
+    /// changes.
+    albums: HashMap<String, Option<Entry>>,
     /// Images' widths and heights by URL, read once each (none when the
     /// header was not understood).
     sizes: HashMap<String, Option<(u32, u32)>>,
@@ -285,6 +300,8 @@ impl Artwork {
             image_states: HashMap::new(),
             downloading: HashSet::new(),
             image_queue: Vec::new(),
+            repo_wanted: Vec::new(),
+            albums: HashMap::new(),
             sizes: HashMap::new(),
             backdrops: HashMap::new(),
             blurring: HashSet::new(),
@@ -384,9 +401,79 @@ impl Artwork {
             .filter(|r| r.key == Artwork::key_for(entry))
     }
 
-    /// The cover URL when it is already known.
-    pub fn cover_url(&self, entry: &Entry) -> Option<&str> {
+    /// The cover's image key when it is already known: the URL the
+    /// lookup gave, or the `repo:` value of one of the owner's files. A
+    /// song has its album's while the album is in the library with a
+    /// cover.
+    pub fn cover_url<'a>(&'a self, entry: &'a Entry) -> Option<&'a str> {
+        if let Some(Some(album)) = self.albums.get(&entry.id)
+            && let Some(url) = self.own_cover_url(album)
+        {
+            return Some(url);
+        }
+        self.own_cover_url(entry)
+    }
+
+    /// The entry's own cover, a song's album left aside.
+    pub fn own_cover_url<'a>(&'a self, entry: &'a Entry) -> Option<&'a str> {
+        if let Some(cover_from) = entry.cover_from.as_deref()
+            && covers::repo_path(cover_from).is_some()
+        {
+            return Some(cover_from);
+        }
         self.record_of(entry).and_then(|r| r.url.as_deref())
+    }
+
+    /// The album entry in the library the song `id` shows the cover of,
+    /// once a screen has shown the song.
+    pub fn album_of(&self, id: &str) -> Option<&Entry> {
+        self.albums.get(id).and_then(Option::as_ref)
+    }
+
+    /// The library changed: which album a song belongs to is found
+    /// again.
+    pub fn library_changed(&mut self) {
+        self.albums.clear();
+    }
+
+    /// The owner's covers the screens asked for since the last call that
+    /// are not on this computer.
+    pub fn take_repo_wanted(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.repo_wanted)
+    }
+
+    /// One of the owner's covers is on this computer, at `path`.
+    pub fn set_image(&mut self, url: &str, path: PathBuf) {
+        self.sizes.remove(url);
+        self.backdrops.remove(url);
+        self.image_states
+            .insert(url.to_owned(), ImageState::Ready(path));
+    }
+
+    /// One of the owner's covers could not be fetched; it is asked for
+    /// again after a while.
+    pub fn set_image_failed(&mut self, url: &str) {
+        self.image_states.insert(
+            url.to_owned(),
+            ImageState::Failed(Instant::now() + IMAGE_RETRY_OFFLINE),
+        );
+    }
+
+    /// Forgets an image's file, size and blurred copy: the file was
+    /// deleted, moved or replaced.
+    pub fn forget_image(&mut self, url: &str) {
+        self.image_states.remove(url);
+        self.sizes.remove(url);
+        self.backdrops.remove(url);
+    }
+
+    /// Forgets every one of the owner's covers, so each is looked for
+    /// again (a new list came from GitHub).
+    pub fn forget_repo_images(&mut self) {
+        let is_repo = |url: &String| covers::repo_path(url).is_some();
+        self.image_states.retain(|url, _| !is_repo(url));
+        self.sizes.retain(|url, _| !is_repo(url));
+        self.backdrops.retain(|url, _| !is_repo(url));
     }
 
     /// The lookup id the entry was matched to on this computer, when
@@ -518,6 +605,15 @@ impl Artwork {
         for id in &wants.covers {
             if let Some(entry) = library.entry(id) {
                 self.want_cover(entry);
+                // A song shows its album's cover.
+                if crate::music::is_song(entry) && entry.media == MediaType::Music {
+                    let album = self.albums.entry(id.clone()).or_insert_with(|| {
+                        crate::music::album_of_song(&library.entries, entry).cloned()
+                    });
+                    if let Some(album) = album.clone() {
+                        self.want_cover(&album);
+                    }
+                }
             }
         }
         for name in &wants.artists {
@@ -564,6 +660,16 @@ impl Artwork {
     }
 
     fn want_cover(&mut self, entry: &Entry) {
+        // One of the owner's files needs no lookup; an entry with no
+        // source is still matched below, for its series and track list.
+        if let Some(cover_from) = entry.cover_from.as_deref()
+            && covers::repo_path(cover_from).is_some()
+        {
+            self.want_image(cover_from);
+            if entry.source.is_some() {
+                return;
+            }
+        }
         if let Some(record) = self.record_of(entry) {
             match &record.url {
                 Some(url) => {
@@ -642,6 +748,13 @@ impl Artwork {
             Some(ImageState::Ready(_)) => return,
             Some(ImageState::Failed(until)) if Instant::now() < *until => return,
             _ => {}
+        }
+        // The owner's own covers are the app's to fetch, from GitHub.
+        if covers::repo_path(url).is_some() {
+            if !self.repo_wanted.iter().any(|wanted| wanted == url) {
+                self.repo_wanted.push(url.to_owned());
+            }
+            return;
         }
         if let Some(path) = self.images.cached(url) {
             self.image_states
@@ -1418,6 +1531,7 @@ mod tests {
             source: source.map(str::to_owned),
             tmdb: None,
             cover_from: None,
+            cover_keep_mine: None,
             platform: None,
             formats: None,
             pages: None,

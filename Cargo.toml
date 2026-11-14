@@ -24,6 +24,10 @@ sha1 = "0.11"
 base64 = "0.22"
 tokio = "1"
 zbus = "5.19"
+# Already in the build through iced, which does not hand on its encoder:
+# an uploaded cover is decoded, scaled, cropped and saved as JPEG
+# (src/covers/picture.rs).
+image = "0.25"
 
 [dev-dependencies]
 iced_test = "0.14.0"

@@ -69,6 +69,62 @@ pub fn panel<'a, Message: 'a>(
         .into()
 }
 
+/// One answer of a pick-one question in a dialog: the label (red when
+/// it deletes) over its line, in a box with the accent outline when
+/// picked. One that cannot be picked is dimmed and takes no press.
+pub fn pick_option<'a, Message: Clone + 'a>(
+    label: impl text::IntoFragment<'a>,
+    help: String,
+    picked: bool,
+    enabled: bool,
+    danger: bool,
+    tokens: &Tokens,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use super::FocusExt;
+    use iced::widget::button;
+    use iced::{Background, Border, Fill};
+
+    let tokens = *tokens;
+    let label_color = if danger { tokens.danger } else { tokens.text };
+    let (label_color, help_color) = if enabled {
+        (label_color, tokens.sub)
+    } else {
+        (label_color.scale_alpha(0.5), tokens.sub.scale_alpha(0.6))
+    };
+    button(
+        column![
+            text(label)
+                .size(crate::theme::size::BODY)
+                .font(font::SEMIBOLD)
+                .color(label_color),
+            text(help).size(12.5).line_height(1.45).color(help_color),
+        ]
+        .spacing(3),
+    )
+    .width(Fill)
+    .padding([11, 14])
+    .on_press_maybe(enabled.then_some(on_press))
+    .style(move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: (picked || hovered).then_some(Background::Color(if picked {
+                tokens.picked
+            } else {
+                tokens.hover
+            })),
+            text_color: tokens.text,
+            border: Border::default().rounded(10).width(1).color(if picked {
+                tokens.accent
+            } else {
+                tokens.line
+            }),
+            ..button::Style::default()
+        }
+    })
+    .focusable(10.0, &tokens)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

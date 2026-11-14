@@ -45,6 +45,8 @@ pub struct State {
     /// pressed for it were refused.
     pub recording: Option<Action>,
     pub key_warning: Option<String>,
+    /// Your covers: the check for online covers and the unused files.
+    pub covers: super::your_covers::State,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +117,8 @@ pub enum Message {
     /// The keys pressed while waiting: Esc alone cancels.
     Recorded(Combo),
     ResetKeys,
+    /// Library source › Your covers.
+    Covers(super::your_covers::Message),
 }
 
 fn msg(message: Message) -> AppMessage {
@@ -122,8 +126,12 @@ fn msg(message: Message) -> AppMessage {
 }
 
 pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
+    if let Message::Covers(message) = message {
+        return super::your_covers::update(app, message);
+    }
     let page = &mut app.settings_page;
     match message {
+        Message::Covers(_) => {}
         Message::Jump(index) => {
             if let Some(&top) = page.tops.get(index) {
                 let offset = scrollable::AbsoluteOffset {
@@ -265,6 +273,7 @@ pub fn dismiss_top(app: &mut App) -> bool {
     let page = &mut app.settings_page;
     page.key_warning = None;
     std::mem::take(&mut page.licenses_open)
+        || super::your_covers::dismiss(&mut page.covers)
         || page.disconnect.take().is_some()
         || page.recording.take().is_some()
 }
@@ -312,12 +321,15 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
     let (dialog, close) = match page.disconnect {
         Some(step) => (
             Some(disconnect_dialog(app, step, &tokens)),
-            Message::CloseDisconnect,
+            msg(Message::CloseDisconnect),
         ),
-        None if page.licenses_open => (Some(licenses_dialog(&tokens)), Message::CloseLicenses),
-        None => (None, Message::CloseDisconnect),
+        None if page.licenses_open => (Some(licenses_dialog(&tokens)), msg(Message::CloseLicenses)),
+        None => match super::your_covers::dialog(app, &tokens) {
+            Some((dialog, close)) => (Some(dialog), close),
+            None => (None, msg(Message::CloseDisconnect)),
+        },
     };
-    ui::modal(shell(app, content), dialog, msg(close), &tokens)
+    ui::modal(shell(app, content), dialog, close, &tokens)
 }
 
 /// "On this page": one link per section, the current one marked.
@@ -973,12 +985,20 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     };
     section(
         "Library source",
-        vec![setting(
-            "GitHub repository",
-            "Where library.json lives. Libri saves in the background and bundles quick edits into one commit.".into(),
-            control,
-            tokens,
-        )],
+        vec![
+            setting(
+                "GitHub repository",
+                "Where library.json lives. Libri saves in the background and bundles quick edits into one commit.".into(),
+                control,
+                tokens,
+            ),
+            setting(
+                "Your covers",
+                "Covers you uploaded. They live in Covers/<Type>/, next to library.json.".into(),
+                super::your_covers::group(app, tokens),
+                tokens,
+            ),
+        ],
         22.0,
         0.0,
         44.0,

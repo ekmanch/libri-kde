@@ -213,6 +213,7 @@ pub fn cover_dialog<'a>(app: &'a App, media: MediaType, name: &str) -> Element<'
             on,
             // Music has no series.
             square: false,
+            badge: None,
         };
         ui::cover::choice_tile(
             choice,

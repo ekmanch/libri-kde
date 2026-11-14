@@ -145,6 +145,16 @@ pub const BADGE_MARK: Color = hex(0x5EE08A);
 /// The DNF badge's mark.
 pub const BADGE_DNF: Color = hex(0xA3A8AE);
 
+/// The dark pill on a cover of the owner's own ("Yours") and the chip
+/// across a cover's foot ("Not 2:3 · Adjust"), the same on every theme
+/// since they sit on an image: near-black, mostly opaque, with the
+/// viewer's light text.
+pub const COVER_BADGE: Color = Color::from_rgba8(0x13, 0x14, 0x16, 0.88);
+/// The dim over the part of a picture that Fit your cover cuts away, and
+/// the frame around the part it keeps.
+pub const FIT_DIM: Color = Color::from_rgba8(0x08, 0x09, 0x0A, 0.6);
+pub const FIT_FRAME: Color = hex(0xEEF0F2);
+
 /// The cover viewer, dark on every theme as in the mockup: its text and
 /// the second line.
 pub const VIEWER_TEXT: Color = hex(0xEEF0F2);

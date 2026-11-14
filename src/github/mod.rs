@@ -148,6 +148,23 @@ pub struct TreeFile {
     pub sha: String,
 }
 
+/// The head of a branch: its commit and that commit's tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Head {
+    pub commit: String,
+    pub tree: String,
+}
+
+/// What a commit made through the Git Data API does to one path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TreeEdit {
+    /// The file with this text.
+    Text(String),
+    /// The file as a blob the repo already has.
+    Blob(String),
+    Delete,
+}
+
 /// A commit, from the commits list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitInfo {
@@ -182,7 +199,7 @@ impl std::fmt::Debug for Client {
     }
 }
 
-type Reply<T> = Result<T, Failure>;
+pub type Reply<T> = Result<T, Failure>;
 
 impl Client {
     pub fn new(token: impl Into<String>, repository: impl Into<String>) -> Client {
@@ -445,6 +462,99 @@ impl Client {
             .collect())
     }
 
+    // The Git Data API: a commit that touches several files at once (a
+    // cover uploaded, moved or deleted with the library change that goes
+    // with it; `sync::commit`). The Contents API above commits one file.
+
+    /// The commit at the head of `branch`, and that commit's tree.
+    pub fn head(&self, branch: &str) -> Reply<Head> {
+        let segments: Vec<&str> = ["git", "ref", "heads"]
+            .into_iter()
+            .chain(branch.split('/'))
+            .collect();
+        let json = self
+            .send(self.get(&self.url(&segments, &[]), JSON), &[200])?
+            .json()?;
+        let commit = sha_at(&json["object"]["sha"])?;
+        let url = self.url(&["git", "commits", &commit], &[]);
+        let json = self.send(self.get(&url, JSON), &[200])?.json()?;
+        Ok(Head {
+            tree: sha_at(&json["tree"]["sha"])?,
+            commit,
+        })
+    }
+
+    /// Every blob of the tree `sha`, folders followed.
+    pub fn tree(&self, sha: &str) -> Reply<Vec<TreeFile>> {
+        self.files(sha, "")
+    }
+
+    fn post(&self, segments: &[&str], body: &serde_json::Value, ok: &[u16]) -> Reply<Response> {
+        let request = self
+            .agent
+            .post(&self.url(segments, &[]))
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", JSON)
+            .header("X-GitHub-Api-Version", API_VERSION)
+            .header("Content-Type", "application/json");
+        self.send_body(request, &body.to_string(), ok)
+    }
+
+    /// Stores `bytes` as a blob and gives its sha.
+    pub fn create_blob(&self, bytes: &[u8]) -> Reply<String> {
+        let body = serde_json::json!({
+            "content": base64::engine::general_purpose::STANDARD.encode(bytes),
+            "encoding": "base64",
+        });
+        let json = self.post(&["git", "blobs"], &body, &[201])?.json()?;
+        sha_at(&json["sha"])
+    }
+
+    /// A tree made from the tree `base` with `edits` on top, and its sha.
+    pub fn create_tree(&self, base: &str, edits: &[(String, TreeEdit)]) -> Reply<String> {
+        let tree: Vec<serde_json::Value> = edits
+            .iter()
+            .map(|(path, edit)| {
+                let mut item = serde_json::json!({"path": path, "mode": "100644", "type": "blob"});
+                match edit {
+                    TreeEdit::Text(text) => item["content"] = serde_json::json!(text),
+                    TreeEdit::Blob(sha) => item["sha"] = serde_json::json!(sha),
+                    TreeEdit::Delete => item["sha"] = serde_json::Value::Null,
+                }
+                item
+            })
+            .collect();
+        let body = serde_json::json!({"base_tree": base, "tree": tree});
+        let json = self.post(&["git", "trees"], &body, &[201])?.json()?;
+        sha_at(&json["sha"])
+    }
+
+    /// A commit of `tree` on top of `parent`, and its sha.
+    pub fn create_commit(&self, message: &str, tree: &str, parent: &str) -> Reply<String> {
+        let body = serde_json::json!({"message": message, "tree": tree, "parents": [parent]});
+        let json = self.post(&["git", "commits"], &body, &[201])?.json()?;
+        sha_at(&json["sha"])
+    }
+
+    /// Moves `branch` forward to `commit`. A branch that moved meanwhile
+    /// is not forced: that fails with `Conflict`.
+    pub fn move_branch(&self, branch: &str, commit: &str) -> Reply<()> {
+        let segments: Vec<&str> = ["git", "refs", "heads"]
+            .into_iter()
+            .chain(branch.split('/'))
+            .collect();
+        let request = self
+            .agent
+            .patch(&self.url(&segments, &[]))
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", JSON)
+            .header("X-GitHub-Api-Version", API_VERSION)
+            .header("Content-Type", "application/json");
+        let body = serde_json::json!({"sha": commit, "force": false});
+        self.send_body(request, &body.to_string(), &[200])?;
+        Ok(())
+    }
+
     /// The newest commits that touched `path` on `branch`, newest first.
     pub fn commits(&self, path: &str, branch: &str, limit: usize) -> Reply<Vec<CommitInfo>> {
         let per_page = limit.to_string();
@@ -486,6 +596,14 @@ impl Response {
         serde_json::from_slice(&self.bytes)
             .map_err(|e| Failure::new(FailureKind::Other, format!("the answer is not JSON: {e}")))
     }
+}
+
+/// A sha in an answer.
+fn sha_at(value: &serde_json::Value) -> Reply<String> {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| Failure::new(FailureKind::Other, "the answer names no sha"))
 }
 
 /// The committer date of a commit object from the commits API.

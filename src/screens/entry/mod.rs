@@ -3,6 +3,7 @@
 //! plan and the delete confirmation.
 
 mod cover;
+pub mod pick;
 pub use cover::want_large;
 pub mod details;
 mod dialogs;
@@ -46,6 +47,9 @@ pub enum Dialog {
     Tags(Box<Form>),
     Delete {
         id: String,
+        /// The entry's own cover files in the library repo are deleted
+        /// with it.
+        covers: bool,
     },
     AddToPlan {
         id: String,
@@ -70,6 +74,9 @@ pub struct CoverView {
     /// The other matches for the title, once asked for.
     pub choices: Option<SearchResult>,
     pub loading: bool,
+    /// Pick a cover's own state: Upload, Fit your cover, the online
+    /// cover question.
+    pub pick: pick::PickState,
 }
 
 /// The Add and Edit dialog's fields. Nothing reaches the library until
@@ -137,10 +144,17 @@ pub struct Form {
     pub recategorized: BTreeMap<String, Vec<TagCategory>>,
     /// The match's tag suggestions not taken yet.
     pub suggested: Vec<Suggestion>,
-    /// The lookup id of another match whose cover the entry shows.
+    /// The cover the entry shows when it is not its match's own: the
+    /// lookup id of another match, or one of the owner's files (`covers`).
     pub cover_from: Option<String>,
+    /// The owner's file was picked over a cover the lookup has.
+    pub cover_keep_mine: Option<bool>,
     /// Pick a cover, open over the form.
     pub cover_dialog: bool,
+    /// A song whose album is in the library: the album Pick a cover works
+    /// on, since the song shows its cover.
+    pub cover_album: Option<String>,
+    pub pick: pick::PickState,
     /// A game lookup narrowed to one platform, and its picker.
     pub platform_filter: Option<String>,
     pub platform_open: bool,
@@ -578,9 +592,14 @@ pub enum Message {
     ChangeCover,
     /// Pick a cover's Done: back to the cover alone.
     DoneChangingCover,
-    /// A choice in the viewer: another match's cover, or `None` for the
-    /// match's own. Saved at once.
+    /// A choice in the viewer: another match's cover, one of the owner's
+    /// files, or `None` for the match's own. Saved at once.
     SetCover(Option<String>),
+    /// Pick a cover's own doings: Upload, Fit your cover, the online
+    /// cover question.
+    Covers(pick::Message),
+    /// The Delete dialog's "Also delete its cover file".
+    ToggleDeleteCovers,
     /// The viewer's other matches came.
     ViewerChoices {
         id: String,
@@ -714,7 +733,10 @@ impl Form {
             recategorized: BTreeMap::new(),
             suggested: Vec::new(),
             cover_from: None,
+            cover_keep_mine: None,
             cover_dialog: false,
+            cover_album: None,
+            pick: pick::PickState::default(),
             platform_filter: None,
             platform_open: false,
             platform_query: String::new(),
@@ -741,6 +763,7 @@ impl Form {
             editing: Some(entry.id.clone()),
             source: entry.source.clone(),
             cover_from: entry.cover_from.clone(),
+            cover_keep_mine: entry.cover_keep_mine,
             title: entry.title.clone(),
             creator: entry.creator.clone().unwrap_or_default(),
             released: entry.released.map(|r| r.to_string()).unwrap_or_default(),
@@ -817,6 +840,10 @@ impl Form {
     /// own; `None` for an entry whose cover comes from the resolver.
     pub fn cover_url(&self) -> Option<String> {
         if let Some(cover_from) = &self.cover_from {
+            // One of the owner's files is its own image.
+            if crate::covers::repo_path(cover_from).is_some() {
+                return Some(cover_from.clone());
+            }
             return self
                 .cover_choices()
                 .iter()
@@ -1202,27 +1229,51 @@ impl Form {
         self.suggest(full, library);
     }
 
-    /// Opens Pick a cover and asks for the other matches once.
+    /// Opens Pick a cover and asks for the other matches once. It opens
+    /// with a title alone: the owner's own covers need no match. A song
+    /// whose album is in the library opens it on the album, whose cover
+    /// the song shows.
     fn open_cover(&mut self, ctx: &Context) {
-        if self.title.trim().is_empty() || self.source.is_none() {
+        if self.title.trim().is_empty() {
             return;
         }
         self.cover_dialog = true;
+        self.pick = pick::PickState::default();
+        let song = self.media == MediaType::Music && self.kind == EntryKind::Song;
+        let album = if song {
+            let probe = self.entry(None, ctx.library, ctx.today);
+            music::album_of_song(&ctx.library.entries, &probe)
+                .filter(|album| Some(&album.id) != self.editing.as_ref())
+        } else {
+            None
+        };
+        let album_id = album.map(|album| album.id.clone());
+        if album_id != self.cover_album {
+            self.cover_album = album_id;
+            self.choices = None;
+            self.choices_loading = false;
+        }
         if self.choices.is_some() || self.choices_loading {
             return;
         }
-        let creator = Some(self.creator.trim().to_owned()).filter(|c| !c.is_empty());
+        let (title, creator) = match album {
+            Some(album) => (album.title.trim().to_owned(), album.creator.clone()),
+            None => (
+                self.title.trim().to_owned(),
+                Some(self.creator.trim().to_owned()),
+            ),
+        };
+        let creator = creator.filter(|c| !c.trim().is_empty());
         if ctx.service.is_instant() {
-            self.choices = Some(ctx.service.cover_choices(
-                self.title.trim(),
-                self.media,
-                creator.as_deref(),
-            ));
+            self.choices = Some(
+                ctx.service
+                    .cover_choices(&title, self.media, creator.as_deref()),
+            );
             return;
         }
         self.choices_loading = true;
         self.pending.push(Pending::CoverChoices {
-            title: self.title.trim().to_owned(),
+            title,
             media: self.media,
             creator,
         });
@@ -1820,6 +1871,7 @@ impl Form {
             source: None,
             tmdb: None,
             cover_from: None,
+            cover_keep_mine: None,
             platform: None,
             formats: None,
             pages: None,
@@ -1839,6 +1891,9 @@ impl Form {
             entry.source = self.source.clone();
         }
         entry.cover_from = self.cover_from.clone();
+        entry.cover_keep_mine = self
+            .cover_keep_mine
+            .filter(|_| crate::covers::is_repo(self.cover_from.as_deref()));
         entry.media = self.media;
         entry.title = self.title.trim().to_owned();
         entry.creator = creator;
@@ -2085,7 +2140,16 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             }
         }
         Message::SaveNote => save_note(app),
-        Message::Delete(id) => app.dialog = Some(Dialog::Delete { id }),
+        Message::Delete(id) => app.dialog = Some(Dialog::Delete { id, covers: true }),
+        Message::ToggleDeleteCovers => {
+            if let Some(Dialog::Delete { covers, .. }) = &mut app.dialog {
+                *covers = !*covers;
+            }
+        }
+        Message::Covers(message) => return pick::update(app, message),
+        // A pick in Pick a cover, from the viewer or the form: saved at
+        // once on an entry of the library, kept for Save in the form.
+        Message::PickCover(cover_from) => pick::pick(app, cover_from),
         Message::AddToPlan(id) => app.dialog = Some(Dialog::AddToPlan { id }),
         Message::Close => app.dialog = None,
         Message::WarmCover(id) => app.library.cover_warm = Some(id),
@@ -2111,20 +2175,13 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::DoneChangingCover => {
             if let Some(Dialog::Cover(view)) = &mut app.dialog {
                 view.changing = false;
-            }
-        }
-        Message::SetCover(cover_from) => {
-            if let Some(Dialog::Cover(view)) = &app.dialog
-                && let Some(entry) = app.repo.library().entry(&view.id)
-                && entry.cover_from != cover_from
-            {
-                let entry = Entry {
-                    cover_from,
-                    ..entry.clone()
+                view.pick = pick::PickState {
+                    checked: view.pick.checked,
+                    ..pick::PickState::default()
                 };
-                app.apply(Operation::UpdateEntry(entry));
             }
         }
+        Message::SetCover(cover_from) => pick::pick(app, cover_from),
         Message::ViewerChoices { id, result } => {
             if let Some(Dialog::Cover(view)) = &mut app.dialog
                 && view.id == id
@@ -2134,11 +2191,23 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             }
         }
         Message::ConfirmDelete => {
-            if let Some(Dialog::Delete { id }) = app.dialog.take() {
+            if let Some(Dialog::Delete { id, covers }) = app.dialog.take() {
                 if app.library.selected.as_deref() == Some(id.as_str()) {
                     app.library.selected = None;
                 }
+                let files = if covers {
+                    dialogs::cover_files_of(app, &id)
+                } else {
+                    Vec::new()
+                };
                 app.apply(Operation::DeleteEntry { id });
+                app.change_cover_files(
+                    files
+                        .into_iter()
+                        .map(|path| crate::covers::Change::Delete { path })
+                        .collect(),
+                    None,
+                );
             }
         }
         Message::TogglePlan(plan) => {
@@ -2197,7 +2266,15 @@ fn form_update(app: &mut App, message: Message) -> Task<AppMessage> {
     let outcome = update_form(form, message, &ctx);
     let pending = std::mem::take(&mut form.pending);
     let picked = form.picked_match.is_some() || form.fetched;
-    if let Some(operations) = outcome {
+    if let Some(mut operations) = outcome {
+        // A type change takes the entry's own cover files to the new
+        // type's folder, in the commit that saves the entry.
+        let mut moves = Vec::new();
+        for operation in &mut operations {
+            if let Operation::UpdateEntry(entry) = operation {
+                moves.extend(move_covers(app, entry));
+            }
+        }
         let selected = operations.iter().find_map(|op| match op {
             Operation::AddEntry(entry) | Operation::UpdateEntry(entry) => Some(entry.id.clone()),
             // Rated on the album: the album it went to.
@@ -2208,6 +2285,7 @@ fn form_update(app: &mut App, message: Message) -> Task<AppMessage> {
         for operation in operations {
             app.apply(operation);
         }
+        app.change_cover_files(moves, None);
         if picked && let Some(id) = &selected {
             app.artwork.forget(id);
         }
@@ -2217,6 +2295,36 @@ fn form_update(app: &mut App, message: Message) -> Task<AppMessage> {
         app.library.close_popovers();
     }
     start_pending(&service, pending)
+}
+
+/// The moves a type change asks of the entry's own cover files: each
+/// file named after it, from the folder of its old type (or of the type
+/// its id was made for) to the new type's, with the entry's `cover_from`
+/// following the one it shows.
+fn move_covers(app: &App, entry: &mut Entry) -> Vec<crate::covers::Change> {
+    use crate::covers;
+    let Some(before) = app.repo.library().entry(&entry.id) else {
+        return Vec::new();
+    };
+    if before.media == entry.media {
+        return Vec::new();
+    }
+    let to_folder = covers::folder(entry.media);
+    let mut moves = Vec::new();
+    for file in app.covers.candidates(before) {
+        if file.folder() == to_folder {
+            continue;
+        }
+        let to = format!("{to_folder}/{}", file.name());
+        if entry.cover_from.as_deref().and_then(covers::repo_path) == Some(file.path.as_str()) {
+            entry.cover_from = Some(covers::cover_from(&to));
+        }
+        moves.push(covers::Change::Move {
+            from: file.path.clone(),
+            to,
+        });
+    }
+    moves
 }
 
 /// The tasks for the work a form change asked for.
@@ -2398,11 +2506,7 @@ pub fn wanted(app: &App, wants: &mut Wants) {
         }
     }
     if form.cover_dialog {
-        for found in form.cover_choices() {
-            if let Some(url) = found.cover_url.as_deref().or(found.cache_cover_url()) {
-                wants.images.push(url.to_owned());
-            }
-        }
+        pick::wanted(app, wants);
     }
     if form.media == MediaType::Games && (form.platform_open || form.platform_filter.is_some()) {
         wants.platforms = true;
@@ -2413,25 +2517,43 @@ pub fn wanted(app: &App, wants: &mut Wants) {
 /// other matches for the title once.
 fn change_cover(app: &mut App) -> Task<AppMessage> {
     let service = app.lookups.clone();
+    // The list of the owner's files again when it is a while old, so one
+    // committed by hand meanwhile is offered.
+    let listing = app.list_covers_if_stale();
+    let Some(Dialog::Cover(view)) = &app.dialog else {
+        return Task::none();
+    };
+    // A song shows its album's cover: the matches are the album's.
+    let Some(entry) = app
+        .repo
+        .library()
+        .entry(&view.id)
+        .map(|entry| pick::cover_owner(app, entry))
+    else {
+        return Task::none();
+    };
+    let (title, media) = (entry.title.trim().to_owned(), entry.media);
+    let creator = entry.creator.clone().filter(|c| !c.trim().is_empty());
     let Some(Dialog::Cover(view)) = &mut app.dialog else {
         return Task::none();
     };
-    let Some(entry) = app.repo.library().entry(&view.id) else {
+    view.changing = true;
+    let asked = view.choices.is_some() || view.loading;
+    if !asked && service.is_instant() {
+        view.choices = Some(service.cover_choices(&title, media, creator.as_deref()));
+    }
+    // Whether the lookup has a cover by now, for a title that shows one
+    // of the owner's files.
+    let online = pick::check_online(app);
+    if asked || service.is_instant() {
+        return Task::batch([listing, online]);
+    }
+    let Some(Dialog::Cover(view)) = &mut app.dialog else {
         return Task::none();
     };
-    view.changing = true;
-    if view.choices.is_some() || view.loading {
-        return Task::none();
-    }
-    let (title, media) = (entry.title.trim().to_owned(), entry.media);
-    let creator = entry.creator.clone().filter(|c| !c.trim().is_empty());
-    if service.is_instant() {
-        view.choices = Some(service.cover_choices(&title, media, creator.as_deref()));
-        return Task::none();
-    }
     view.loading = true;
     let id = view.id.clone();
-    Task::perform(
+    let choices = Task::perform(
         crate::app::blocking(move || Ok(service.cover_choices(&title, media, creator.as_deref()))),
         move |result| {
             AppMessage::Entry(Message::ViewerChoices {
@@ -2439,7 +2561,8 @@ fn change_cover(app: &mut App) -> Task<AppMessage> {
                 result: result.unwrap_or_default(),
             })
         },
-    )
+    );
+    Task::batch([listing, online, choices])
 }
 
 /// Whether the music lookup is on screen, so Shift+← and Shift+→ move
@@ -2527,8 +2650,14 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
             form.choices = None;
             form.choices_loading = false;
             // The lookup id, a picked cover and the platform go with the
-            // type.
-            form.cover_from = None;
+            // type; one of the owner's own files stays, and moves to the
+            // new type's folder when the entry is saved.
+            if !crate::covers::is_repo(form.cover_from.as_deref()) {
+                form.cover_from = None;
+                form.cover_keep_mine = None;
+            }
+            form.choices = None;
+            form.choices_loading = false;
             form.platform_filter = None;
             form.platform_open = false;
             form.ebook_note = false;
@@ -2628,8 +2757,10 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
                 form.choices = Some(result);
             }
         }
-        Message::CloseCover => form.cover_dialog = false,
-        Message::PickCover(id) => form.cover_from = id,
+        Message::CloseCover => {
+            form.cover_dialog = false;
+            form.pick = pick::PickState::default();
+        }
         Message::TogglePlatformPicker => {
             form.platform_open = !form.platform_open;
             form.platform_query.clear();
@@ -3027,7 +3158,7 @@ pub fn dismiss_top(app: &mut App) -> bool {
             true
         }
         Some(Dialog::Cover(view)) => {
-            if !std::mem::take(&mut view.changing) {
+            if !pick::dismiss_inner(&mut view.pick) && !std::mem::take(&mut view.changing) {
                 app.dialog = None;
             }
             true
@@ -3037,6 +3168,7 @@ pub fn dismiss_top(app: &mut App) -> bool {
                 && form.new_tag.take().is_none()
                 && form.categories.take().is_none()
                 && form.season_menu.take().is_none()
+                && !(form.cover_dialog && pick::dismiss_inner(&mut form.pick))
                 && !std::mem::take(&mut form.cover_dialog)
                 && !std::mem::take(&mut form.platform_open)
                 && !form.picker.as_mut().is_some_and(PickerState::dismiss_inner)
@@ -3111,7 +3243,7 @@ pub fn overlay<'a>(app: &'a App, base: Element<'a, AppMessage>) -> Element<'a, A
     let dialog = app.dialog.as_ref().map(|dialog| match dialog {
         Dialog::Form(form) => form::view(app, form),
         Dialog::Tags(form) => form::tags_view(app, form),
-        Dialog::Delete { id } => dialogs::delete(app, id),
+        Dialog::Delete { id, covers } => dialogs::delete(app, id, *covers),
         Dialog::AddToPlan { id } => dialogs::add_to_plan(app, id),
         Dialog::SeasonDropped { id, season } => dialogs::season_dropped(app, id, *season),
         Dialog::Cover(view) => cover::view(app, view),
@@ -3204,7 +3336,7 @@ mod tests {
                 crate::app::WINDOW_SIZE,
                 app.view(),
             );
-            ui.find("No cover yet").is_ok()
+            ui.find("No cover yet · click to add").is_ok()
         };
         assert!(shows(&app), "no match and no cover");
         // A cover found by the title, for an entry saved without a match.
@@ -4009,11 +4141,11 @@ mod tests {
         let mut app = app();
         let id = "books/dracula-1897";
         send(&mut app, Message::Edit(id.into()));
+        // With no match yet the picker still opens: the owner's own
+        // covers need none.
         send(&mut app, Message::OpenCover);
-        assert!(
-            !form(&app).cover_dialog,
-            "no match yet, so no cover to pick"
-        );
+        assert!(form(&app).cover_dialog);
+        send(&mut app, Message::CloseCover);
         send(&mut app, Message::LookAgain);
         send(&mut app, Message::Pick(0));
         send(&mut app, Message::CancelLookAgain);

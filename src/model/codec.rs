@@ -114,6 +114,20 @@ mod tests {
     }
 
     #[test]
+    fn one_of_the_owners_covers_and_keep_mine_are_written_after_source() {
+        let text = r#"{"version": 2, "entries": [{"id": "movies/x-2000", "type": "movies",
+            "title": "X", "status": "want", "added": "2026-10-01", "source": "tmdb:movie:1",
+            "cover_keep_mine": true, "cover_from": "repo:Movies/x-2000.a3f9c2e.jpg"}]}"#;
+        let encoded = encode(&decode(text).unwrap());
+        assert!(encoded.contains(
+            "      \"source\": \"tmdb:movie:1\",\n      \"cover_from\": \"repo:Movies/x-2000.a3f9c2e.jpg\",\n      \"cover_keep_mine\": true\n"
+        ));
+        // Written only while true.
+        let plain = encode(&decode(&text.replace("\"cover_keep_mine\": true,", "")).unwrap());
+        assert!(!plain.contains("cover_keep_mine"));
+    }
+
+    #[test]
     fn an_anime_series_keeps_its_tmdb_show_and_season_split_in_the_phones_order() {
         let text = concat!(
             "{\n  \"version\": 2,\n  \"tags\": {},\n  \"entries\": [\n    {\n",

@@ -18,20 +18,25 @@
 //! parts' covers in series order, from the one it opened on: Ctrl+click
 //! on a series' row opens on the cover the row shows. The covers and the
 //! sharper copies of the parts on either side are fetched ahead.
+//!
+//! Pick a cover itself is `pick`: the owner's own covers with Upload, the
+//! online matches and the folder's other files. A song shows its album's
+//! cover, so on a song the picker works on the album.
 
 use iced::widget::image::{Handle, Image};
-use iced::widget::{Column, Row, button, column, container, mouse_area, opaque, row, stack, text};
+use iced::widget::{Row, button, column, container, mouse_area, opaque, row, stack, text};
 use iced::{Border, Center, ContentFit, Element, Fill, Right};
 
-use super::{CoverView, Message};
+use super::{CoverView, Message, pick};
 use crate::app::{App, Message as AppMessage};
 use crate::artwork::Wants;
 use crate::browse;
+use crate::covers;
 use crate::lookup::{self, Match};
 use crate::model::{Entry, Series};
 use crate::series;
 use crate::theme::{self, Tokens, font};
-use crate::ui::{self, ButtonKind, FocusExt, Icon};
+use crate::ui::{self, FocusExt, Icon};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Entry(message)
@@ -49,64 +54,12 @@ const ARROW_GAP: f32 = 28.0;
 /// The shapes a cover's frame keeps within, width over height.
 const NARROWEST: f32 = 0.5;
 const WIDEST: f32 = 1.5;
-/// Pick a cover's panel, its three columns of tiles and the gaps.
-const PANEL_WIDTH: f32 = 560.0;
-const PANEL_PADDING: f32 = 22.0;
-const TILE_GAP: f32 = 14.0;
-/// A tile's three caption lines under its cover.
-const TILE_CAPTION: f32 = 60.0;
-/// The panel around the grid: padding, the header and the lines under it.
-const PANEL_CHROME: f32 = 180.0;
-
-/// One choice: the lookup id to store as `cover_from` (`None` for the
-/// match's own cover), the match when there is one, and its image.
-struct Choice<'a> {
-    cover_from: Option<String>,
-    found: Option<&'a Match>,
-    url: Option<String>,
-}
-
-/// The choices Pick a cover lists: the match's own cover first (from the
-/// matches, or the cover the library shows while none is picked), then
-/// the other matches for the title, one per image.
-fn choices<'a>(app: &App, view: &'a CoverView, entry: &Entry) -> Vec<Choice<'a>> {
-    let own_source = app.artwork.source_of(entry);
-    let matches: Vec<&Match> = view.choices.iter().flat_map(|r| r.matches.iter()).collect();
-    let own_match = matches
-        .iter()
-        .copied()
-        .find(|m| Some(m.source.as_str()) == own_source.as_deref());
-    let own_url = match own_match {
-        Some(found) => found.cache_cover_url().map(str::to_owned),
-        None if entry.cover_from.is_none() => app.artwork.cover_url(entry).map(str::to_owned),
-        None => None,
-    };
-    let mut list = vec![Choice {
-        cover_from: None,
-        found: own_match,
-        url: own_url.clone(),
-    }];
-    for found in matches {
-        if Some(found.source.as_str()) == own_source.as_deref() {
-            continue;
-        }
-        let url = found.cache_cover_url().map(str::to_owned);
-        if url.is_some() && url == own_url {
-            continue;
-        }
-        list.push(Choice {
-            cover_from: Some(found.cover_from().to_owned()),
-            found: Some(found),
-            url,
-        });
-    }
-    list
-}
-
 /// The image the viewer shows: the picked choice's while the new cover
-/// record is on its way, else the cover the library shows.
-fn shown_url<'a>(app: &'a App, view: &'a CoverView, entry: &Entry) -> Option<&'a str> {
-    if let Some(cover_from) = &entry.cover_from
+/// record is on its way, else the cover the library shows (a song's is
+/// its album's).
+fn shown_url<'a>(app: &'a App, view: &'a CoverView, entry: &'a Entry) -> Option<&'a str> {
+    let owner = pick::cover_owner(app, entry);
+    if let Some(cover_from) = &owner.cover_from
         && let Some(url) = view
             .choices
             .iter()
@@ -117,7 +70,9 @@ fn shown_url<'a>(app: &'a App, view: &'a CoverView, entry: &Entry) -> Option<&'a
     {
         return Some(url);
     }
-    app.artwork.cover_url(entry)
+    app.artwork
+        .own_cover_url(owner)
+        .or_else(|| app.artwork.cover_url(entry))
 }
 
 /// The parts of the entry's series in the library, in series order, and
@@ -214,22 +169,35 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
         None => face,
     };
 
-    let picked = entry.cover_from.as_deref().and_then(|cover_from| {
+    // A song shows its album's cover.
+    let owner = pick::cover_owner(app, entry);
+    let picked = owner.cover_from.as_deref().and_then(|cover_from| {
         view.choices
             .iter()
             .flat_map(|r| r.matches.iter())
             .find(|m| m.cover_from() == cover_from)
     });
-    // Where the cover comes from is only said when it is another match's.
-    let from = match (&entry.cover_from, picked) {
+    // Where the cover comes from is only said when it is not the
+    // match's own: one of the owner's files, or another match's.
+    let from = match (owner.cover_from.as_deref(), picked) {
         (None, _) => None,
+        (Some(cover_from), _) if covers::repo_path(cover_from).is_some() => Some(format!(
+            "Your cover: {}",
+            covers::name_of(covers::repo_path(cover_from).unwrap_or_default())
+        )),
         (Some(_), Some(found)) if !found.year_and_edition().is_empty() => {
             Some(format!("From another match: {}", found.year_and_edition()))
         }
         (Some(_), _) => Some("From another match".to_owned()),
     };
     let mut kind = browse::kind_label(entry).to_owned();
-    if let Some(years) = entry.years(app.today) {
+    if owner.id != entry.id {
+        // "Song · Massive Attack · on Mezzanine".
+        if let Some(artist) = entry.creator.as_deref().filter(|c| !c.is_empty()) {
+            kind = format!("{kind} · {artist}");
+        }
+        kind = format!("{kind} · on {}", owner.title);
+    } else if let Some(years) = entry.years(app.today) {
         kind = format!("{kind} · {years}");
     }
     if let Some(from) = from {
@@ -287,9 +255,19 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
         cover = cover.push(change_button(&tokens));
     }
 
-    let mut content = Row::new().spacing(48).align_y(Center).push(opaque(cover));
+    // Pick a cover beside the cover; alone where the window has no room
+    // for both.
+    let mut content = Row::new().spacing(48).align_y(Center);
+    let room = width + 48.0 + pick::PANEL_WIDTH + 80.0;
+    if !view.changing || app.window.width >= room {
+        content = content.push(opaque(cover));
+    }
     if view.changing {
-        content = content.push(opaque(picker(app, view, entry, &tokens)));
+        content = content.push(opaque(pick::panel(
+            app,
+            Message::DoneChangingCover,
+            &tokens,
+        )));
     }
 
     let close = round_button(Icon::Close, 40.0, 18.0, Message::Close, &tokens);
@@ -371,115 +349,6 @@ fn change_button<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
     .focusable(8.0, tokens)
 }
 
-/// Pick a cover beside the cover: the title and what changes, Done, the
-/// choices three to a row, and "Use the match's cover" while another
-/// match's is in use.
-fn picker<'a>(
-    app: &'a App,
-    view: &'a CoverView,
-    entry: &'a Entry,
-    tokens: &Tokens,
-) -> Element<'a, AppMessage> {
-    let header = row![
-        column![
-            text("Pick a cover").size(20).font(font::EXTRABOLD),
-            text(format!(
-                "Other matches for \u{201c}{}\u{201d}. Only the cover changes.",
-                entry.title.trim()
-            ))
-            .size(13)
-            .color(tokens.sub),
-        ]
-        .spacing(4)
-        .width(Fill),
-        ui::labeled_button(
-            "Done",
-            ButtonKind::Primary,
-            *tokens,
-            Some(msg(Message::DoneChangingCover))
-        ),
-    ]
-    .spacing(12);
-
-    let tile = (PANEL_WIDTH - 2.0 * PANEL_PADDING - 2.0 * TILE_GAP) / 3.0;
-    let list = choices(app, view, entry);
-    // The grid scrolls once its rows outgrow the window.
-    let rows = list.len().div_ceil(3) as f32;
-    let square = ui::cover::is_square(entry.media);
-    let grid_height = rows * (ui::cover::height_for(tile, square) + TILE_CAPTION)
-        + (rows - 1.0).max(0.0) * TILE_GAP;
-    let max_height = (app.window.height - 80.0).max(300.0);
-    let grid_height = grid_height.min(max_height - PANEL_CHROME);
-    let tiles = list.into_iter().map(|choice| {
-        let on = choice.cover_from == entry.cover_from
-            || (choice.cover_from.is_none() && entry.cover_from.is_none());
-        let is_own = choice.cover_from.is_none();
-        let title = choice
-            .found
-            .map_or(entry.title.as_str(), |found| found.title.as_str());
-        let sub = match choice.found {
-            Some(found) => found.year_and_edition(),
-            None => entry.year().map(|y| y.to_string()).unwrap_or_default(),
-        };
-        let tint = match (choice.found, is_own) {
-            (_, true) => theme::cover_color(&entry.id),
-            (Some(found), false) => theme::cover_color(&found.source),
-            (None, false) => theme::cover_color(&entry.id),
-        };
-        let tile_choice = ui::cover::Choice {
-            handle: choice.url.as_deref().and_then(|url| app.artwork.image(url)),
-            tint,
-            title,
-            sub,
-            note: if is_own { "The match's cover" } else { "" },
-            on,
-            square,
-        };
-        ui::cover::choice_tile(
-            tile_choice,
-            tile,
-            msg(Message::SetCover(choice.cover_from)),
-            tokens,
-        )
-    });
-    let grid = Row::with_children(tiles)
-        .spacing(TILE_GAP)
-        .wrap()
-        .vertical_spacing(TILE_GAP);
-
-    let mut body = Column::new()
-        .spacing(14)
-        .push(header)
-        .push(ui::scroll(grid).height(grid_height).width(Fill));
-    if view.loading {
-        body = body.push(text("Looking for other covers…").size(13).color(tokens.sub));
-    } else if view
-        .choices
-        .as_ref()
-        .is_some_and(|c| c.partly_failed() || c.all_failed().is_some())
-    {
-        body = body.push(
-            text("Some lookups could not be reached, so a cover may be missing.")
-                .size(13)
-                .color(tokens.sub),
-        );
-    }
-    if entry.cover_from.is_some() {
-        body = body.push(ui::labeled_button(
-            "Use the match's cover",
-            ButtonKind::Text,
-            *tokens,
-            Some(msg(Message::SetCover(None))),
-        ));
-    }
-    let tokens = *tokens;
-    container(body)
-        .width(PANEL_WIDTH)
-        .padding(PANEL_PADDING)
-        .style(move |_| ui::panel_style(&tokens, 14.0))
-        .into()
-}
-
 /// What the viewer shows: the entry's cover, and with Pick a cover open
 /// each choice's image.
 pub fn wanted(app: &App, view: &CoverView, wants: &mut Wants) {
@@ -507,9 +376,5 @@ pub fn wanted(app: &App, view: &CoverView, wants: &mut Wants) {
         }
         return;
     }
-    for choice in choices(app, view, entry) {
-        if let Some(url) = choice.url {
-            wants.images.push(url);
-        }
-    }
+    pick::wanted(app, wants);
 }

@@ -15,7 +15,7 @@ fn msg(message: Message) -> AppMessage {
 }
 
 /// "Delete Dracula?": names the plans the entry leaves with it.
-pub fn delete<'a>(app: &'a App, id: &str) -> Element<'a, AppMessage> {
+pub fn delete<'a>(app: &'a App, id: &str, covers: bool) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
     let library = app.repo.library();
     let Some(entry) = library.entry(id) else {
@@ -27,7 +27,7 @@ pub fn delete<'a>(app: &'a App, id: &str) -> Element<'a, AppMessage> {
         .filter(|p| p.item_for(id).is_some())
         .map(Plan::title)
         .collect();
-    let body =
+    let mut body =
         column![
         text(format!("It will be removed from your library{}.", plans_clause(&plans)))
             .size(14)
@@ -37,6 +37,30 @@ pub fn delete<'a>(app: &'a App, id: &str) -> Element<'a, AppMessage> {
             .color(tokens.sub),
     ]
         .spacing(10);
+    // The entry's own cover files go with it, unless unticked.
+    let files = cover_files_of(app, id);
+    if !files.is_empty() {
+        let label = match files.as_slice() {
+            [only] => format!(
+                "Also delete its cover file, {}",
+                crate::covers::name_of(only)
+            ),
+            many => format!("Also delete its {} cover files", many.len()),
+        };
+        body = body.push(
+            row![
+                ui::type_checkbox(
+                    tokens.accent,
+                    covers,
+                    &tokens,
+                    msg(Message::ToggleDeleteCovers)
+                ),
+                text(label).size(13.5).color(tokens.text),
+            ]
+            .spacing(10)
+            .align_y(iced::Center),
+        );
+    }
     let footer = row![
         space::horizontal(),
         ui::labeled_button(
@@ -55,6 +79,32 @@ pub fn delete<'a>(app: &'a App, id: &str) -> Element<'a, AppMessage> {
     .spacing(8);
     let title = format!("Delete {}?", entry.title);
     ui::dialog(title, body, footer, 460, &tokens, msg(Message::Close))
+}
+
+/// The cover files that are the entry's alone: the ones named after it,
+/// and the one it shows unless another entry shows it too.
+pub fn cover_files_of(app: &App, id: &str) -> Vec<String> {
+    let library = app.repo.library();
+    let Some(entry) = library.entry(id) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<String> = app
+        .covers
+        .candidates(entry)
+        .into_iter()
+        .map(|file| file.path.clone())
+        .collect();
+    if let Some(shown) = entry
+        .cover_from
+        .as_deref()
+        .and_then(crate::covers::repo_path)
+        && app.covers.get(shown).is_some()
+        && !paths.iter().any(|path| path == shown)
+    {
+        paths.push(shown.to_owned());
+    }
+    paths.retain(|path| !crate::covers::Covers::used_elsewhere(library, path, id));
+    paths
 }
 
 /// " and from the plan Halloween 2026", or the plans listed.

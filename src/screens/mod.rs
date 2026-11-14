@@ -9,6 +9,7 @@ pub mod setup;
 pub mod shell;
 pub mod splash;
 pub mod token;
+pub mod your_covers;
 
 use iced::Element;
 
@@ -68,6 +69,7 @@ pub fn wanted(app: &App) -> Wants {
     match app.screen {
         Screen::Library => library::wanted(app, &mut wants),
         Screen::Plans => plans::wanted(app, &mut wants),
+        Screen::Settings => your_covers::wanted(app, &mut wants),
         _ => {}
     }
     wants

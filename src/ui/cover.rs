@@ -213,6 +213,9 @@ pub struct Choice<'a> {
     pub note: &'a str,
     pub on: bool,
     pub square: bool,
+    /// A dark pill in the cover's top left corner: "Yours" on one of the
+    /// owner's own files.
+    pub badge: Option<&'a str>,
 }
 
 /// The accent ring around the chosen cover.
@@ -234,16 +237,21 @@ pub fn choice_tile<'a, Message: Clone + 'a>(
     // The ring sits around the cover, 3 px in the accent on the one in
     // use; the cover would draw over a border of its own container.
     let inner = width - 2.0 * RING;
-    let face = container(titled_cover(
+    let cover = titled_cover(
         choice.handle,
         choice.tint,
         choice.title,
         inner,
         height_for(inner, square),
         label_size,
-    ))
-    .padding(RING)
-    .style(move |_| {
+    );
+    let cover: Element<'a, Message> = match choice.badge {
+        Some(badge) => {
+            iced::widget::stack![cover, container(pill(badge.to_owned(), None)).padding(6),].into()
+        }
+        None => cover,
+    };
+    let face = container(cover).padding(RING).style(move |_| {
         container::Style::default().border(
             Border::default()
                 .rounded(8.0 + RING)
@@ -275,4 +283,121 @@ pub fn choice_tile<'a, Message: Clone + 'a>(
         ..button::Style::default()
     })
     .focusable(8.0, tokens)
+}
+
+/// The dark pill a cover of the owner's own carries: "Yours".
+pub fn badge<'a, Message: 'a>(words: &str) -> Element<'a, Message> {
+    pill(words.to_owned(), None)
+}
+
+/// The dark pill on a cover: its words, and after them words in `accent`
+/// (the action of a chip).
+fn pill<'a, Message: 'a>(words: String, action: Option<(&'a str, Color)>) -> Element<'a, Message> {
+    use crate::theme::{COVER_BADGE, VIEWER_TEXT};
+    let mut line = iced::widget::Row::new().push(
+        text(words)
+            .size(11)
+            .font(font::BOLD)
+            .color(VIEWER_TEXT)
+            .wrapping(text::Wrapping::None),
+    );
+    if let Some((action, accent)) = action {
+        line = line.push(
+            text(action)
+                .size(11)
+                .font(font::BOLD)
+                .color(accent)
+                .wrapping(text::Wrapping::None),
+        );
+    }
+    container(line)
+        .padding([3, 7])
+        .style(|_| container::background(COVER_BADGE).border(Border::default().rounded(6)))
+        .into()
+}
+
+/// A choice tile with a chip across its cover's foot: "Not 2:3 · " and
+/// the action after it ("Adjust") in the accent, a button of its own
+/// over the tile's.
+pub fn with_chip<'a, Message: Clone + 'a>(
+    tile: Element<'a, Message>,
+    width: f32,
+    square: bool,
+    words: String,
+    action: &'a str,
+    on_press: Message,
+    tokens: &crate::theme::Tokens,
+) -> Element<'a, Message> {
+    use super::FocusExt;
+    use iced::widget::button;
+
+    let cover_height = height_for(width - 2.0 * RING, square) + 2.0 * RING;
+    let chip = button(pill(words, Some((action, tokens.accent))))
+        .padding(0)
+        .on_press(on_press)
+        .style(|_, _| button::Style::default())
+        .focusable(6.0, tokens);
+    iced::widget::stack![
+        tile,
+        container(chip)
+            .width(width)
+            .height(cover_height)
+            .padding(RING + 6.0)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Bottom),
+    ]
+    .into()
+}
+
+/// The Upload tile that leads the owner's covers in Pick a cover: a
+/// plus, "Upload" and how ("Browse or Ctrl+V"), in the shape of a cover;
+/// "Reading…" while a picked file is being read.
+pub fn upload_tile<'a, Message: Clone + 'a>(
+    width: f32,
+    square: bool,
+    busy: bool,
+    on_press: Message,
+    tokens: &crate::theme::Tokens,
+) -> Element<'a, Message> {
+    use super::{FocusExt, Icon, icon};
+    use iced::widget::button;
+
+    let tokens = *tokens;
+    let inner = width - 2.0 * RING;
+    let words = column![
+        icon(Icon::Plus, 22.0, tokens.text),
+        text(if busy { "Reading…" } else { "Upload" })
+            .size(13)
+            .font(font::SEMIBOLD)
+            .color(tokens.text),
+        text("Browse or Ctrl+V")
+            .size(11)
+            .color(tokens.sub)
+            .align_x(iced::alignment::Horizontal::Center),
+    ]
+    .spacing(6)
+    .align_x(iced::alignment::Horizontal::Center);
+    button(
+        container(words)
+            .width(inner)
+            .height(height_for(inner, square))
+            .padding(8)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center),
+    )
+    .padding(RING)
+    .on_press_maybe((!busy).then_some(on_press))
+    .style(move |_, status| button::Style {
+        background: Some(
+            if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                tokens.selection
+            } else {
+                tokens.hover
+            }
+            .into(),
+        ),
+        border: Border::default().rounded(8.0 + RING),
+        ..button::Style::default()
+    })
+    .focusable(8.0 + RING, &tokens)
 }

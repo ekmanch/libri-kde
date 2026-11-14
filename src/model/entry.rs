@@ -218,10 +218,18 @@ pub struct Entry {
     /// a movie, clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmdb: Option<String>,
-    /// The lookup id of another match whose cover the entry shows (an
-    /// edition, an ebook), left out while the cover is the match's own.
+    /// The cover the entry shows when it is not its match's own, left out
+    /// while it is: the lookup id of another match (an edition, an
+    /// ebook), or one of the owner's files in the library repo,
+    /// "repo:Movies/the-mummy-1999.a3f9c2e.jpg" (the path under `Covers/`
+    /// beside the library file; `covers`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover_from: Option<String>,
+    /// The owner keeps their own cover file whatever the lookups have:
+    /// an online cover for the title is never offered again. Written
+    /// only while true, right after `cover_from`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover_keep_mine: Option<bool>,
     // Games.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,
@@ -542,6 +550,7 @@ mod tests {
             source: None,
             tmdb: None,
             cover_from: None,
+            cover_keep_mine: None,
             platform: None,
             formats: None,
             pages: None,

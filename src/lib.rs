@@ -8,6 +8,7 @@ pub mod blur;
 pub mod browse;
 pub mod clock;
 pub mod connection;
+pub mod covers;
 pub mod decoration;
 pub mod discover;
 pub mod fixtures;
