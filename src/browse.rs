@@ -589,7 +589,9 @@ pub fn sections<'a>(sort: Sort, entries: &[&'a Entry], today: Date) -> Vec<ListS
     sections
 }
 
-fn section_key(sort: Sort, entry: &Entry, today: Date) -> (String, String) {
+/// The section `entry` is in under `sort`: its header and its short label
+/// for the rail.
+pub fn section_key(sort: Sort, entry: &Entry, today: Date) -> (String, String) {
     match sort {
         Sort::TitleAz => {
             let initial = title_initial(&entry.title).to_string();

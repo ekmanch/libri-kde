@@ -6,7 +6,8 @@ use iced::{Element, Fill, Padding};
 
 use super::{Listing, Message, MusicTab, View, rail};
 use crate::app::{App, Message as AppMessage};
-use crate::model::{Entry, MediaType};
+use crate::browse::{self, Sort};
+use crate::model::{Date, Entry, MediaType};
 use crate::music::{self, Song};
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, Icon, music::SongLook};
@@ -69,16 +70,19 @@ fn tab_list<'a>(
     let mut room = rail::LEFT;
     let children: Vec<Element<'a, AppMessage>> = match tab {
         MusicTab::Artists => {
-            let artists = music::artists(&listing.shown);
+            let artists = music::artists(&listing.shown, state.sort);
             if artists.is_empty() {
                 return empty("No artists here", tokens);
             }
-            // A long list gets letter sections and the section rail; a
-            // long grid the rail alone.
+            // A long list gets the sort's sections and the section rail;
+            // a long grid the rail alone. The rail lists the alphabet in
+            // the name order.
+            let alphabet = state.sort == Sort::TitleAz;
+            let sections = |artists| artist_sections(artists, state.sort, app.today);
             if view == View::Grid {
-                let sections = artist_sections(artists);
+                let sections = sections(artists);
                 let names = sections.iter().map(|s| s.1.clone()).collect();
-                let on_rail = rail::Sections::new(names, true);
+                let on_rail = rail::Sections::new(names, alphabet);
                 let rows = rail::GridRows::new(
                     state.list_width - rail::LEFT - on_rail.room(),
                     CELL_MAX_WIDTH,
@@ -101,10 +105,10 @@ fn tab_list<'a>(
                     tokens,
                 )]
             } else if state.is_long(artists.len(), view) {
-                let sections = artist_sections(artists);
+                let sections = sections(artists);
                 if sections.len() >= 2 {
                     let names: Vec<String> = sections.iter().map(|s| s.1.clone()).collect();
-                    let on_rail = rail::Sections::new(names, true);
+                    let on_rail = rail::Sections::new(names, alphabet);
                     room = on_rail.room();
                     if still.is_none() {
                         overlays.push(on_rail.in_list(state).view(state, tokens));
@@ -178,20 +182,26 @@ fn empty<'a>(title: &str, tokens: &Tokens) -> Element<'a, AppMessage> {
     )
 }
 
-/// The letter sections of an artist list already in order: the first
-/// letter with a leading "The" ignored, and Various Artists on its own at
-/// the end. Each is (header, rail label, artists).
+/// The sections of an artist list already in `sort` order. By name: the
+/// first letter with a leading "The" ignored, and Various Artists on its
+/// own at the end. In the other orders: the section of the entry that
+/// places the artist (`Artist::lead`), as in every long list. Each is
+/// (header, rail label, artists).
 #[allow(clippy::type_complexity)]
 fn artist_sections(
     artists: Vec<music::Artist<'_>>,
+    sort: Sort,
+    today: Date,
 ) -> Vec<(String, String, Vec<music::Artist<'_>>)> {
     let mut sections: Vec<(String, String, Vec<music::Artist<'_>>)> = Vec::new();
     for artist in artists {
-        let (various, key) = music::artist_key(artist.name);
-        let (label, short) = if various {
+        let (label, short) = if sort != Sort::TitleAz {
+            browse::section_key(sort, artist.lead, today)
+        } else if artist.name == music::VARIOUS_ARTISTS {
             (music::VARIOUS_ARTISTS.to_owned(), "VA".to_owned())
         } else {
-            let initial = crate::browse::title_initial(&key).to_string();
+            let (_, key) = music::artist_key(artist.name);
+            let initial = browse::title_initial(&key).to_string();
             (initial.clone(), initial)
         };
         match sections.last_mut() {
@@ -308,7 +318,7 @@ fn artist_page<'a>(
     view: View,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
-    let artists = music::artists(&listing.shown);
+    let artists = music::artists(&listing.shown, app.library.sort);
     let Some(artist) = artists
         .into_iter()
         .find(|a| a.name.eq_ignore_ascii_case(name))

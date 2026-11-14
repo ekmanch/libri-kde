@@ -3,6 +3,7 @@
 //! behind the phone's replace dialogs (DESIGN.md section 5 of the phone's
 //! design).
 
+use crate::browse::Sort;
 use crate::model::{Entry, EntryKind, MediaType, Track};
 
 /// Pinned after Z in the artist list.
@@ -24,8 +25,8 @@ pub fn is_song(entry: &Entry) -> bool {
     entry.kind == Some(EntryKind::Song)
 }
 
-/// How an artist sorts: a leading "The" ignored, case ignored, Various
-/// Artists after everything.
+/// How an artist sorts by name: a leading "The" ignored, case ignored,
+/// Various Artists after everything.
 pub fn artist_key(name: &str) -> (bool, String) {
     let lower = name.trim().to_lowercase();
     let key = lower.strip_prefix("the ").unwrap_or(&lower).to_owned();
@@ -36,6 +37,9 @@ pub fn artist_key(name: &str) -> (bool, String) {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Artist<'a> {
     pub name: &'a str,
+    /// Their entry that comes first in the list's sort: the one that
+    /// places the artist, and whose section the artist is in.
+    pub lead: &'a Entry,
     pub albums: Vec<&'a Entry>,
     pub songs: Vec<&'a Entry>,
 }
@@ -57,9 +61,12 @@ impl Artist<'_> {
     }
 }
 
-/// Every artist with an album or a song among `entries`, A to Z by
-/// `artist_key`; each artist's entries keep their order.
-pub fn artists<'a>(entries: &[&'a Entry]) -> Vec<Artist<'a>> {
+/// Every artist with an album or a song among `entries`, which are in
+/// `sort` order. The artists follow that sort: by name in the title order
+/// (`artist_key`), and in the others each where their first entry is (the
+/// one added last, the newest or oldest release, the highest rated). Each
+/// artist's entries keep their order.
+pub fn artists<'a>(entries: &[&'a Entry], sort: Sort) -> Vec<Artist<'a>> {
     let mut artists: Vec<Artist<'a>> = Vec::new();
     for &entry in entries.iter().filter(|e| e.media == MediaType::Music) {
         let name = artist_of(entry);
@@ -71,6 +78,7 @@ pub fn artists<'a>(entries: &[&'a Entry]) -> Vec<Artist<'a>> {
             None => {
                 artists.push(Artist {
                     name,
+                    lead: entry,
                     albums: Vec::new(),
                     songs: Vec::new(),
                 });
@@ -84,7 +92,9 @@ pub fn artists<'a>(entries: &[&'a Entry]) -> Vec<Artist<'a>> {
             artist.albums.push(entry);
         }
     }
-    artists.sort_by_key(|a| artist_key(a.name));
+    if sort == Sort::TitleAz {
+        artists.sort_by_key(|a| artist_key(a.name));
+    }
     artists
 }
 
@@ -236,7 +246,7 @@ mod tests {
     fn artists_sort_without_the_and_various_artists_last() {
         let library = library();
         let entries: Vec<&Entry> = library.entries.iter().collect();
-        let artists = artists(&entries);
+        let artists = artists(&entries, Sort::TitleAz);
         let names: Vec<&str> = artists.iter().map(|a| a.name).collect();
         assert_eq!(names.last(), Some(&VARIOUS_ARTISTS));
         let beatles = names.iter().position(|n| *n == "The Beatles").unwrap();
@@ -249,15 +259,58 @@ mod tests {
     }
 
     #[test]
+    fn artists_follow_the_sort() {
+        let library = library();
+        let music = |sort: Sort| {
+            let mut entries: Vec<&Entry> = library
+                .entries
+                .iter()
+                .filter(|e| e.media == MediaType::Music)
+                .collect();
+            sort.apply(&mut entries);
+            entries
+        };
+        for sort in Sort::ALL {
+            let entries = music(sort);
+            let artists = artists(&entries, sort);
+            if sort == Sort::TitleAz {
+                assert_eq!(artists[0].name, "2Pac", "by name, not by title");
+                continue;
+            }
+            // Each artist sits where their first entry in the sort is.
+            let mut seen: Vec<&str> = Vec::new();
+            for entry in &entries {
+                let name = artist_of(entry);
+                if !seen.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+                    seen.push(name);
+                }
+            }
+            let names: Vec<&str> = artists.iter().map(|a| a.name).collect();
+            assert_eq!(names, seen, "{sort:?}");
+            assert_eq!(artists[0].lead.id, entries[0].id, "{sort:?}");
+        }
+        let newest: Vec<&str> = artists(&music(Sort::NewestAdded), Sort::NewestAdded)
+            .iter()
+            .map(|a| a.name)
+            .collect();
+        let by_name: Vec<&str> = artists(&music(Sort::TitleAz), Sort::TitleAz)
+            .iter()
+            .map(|a| a.name)
+            .collect();
+        assert_ne!(newest, by_name);
+    }
+
+    #[test]
     fn an_artist_says_what_is_saved() {
         let library = library();
         let entries: Vec<&Entry> = library.entries.iter().collect();
-        let artists = artists(&entries);
+        let artists = artists(&entries, Sort::TitleAz);
         let find = |name| artists.iter().find(|a| a.name == name).unwrap().summary();
         assert_eq!(find("Alice in Chains"), "1 album");
         assert_eq!(find("The Cramps"), "1 song");
         let two = Artist {
             name: "x",
+            lead: &library.entries[0],
             albums: vec![&library.entries[0], &library.entries[1]],
             songs: vec![
                 &library.entries[2],

@@ -506,7 +506,7 @@ pub fn wanted(app: &App, wants: &mut Wants) {
         && state.music_tab == MusicTab::Artists
     {
         let listing = state.listing(library, app.today);
-        let artists = crate::music::artists(&listing.shown);
+        let artists = crate::music::artists(&listing.shown, state.sort);
         wants.artists.extend(
             covers_on_screen(artists.len(), state.scroll)
                 .into_iter()
@@ -1253,7 +1253,7 @@ impl State {
         if self.single() == Some(MediaType::Music) {
             return match (self.artist.as_deref(), self.music_tab) {
                 (Some(name), _) => {
-                    let artists = crate::music::artists(&listing.shown);
+                    let artists = crate::music::artists(&listing.shown, self.sort);
                     match artists.iter().find(|a| a.name.eq_ignore_ascii_case(name)) {
                         Some(artist) => artist
                             .albums
