@@ -582,9 +582,9 @@ mod tests {
 
     const BABY: &str = "movies/million-dollar-baby-2004";
     const DRACULA: &str = "books/dracula-1897";
-    const STEELBOOK: &str = "Movies/million-dollar-baby-2004.steelbook.jpg";
-    const DELUXE: &str = "Music/dirt-alice-in-chains.deluxe.jpg";
-    const DRACULA_OWN: &str = "Books/dracula-1897.first-edition.jpg";
+    const STEELBOOK: &str = "movies/million-dollar-baby-2004.steelbook.jpg";
+    const DELUXE: &str = "music/dirt-alice-in-chains.deluxe.jpg";
+    const DRACULA_OWN: &str = "books/dracula-1897.first-edition.jpg";
 
     /// The demo's files and one for Dracula, which the fake's lookup has
     /// a cover for; it has none for Million Dollar Baby.
@@ -719,7 +719,7 @@ mod tests {
             &app,
             &[
                 "Unused covers",
-                "Movies/old-poster.png",
+                "movies/old-poster.png",
                 "Doesn't match any title",
                 "Delete 7 files",
             ],

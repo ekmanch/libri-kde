@@ -1114,7 +1114,7 @@ mod tests {
         let base_sha = raw(&library).blob_sha;
         let operation = flip(&library, MUMMY);
         engine.queue(operation.clone(), "Edit The Mummy".into());
-        engine.queue_file(upload("Movies/the-mummy-1999.a3f9c2e.jpg"), None);
+        engine.queue_file(upload("movies/the-mummy-1999.a3f9c2e.jpg"), None);
         let edited = with(&library, operation);
         let _ = engine.begin(Kind::Sync);
         let outcome = engine.answer(Answer::Raw(Ok(None)), &edited);
@@ -1130,7 +1130,7 @@ mod tests {
         assert_eq!(sent, Some(codec::encode(&edited).into_bytes()));
         assert_eq!(message, "Edit The Mummy");
         assert_eq!(sha, Some(base_sha));
-        assert_eq!(files, [upload("Movies/the-mummy-1999.a3f9c2e.jpg")]);
+        assert_eq!(files, [upload("movies/the-mummy-1999.a3f9c2e.jpg")]);
         assert_eq!(engine.status().phase, Phase::Saving);
         // The save in flight names the files it carries.
         assert_eq!(engine.pending().in_flight().unwrap().files, vec![2]);
@@ -1149,13 +1149,13 @@ mod tests {
         let summary = Some("Delete 2 unused covers".to_owned());
         engine.queue_file(
             Change::Delete {
-                path: "Movies/old-poster.png".into(),
+                path: "movies/old-poster.png".into(),
             },
             summary.clone(),
         );
         engine.queue_file(
             Change::Delete {
-                path: "Movies/scan-2.jpg".into(),
+                path: "movies/scan-2.jpg".into(),
             },
             summary,
         );
@@ -1200,7 +1200,7 @@ mod tests {
         let (mut engine, library) = synced();
         let operation = flip(&library, MUMMY);
         engine.queue(operation.clone(), "Edit The Mummy".into());
-        engine.queue_file(upload("Movies/the-mummy-1999.a3f9c2e.jpg"), None);
+        engine.queue_file(upload("movies/the-mummy-1999.a3f9c2e.jpg"), None);
         let edited = with(&library, operation);
         let _ = engine.begin(Kind::Sync);
         let _ = engine.answer(Answer::Raw(Ok(None)), &edited);
@@ -1227,7 +1227,7 @@ mod tests {
     fn keep_githubs_drops_the_queued_cover_files_too() {
         let (mut engine, library) = synced();
         engine.queue(flip(&library, MUMMY), "Edit The Mummy".into());
-        engine.queue_file(upload("Movies/the-mummy-1999.a3f9c2e.jpg"), None);
+        engine.queue_file(upload("movies/the-mummy-1999.a3f9c2e.jpg"), None);
         let _ = engine.begin(Kind::KeepTheirs);
         let outcome = engine.answer(Answer::Raw(Ok(Some(raw(&library)))), &library);
         assert_eq!(outcome.library, Some(library));

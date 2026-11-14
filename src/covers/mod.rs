@@ -1,20 +1,21 @@
 //! The owner's own covers, kept as files in the library repo.
 //!
-//! They live in `Covers/<Type>/` in the folder of the library file
-//! (`Covers/Movies/` beside `library.json`), one folder per type: Movies,
-//! Shows, Books, Games, Anime, Music. A file is named
+//! They live in `covers/<type>/` in the folder of the library file
+//! (`covers/movies/` beside `library.json`), one folder per type, named
+//! as the type is in entry ids: movies, shows, books, games, anime, music.
+//! All in lower case, like every other folder the app keeps. A file is named
 //! `<slug>[.<label>].<ext>`, the slug being the entry id without its type
-//! (`movies/the-mummy-1999` is `Covers/Movies/the-mummy-1999.steelbook.jpg`),
+//! (`movies/the-mummy-1999` is `covers/movies/the-mummy-1999.steelbook.jpg`),
 //! and belongs to a title when its name is the slug followed by a dot.
 //! The name only makes a file a candidate: the cover an entry shows is
-//! the one its `cover_from` names, `repo:Movies/the-mummy-1999.a3f9c2e.jpg`
-//! (the path under `Covers/`), so a file committed by hand is offered in
+//! the one its `cover_from` names, `repo:movies/the-mummy-1999.a3f9c2e.jpg`
+//! (the path under `covers/`), so a file committed by hand is offered in
 //! Pick a cover and never applied on its own.
 //!
-//! [`Covers`] is what the app knows of the folder: the list GitHub gave
+//! [`covers`] is what the app knows of the folder: the list GitHub gave
 //! (one tree call, kept in `covers.json` under the cache folder for the
 //! next start), with the changes this computer has queued on top, and the
-//! copies on this computer in `Covers/` beside the local library. A copy
+//! copies on this computer in `covers/` beside the local library. A copy
 //! is fetched when a screen shows it; an upload is written there first
 //! and pushed with the commit that sets `cover_from` (`sync`). With the
 //! library kept on this computer the folder is all there is.
@@ -35,7 +36,7 @@ use crate::model::{Entry, Library, MediaType};
 /// What a `cover_from` naming one of the owner's files starts with.
 pub const SCHEME: &str = "repo:";
 /// The folder beside the library file.
-pub const FOLDER: &str = "Covers";
+pub const FOLDER: &str = "covers";
 /// How long a download that failed waits before it is tried again.
 const RETRY: Duration = Duration::from_secs(60);
 /// How long a listing is trusted before Pick a cover asks again.
@@ -43,9 +44,10 @@ pub const LISTING_AGE: Duration = Duration::from_secs(60);
 /// The `covers.json` format.
 const VERSION: i64 = 1;
 
-/// The type's folder under `Covers/`: "Movies".
+/// The type's folder under `covers/`: "movies", the type's name in
+/// entry ids.
 pub fn folder(media: MediaType) -> &'static str {
-    media.label()
+    media.key()
 }
 
 /// The entry id without its type: `movies/the-mummy-1999` is
@@ -55,7 +57,7 @@ pub fn slug(id: &str) -> &str {
 }
 
 /// The folder of the type the id was made for, which stays when the
-/// entry's type changes: `movies/the-mummy-1999` is "Movies".
+/// entry's type changes: `movies/the-mummy-1999` is "movies".
 pub fn id_folder(id: &str) -> Option<&'static str> {
     let (key, _) = id.split_once('/')?;
     MediaType::ALL
@@ -64,7 +66,7 @@ pub fn id_folder(id: &str) -> Option<&'static str> {
         .map(folder)
 }
 
-/// The path under `Covers/` a `cover_from` names, when it names one of
+/// The path under `covers/` a `cover_from` names, when it names one of
 /// the owner's files.
 pub fn repo_path(cover_from: &str) -> Option<&str> {
     cover_from.strip_prefix(SCHEME)
@@ -75,13 +77,13 @@ pub fn is_repo(cover_from: Option<&str>) -> bool {
     cover_from.is_some_and(|cover_from| cover_from.starts_with(SCHEME))
 }
 
-/// The `cover_from` for the file at `path` under `Covers/`.
+/// The `cover_from` for the file at `path` under `covers/`.
 pub fn cover_from(path: &str) -> String {
     format!("{SCHEME}{path}")
 }
 
-/// "Movies/the-mummy-1999.jpg" is ("Movies", "the-mummy-1999.jpg"); a
-/// file right under `Covers/` has no folder.
+/// "movies/the-mummy-1999.jpg" is ("movies", "the-mummy-1999.jpg"); a
+/// file right under `covers/` has no folder.
 pub fn split(path: &str) -> (&str, &str) {
     path.rsplit_once('/').unwrap_or(("", path))
 }
@@ -128,9 +130,9 @@ pub fn is_image(name: &str) -> bool {
 /// The name an upload gets: the slug, the first seven characters of the
 /// file's git blob sha and "jpg", so two computers never pick the same
 /// name for different images and a new image never hides behind a cached
-/// one.
+/// one. All in lower case, like the folders.
 pub fn upload_name(slug: &str, sha: &str) -> String {
-    format!("{slug}.{}.jpg", &sha[..sha.len().min(7)])
+    format!("{slug}.{}.jpg", &sha[..sha.len().min(7)]).to_lowercase()
 }
 
 /// Whether a label is the short sha of an upload from the app.
@@ -141,8 +143,8 @@ pub fn is_upload_label(label: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// The folder in the repo: `Covers` beside the library file, so
-/// `data/library.json` has `data/Covers`.
+/// The folder in the repo: `covers` beside the library file, so
+/// `data/library.json` has `data/covers`.
 pub fn root(library_file: &str) -> String {
     match library_file.rsplit_once('/') {
         Some((dir, _)) if !dir.is_empty() => format!("{dir}/{FOLDER}"),
@@ -159,7 +161,7 @@ pub fn size_label(bytes: u64) -> String {
     }
 }
 
-/// One file under `Covers/`: its path there ("Movies/the-mummy-1999.jpg"),
+/// One file under `covers/`: its path there ("movies/the-mummy-1999.jpg"),
 /// its size and git's blob sha.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct File {
@@ -184,10 +186,10 @@ impl File {
 }
 
 /// A change to the files, queued for the next commit (`sync`): paths
-/// under `Covers/`.
+/// under `covers/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
-    /// The file this computer wrote to its own `Covers/`.
+    /// The file this computer wrote to its own `covers/`.
     Upload {
         path: String,
     },
@@ -225,11 +227,11 @@ impl Change {
     }
 }
 
-/// The files of `Covers/` as the app knows them, and the copies on this
+/// The files of `covers/` as the app knows them, and the copies on this
 /// computer.
 #[derive(Debug, Default)]
 pub struct Covers {
-    /// `Covers/` beside the local library; none keeps nothing on disk
+    /// `covers/` beside the local library; none keeps nothing on disk
     /// (the tests, the mock runs).
     dir: Option<PathBuf>,
     /// `covers.json` under the cache folder.
@@ -252,7 +254,7 @@ pub struct Covers {
 }
 
 impl Covers {
-    /// The state over `dir` (`Covers/` beside the library) and the cache
+    /// The state over `dir` (`covers/` beside the library) and the cache
     /// folder's `covers.json`, with the list of the last session.
     pub fn at(dir: Option<PathBuf>, cache: Option<&Path>) -> Covers {
         let mut covers = Covers {
@@ -646,15 +648,15 @@ impl Covers {
 /// a few files in the type folders that are named after no title.
 pub fn demo() -> Vec<File> {
     [
-        ("Movies/million-dollar-baby-2004.steelbook.jpg", 412_000),
-        ("Music/dirt-alice-in-chains.deluxe.jpg", 388_000),
-        ("Movies/old-poster.png", 911_000),
-        ("Movies/bluray-front.jpg", 240_000),
-        ("Movies/scan-2.jpg", 198_000),
-        ("Movies/untitled.png", 76_000),
-        ("Books/shogun-scan.jpg", 301_000),
-        ("Music/mezz-front.jpg", 265_000),
-        ("Music/back-cover.png", 540_000),
+        ("movies/million-dollar-baby-2004.steelbook.jpg", 412_000),
+        ("music/dirt-alice-in-chains.deluxe.jpg", 388_000),
+        ("movies/old-poster.png", 911_000),
+        ("movies/bluray-front.jpg", 240_000),
+        ("movies/scan-2.jpg", 198_000),
+        ("movies/untitled.png", 76_000),
+        ("books/shogun-scan.jpg", 301_000),
+        ("music/mezz-front.jpg", 265_000),
+        ("music/back-cover.png", 540_000),
     ]
     .into_iter()
     .map(|(path, size)| File {
@@ -712,7 +714,7 @@ pub fn write_bytes(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     written
 }
 
-/// The files of `Covers/` beside `library_file` on `branch`, from one
+/// The files of `covers/` beside `library_file` on `branch`, from one
 /// tree call. A repo without the folder has none.
 pub fn list(client: &github::Client, branch: &str, library_file: &str) -> github::Reply<Vec<File>> {
     let prefix = format!("{}/", root(library_file));
@@ -721,7 +723,7 @@ pub fn list(client: &github::Client, branch: &str, library_file: &str) -> github
         .into_iter()
         .filter_map(|file| {
             let path = file.path.strip_prefix(&prefix)?;
-            // One folder deep: `Covers/<Type>/<file>`.
+            // One folder deep: `covers/<type>/<file>`.
             (path.matches('/').count() == 1).then(|| File {
                 path: path.to_owned(),
                 size: file.size,
@@ -731,7 +733,7 @@ pub fn list(client: &github::Client, branch: &str, library_file: &str) -> github
         .collect())
 }
 
-/// Fetches the file at `path` under `Covers/` to `to` and gives its blob
+/// Fetches the file at `path` under `covers/` to `to` and gives its blob
 /// sha.
 pub fn download(
     client: &github::Client,
@@ -770,7 +772,7 @@ mod tests {
     #[test]
     fn a_file_belongs_to_a_title_by_its_slug_and_a_dot() {
         assert_eq!(slug("movies/the-mummy-1999"), "the-mummy-1999");
-        assert_eq!(id_folder("movies/the-mummy-1999"), Some("Movies"));
+        assert_eq!(id_folder("movies/the-mummy-1999"), Some("movies"));
         assert_eq!(id_folder("nope/x"), None);
         assert!(belongs("the-mummy-1999.jpg", "the-mummy-1999"));
         assert!(belongs("the-mummy-1999.steelbook.jpg", "the-mummy-1999"));
@@ -788,17 +790,26 @@ mod tests {
             "the-mummy-1999.a3f9c2e.jpg"
         );
         assert!(is_upload_label("a3f9c2e") && !is_upload_label("steelbook"));
+        // Every name the app makes is in lower case, folder and all.
+        for media in MediaType::ALL {
+            let path = format!(
+                "{FOLDER}/{}/{}",
+                folder(media),
+                upload_name(slug("movies/the-mummy-1999"), "A3F9C2E41B0D")
+            );
+            assert_eq!(path, path.to_lowercase());
+        }
         assert_eq!(
-            repo_path("repo:Movies/the-mummy-1999.jpg"),
-            Some("Movies/the-mummy-1999.jpg")
+            repo_path("repo:movies/the-mummy-1999.jpg"),
+            Some("movies/the-mummy-1999.jpg")
         );
         assert_eq!(repo_path("tmdb:movie:1"), None);
     }
 
     #[test]
     fn the_folder_sits_beside_the_library_file() {
-        assert_eq!(root("library.json"), "Covers");
-        assert_eq!(root("data/library.json"), "data/Covers");
+        assert_eq!(root("library.json"), "covers");
+        assert_eq!(root("data/library.json"), "data/covers");
         assert_eq!(size_label(1_400_000), "1.4 MB");
         assert_eq!(size_label(240_123), "241 KB");
     }
@@ -810,23 +821,23 @@ mod tests {
             .entry("movies/million-dollar-baby-2004")
             .expect("in the fixture");
         let covers = Covers::with_files(vec![
-            file("Movies/million-dollar-baby-2004.steelbook.jpg"),
-            file("Movies/million-dollar-baby-2004.notes.txt"),
-            file("Movies/old-poster.png"),
-            file("Books/million-dollar-baby-2004.jpg"),
-            file("Movies/gone-title-1990.a91c0d2.jpg"),
+            file("movies/million-dollar-baby-2004.steelbook.jpg"),
+            file("movies/million-dollar-baby-2004.notes.txt"),
+            file("movies/old-poster.png"),
+            file("books/million-dollar-baby-2004.jpg"),
+            file("movies/gone-title-1990.a91c0d2.jpg"),
         ]);
         let names =
             |files: Vec<&File>| -> Vec<String> { files.iter().map(|f| f.path.clone()).collect() };
         assert_eq!(
             names(covers.candidates(entry)),
-            ["Movies/million-dollar-baby-2004.steelbook.jpg"]
+            ["movies/million-dollar-baby-2004.steelbook.jpg"]
         );
         assert_eq!(
             names(covers.others(MediaType::Movies, &library)),
             [
-                "Movies/gone-title-1990.a91c0d2.jpg",
-                "Movies/old-poster.png"
+                "movies/gone-title-1990.a91c0d2.jpg",
+                "movies/old-poster.png"
             ]
         );
         // The book's folder has no such title; the text file is unused
@@ -834,26 +845,26 @@ mod tests {
         assert_eq!(
             names(covers.unused(&library)),
             [
-                "Books/million-dollar-baby-2004.jpg",
-                "Movies/gone-title-1990.a91c0d2.jpg",
-                "Movies/old-poster.png"
+                "books/million-dollar-baby-2004.jpg",
+                "movies/gone-title-1990.a91c0d2.jpg",
+                "movies/old-poster.png"
             ]
         );
         // A file an entry shows is in use whatever its name.
         let mut library = library;
         let id = "movies/million-dollar-baby-2004";
         let mut changed = library.entry(id).unwrap().clone();
-        changed.cover_from = Some("repo:Movies/old-poster.png".into());
+        changed.cover_from = Some("repo:movies/old-poster.png".into());
         *library.entries.iter_mut().find(|e| e.id == id).unwrap() = changed;
-        assert!(!names(covers.unused(&library)).contains(&"Movies/old-poster.png".to_owned()));
+        assert!(!names(covers.unused(&library)).contains(&"movies/old-poster.png".to_owned()));
         assert!(Covers::used_elsewhere(
             &library,
-            "Movies/old-poster.png",
+            "movies/old-poster.png",
             "movies/x"
         ));
         assert!(!Covers::used_elsewhere(
             &library,
-            "Movies/old-poster.png",
+            "movies/old-poster.png",
             id
         ));
     }
@@ -869,8 +880,8 @@ mod tests {
         entry.media = MediaType::Shows;
         let entry = entry.clone();
         let covers = Covers::with_files(vec![
-            file("Movies/million-dollar-baby-2004.a.jpg"),
-            file("Shows/million-dollar-baby-2004.b.jpg"),
+            file("movies/million-dollar-baby-2004.a.jpg"),
+            file("shows/million-dollar-baby-2004.b.jpg"),
         ]);
         assert_eq!(covers.candidates(&entry).len(), 2);
         assert!(covers.unused(&library).is_empty());
@@ -879,86 +890,86 @@ mod tests {
     #[test]
     fn queued_changes_show_on_top_of_githubs_list() {
         let dir = TempDir::new("covers");
-        let mut covers = Covers::at(Some(dir.path("Covers")), Some(&dir.0));
-        let stored = covers.store("Movies/a.1234567.jpg", b"jpeg bytes").unwrap();
+        let mut covers = Covers::at(Some(dir.path("covers")), Some(&dir.0));
+        let stored = covers.store("movies/a.1234567.jpg", b"jpeg bytes").unwrap();
         assert_eq!(stored.sha, blob_sha(b"jpeg bytes"));
-        assert!(dir.path("Covers").join("Movies/a.1234567.jpg").is_file());
+        assert!(dir.path("covers").join("movies/a.1234567.jpg").is_file());
         assert_eq!(
-            covers.ready("Movies/a.1234567.jpg").unwrap(),
-            dir.path("Covers").join("Movies/a.1234567.jpg")
+            covers.ready("movies/a.1234567.jpg").unwrap(),
+            dir.path("covers").join("movies/a.1234567.jpg")
         );
 
         let queued = [
             Change::Upload {
-                path: "Movies/a.1234567.jpg".into(),
+                path: "movies/a.1234567.jpg".into(),
             },
             Change::Delete {
-                path: "Movies/old.png".into(),
+                path: "movies/old.png".into(),
             },
             Change::Move {
-                from: "Movies/b.jpg".into(),
-                to: "Shows/b.jpg".into(),
+                from: "movies/b.jpg".into(),
+                to: "shows/b.jpg".into(),
             },
         ];
-        covers.listed(vec![file("Movies/old.png"), file("Movies/b.jpg")], &queued);
+        covers.listed(vec![file("movies/old.png"), file("movies/b.jpg")], &queued);
         let paths: Vec<&str> = covers.files().iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, ["Movies/a.1234567.jpg", "Shows/b.jpg"]);
-        assert_eq!(covers.get("Shows/b.jpg").unwrap().sha, "sha-Movies/b.jpg");
+        assert_eq!(paths, ["movies/a.1234567.jpg", "shows/b.jpg"]);
+        assert_eq!(covers.get("shows/b.jpg").unwrap().sha, "sha-movies/b.jpg");
 
         // The list and the copies' shas are there after a restart.
-        let again = Covers::at(Some(dir.path("Covers")), Some(&dir.0));
+        let again = Covers::at(Some(dir.path("covers")), Some(&dir.0));
         assert_eq!(again.remote.len(), 2);
-        assert!(again.have.contains_key("Movies/a.1234567.jpg"));
+        assert!(again.have.contains_key("movies/a.1234567.jpg"));
 
         // A file replaced on GitHub under the same name is fetched again.
         covers.listed(
             vec![File {
-                path: "Movies/a.1234567.jpg".into(),
+                path: "movies/a.1234567.jpg".into(),
                 size: 5,
                 sha: "another".into(),
             }],
             &[],
         );
-        assert!(covers.ready("Movies/a.1234567.jpg").is_none());
+        assert!(covers.ready("movies/a.1234567.jpg").is_none());
         assert_eq!(
-            covers.to_fetch(&["Movies/a.1234567.jpg".into(), "Movies/unlisted.jpg".into()]),
-            ["Movies/a.1234567.jpg"]
+            covers.to_fetch(&["movies/a.1234567.jpg".into(), "movies/unlisted.jpg".into()]),
+            ["movies/a.1234567.jpg"]
         );
         assert!(
-            covers.to_fetch(&["Movies/a.1234567.jpg".into()]).is_empty(),
+            covers.to_fetch(&["movies/a.1234567.jpg".into()]).is_empty(),
             "on its way"
         );
-        covers.fetched("Movies/a.1234567.jpg", &Err("offline".into()));
-        assert!(covers.failed("Movies/a.1234567.jpg"));
+        covers.fetched("movies/a.1234567.jpg", &Err("offline".into()));
+        assert!(covers.failed("movies/a.1234567.jpg"));
     }
 
     #[test]
     fn a_delete_and_a_move_reach_the_copies_on_this_computer() {
         let dir = TempDir::new("covers");
-        let mut covers = Covers::at(Some(dir.path("Covers")), Some(&dir.0));
-        covers.store("Movies/a.jpg", b"a").unwrap();
-        covers.store("Movies/b.jpg", b"b").unwrap();
+        let mut covers = Covers::at(Some(dir.path("covers")), Some(&dir.0));
+        covers.store("movies/a.jpg", b"a").unwrap();
+        covers.store("movies/b.jpg", b"b").unwrap();
         covers.apply(
             &Change::Move {
-                from: "Movies/a.jpg".into(),
-                to: "Shows/a.jpg".into(),
+                from: "movies/a.jpg".into(),
+                to: "shows/a.jpg".into(),
             },
             true,
         );
         covers.apply(
             &Change::Delete {
-                path: "Movies/b.jpg".into(),
+                path: "movies/b.jpg".into(),
             },
             true,
         );
-        assert!(dir.path("Covers").join("Shows/a.jpg").is_file());
-        assert!(!dir.path("Covers").join("Movies/a.jpg").exists());
-        assert!(!dir.path("Covers").join("Movies/b.jpg").exists());
+        assert!(dir.path("covers").join("shows/a.jpg").is_file());
+        assert!(!dir.path("covers").join("movies/a.jpg").exists());
+        assert!(!dir.path("covers").join("movies/b.jpg").exists());
         assert_eq!(covers.files().len(), 1);
-        assert!(covers.ready("Shows/a.jpg").is_some());
+        assert!(covers.ready("shows/a.jpg").is_some());
 
         // With the library kept on this computer the folder is the list.
-        let mut local = Covers::at(Some(dir.path("Covers")), None);
+        let mut local = Covers::at(Some(dir.path("covers")), None);
         local.scan();
         assert_eq!(local.files().len(), 1);
         assert_eq!(local.files()[0].sha, blob_sha(b"a"));
@@ -970,14 +981,14 @@ mod tests {
     fn changes_round_trip_through_json() {
         for change in [
             Change::Upload {
-                path: "Movies/a.jpg".into(),
+                path: "movies/a.jpg".into(),
             },
             Change::Delete {
-                path: "Movies/a.jpg".into(),
+                path: "movies/a.jpg".into(),
             },
             Change::Move {
-                from: "Movies/a.jpg".into(),
-                to: "Shows/a.jpg".into(),
+                from: "movies/a.jpg".into(),
+                to: "shows/a.jpg".into(),
             },
         ] {
             assert_eq!(Change::from_json(&change.to_json()), Some(change));

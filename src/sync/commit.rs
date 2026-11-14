@@ -23,7 +23,7 @@ use crate::github::{Client, Failure, FailureKind, PutResult, Reply, TreeEdit, Tr
 /// What the commit does to one cover file, by its path in the repo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Edit {
-    /// The file from this computer's `Covers/`, at this path under it.
+    /// The file from this computer's `covers/`, at this path under it.
     Upload(String),
     /// A blob the repo already has.
     Blob(String),
@@ -31,7 +31,7 @@ pub enum Edit {
 }
 
 /// The edits `changes` come to against `tree`, the blobs of the repo by
-/// path: the paths in the repo (under `root`, the `Covers` folder) with
+/// path: the paths in the repo (under `root`, the `covers` folder) with
 /// what happens to each, in path order. Deletes of files that are not
 /// there and blobs already in place are left out.
 pub fn plan(tree: &[TreeFile], root: &str, changes: &[Change]) -> Vec<(String, Edit)> {
@@ -199,46 +199,46 @@ mod tests {
     fn uploads_deletes_and_moves_become_edits_under_the_covers_folder() {
         let tree = tree(&[
             ("library.json", "lib"),
-            ("Covers/Movies/old.png", "old"),
-            ("Covers/Movies/a.jpg", "aaa"),
+            ("covers/movies/old.png", "old"),
+            ("covers/movies/a.jpg", "aaa"),
         ]);
         let edits = plan(
             &tree,
-            "Covers",
+            "covers",
             &[
-                upload("Movies/new.1234567.jpg"),
-                delete("Movies/old.png"),
-                moved("Movies/a.jpg", "Shows/a.jpg"),
+                upload("movies/new.1234567.jpg"),
+                delete("movies/old.png"),
+                moved("movies/a.jpg", "shows/a.jpg"),
             ],
         );
         assert_eq!(
             edits,
             [
-                ("Covers/Movies/a.jpg".to_owned(), Edit::Delete),
+                ("covers/movies/a.jpg".to_owned(), Edit::Delete),
                 (
-                    "Covers/Movies/new.1234567.jpg".to_owned(),
-                    Edit::Upload("Movies/new.1234567.jpg".into())
+                    "covers/movies/new.1234567.jpg".to_owned(),
+                    Edit::Upload("movies/new.1234567.jpg".into())
                 ),
-                ("Covers/Movies/old.png".to_owned(), Edit::Delete),
-                ("Covers/Shows/a.jpg".to_owned(), Edit::Blob("aaa".into())),
+                ("covers/movies/old.png".to_owned(), Edit::Delete),
+                ("covers/shows/a.jpg".to_owned(), Edit::Blob("aaa".into())),
             ]
         );
         // Beside a library file in a folder.
-        let edits = plan(&[], "data/Covers", &[upload("Books/b.jpg")]);
-        assert_eq!(edits[0].0, "data/Covers/Books/b.jpg");
+        let edits = plan(&[], "data/covers", &[upload("books/b.jpg")]);
+        assert_eq!(edits[0].0, "data/covers/books/b.jpg");
     }
 
     #[test]
     fn what_is_done_already_is_left_out() {
         // The same changes sent again after they landed: nothing left
         // but the upload, which the bytes then tell is there.
-        let tree = tree(&[("Covers/Shows/a.jpg", "aaa")]);
+        let tree = tree(&[("covers/shows/a.jpg", "aaa")]);
         let edits = plan(
             &tree,
-            "Covers",
+            "covers",
             &[
-                delete("Movies/old.png"),
-                moved("Movies/a.jpg", "Shows/a.jpg"),
+                delete("movies/old.png"),
+                moved("movies/a.jpg", "shows/a.jpg"),
             ],
         );
         assert!(edits.is_empty(), "{edits:?}");
@@ -249,31 +249,31 @@ mod tests {
         // Uploaded, then replaced by a fitted copy before the push.
         let edits = plan(
             &[],
-            "Covers",
+            "covers",
             &[
-                upload("Movies/a.1111111.jpg"),
-                delete("Movies/a.1111111.jpg"),
-                upload("Movies/a.2222222.jpg"),
+                upload("movies/a.1111111.jpg"),
+                delete("movies/a.1111111.jpg"),
+                upload("movies/a.2222222.jpg"),
             ],
         );
         assert_eq!(
             edits,
             [(
-                "Covers/Movies/a.2222222.jpg".to_owned(),
-                Edit::Upload("Movies/a.2222222.jpg".into())
+                "covers/movies/a.2222222.jpg".to_owned(),
+                Edit::Upload("movies/a.2222222.jpg".into())
             )]
         );
         // An upload moved before it was pushed goes up at its new path.
         let edits = plan(
             &[],
-            "Covers",
-            &[upload("Movies/a.jpg"), moved("Movies/a.jpg", "Shows/a.jpg")],
+            "covers",
+            &[upload("movies/a.jpg"), moved("movies/a.jpg", "shows/a.jpg")],
         );
         assert_eq!(
             edits,
             [(
-                "Covers/Shows/a.jpg".to_owned(),
-                Edit::Upload("Shows/a.jpg".into())
+                "covers/shows/a.jpg".to_owned(),
+                Edit::Upload("shows/a.jpg".into())
             )]
         );
     }

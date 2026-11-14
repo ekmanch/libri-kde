@@ -994,7 +994,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             ),
             setting(
                 "Your covers",
-                "Covers you uploaded. They live in Covers/<Type>/, next to library.json.".into(),
+                "Covers you uploaded. They live in covers/<type>/, next to library.json.".into(),
                 super::your_covers::group(app, tokens),
                 tokens,
             ),

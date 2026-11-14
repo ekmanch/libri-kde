@@ -355,13 +355,13 @@ mod tests {
         });
         queue.add_file(
             Change::Upload {
-                path: "Movies/a.1234567.jpg".into(),
+                path: "movies/a.1234567.jpg".into(),
             },
             None,
         );
         queue.add_file(
             Change::Delete {
-                path: "Movies/old.png".into(),
+                path: "movies/old.png".into(),
             },
             Some("Delete 1 unused cover".into()),
         );

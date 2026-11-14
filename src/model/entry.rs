@@ -221,7 +221,7 @@ pub struct Entry {
     /// The cover the entry shows when it is not its match's own, left out
     /// while it is: the lookup id of another match (an edition, an
     /// ebook), or one of the owner's files in the library repo,
-    /// "repo:Movies/the-mummy-1999.a3f9c2e.jpg" (the path under `Covers/`
+    /// "repo:movies/the-mummy-1999.a3f9c2e.jpg" (the path under `covers/`
     /// beside the library file; `covers`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover_from: Option<String>,

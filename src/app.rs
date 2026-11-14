@@ -197,7 +197,7 @@ pub struct App {
     /// fetched for the screens, with the cache under `~/.cache/libri/`.
     pub artwork: Artwork,
     /// The owner's own covers in the library repo: the files GitHub
-    /// lists under `Covers/`, and the copies on this computer.
+    /// lists under `covers/`, and the copies on this computer.
     pub covers: Covers,
     /// Discover: what the daily check found for the Coming soon page, and
     /// the items marked Not interested.
@@ -278,7 +278,7 @@ pub enum Message {
 
 #[derive(Debug, Clone)]
 pub enum CoversMessage {
-    /// The files under `Covers/`, for the engine of that generation.
+    /// The files under `covers/`, for the engine of that generation.
     Listed(Result<Vec<covers::File>, String>, u64),
     /// A cover file came from GitHub: its blob sha.
     Fetched {
@@ -963,13 +963,13 @@ impl App {
 
     // The owner's own covers (`covers`): files in the library repo.
 
-    /// `Covers/` beside the library on this computer; nowhere in a mock
+    /// `covers/` beside the library on this computer; nowhere in a mock
     /// run.
     fn covers_dir(&self) -> Option<std::path::PathBuf> {
         self.data_dir().map(|dir| dir.join(covers::FOLDER))
     }
 
-    /// Asks GitHub for the files under `Covers/`, one tree call, unless a
+    /// Asks GitHub for the files under `covers/`, one tree call, unless a
     /// listing is on its way. With the library kept on this computer the
     /// folder here is read instead.
     pub fn list_covers(&mut self) -> Task<Message> {
@@ -1090,7 +1090,7 @@ impl App {
         Task::batch(tasks.collect::<Vec<_>>())
     }
 
-    /// Stores an upload under `Covers/` at `path` and queues it for the
+    /// Stores an upload under `covers/` at `path` and queues it for the
     /// next commit; the screens show it at once.
     pub fn add_cover_file(&mut self, path: &str, bytes: &[u8]) -> Option<covers::File> {
         let file = match self.covers.store(path, bytes) {

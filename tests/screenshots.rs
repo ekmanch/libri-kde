@@ -71,7 +71,7 @@ const DIRT: &str = "music/dirt-alice-in-chains";
 const FELLOWSHIP: &str = "movies/the-lord-of-the-rings-the-fellowship-of-the-ring-2001";
 
 const DRACULA: &str = "books/dracula-1897";
-const STEELBOOK: &str = "Movies/million-dollar-baby-2004.steelbook.jpg";
+const STEELBOOK: &str = "movies/million-dollar-baby-2004.steelbook.jpg";
 
 /// A picture for the cover captures, as PNG: a diagonal blend of two
 /// colors with a lighter band across it, so a crop and a blur show.
@@ -106,37 +106,37 @@ fn picture(width: u32, height: u32, from: [u8; 3], to: [u8; 3]) -> Vec<u8> {
 fn own_covers(app: &mut App) {
     let dir = std::env::temp_dir().join(format!("libri-shots-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    app.covers = libri::covers::Covers::at(Some(dir.join("Covers")), None);
+    app.covers = libri::covers::Covers::at(Some(dir.join("covers")), None);
     // The path, the size, and the two colors of the blend.
     type Demo = (&'static str, (u32, u32), [u8; 3], [u8; 3]);
     let files: [Demo; 6] = [
         (STEELBOOK, (600, 900), [150, 40, 30], [30, 20, 40]),
         (
-            "Books/dracula-1897.first-edition.jpg",
+            "books/dracula-1897.first-edition.jpg",
             (600, 900),
             [90, 20, 20],
             [20, 10, 10],
         ),
         (
-            "Movies/old-poster.png",
+            "movies/old-poster.png",
             (600, 900),
             [40, 90, 130],
             [20, 30, 60],
         ),
         (
-            "Movies/bluray-front.jpg",
+            "movies/bluray-front.jpg",
             (600, 760),
             [50, 110, 80],
             [20, 40, 30],
         ),
         (
-            "Movies/scan-2.jpg",
+            "movies/scan-2.jpg",
             (600, 900),
             [120, 100, 60],
             [50, 40, 20],
         ),
         (
-            "Movies/untitled.png",
+            "movies/untitled.png",
             (500, 500),
             [90, 70, 120],
             [30, 20, 50],
@@ -856,7 +856,7 @@ fn capture_every_screen() {
                     [20, 40, 30],
                 ))
                 .unwrap();
-                let path = "Music/green-river-creedence-clearwater-revival.vinyl.jpg";
+                let path = "music/green-river-creedence-clearwater-revival.vinyl.jpg";
                 app.add_cover_file(path, &cover.bytes);
                 show_own(
                     app,
@@ -873,7 +873,7 @@ fn capture_every_screen() {
             ("cover-pick-online", |app| {
                 show_type(app, MediaType::Books);
                 own_covers(app);
-                show_own(app, DRACULA, "Books/dracula-1897.first-edition.jpg", false);
+                show_own(app, DRACULA, "books/dracula-1897.first-edition.jpg", false);
                 select(app, DRACULA);
                 let _ = app.update(Message::Entry(entry::Message::ViewCover(DRACULA.into())));
                 let _ = app.update(Message::Entry(entry::Message::ChangeCover));
@@ -1679,7 +1679,7 @@ fn capture_every_screen() {
             ("settings-covers", |app| {
                 own_covers(app);
                 show_own(app, BABY, STEELBOOK, true);
-                show_own(app, DRACULA, "Books/dracula-1897.first-edition.jpg", false);
+                show_own(app, DRACULA, "books/dracula-1897.first-edition.jpg", false);
             }),
         ),
         (
@@ -1687,7 +1687,7 @@ fn capture_every_screen() {
             ("settings-covers-found", |app| {
                 own_covers(app);
                 show_own(app, BABY, STEELBOOK, false);
-                show_own(app, DRACULA, "Books/dracula-1897.first-edition.jpg", false);
+                show_own(app, DRACULA, "books/dracula-1897.first-edition.jpg", false);
                 let _ = app.update(Message::Settings(
                     libri::screens::settings::Message::Covers(
                         libri::screens::your_covers::Message::Check,

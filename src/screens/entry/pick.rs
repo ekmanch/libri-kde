@@ -231,7 +231,7 @@ impl Subject {
         ui::cover::is_square(self.media)
     }
 
-    /// The path under `Covers/` the subject shows, when it shows one of
+    /// The path under `covers/` the subject shows, when it shows one of
     /// the owner's files.
     fn repo_path(&self) -> Option<&str> {
         self.current.as_deref().and_then(covers::repo_path)
@@ -630,7 +630,7 @@ fn make(bytes: Vec<u8>) -> Result<Upload, String> {
 }
 
 /// Stores an upload for the open picker's subject under its name and
-/// gives the path under `Covers/`.
+/// gives the path under `covers/`.
 fn store(app: &mut App, upload: &Upload) -> Option<String> {
     let subject = subject(app)?;
     let name = covers::upload_name(subject.slug(), &upload.prepared.sha);
@@ -1088,7 +1088,7 @@ fn picker<'a>(
         let toggle = button(
             row![
                 ui::icon(chevron, 14.0, tokens.sub),
-                text(format!("Other files in {}", covers::folder(subject.media))).size(13.5),
+                text(format!("Other files in {}", subject.media.label())).size(13.5),
                 ui::mono(others.len().to_string(), 11.5, tokens.sub),
                 iced::widget::space::horizontal(),
                 text("Files whose name doesn't match a title")
@@ -1556,7 +1556,7 @@ mod tests {
     use crate::storage::TempDir;
 
     const BABY: &str = "movies/million-dollar-baby-2004";
-    const STEELBOOK: &str = "Movies/million-dollar-baby-2004.steelbook.jpg";
+    const STEELBOOK: &str = "movies/million-dollar-baby-2004.steelbook.jpg";
     const SONG: &str = "music/bad-moon-rising-creedence-clearwater-revival";
 
     fn app() -> App {
@@ -1624,12 +1624,12 @@ mod tests {
         );
         assert_eq!(
             entry(&app, BABY).cover_from.as_deref(),
-            Some("repo:Movies/million-dollar-baby-2004.steelbook.jpg")
+            Some("repo:movies/million-dollar-baby-2004.steelbook.jpg")
         );
         // The image is the file itself: no lookup stands between.
         assert_eq!(
             app.artwork.cover_url(entry(&app, BABY)),
-            Some("repo:Movies/million-dollar-baby-2004.steelbook.jpg")
+            Some("repo:movies/million-dollar-baby-2004.steelbook.jpg")
         );
         // The folder's other files are the ones named after no title.
         let others = app.covers.others(MediaType::Movies, app.repo.library());
@@ -1646,7 +1646,7 @@ mod tests {
         let upload = make(png(400, 600)).unwrap();
         let sha = upload.prepared.sha.clone();
         pick_says(&mut app, Message::Prepared(Ok(Some(upload))));
-        let path = format!("Movies/million-dollar-baby-2004.{}.jpg", &sha[..7]);
+        let path = format!("movies/million-dollar-baby-2004.{}.jpg", &sha[..7]);
         assert_eq!(entry(&app, BABY).cover_from, Some(format!("repo:{path}")));
         assert!(app.covers.get(&path).is_some(), "listed at once");
         assert_eq!(app.covers.candidates(entry(&app, BABY)).len(), 2);
@@ -1672,7 +1672,7 @@ mod tests {
     fn a_picture_of_another_shape_is_fitted_and_takes_the_uploads_place() {
         let dir = TempDir::new("pick");
         let mut app = app();
-        app.covers = Covers::at(Some(dir.path("Covers")), None);
+        app.covers = Covers::at(Some(dir.path("covers")), None);
         open_viewer(&mut app, BABY);
         pick_says(
             &mut app,
@@ -1730,11 +1730,11 @@ mod tests {
         assert!(app.covers.ready(&fitted).is_some());
         // The upload it replaces is gone, here and from the list.
         assert!(app.covers.get(&wide).is_none());
-        assert!(!dir.path("Covers").join(&wide).exists());
+        assert!(!dir.path("covers").join(&wide).exists());
     }
 
     const DRACULA: &str = "books/dracula-1897";
-    const DRACULA_OWN: &str = "Books/dracula-1897.first-edition.jpg";
+    const DRACULA_OWN: &str = "books/dracula-1897.first-edition.jpg";
 
     /// The demo's files and one for Dracula, which the fake's lookup has
     /// a cover for.
@@ -1838,7 +1838,7 @@ mod tests {
             Message::Prepared(Ok(Some(make(png(500, 500)).unwrap()))),
         );
         let shown = entry(&app, &album.id).cover_from.clone().unwrap();
-        assert!(shown.starts_with("repo:Music/green-river-creedence-clearwater-revival."));
+        assert!(shown.starts_with("repo:music/green-river-creedence-clearwater-revival."));
         assert!(entry(&app, SONG).cover_from.is_none());
         // And the song shows it, once a screen has shown the song.
         let mut wants = Wants::default();
@@ -1875,12 +1875,12 @@ mod tests {
         assert_eq!(saved.media, MediaType::Shows);
         assert_eq!(
             saved.cover_from.as_deref(),
-            Some("repo:Shows/million-dollar-baby-2004.steelbook.jpg")
+            Some("repo:shows/million-dollar-baby-2004.steelbook.jpg")
         );
         assert!(app.covers.get(STEELBOOK).is_none());
         assert!(
             app.covers
-                .get("Shows/million-dollar-baby-2004.steelbook.jpg")
+                .get("shows/million-dollar-baby-2004.steelbook.jpg")
                 .is_some()
         );
         // The id keeps its first type; the files are found all the same.
