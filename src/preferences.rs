@@ -3,7 +3,7 @@
 //! phase 2). What is kept: Settings' choices (theme, background style,
 //! accent, timeline default, seasonal touches, default platform), the
 //! sidebar's tag mode, pins and type checkboxes, the view and the details
-//! panel's pin per type, the plan page's pin, each plan's look and the
+//! panel's pin per type, the sort of each of Music's tabs, the plan page's pin, each plan's look and the
 //! changed shortcuts. The file is written whenever one of them changes.
 //!
 //! The file is plain JSON with readable words, so a hand edit or an
@@ -16,8 +16,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::app::App;
+use crate::browse::Sort;
 use crate::model::MediaType;
-use crate::screens::library::{SidebarTags, View, ViewKey};
+use crate::screens::library::{MusicSorts, MusicTab, SidebarTags, View, ViewKey};
 use crate::screens::plans::Style;
 use crate::settings::{Settings, ThemeChoice};
 use crate::storage;
@@ -48,6 +49,10 @@ pub struct Preferences {
     /// Whether the details panel is pinned, per list as `views`; a list
     /// not in it is pinned.
     pub panels: BTreeMap<String, bool>,
+    /// The sort of each of Music's tabs ("artists", "albums", "songs"):
+    /// "newest", "title", "artist", "year_newest", "year_oldest" or
+    /// "rating"; a tab not in it is on Newest added.
+    pub music_sorts: BTreeMap<String, String>,
     /// Whether the plan page's details panel is pinned: one choice for
     /// every plan and both of its tabs.
     pub plan_panel: bool,
@@ -80,6 +85,7 @@ impl Default for Preferences {
             type_boxes: false,
             views: BTreeMap::new(),
             panels: BTreeMap::new(),
+            music_sorts: BTreeMap::new(),
             plan_panel: true,
             plans: BTreeMap::new(),
             keys: BTreeMap::new(),
@@ -113,6 +119,12 @@ impl Preferences {
                 .panels
                 .iter()
                 .map(|(key, pinned)| (view_key(*key).to_owned(), *pinned))
+                .collect(),
+            music_sorts: MusicTab::ALL
+                .into_iter()
+                .map(|tab| (tab, app.library.music_sorts.get(tab)))
+                .filter(|(_, sort)| *sort != Sort::default())
+                .map(|(tab, sort)| (tab_key(tab).to_owned(), sort.key().to_owned()))
                 .collect(),
             keys: app.keymap.to_prefs(),
             plan_panel: !app.plans.unpinned,
@@ -162,6 +174,13 @@ impl Preferences {
             .iter()
             .filter_map(|(key, pinned)| Some((view_key_from(key)?, *pinned)))
             .collect();
+        app.library.music_sorts = MusicSorts::default();
+        for tab in MusicTab::ALL {
+            let sort = self.music_sorts.get(tab_key(tab));
+            if let Some(sort) = sort.and_then(|key| Sort::from_key(key)) {
+                app.library.music_sorts.set(tab, sort);
+            }
+        }
         app.keymap = crate::keymap::Keymap::from_prefs(&self.keys);
         app.plans.unpinned = !self.plan_panel;
         app.plans.styles = self
@@ -247,6 +266,14 @@ fn view_key_from(key: &str) -> Option<ViewKey> {
             .into_iter()
             .find(|media| media.key() == key)
             .map(ViewKey::Type),
+    }
+}
+
+fn tab_key(tab: MusicTab) -> &'static str {
+    match tab {
+        MusicTab::Artists => "artists",
+        MusicTab::Albums => "albums",
+        MusicTab::Songs => "songs",
     }
 }
 
@@ -372,6 +399,11 @@ mod tests {
         app.library
             .panels
             .insert(ViewKey::Type(MediaType::Movies), false);
+        app.library.music_sorts = MusicSorts {
+            artists: Sort::TitleAz,
+            albums: Sort::NewestAdded,
+            songs: Sort::ArtistAz,
+        };
         app.keymap
             .bind(
                 crate::keymap::Action::Panel,
@@ -400,6 +432,9 @@ mod tests {
         assert_eq!(again.library.pins, app.library.pins);
         assert_eq!(again.library.views, app.library.views);
         assert_eq!(again.library.panels, app.library.panels);
+        assert_eq!(again.library.music_sorts, app.library.music_sorts);
+        assert!(text.contains("\"songs\": \"artist\""));
+        assert!(!text.contains("\"albums\""), "the default is left out");
         assert_eq!(again.keymap, app.keymap);
         assert!(text.contains("\"panel\": \"Ctrl+P\""));
         assert_eq!(again.library.sidebar_tags, SidebarTags::MostUsed);

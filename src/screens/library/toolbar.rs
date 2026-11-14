@@ -6,7 +6,7 @@ use iced::{Background, Border, Center, Element, Fill, Padding};
 
 use super::{Listing, Message, MusicTab, Popup, SEARCH_ID, TOP_TAGS, View};
 use crate::app::{App, Message as AppMessage};
-use crate::browse::{self, Decade, Sort};
+use crate::browse::{self, Decade};
 use crate::model::{Entry, MediaType};
 use crate::screens::shell;
 use crate::theme::{Tokens, font};
@@ -64,9 +64,12 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         .align(Align::End)
         .on_dismiss(msg(Message::ClosePopup));
 
+    let current_sort = state.current_sort();
     let sort_label = match density {
-        Density::Full => row![text("Sort").color(tokens.sub), text(state.sort.short())].spacing(6),
-        Density::Compact => row![text(state.sort.short())],
+        Density::Full => {
+            row![text("Sort").color(tokens.sub), text(current_sort.short())].spacing(6)
+        }
+        Density::Compact => row![text(current_sort.short())],
         Density::Tight => row![text("Sort")],
     };
     let sort_button = ui::menu_button(
@@ -78,8 +81,10 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         msg(Message::Toggle(Popup::Sort)),
     );
     let sort_menu = (state.popup == Some(Popup::Sort)).then(|| {
-        let items =
-            Sort::ALL.map(|sort| (sort.label(), sort == state.sort, msg(Message::Sort(sort))));
+        let items = state
+            .sort_choices()
+            .iter()
+            .map(|&sort| (sort.label(), sort == current_sort, msg(Message::Sort(sort))));
         ui::radio_menu("Sort by", items, &tokens)
     });
     let sort = Popover::new(sort_button, sort_menu)

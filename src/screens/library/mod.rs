@@ -85,6 +85,35 @@ impl MusicTab {
     }
 }
 
+/// The sort of each of Music's tabs: every tab keeps its own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MusicSorts {
+    pub artists: Sort,
+    pub albums: Sort,
+    pub songs: Sort,
+}
+
+impl MusicSorts {
+    pub fn get(self, tab: MusicTab) -> Sort {
+        match tab {
+            MusicTab::Artists => self.artists,
+            MusicTab::Albums => self.albums,
+            MusicTab::Songs => self.songs,
+        }
+    }
+
+    /// Sets a tab's sort. The Artists tab has no order by artist of its
+    /// own (that is its order by name), so there it is left as it was.
+    pub fn set(&mut self, tab: MusicTab, sort: Sort) {
+        match tab {
+            MusicTab::Artists if sort == Sort::ArtistAz => {}
+            MusicTab::Artists => self.artists = sort,
+            MusicTab::Albums => self.albums = sort,
+            MusicTab::Songs => self.songs = sort,
+        }
+    }
+}
+
 /// Whether Music's Artists | Albums | Songs tabs are on screen: the Music
 /// list itself, not an artist's page, a tag's page or Coming soon.
 pub fn music_tabs_shown(state: &State) -> bool {
@@ -188,6 +217,7 @@ pub struct Place {
     pub status: Option<EntryStatus>,
     pub filter: Filter,
     pub sort: Sort,
+    pub music_sorts: MusicSorts,
     pub query: String,
     pub music_tab: MusicTab,
     pub artist: Option<String>,
@@ -202,7 +232,9 @@ pub struct State {
     pub types: BTreeSet<MediaType>,
     pub status: Option<EntryStatus>,
     pub filter: Filter,
+    /// The sort of every list but Music's, which has one per tab.
     pub sort: Sort,
+    pub music_sorts: MusicSorts,
     pub query: String,
     pub views: HashMap<ViewKey, View>,
     /// The details panel unpinned (`false`), per view key like the view;
@@ -506,7 +538,7 @@ pub fn wanted(app: &App, wants: &mut Wants) {
         && state.music_tab == MusicTab::Artists
     {
         let listing = state.listing(library, app.today);
-        let artists = crate::music::artists(&listing.shown, state.sort);
+        let artists = crate::music::artists(&listing.shown, state.current_sort());
         wants.artists.extend(
             covers_on_screen(artists.len(), state.scroll)
                 .into_iter()
@@ -545,6 +577,7 @@ impl State {
             status: self.status,
             filter: self.filter.clone(),
             sort: self.sort,
+            music_sorts: self.music_sorts,
             query: self.query.clone(),
             music_tab: self.music_tab,
             artist: self.artist.clone(),
@@ -563,6 +596,7 @@ impl State {
         self.status = place.status;
         self.filter = place.filter;
         self.sort = place.sort;
+        self.music_sorts = place.music_sorts;
         self.query = place.query;
         self.music_tab = place.music_tab;
         self.artist = place.artist;
@@ -788,7 +822,11 @@ impl State {
             }
             Message::ClosePopup => self.popup = None,
             Message::Sort(sort) => {
-                self.sort = sort;
+                if self.single() == Some(MediaType::Music) {
+                    self.music_sorts.set(self.music_tab, sort);
+                } else if sort != Sort::ArtistAz {
+                    self.sort = sort;
+                }
                 self.popup = None;
             }
             Message::ToggleDecade(decade) => self.filter.toggle_decade(decade),
@@ -1065,6 +1103,45 @@ impl State {
     }
 
     /// The one type shown, when exactly one is.
+    /// The sort of the list shown: Music's is its tab's (an artist's
+    /// page follows the tab it was opened from), every other list shares
+    /// one.
+    pub fn current_sort(&self) -> Sort {
+        if self.single() == Some(MediaType::Music) {
+            self.music_sorts.get(self.music_tab)
+        } else {
+            self.sort
+        }
+    }
+
+    /// The Sort menu's choices for the list shown: Music's Albums and
+    /// Songs can go by artist as well.
+    pub fn sort_choices(&self) -> &'static [Sort] {
+        if self.single() == Some(MediaType::Music) && self.music_tab != MusicTab::Artists {
+            &Sort::WITH_ARTIST
+        } else {
+            &Sort::ALL
+        }
+    }
+
+    /// `listing`'s entries in the sort of a music tab: the tabs beside
+    /// the picked one slide past in their own order.
+    pub fn shown_in_tab<'a>(&self, listing: &Listing<'a>, tab: MusicTab) -> Vec<&'a Entry> {
+        let sort = self.music_sorts.get(tab);
+        if sort == self.current_sort() {
+            return listing.shown.clone();
+        }
+        // From the library's order, which Newest added breaks its ties by.
+        let mut shown: Vec<&Entry> = listing
+            .base
+            .iter()
+            .copied()
+            .filter(|e| self.status.is_none_or(|s| e.status == s))
+            .collect();
+        sort.apply(&mut shown);
+        shown
+    }
+
     pub fn single(&self) -> Option<MediaType> {
         match self.types.len() {
             1 => self.types.first().copied(),
@@ -1253,7 +1330,7 @@ impl State {
         if self.single() == Some(MediaType::Music) {
             return match (self.artist.as_deref(), self.music_tab) {
                 (Some(name), _) => {
-                    let artists = crate::music::artists(&listing.shown, self.sort);
+                    let artists = crate::music::artists(&listing.shown, self.current_sort());
                     match artists.iter().find(|a| a.name.eq_ignore_ascii_case(name)) {
                         Some(artist) => artist
                             .albums
@@ -1320,7 +1397,7 @@ impl State {
             .copied()
             .filter(|e| self.status.is_none_or(|s| e.status == s))
             .collect();
-        self.sort.apply(&mut shown);
+        self.current_sort().apply(&mut shown);
         let in_type = library.entries.iter().filter(of_type).count();
         let rows = if self.groups_series(shown.len(), self.view_mode()) {
             browse::group_series(&shown)
@@ -1614,6 +1691,56 @@ mod tests {
         state.update(Message::ToggleType(MediaType::Movies));
         state.update(Message::ToggleType(MediaType::Shows));
         assert_eq!(state.view_mode(), View::List);
+    }
+
+    #[test]
+    fn each_music_tab_keeps_its_own_sort() {
+        let mut app = App::new(crate::screens::Screen::Library);
+        let state = &mut app.library;
+        state.update(Message::ShowType(Some(MediaType::Movies)));
+        state.update(Message::Sort(Sort::YearOldest));
+        state.update(Message::ShowType(Some(MediaType::Music)));
+        assert_eq!(state.current_sort(), Sort::NewestAdded, "not the movies'");
+        assert_eq!(state.sort_choices(), &Sort::ALL[..], "artists: no Artist");
+        state.update(Message::Sort(Sort::TitleAz));
+        state.update(Message::MusicTab(MusicTab::Albums));
+        assert_eq!(state.current_sort(), Sort::NewestAdded);
+        assert_eq!(state.sort_choices(), &Sort::WITH_ARTIST[..]);
+        state.update(Message::Sort(Sort::ArtistAz));
+        state.update(Message::MusicTab(MusicTab::Songs));
+        assert_eq!(state.sort_choices(), &Sort::WITH_ARTIST[..]);
+        state.update(Message::Sort(Sort::RatingHighest));
+        assert_eq!(
+            state.music_sorts,
+            MusicSorts {
+                artists: Sort::TitleAz,
+                albums: Sort::ArtistAz,
+                songs: Sort::RatingHighest,
+            }
+        );
+        state.update(Message::MusicTab(MusicTab::Artists));
+        assert_eq!(state.current_sort(), Sort::TitleAz);
+        state.update(Message::ShowType(Some(MediaType::Movies)));
+        assert_eq!(state.current_sort(), Sort::YearOldest, "untouched by Music");
+        assert_eq!(state.sort_choices(), &Sort::ALL[..]);
+
+        // The albums by artist; and a tab beside the picked one in its
+        // own order, as it slides past.
+        state.update(Message::ShowType(Some(MediaType::Music)));
+        state.update(Message::MusicTab(MusicTab::Albums));
+        let library = app.repo.library();
+        let listing = app.library.listing(library, app.today);
+        let artists: Vec<_> = listing
+            .shown
+            .iter()
+            .map(|e| crate::music::artist_key(crate::music::artist_of(e)))
+            .collect();
+        assert!(artists.len() >= 2 && artists.windows(2).all(|w| w[0] <= w[1]));
+        let beside = app.library.shown_in_tab(&listing, MusicTab::Songs);
+        let mut by_rating = app.library.clone();
+        by_rating.update(Message::MusicTab(MusicTab::Songs));
+        assert_eq!(beside, by_rating.listing(library, app.today).shown);
+        assert_ne!(beside, listing.shown);
     }
 
     #[test]

@@ -308,12 +308,16 @@ pub enum Sort {
     #[default]
     NewestAdded,
     TitleAz,
+    /// By the artist's name, then the title: Music's Albums and Songs
+    /// only.
+    ArtistAz,
     YearNewest,
     YearOldest,
     RatingHighest,
 }
 
 impl Sort {
+    /// The choices every list has.
     pub const ALL: [Sort; 5] = [
         Sort::NewestAdded,
         Sort::TitleAz,
@@ -322,10 +326,37 @@ impl Sort {
         Sort::RatingHighest,
     ];
 
+    /// The choices of Music's Albums and Songs: by artist too.
+    pub const WITH_ARTIST: [Sort; 6] = [
+        Sort::NewestAdded,
+        Sort::TitleAz,
+        Sort::ArtistAz,
+        Sort::YearNewest,
+        Sort::YearOldest,
+        Sort::RatingHighest,
+    ];
+
+    /// The word for the sort in `preferences.json`.
+    pub fn key(self) -> &'static str {
+        match self {
+            Sort::NewestAdded => "newest",
+            Sort::TitleAz => "title",
+            Sort::ArtistAz => "artist",
+            Sort::YearNewest => "year_newest",
+            Sort::YearOldest => "year_oldest",
+            Sort::RatingHighest => "rating",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Sort> {
+        Sort::WITH_ARTIST.into_iter().find(|sort| sort.key() == key)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Sort::NewestAdded => "Newest added",
             Sort::TitleAz => "Title, A to Z",
+            Sort::ArtistAz => "Artist, A to Z",
             Sort::YearNewest => "Year, newest first",
             Sort::YearOldest => "Year, oldest first",
             Sort::RatingHighest => "Rating, highest first",
@@ -337,6 +368,7 @@ impl Sort {
         match self {
             Sort::NewestAdded => "Newest added",
             Sort::TitleAz => "Title A–Z",
+            Sort::ArtistAz => "Artist A–Z",
             Sort::YearNewest => "Year ↓",
             Sort::YearOldest => "Year ↑",
             Sort::RatingHighest => "Rating ↓",
@@ -367,6 +399,12 @@ impl Sort {
                     .then(position[b.id.as_str()].cmp(&position[a.id.as_str()]))
             }),
             Sort::TitleAz => entries.sort_by(by_title),
+            // The artists in the Artists tab's order by name, each one's
+            // titles A to Z.
+            Sort::ArtistAz => entries.sort_by(|a, b| {
+                let artist = |e: &Entry| crate::music::artist_key(crate::music::artist_of(e));
+                artist(a).cmp(&artist(b)).then(by_title(a, b))
+            }),
             Sort::YearNewest => {
                 entries.sort_by(|a, b| last(a.year(), b.year(), true).then(by_title(a, b)))
             }
@@ -595,6 +633,11 @@ pub fn section_key(sort: Sort, entry: &Entry, today: Date) -> (String, String) {
     match sort {
         Sort::TitleAz => {
             let initial = title_initial(&entry.title).to_string();
+            (initial.clone(), initial)
+        }
+        Sort::ArtistAz => {
+            let (_, key) = crate::music::artist_key(crate::music::artist_of(entry));
+            let initial = title_initial(&key).to_string();
             (initial.clone(), initial)
         }
         Sort::YearNewest | Sort::YearOldest => match entry.year() {
@@ -1075,6 +1118,38 @@ mod tests {
         assert_eq!(title_initial("\"Weird\" tales"), 'W');
         assert_eq!(title_initial("éclair"), 'É');
         assert_eq!(title_initial(""), '#');
+    }
+
+    #[test]
+    fn artist_sort_goes_by_the_artist_and_then_the_title() {
+        let library = library();
+        let mut entries: Vec<&Entry> = library
+            .entries
+            .iter()
+            .filter(|e| e.media == MediaType::Music)
+            .collect();
+        Sort::ArtistAz.apply(&mut entries);
+        let keys: Vec<_> = entries
+            .iter()
+            .map(|e| {
+                (
+                    crate::music::artist_key(crate::music::artist_of(e)),
+                    e.title.to_lowercase(),
+                )
+            })
+            .collect();
+        assert!(keys.windows(2).all(|w| w[0] <= w[1]), "{keys:?}");
+        // By the artist, not by the title: the two orders differ.
+        let by_artist = titles(&entries);
+        Sort::TitleAz.apply(&mut entries);
+        assert_ne!(by_artist, titles(&entries));
+        // A leading "The" is ignored, as in the Artists tab.
+        let beatles = keys.iter().position(|k| k.0.1 == "beatles");
+        assert!(beatles.is_some(), "The Beatles file under B: {keys:?}");
+        assert!(Sort::ALL.iter().all(|sort| *sort != Sort::ArtistAz));
+        for sort in Sort::WITH_ARTIST {
+            assert_eq!(Sort::from_key(sort.key()), Some(sort));
+        }
     }
 
     #[test]

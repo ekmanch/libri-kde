@@ -924,6 +924,18 @@ fn capture_every_screen() {
                 albums(app, View::List);
             }),
         ),
+        // Each music tab has its own sort; Albums and Songs can go by
+        // artist.
+        (
+            Screen::Library,
+            ("music-albums-by-artist", |app| {
+                albums(app, View::List);
+                let _ = app.update(Message::Library(library::Message::Sort(Sort::ArtistAz)));
+                let _ = app.update(Message::Library(library::Message::Toggle(
+                    library::Popup::Sort,
+                )));
+            }),
+        ),
         (
             Screen::Library,
             ("cover-viewer-album", |app| {

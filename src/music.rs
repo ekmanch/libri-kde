@@ -92,7 +92,7 @@ pub fn artists<'a>(entries: &[&'a Entry], sort: Sort) -> Vec<Artist<'a>> {
             artist.albums.push(entry);
         }
     }
-    if sort == Sort::TitleAz {
+    if matches!(sort, Sort::TitleAz | Sort::ArtistAz) {
         artists.sort_by_key(|a| artist_key(a.name));
     }
     artists

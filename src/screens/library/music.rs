@@ -68,17 +68,20 @@ fn tab_list<'a>(
     let state = &app.library;
     let mut overlays = Vec::new();
     let mut room = rail::LEFT;
+    // Each tab in its own sort, the still copies beside the picked one too.
+    let sort = state.music_sorts.get(tab);
+    let shown = state.shown_in_tab(listing, tab);
     let children: Vec<Element<'a, AppMessage>> = match tab {
         MusicTab::Artists => {
-            let artists = music::artists(&listing.shown, state.sort);
+            let artists = music::artists(&shown, sort);
             if artists.is_empty() {
                 return empty("No artists here", tokens);
             }
             // A long list gets the sort's sections and the section rail;
             // a long grid the rail alone. The rail lists the alphabet in
             // the name order.
-            let alphabet = state.sort == Sort::TitleAz;
-            let sections = |artists| artist_sections(artists, state.sort, app.today);
+            let alphabet = sort == Sort::TitleAz;
+            let sections = |artists| artist_sections(artists, sort, app.today);
             if view == View::Grid {
                 let sections = sections(artists);
                 let names = sections.iter().map(|s| s.1.clone()).collect();
@@ -136,8 +139,7 @@ fn tab_list<'a>(
             }
         }
         MusicTab::Albums => {
-            let albums: Vec<&Entry> = listing
-                .shown
+            let albums: Vec<&Entry> = shown
                 .iter()
                 .copied()
                 .filter(|e| !music::is_song(e))
@@ -148,7 +150,7 @@ fn tab_list<'a>(
             vec![super::entries::block_entries(app, &albums, view, tokens)]
         }
         MusicTab::Songs => {
-            let songs = music::songs_matching(&listing.shown, &state.query);
+            let songs = music::songs_matching(&shown, &state.query);
             if songs.is_empty() {
                 return empty("No songs here", tokens);
             }
@@ -318,7 +320,7 @@ fn artist_page<'a>(
     view: View,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
-    let artists = music::artists(&listing.shown, app.library.sort);
+    let artists = music::artists(&listing.shown, app.library.current_sort());
     let Some(artist) = artists
         .into_iter()
         .find(|a| a.name.eq_ignore_ascii_case(name))

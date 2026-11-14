@@ -76,12 +76,12 @@ fn sectioned<'a>(
 ) -> Option<(Element<'a, AppMessage>, f32)> {
     let state = &app.library;
     state.single()?;
-    let sections = browse::row_sections(state.sort, &listing.rows, app.today);
+    let sections = browse::row_sections(state.current_sort(), &listing.rows, app.today);
     if sections.len() < 2 {
         return None;
     }
     let names = sections.iter().map(|s| s.short.clone()).collect();
-    let on_rail = rail::Sections::new(names, state.sort == Sort::TitleAz);
+    let on_rail = rail::Sections::new(names, state.current_sort() == Sort::TitleAz);
     let room = on_rail.room();
     if view == View::Grid {
         let rows = rail::GridRows::new(
