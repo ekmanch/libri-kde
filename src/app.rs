@@ -1311,7 +1311,8 @@ impl App {
             Message::KeyPressed(key, modifiers) => match self.shortcut(&key, modifiers) {
                 Some(message) => {
                     // Shift+arrow over a plan's tabs slides the way the
-                    // arrow points.
+                    // arrow points, where a click on a segment swaps at
+                    // once.
                     let action =
                         Combo::of(&key, modifiers).and_then(|c| self.keymap.action_for(&c));
                     if let (Message::Plans(_), Some(Action::SoonPrev | Action::SoonNext)) =
@@ -1919,8 +1920,8 @@ impl App {
             Message::Library(library::Message::PickSeriesCover(id)) => {
                 self.apply(Operation::SetSeriesCover { id });
             }
-            // The Coming soon page's slices: the list slides between them
-            // and each keeps its own scroll offset.
+            // The Coming soon page's slices: each keeps its own scroll
+            // offset, and on a step the list slides between them.
             Message::Library(
                 library::Message::SoonSlice(_)
                 | library::Message::SoonStep(_)
@@ -2196,12 +2197,13 @@ const DISCOVER_DELAY: Duration = Duration::from_secs(5);
 const DISCOVER_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 impl App {
-    /// A slice switch on the Coming soon page (a segment, Shift+arrows, a
-    /// side-scroll or Shift+wheel, a row of New in Discover): the list slides from the
-    /// slice left to the new one as KWin switches desktops, on its spring
-    /// at Plasma's speed and from wherever a slide under way has it (a
-    /// plain swap at Instant), and the new slice is scrolled back to
-    /// where it was left.
+    /// A slice switch on the Coming soon page: the new slice is scrolled
+    /// back to where it was left. By Shift+arrows, a side-scroll or
+    /// Shift+wheel (`SoonStep`) the list slides from the slice left to
+    /// the new one as KWin switches desktops, on its spring at Plasma's
+    /// speed and from wherever a slide under way has it (a plain swap at
+    /// Instant); a click (a segment, a row of New in Discover) swaps at
+    /// once, ending any slide on its way.
     fn switch_slice(&mut self, message: Message) -> Task<Message> {
         let Message::Library(message) = message else {
             return Task::none();
@@ -2209,13 +2211,17 @@ impl App {
         if !self.library.soon {
             return Task::none();
         }
+        let stepped = matches!(message, library::Message::SoonStep(_));
+        if !stepped {
+            self.library.slide = None;
+        }
         let from = self.library.slice;
         self.library.update(message);
         let to = self.library.slice;
         if from == to {
             return Task::none();
         }
-        if let Some(spring) = animation::Spring::desktop_switch(self.speed) {
+        if stepped && let Some(spring) = animation::Spring::desktop_switch(self.speed) {
             let width = if self.library.list_width > 0.0 {
                 self.library.list_width
             } else {

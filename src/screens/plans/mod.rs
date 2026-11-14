@@ -197,10 +197,10 @@ pub fn other_tab(app: &App) -> Option<Message> {
 }
 
 /// After a message, with the page before it (None from another screen):
-/// a switch between a plan's tabs slides the list to the other one, as
-/// Music's tabs do, toward All to the left and back to the right unless a
-/// gesture said which way (`tab_step`); any new page is scrolled to where
-/// it was left.
+/// a switch between a plan's tabs by a gesture or Shift+arrow slides the
+/// list to the other one, as Music's tabs do, the way the gesture pointed
+/// (`tab_step`), where a click on a segment swaps at once; any new page
+/// is scrolled to where it was left.
 pub fn page_turned(app: &mut App, before: Option<Page>, now: Instant) -> Task<AppMessage> {
     let step = app.plans.tab_step.take();
     if app.screen != super::Screen::Plans {
@@ -214,18 +214,15 @@ pub fn page_turned(app: &mut App, before: Option<Page>, now: Instant) -> Task<Ap
         (Some((was, from)), Some((id, to))) if was == id => Some((from, to)),
         _ => None,
     };
-    app.plans.tab_slide = match (tabs, Spring::desktop_switch(app.speed)) {
-        (Some((from, to)), Some(spring)) => {
-            let step = step.unwrap_or(if to > from { 1 } else { -1 });
-            Some(SliceSlide::step(
-                app.plans.tab_slide.as_ref(),
-                from,
-                step,
-                spring.slowed(library::soon::SLOWER),
-                (list_width(app) + library::soon::GAP) * app.scale,
-                now,
-            ))
-        }
+    app.plans.tab_slide = match (tabs, step, Spring::desktop_switch(app.speed)) {
+        (Some((from, _)), Some(step), Some(spring)) => Some(SliceSlide::step(
+            app.plans.tab_slide.as_ref(),
+            from,
+            step,
+            spring.slowed(library::soon::SLOWER),
+            (list_width(app) + library::soon::GAP) * app.scale,
+            now,
+        )),
         _ => None,
     };
     let offset = scrollable::AbsoluteOffset {
@@ -1496,8 +1493,8 @@ mod tests {
         assert_eq!(app.plans.scroll, 240.0);
         assert_eq!(app.plans.tab_scroll, [80.0, 240.0]);
 
-        // With animations the list slides: a click toward All to the
-        // left and back to the right, a gesture the way it points.
+        // With animations the list slides the way a gesture points; a
+        // click on a segment swaps at once, also in the middle of a slide.
         app.speed = crate::animation::Speed::factor(1.0);
         let at = |app: &mut App, message: Message, ms: u64| {
             let _ = app.update_at(
@@ -1506,15 +1503,15 @@ mod tests {
             );
         };
         at(&mut app, Message::ShowPlan("halloween-2026".into()), 10_000);
-        assert!(!app.plans.tab_slide.as_ref().expect("a slide").forward());
+        assert_eq!(app.plans.tab_slide, None, "a click");
+        wheel(&mut app, -1.0, 0.0, 20_000);
+        assert_eq!(app.plans.page, all());
+        assert!(app.plans.tab_slide.as_ref().expect("a slide").forward());
+        at(&mut app, Message::ShowPlan("halloween-2026".into()), 20_100);
+        assert_eq!(app.plans.tab_slide, None, "a click on the way");
+        wheel(&mut app, -1.0, 0.0, 25_000);
         at(&mut app, Message::Scrolled(80.0), 30_000);
         assert_eq!(app.plans.tab_slide, None, "settled");
-        at(
-            &mut app,
-            Message::ShowCollection("halloween-2026".into()),
-            30_000,
-        );
-        assert!(app.plans.tab_slide.as_ref().unwrap().forward());
         wheel(&mut app, 1.0, 0.0, 60_000);
         assert_eq!(app.plans.page, plan());
         assert!(!app.plans.tab_slide.as_ref().unwrap().forward());

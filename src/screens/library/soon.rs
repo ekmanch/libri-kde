@@ -2176,7 +2176,7 @@ mod tests {
         assert_eq!(app.library.slide, None, "instant in the tests");
         app.speed = Speed::factor(0.5);
         let start = Instant::now();
-        let _ = app.update_at(lib(Message::SoonSlice(Slice::Discover)), start);
+        let _ = app.update_at(lib(Message::SoonStep(1)), start);
         let moving = app.library.slide.clone().expect("a slide");
         assert_eq!(moving.position(start), 0.0, "from Library");
         assert_eq!(moving.anchor, 1.0);
@@ -2189,7 +2189,7 @@ mod tests {
         assert!((0.3..0.7).contains(&halfway), "{halfway}");
         // A switch on the way starts where the list is, at its speed.
         let mid = start + Duration::from_millis(210);
-        let _ = app.update_at(lib(Message::SoonSlice(Slice::All)), mid);
+        let _ = app.update_at(lib(Message::SoonStep(1)), mid);
         let again = app.library.slide.clone().unwrap();
         assert!((again.position(mid) - halfway).abs() < 1e-4);
         assert_eq!(again.anchor, 2.0, "on along the row, not back round");
@@ -2197,19 +2197,27 @@ mod tests {
         let _ = app.update_at(AppMessage::Frame(start), mid + Duration::from_secs(3));
         assert_eq!(app.library.slide, None, "settled on a frame after it");
         // Back is the other way; All to Library wraps forward.
-        let _ = app.update_at(lib(Message::SoonSlice(Slice::Discover)), start);
+        let _ = app.update_at(lib(Message::SoonStep(-1)), start);
+        assert_eq!(app.library.slice, Slice::Discover);
         assert!(!app.library.slide.as_ref().unwrap().forward());
         app.library.slide = None;
-        let _ = app.update_at(lib(Message::SoonSlice(Slice::Library)), start);
+        let _ = app.update_at(lib(Message::SoonStep(-1)), start);
         app.library.slide = None;
-        let _ = app.update_at(lib(Message::SoonSlice(Slice::All)), start);
+        let _ = app.update_at(lib(Message::SoonStep(-1)), start);
+        assert_eq!(app.library.slice, Slice::All);
         assert!(!app.library.slide.as_ref().unwrap().forward());
         app.library.slide = None;
         let _ = app.update_at(lib(Message::SoonStep(1)), start);
         assert_eq!(app.library.slice, Slice::Library);
         assert!(app.library.slide.as_ref().unwrap().forward());
+        // A click on a segment swaps at once, also in the middle of a
+        // slide.
+        let _ = app.update_at(lib(Message::SoonSlice(Slice::All)), start);
+        assert_eq!(app.library.slice, Slice::All);
+        assert_eq!(app.library.slide, None, "a click on the way");
+        let _ = app.update_at(lib(Message::SoonSlice(Slice::Library)), start);
+        assert_eq!(app.library.slide, None, "a click");
         // The same slice again, and type chips, never slide.
-        app.library.slide = None;
         let _ = app.update_at(lib(Message::SoonSlice(Slice::Library)), start);
         let _ = app.update_at(lib(Message::SoonType(MediaType::Games)), start);
         assert_eq!(app.library.slide, None);
