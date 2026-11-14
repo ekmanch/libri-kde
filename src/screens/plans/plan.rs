@@ -729,15 +729,9 @@ fn collection<'a>(
     style: super::Style,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
-    let library = app.repo.library();
-    let all = rules::collection(plan, library);
-    let sections: Vec<Element<'a, AppMessage>> = MediaType::ALL
+    let sections: Vec<Element<'a, AppMessage>> = collection_sections(app, plan)
         .into_iter()
-        .filter_map(|media| {
-            let entries: Vec<&Entry> = all.iter().copied().filter(|e| e.media == media).collect();
-            if entries.is_empty() {
-                return None;
-            }
+        .map(|(media, entries)| {
             let rows = entries.iter().map(|entry| {
                 let in_plan = plan.item_for(&entry.id).is_some();
                 let status = browse::status_label(Some(entry.media), entry.status);
@@ -774,17 +768,55 @@ fn collection<'a>(
                 ]
                 .into()
             });
-            Some(section(
+            section(
                 media,
                 entries.len().to_string(),
                 Column::with_children(rows),
                 style.cards,
                 tokens,
-            ))
+            )
         })
         .collect();
     two_columns(sections)
 }
+
+/// The collection's rows as it lists them: a section for each type that
+/// has any.
+pub(super) fn collection_sections<'a>(
+    app: &'a App,
+    plan: &Plan,
+) -> Vec<(MediaType, Vec<&'a Entry>)> {
+    let all = rules::collection(plan, app.repo.library());
+    MediaType::ALL
+        .into_iter()
+        .map(|media| {
+            let entries: Vec<&Entry> = all.iter().copied().filter(|e| e.media == media).collect();
+            (media, entries)
+        })
+        .filter(|(_, entries)| !entries.is_empty())
+        .collect()
+}
+
+/// The rows of "Add to this plan": the plan's pool, or with a search what
+/// it finds in the whole library, the first forty.
+pub(super) fn pool_entries<'a>(app: &'a App, plan: &Plan) -> Vec<&'a Entry> {
+    let library = app.repo.library();
+    let query = app.plans.pool_query.trim().to_lowercase();
+    let mut entries: Vec<&Entry> = if query.is_empty() {
+        rules::pool(plan, library)
+    } else {
+        library
+            .entries
+            .iter()
+            .filter(|e| plan.item_for(&e.id).is_none() && browse::matches_search(e, &query))
+            .collect()
+    };
+    entries.truncate(POOL_ROWS);
+    entries
+}
+
+/// How many rows "Add to this plan" lists.
+const POOL_ROWS: usize = 40;
 
 /// A 30 px outlined +.
 fn plus<'a>(tokens: &Tokens, on_press: AppMessage) -> Element<'a, AppMessage> {
@@ -811,17 +843,7 @@ fn pool<'a>(
     covers: bool,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
-    let library = app.repo.library();
-    let query = app.plans.pool_query.trim().to_lowercase();
-    let entries: Vec<&Entry> = if query.is_empty() {
-        rules::pool(plan, library)
-    } else {
-        library
-            .entries
-            .iter()
-            .filter(|e| plan.item_for(&e.id).is_none() && browse::matches_search(e, &query))
-            .collect()
-    };
+    let entries = pool_entries(app, plan);
     let help = if plan.tags.is_empty() {
         "This plan has no tag, so here are titles you marked Want.".to_owned()
     } else {
@@ -831,7 +853,7 @@ fn pool<'a>(
             tags.join(" or ")
         )
     };
-    let rows = Column::with_children(entries.into_iter().take(40).map(|entry| {
+    let rows = Column::with_children(entries.into_iter().map(|entry| {
         let mut content = Row::new().spacing(10).align_y(Center);
         if covers {
             content = content.push(cover(app, entry, 28.0));

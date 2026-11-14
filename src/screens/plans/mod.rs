@@ -103,8 +103,8 @@ impl State {
 }
 
 /// What the Plans screen draws from the lookups now: the details' entry,
-/// the five covers on each plan card, and a plan's rows when its view is
-/// with covers.
+/// the five covers on each plan card, and with covers in its view a
+/// plan's rows and "Add to this plan", or every row of its collection.
 pub fn wanted(app: &App, wants: &mut Wants) {
     let library = app.repo.library();
     if let Some(id) = &app.plans.selected {
@@ -127,16 +127,21 @@ pub fn wanted(app: &App, wants: &mut Wants) {
             if !app.plans.style(id, app.tokens().light).covers {
                 return;
             }
-            wants
-                .covers
-                .extend(plan.items.iter().map(|i| i.entry.clone()));
-            if matches!(app.plans.page, Page::Plan(_)) {
+            if matches!(app.plans.page, Page::Collection(_)) {
+                // Everything with the plan's tags, in the plan or not.
                 wants.covers.extend(
-                    rules::pool(plan, library)
+                    plan::collection_sections(app, plan)
                         .iter()
-                        .take(40)
+                        .flat_map(|(_, entries)| entries)
                         .map(|e| e.id.clone()),
                 );
+            } else {
+                wants
+                    .covers
+                    .extend(plan.items.iter().map(|i| i.entry.clone()));
+                wants
+                    .covers
+                    .extend(plan::pool_entries(app, plan).iter().map(|e| e.id.clone()));
             }
         }
     }
@@ -805,6 +810,41 @@ mod tests {
 
     fn send(app: &mut App, message: Message) {
         let _ = update(app, message);
+    }
+
+    #[test]
+    fn the_collection_with_covers_wants_every_row_not_only_the_plan() {
+        let mut app = app();
+        send(&mut app, Message::ShowCollection("halloween-2026".into()));
+        send(&mut app, Message::SetCovers(true));
+        let library = app.repo.library();
+        let plan = library.plan("halloween-2026").unwrap();
+        let all = rules::collection(plan, library);
+        assert!(all.len() > plan.items.len(), "the fixture tags more");
+        let mut wants = Wants::default();
+        wanted(&app, &mut wants);
+        for entry in all {
+            assert!(wants.covers.contains(&entry.id), "{}", entry.id);
+        }
+    }
+
+    #[test]
+    fn a_pool_search_wants_the_covers_it_finds() {
+        let mut app = app();
+        send(&mut app, Message::ShowPlan("halloween-2026".into()));
+        send(&mut app, Message::SetCovers(true));
+        let library = app.repo.library();
+        let plan = library.plan("halloween-2026").unwrap();
+        let outside = library
+            .entries
+            .iter()
+            .find(|e| !e.tags.iter().any(|t| plan.tags.contains(t)))
+            .unwrap();
+        let (id, title) = (outside.id.clone(), outside.title.clone());
+        app.plans.pool_query = title;
+        let mut wants = Wants::default();
+        wanted(&app, &mut wants);
+        assert!(wants.covers.contains(&id));
     }
 
     #[test]
