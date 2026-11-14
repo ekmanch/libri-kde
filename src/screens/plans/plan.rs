@@ -53,17 +53,36 @@ pub fn view<'a>(app: &'a App, plan: &'a Plan) -> Element<'a, AppMessage> {
         .push(header(app, plan, on_collection, &tokens))
         .push(ui::rule(tokens.line.scale_alpha(0.5)));
     let style = app.plans.style(&plan.id, tokens.light);
-    let body: Element<'a, AppMessage> = if on_collection {
-        collection(app, plan, style, &tokens)
-    } else if plan.timeline {
-        timeline(app, plan, style.covers, &tokens)
-    } else {
-        checklist(app, plan, style, &tokens)
+    // The two tabs side by side, the list sliding between them as Music's
+    // does between its tabs: the open tab is the live list, the other
+    // passes as a still copy where it was left.
+    let body = |all: bool| -> Element<'a, AppMessage> {
+        let body = if all {
+            collection(app, plan, style, &tokens)
+        } else if plan.timeline {
+            timeline(app, plan, style.covers, &tokens)
+        } else {
+            checklist(app, plan, style, &tokens)
+        };
+        container(body)
+            .padding(Padding::new(28.0).top(20))
+            .width(Fill)
+            .into()
     };
-    let list = column![
-        ui::scroll(container(body).padding(Padding::new(28.0).top(20))).height(Fill),
-        footer(app)
-    ];
+    let live = ui::scroll(body(on_collection))
+        .id(super::LIST_ID)
+        .on_scroll(|viewport| msg(Message::Scrolled(viewport.absolute_offset().y)))
+        .height(Fill);
+    let lists = library::soon::sliding_in(
+        super::list_width(app),
+        app.scale,
+        app.plans.tab_slide.as_ref(),
+        usize::from(on_collection),
+        2,
+        live.into(),
+        |tab| ui::scrolled(body(tab == 1), app.plans.tab_scroll[tab]).into(),
+    );
+    let list = column![lists, footer(app)];
     // Unpinned, the details slide in as a drawer over the list's right
     // side; the layer is there either way, so the list keeps its place in
     // the tree. Pinned, only the list and the footer narrow for the panel.

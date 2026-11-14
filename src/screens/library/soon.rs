@@ -139,6 +139,38 @@ impl SliceSlide {
         // The step from the slice the list is headed for, so Discover to
         // All goes on forward even while the list is still nearer Library.
         let anchor = nearest(to, n, heading);
+        SliceSlide::to_anchor(start, velocity, anchor, spring, slot, now)
+    }
+
+    /// A slide one place on (`step` 1) or back (-1) from `from` at rest,
+    /// or from where `moving` is headed. A row of two has no nearer way
+    /// round, so the plan page's This plan | All says which way it goes.
+    pub fn step(
+        moving: Option<&SliceSlide>,
+        from: usize,
+        step: isize,
+        spring: Spring,
+        slot: f32,
+        now: Instant,
+    ) -> SliceSlide {
+        let (start, velocity, heading) = match moving {
+            Some(moving) => {
+                let (start, velocity) = moving.at(now);
+                (start, velocity, moving.anchor)
+            }
+            None => (from as f32, 0.0, from as f32),
+        };
+        SliceSlide::to_anchor(start, velocity, heading + step as f32, spring, slot, now)
+    }
+
+    fn to_anchor(
+        start: f32,
+        velocity: f32,
+        anchor: f32,
+        spring: Spring,
+        slot: f32,
+        now: Instant,
+    ) -> SliceSlide {
         let pixel = 1.0 / slot.max(1.0);
         SliceSlide {
             since: now,
@@ -733,7 +765,7 @@ pub(super) fn sliding<'a>(
     at: usize,
     n: usize,
     current: Element<'a, AppMessage>,
-    mut still: impl FnMut(usize) -> Element<'a, AppMessage>,
+    still: impl FnMut(usize) -> Element<'a, AppMessage>,
 ) -> Element<'a, AppMessage> {
     let state = &app.library;
     let width = if state.list_width > 0.0 {
@@ -741,13 +773,27 @@ pub(super) fn sliding<'a>(
     } else {
         crate::screens::shell::content_width(app, 0.0)
     };
+    sliding_in(width, app.scale, slide, at, n, current, still)
+}
+
+/// `sliding` for a list `width` px wide at the window's `scale`: the plan
+/// page slides between This plan and All through it.
+pub fn sliding_in<'a>(
+    width: f32,
+    scale: f32,
+    slide: Option<&SliceSlide>,
+    at: usize,
+    n: usize,
+    current: Element<'a, AppMessage>,
+    mut still: impl FnMut(usize) -> Element<'a, AppMessage>,
+) -> Element<'a, AppMessage> {
     let slot = width + GAP;
     let position = slide.map_or(at as f32, |moving| moving.position(Instant::now()));
     let live = nearest(at, n, position);
     // On whole device pixels: at a fraction the text is laid out anew
     // between glyph positions on every frame and the covers resampled,
     // which reads as smudging while the list moves slowly.
-    let scale = app.scale.max(1.0);
+    let scale = scale.max(1.0);
     let snap = |x: f32| (x * scale).round() / scale;
     let mut layers =
         vec![ui::slide_by(current, Vector::new(snap((live - position) * slot), 0.0)).into()];

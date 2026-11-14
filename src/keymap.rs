@@ -51,8 +51,8 @@ impl Action {
             Action::Back => "Back",
             Action::Forward => "Forward",
             Action::Settings => "Settings",
-            Action::SoonPrev => "Coming soon and Music: previous list or tab",
-            Action::SoonNext => "Coming soon and Music: next list or tab",
+            Action::SoonPrev => "Coming soon, Music and plans: previous list or tab",
+            Action::SoonNext => "Coming soon, Music and plans: next list or tab",
         }
     }
 

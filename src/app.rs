@@ -1047,6 +1047,14 @@ impl App {
         self.library.motion.settle(now);
         self.plans.motion.settle(now);
         if self
+            .plans
+            .tab_slide
+            .as_ref()
+            .is_some_and(|moving| moving.done(now))
+        {
+            self.plans.tab_slide = None;
+        }
+        if self
             .library
             .slide
             .as_ref()
@@ -1064,7 +1072,19 @@ impl App {
         }
         let message = match message {
             Message::KeyPressed(key, modifiers) => match self.shortcut(&key, modifiers) {
-                Some(message) => message,
+                Some(message) => {
+                    // Shift+arrow over a plan's tabs slides the way the
+                    // arrow points.
+                    let action =
+                        Combo::of(&key, modifiers).and_then(|c| self.keymap.action_for(&c));
+                    if let (Message::Plans(_), Some(Action::SoonPrev | Action::SoonNext)) =
+                        (&message, action)
+                    {
+                        let back = action == Some(Action::SoonPrev);
+                        self.plans.tab_step = Some(if back { -1 } else { 1 });
+                    }
+                    message
+                }
                 None => return Task::none(),
             },
             // A side-scroll or Shift+wheel over Music's tabs is the tab
@@ -1076,6 +1096,18 @@ impl App {
                         self.library.music_tab.step(step),
                     )),
                     None => return Task::none(),
+                }
+            }
+            // The same over a plan's This plan | All.
+            Message::Plans(plans::Message::Wheel(delta)) => {
+                let shift = self.modifiers.shift();
+                let step = self.plans.wheel.feed(delta, shift, now);
+                match (step, plans::other_tab(self)) {
+                    (Some(step), Some(tab)) => {
+                        self.plans.tab_step = Some(step);
+                        Message::Plans(tab)
+                    }
+                    _ => return Task::none(),
                 }
             }
             message => self.click_with_modifiers(message),
@@ -1093,7 +1125,9 @@ impl App {
         let closes = library::closes_drawer(&message);
         let plan_drawer = plans::drawer_state(self);
         let plan_closes = plans::closes_drawer(&message);
+        let plan_page = (self.screen == Screen::Plans).then(|| self.plans.page.clone());
         let task = self.handle(message);
+        let task = Task::batch([task, plans::page_turned(self, plan_page, now)]);
         if self.library.selected != selected {
             self.library.selection_moved();
         }
@@ -1220,6 +1254,11 @@ impl App {
                     if self.music_tabs_free() {
                         let tab = self.library.music_tab.step(step);
                         return Some(Message::Library(library::Message::MusicTab(tab)));
+                    }
+                    // And over a plan's This plan | All (`update_at`
+                    // notes which way the arrow points).
+                    if let Some(tab) = plans::other_tab(self) {
+                        return Some(Message::Plans(tab));
                     }
                     self.soon_page_free()
                         .then_some(Message::Library(library::Message::SoonStep(step)))
@@ -1805,6 +1844,15 @@ impl App {
                 _ => None,
             }));
         }
+        // The same on a plan page, for This plan | All.
+        if self.screen == Screen::Plans && self.plans.plan_id().is_some() {
+            subscriptions.push(event::listen_with(|event, _status, _window| match event {
+                Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                    Some(Message::Plans(plans::Message::Wheel(delta)))
+                }
+                _ => None,
+            }));
+        }
         // The splash's bar, and the setup's ring while GitHub is asked.
         if self.screen == Screen::Splash
             || (self.screen == Screen::Setup && self.setup.busy.is_some())
@@ -1816,6 +1864,7 @@ impl App {
         // slide between Music's tabs draw every frame while they run.
         if self.library.motion.running()
             || self.plans.motion.running()
+            || self.plans.tab_slide.is_some()
             || self.library.slide.is_some()
             || self.library.tab_slide.is_some()
         {

@@ -12,10 +12,13 @@ pub use overview::plan_accent;
 use std::collections::HashMap;
 use std::time::Instant;
 
+use iced::mouse::ScrollDelta;
+use iced::widget::{operation, scrollable};
 use iced::{Element, Task};
 
-use super::library::{self, Motion, Shown};
-use crate::animation::{Easing, Slide};
+use super::library::soon::WheelGesture;
+use super::library::{self, Motion, Shown, SliceSlide};
+use crate::animation::{Easing, Slide, Spring};
 use crate::app::{App, KeyPress, Message as AppMessage};
 use crate::artwork::Wants;
 use crate::history::Direction;
@@ -70,6 +73,16 @@ pub struct State {
     /// something shows ("Another" moves it on).
     pub glance_pop: Option<GlancePop>,
     pub pick: u64,
+    /// The list's slide between This plan and All, as Music's between
+    /// its tabs; where the list is scrolled, and where each tab of the
+    /// open plan was left (This plan, All).
+    pub tab_slide: Option<SliceSlide>,
+    pub scroll: f32,
+    pub tab_scroll: [f32; 2],
+    /// The side-scroll or Shift+wheel gesture towards the other tab, and
+    /// the way a gesture or Shift+arrow asked the next switch to slide.
+    pub wheel: WheelGesture,
+    pub tab_step: Option<isize>,
     pub styles: HashMap<String, Style>,
     pub popup: Option<Popup>,
     pub pool_query: String,
@@ -123,13 +136,113 @@ impl State {
         self.anchor = None;
     }
 
+    /// Opens `page`. The other tab of the same plan keeps each tab's
+    /// place in its list; another plan starts at the top.
+    fn turn_to(&mut self, page: Page) {
+        match (tab_of(&self.page), tab_of(&page)) {
+            (Some((was, from)), Some((id, to))) if was == id => {
+                if from != to {
+                    self.tab_scroll[from] = self.scroll;
+                    self.scroll = self.tab_scroll[to];
+                }
+            }
+            _ => {
+                self.scroll = 0.0;
+                self.tab_scroll = [0.0; 2];
+            }
+        }
+        self.page = page;
+    }
+
     /// Returns to `page` (Back or Forward): the selection and the
     /// popovers close.
     pub fn go_to(&mut self, page: Page) {
-        self.page = page;
+        self.turn_to(page);
         self.selected = None;
         self.close_popovers();
     }
+}
+
+/// The plan page's scrolling list, for the scroll back to a tab's place.
+pub const LIST_ID: &str = "plan-list";
+
+/// A plan page's plan and its tab's place: This plan 0, All 1.
+fn tab_of(page: &Page) -> Option<(&str, usize)> {
+    match page {
+        Page::Overview => None,
+        Page::Plan(id) => Some((id, 0)),
+        Page::Collection(id) => Some((id, 1)),
+    }
+}
+
+/// The switch to the other tab, when This plan | All is on screen with
+/// nothing open over it: what a side-scroll, Shift+wheel or Shift+arrow
+/// does there, as on Music's tabs.
+pub fn other_tab(app: &App) -> Option<Message> {
+    let state = &app.plans;
+    let free = app.screen == super::Screen::Plans
+        && app.dialog.is_none()
+        && app.plan_dialog.is_none()
+        && !app.token_warning
+        && state.popup.is_none()
+        && !state.when_open
+        && state.glance_pop.is_none()
+        && app.library.details_pop.is_none()
+        && !app.library.details_rating_open;
+    let plan = current_plan(app).filter(|plan| free && !plan.tags.is_empty())?;
+    Some(match state.page {
+        Page::Collection(_) => Message::ShowPlan(plan.id.clone()),
+        _ => Message::ShowCollection(plan.id.clone()),
+    })
+}
+
+/// After a message, with the page before it (None from another screen):
+/// a switch between a plan's tabs slides the list to the other one, as
+/// Music's tabs do, toward All to the left and back to the right unless a
+/// gesture said which way (`tab_step`); any new page is scrolled to where
+/// it was left.
+pub fn page_turned(app: &mut App, before: Option<Page>, now: Instant) -> Task<AppMessage> {
+    let step = app.plans.tab_step.take();
+    if app.screen != super::Screen::Plans {
+        app.plans.tab_slide = None;
+        return Task::none();
+    }
+    if before.as_ref() == Some(&app.plans.page) {
+        return Task::none();
+    }
+    let tabs = match (before.as_ref().and_then(tab_of), tab_of(&app.plans.page)) {
+        (Some((was, from)), Some((id, to))) if was == id => Some((from, to)),
+        _ => None,
+    };
+    app.plans.tab_slide = match (tabs, Spring::desktop_switch(app.speed)) {
+        (Some((from, to)), Some(spring)) => {
+            let step = step.unwrap_or(if to > from { 1 } else { -1 });
+            Some(SliceSlide::step(
+                app.plans.tab_slide.as_ref(),
+                from,
+                step,
+                spring.slowed(library::soon::SLOWER),
+                (list_width(app) + library::soon::GAP) * app.scale,
+                now,
+            ))
+        }
+        _ => None,
+    };
+    let offset = scrollable::AbsoluteOffset {
+        x: None,
+        y: Some(app.plans.scroll),
+    };
+    operation::scroll_to(LIST_ID, offset)
+}
+
+/// How wide the plan page's list is: the content, less the pinned panel.
+pub fn list_width(app: &App) -> f32 {
+    let side = if app.plans.unpinned {
+        0.0
+    } else {
+        super::entry::details::WIDTH
+    };
+    super::shell::content_width(app, side)
 }
 
 /// What the Plans screen draws from the lookups now: the details' entry,
@@ -295,6 +408,11 @@ pub enum Message {
     ToggleDone(String),
     AddItem(String),
     PoolQuery(String),
+    /// The plan page's list was scrolled to this offset.
+    Scrolled(f32),
+    /// The wheel anywhere on a plan page; `App::update_at` turns a
+    /// side-scroll or Shift+wheel into the other tab.
+    Wheel(ScrollDelta),
     Select(String),
     /// The header's panel button, the drawer's pin and Ctrl+I.
     TogglePanel,
@@ -348,20 +466,22 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
     let state = &mut app.plans;
     match message {
         Message::ShowOverview => {
-            state.page = Page::Overview;
+            state.turn_to(Page::Overview);
             state.selected = None;
             state.close_popovers();
         }
         Message::ShowPlan(id) => {
-            state.page = Page::Plan(id);
+            state.turn_to(Page::Plan(id));
             state.selected = None;
             state.close_popovers();
         }
         Message::ShowCollection(id) => {
-            state.page = Page::Collection(id);
+            state.turn_to(Page::Collection(id));
             state.selected = None;
             state.close_popovers();
         }
+        Message::Scrolled(offset) => state.scroll = offset,
+        Message::Wheel(_) => {}
         Message::TogglePopup(popup) => {
             state.popup = if state.popup == Some(popup) {
                 None
@@ -511,7 +631,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::ConfirmDeletePlan => {
             if let Some(Dialog::Delete { id }) = app.plan_dialog.take() {
                 if app.plans.plan_id() == Some(id.as_str()) {
-                    app.plans.page = Page::Overview;
+                    app.plans.turn_to(Page::Overview);
                     app.plans.selected = None;
                 }
                 app.apply(Operation::DeletePlan { id });
@@ -611,7 +731,7 @@ fn save(app: &mut App) -> Task<AppMessage> {
     };
     app.plan_dialog = None;
     app.apply(operation);
-    app.plans.page = Page::Plan(id);
+    app.plans.turn_to(Page::Plan(id));
     app.plans.selected = None;
     Task::none()
 }
@@ -1324,6 +1444,99 @@ mod tests {
             send(&mut app, Message::ToggleDone(entry));
         }
         see(&app, &["8 of 8 done", "BY TYPE"], &["WHAT'S LEFT"]);
+    }
+
+    /// This plan | All switch as Music's tabs do: a side-scroll,
+    /// Shift+wheel or Shift+arrows, the list sliding to the other tab and
+    /// each tab keeping its place.
+    #[test]
+    fn the_tabs_switch_by_side_scroll_and_shift_arrows_and_slide() {
+        use std::time::Duration;
+
+        use iced::keyboard::{Key, key::Named};
+
+        let mut app = app();
+        let plan = || Page::Plan("halloween-2026".into());
+        let all = || Page::Collection("halloween-2026".into());
+        let start = Instant::now();
+        let wheel = |app: &mut App, x: f32, y: f32, ms: u64| {
+            let delta = ScrollDelta::Lines { x, y };
+            let _ = app.update_at(
+                AppMessage::Plans(Message::Wheel(delta)),
+                start + Duration::from_millis(ms),
+            );
+        };
+        let arrow = |app: &mut App, named: Named, ms: u64| {
+            let _ = app.update_at(
+                AppMessage::KeyPressed(Key::Named(named), Modifiers::SHIFT),
+                start + Duration::from_millis(ms),
+            );
+        };
+        send(&mut app, Message::ShowPlan("halloween-2026".into()));
+        wheel(&mut app, 0.0, -1.0, 0);
+        assert_eq!(app.plans.page, plan(), "plain scrolling");
+        wheel(&mut app, -1.0, 0.0, 1000);
+        assert_eq!(app.plans.page, all(), "a side-scroll");
+        wheel(&mut app, -1.0, 0.0, 1050);
+        assert_eq!(app.plans.page, all(), "one gesture");
+        let _ = app.update(AppMessage::Modifiers(Modifiers::SHIFT));
+        wheel(&mut app, 0.0, 1.0, 2000);
+        assert_eq!(app.plans.page, plan(), "Shift+wheel");
+        let _ = app.update(AppMessage::Modifiers(Modifiers::empty()));
+        arrow(&mut app, Named::ArrowRight, 3000);
+        assert_eq!(app.plans.page, all(), "Shift+Right");
+        assert_eq!(app.plans.tab_slide, None, "instant in the tests");
+
+        // Each tab keeps its place in its list.
+        send(&mut app, Message::Scrolled(240.0));
+        arrow(&mut app, Named::ArrowLeft, 4000);
+        assert_eq!((app.plans.page.clone(), app.plans.scroll), (plan(), 0.0));
+        send(&mut app, Message::Scrolled(80.0));
+        send(&mut app, Message::ShowCollection("halloween-2026".into()));
+        assert_eq!(app.plans.scroll, 240.0);
+        assert_eq!(app.plans.tab_scroll, [80.0, 240.0]);
+
+        // With animations the list slides: a click toward All to the
+        // left and back to the right, a gesture the way it points.
+        app.speed = crate::animation::Speed::factor(1.0);
+        let at = |app: &mut App, message: Message, ms: u64| {
+            let _ = app.update_at(
+                AppMessage::Plans(message),
+                start + Duration::from_millis(ms),
+            );
+        };
+        at(&mut app, Message::ShowPlan("halloween-2026".into()), 10_000);
+        assert!(!app.plans.tab_slide.as_ref().expect("a slide").forward());
+        at(&mut app, Message::Scrolled(80.0), 30_000);
+        assert_eq!(app.plans.tab_slide, None, "settled");
+        at(
+            &mut app,
+            Message::ShowCollection("halloween-2026".into()),
+            30_000,
+        );
+        assert!(app.plans.tab_slide.as_ref().unwrap().forward());
+        wheel(&mut app, 1.0, 0.0, 60_000);
+        assert_eq!(app.plans.page, plan());
+        assert!(!app.plans.tab_slide.as_ref().unwrap().forward());
+        wheel(&mut app, 1.0, 0.0, 90_000);
+        assert_eq!(app.plans.page, all(), "round again, the same way");
+        assert!(!app.plans.tab_slide.as_ref().unwrap().forward());
+
+        // Another plan starts at the top without a slide; a plan without
+        // tags has one tab, and a dialog takes the keys.
+        at(
+            &mut app,
+            Message::ShowPlan("christmas-2026".into()),
+            120_000,
+        );
+        assert_eq!(app.plans.tab_slide, None);
+        assert_eq!((app.plans.scroll, app.plans.tab_scroll), (0.0, [0.0; 2]));
+        send(&mut app, Message::EditPlan);
+        assert!(other_tab(&app).is_none());
+        send(&mut app, Message::Close);
+        assert!(other_tab(&app).is_some());
+        send(&mut app, Message::TogglePopup(Popup::View));
+        assert!(other_tab(&app).is_none());
     }
 
     #[test]
