@@ -121,7 +121,9 @@ pub fn totals(library: &Library, covers: &Covers) -> Totals {
 
 /// The artists to ask Apple about on `today`, A to Z as the Artists tab
 /// orders names: those with no file and no entry in `_missing.json`, or
-/// one that is due again (`Tried::is_due`). `tried_now` are the slugs
+/// one that is due again (`Tried::is_due`); with `again` (Check again in
+/// Settings) every artist without a file that this session has not asked
+/// about, whatever the record says. `tried_now` are the slugs
 /// asked about in this session; an artist recorded today whose newest
 /// entry was added today is asked once more unless this session did the
 /// asking, since the entry may be the reason to look again.
@@ -130,6 +132,7 @@ pub fn todo(
     covers: &Covers,
     today: Date,
     tried_now: &HashSet<String>,
+    again: bool,
 ) -> Vec<Work> {
     let mut out: Vec<Work> = artists_of(library)
         .into_iter()
@@ -140,7 +143,8 @@ pub fn todo(
             match covers.missing().artists.get(&work.slug) {
                 None => !tried_now.contains(&work.slug),
                 Some(tried) => {
-                    tried.is_due(today, Some(*added))
+                    (again && !tried_now.contains(&work.slug))
+                        || tried.is_due(today, Some(*added))
                         || (tried.tried == today
                             && *added == today
                             && !tried_now.contains(&work.slug))
@@ -151,6 +155,142 @@ pub fn todo(
         .collect();
     out.sort_by_key(|work| music::artist_key(&work.name));
     out
+}
+
+/// A state of Settings' Artist photos row forced for a look, with the
+/// canvas's numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Look {
+    Fetching,
+    Paused,
+    Stopped,
+}
+
+impl Look {
+    pub fn from_env(value: &str) -> Option<Look> {
+        match value {
+            "fetching" => Some(Look::Fetching),
+            "paused" => Some(Look::Paused),
+            "stopped" => Some(Look::Stopped),
+            _ => None,
+        }
+    }
+}
+
+/// How long one artist takes on average: the search, some five album
+/// lists three seconds apart, the page and the image.
+const SECONDS_AN_ARTIST: usize = 18;
+
+/// Settings › Library source › Your covers › Artist photos, as it reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Row {
+    /// Apple is being asked: how many artists are settled, of how many,
+    /// and how many are left to ask.
+    Fetching {
+        done: usize,
+        of: usize,
+        left: usize,
+    },
+    Paused {
+        done: usize,
+        of: usize,
+    },
+    /// Apple refused; nothing more is asked until Try again.
+    Stopped {
+        done: usize,
+        of: usize,
+    },
+    Done(Totals),
+}
+
+impl Row {
+    /// The row for the work's state: `active` says photos are fetched in
+    /// this run at all, `left` how many artists are still to ask.
+    pub fn of(state: &State, totals: Totals, left: usize, active: bool) -> Row {
+        let (done, of) = (totals.done(), totals.artists);
+        match state.look {
+            Some(Look::Fetching) => {
+                return Row::Fetching {
+                    done: 150,
+                    of: 377,
+                    left: 227,
+                };
+            }
+            Some(Look::Paused) => return Row::Paused { done: 150, of: 377 },
+            Some(Look::Stopped) => return Row::Stopped { done: 150, of: 377 },
+            None => {}
+        }
+        if !active || (left == 0 && state.running.is_none()) {
+            Row::Done(totals)
+        } else if state.stopped {
+            Row::Stopped { done, of }
+        } else if state.paused {
+            Row::Paused { done, of }
+        } else {
+            Row::Fetching { done, of, left }
+        }
+    }
+
+    pub fn detail(&self) -> String {
+        match *self {
+            Row::Fetching { done, of, left } => format!(
+                "Fetching from Apple Music · {done} of {of} · {}. One artist every few seconds; \
+                 it pauses while you look something up.",
+                time_left(left)
+            ),
+            Row::Paused { done, of } => {
+                format!("Paused at {done} of {of}. Nothing is lost; it picks up where it stopped.")
+            }
+            Row::Stopped { done, of } => format!(
+                "Apple Music stopped answering, so fetching is off for now. {done} of {of} done."
+            ),
+            Row::Done(totals) => {
+                let photos = match totals.with_photo {
+                    1 => "1 photo".to_owned(),
+                    n => format!("{n} photos"),
+                };
+                let covers = match totals.artists - totals.with_photo - totals.no_match {
+                    1 => "1 artist uses a cover from your library".to_owned(),
+                    n => format!("{n} artists use a cover from your library"),
+                };
+                format!(
+                    "{photos} · {covers} · {} not matched. Kept in covers/artists/; new \
+                     artists are fetched as you add them.",
+                    totals.no_match
+                )
+            }
+        }
+    }
+
+    pub fn button(&self) -> &'static str {
+        match self {
+            Row::Fetching { .. } => "Pause",
+            Row::Paused { .. } => "Resume",
+            Row::Stopped { .. } => "Try again",
+            Row::Done(_) => "Check again",
+        }
+    }
+
+    /// How far the bar is, while there is one.
+    pub fn progress(&self) -> Option<f32> {
+        match *self {
+            Row::Fetching { done, of, .. } | Row::Paused { done, of } => {
+                Some(done as f32 / of.max(1) as f32)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// "about 40 minutes left", "about an hour left".
+pub fn time_left(artists: usize) -> String {
+    let minutes = (artists * SECONDS_AN_ARTIST).div_ceil(60);
+    match minutes {
+        0..=1 => "about a minute left".to_owned(),
+        2..=49 => format!("about {minutes} minutes left"),
+        50..=89 => "about an hour left".to_owned(),
+        _ => format!("about {} hours left", (minutes + 30) / 60),
+    }
 }
 
 /// The photo work of this session and the batch held for its commit.
@@ -171,6 +311,11 @@ pub struct State {
     /// After a failure that was not a refusal: when to go on.
     pub retry_at: Option<Instant>,
     tried_now: HashSet<String>,
+    /// Check again: the artists recorded with nothing found are asked
+    /// about once more, whatever their day.
+    pub again: bool,
+    /// A state shown whatever is going on (`LIBRI_PHOTOS`), for a look.
+    pub look: Option<Look>,
     /// Whether an artist was passed over in this session after a failure
     /// that was not an answer: the backfill is then not done.
     passed_over: bool,
@@ -240,6 +385,14 @@ impl State {
     /// library is kept on this computer, where a change is made at once).
     pub fn asked(&mut self, slug: &str) {
         self.tried_now.insert(slug.to_owned());
+    }
+
+    /// Check again: everyone without a file is asked about once more,
+    /// also those this session asked already.
+    pub fn check_again(&mut self) {
+        self.again = true;
+        self.tried_now.clear();
+        self.passed_over = false;
     }
 
     /// Apple's answer about the artist could not be used (a server
@@ -356,7 +509,7 @@ mod tests {
         let mut covers = Covers::with_files(Vec::new());
         // A to Z with a leading "The" aside; the skipped names and the
         // name with no letters are never asked about.
-        let work = todo(&library, &covers, today, &none);
+        let work = todo(&library, &covers, today, &none, false);
         assert_eq!(names(&work), ["Adele", "The Beatles", "Burial", "Can"]);
         // An artist's albums, and the albums their songs name.
         assert_eq!(work[0].owned, ["21", "Hello (the album)"]);
@@ -388,7 +541,7 @@ mod tests {
             tried("Burial", "2026-11-01", Reason::NoPhoto),
             tried("The Beatles", "2026-08-01", Reason::NoMatch),
         ]);
-        let work = todo(&library, &covers, today, &none);
+        let work = todo(&library, &covers, today, &none, false);
         assert_eq!(names(&work), ["Adele", "The Beatles"]);
         let totals = totals(&library, &covers);
         assert_eq!(
@@ -399,9 +552,75 @@ mod tests {
         // Asked in this session with no answer kept: not again.
         let asked: HashSet<String> = ["adele".to_owned()].into();
         assert_eq!(
-            names(&todo(&library, &covers, today, &asked)),
+            names(&todo(&library, &covers, today, &asked, false)),
             ["The Beatles"]
         );
+        // Check again asks about everyone without a file once more.
+        assert_eq!(
+            names(&todo(&library, &covers, today, &none, true)),
+            ["Adele", "The Beatles", "Burial"]
+        );
+        assert_eq!(
+            names(&todo(&library, &covers, today, &asked, true)),
+            ["The Beatles", "Burial"]
+        );
+    }
+
+    #[test]
+    fn the_settings_row_reads_as_the_work_stands() {
+        let totals = Totals {
+            artists: 377,
+            with_photo: 312,
+            no_photo: 50,
+            no_match: 7,
+        };
+        let mut state = State::default();
+        let row = Row::of(&state, totals, 8, true);
+        assert_eq!(
+            row,
+            Row::Fetching {
+                done: 369,
+                of: 377,
+                left: 8
+            }
+        );
+        assert_eq!(row.button(), "Pause");
+        assert!(
+            row.detail()
+                .starts_with("Fetching from Apple Music · 369 of 377 · about 3 minutes left.")
+        );
+        assert!(row.progress().is_some());
+        state.paused = true;
+        let row = Row::of(&state, totals, 8, true);
+        assert_eq!(row.button(), "Resume");
+        assert!(row.detail().starts_with("Paused at 369 of 377."));
+        state.stopped = true;
+        let row = Row::of(&state, totals, 8, true);
+        assert_eq!(row.button(), "Try again");
+        assert_eq!(row.progress(), None);
+        // Nobody left, or a run that fetches nothing: the totals. An
+        // artist with neither a photo nor "not matched" shows a cover
+        // from the library (or initials).
+        let row = Row::of(&State::default(), totals, 0, true);
+        assert_eq!(row.button(), "Check again");
+        assert_eq!(
+            row.detail(),
+            "312 photos · 58 artists use a cover from your library · 7 not matched. Kept in \
+             covers/artists/; new artists are fetched as you add them."
+        );
+        assert_eq!(
+            Row::of(&State::default(), totals, 8, false),
+            Row::Done(totals)
+        );
+        // The canvas's numbers for a look.
+        state.look = Some(Look::Fetching);
+        assert!(
+            Row::of(&state, totals, 0, false)
+                .detail()
+                .contains("150 of 377 · about an hour left")
+        );
+        assert_eq!(time_left(0), "about a minute left");
+        assert_eq!(time_left(377), "about 2 hours left");
     }
 
     #[test]
@@ -417,16 +636,22 @@ mod tests {
             },
         })]);
         let none = HashSet::new();
-        assert!(todo(&library, &covers, day("2026-11-15"), &none).is_empty());
+        assert!(todo(&library, &covers, day("2026-11-15"), &none, false).is_empty());
         library.entries[0].added = day("2026-11-12");
-        assert_eq!(todo(&library, &covers, day("2026-11-15"), &none).len(), 1);
+        assert_eq!(
+            todo(&library, &covers, day("2026-11-15"), &none, false).len(),
+            1
+        );
         // Added on the day of the try: once more on that day, by a
         // session that has not asked yet.
         library.entries[0].added = day("2026-11-10");
-        assert_eq!(todo(&library, &covers, day("2026-11-10"), &none).len(), 1);
+        assert_eq!(
+            todo(&library, &covers, day("2026-11-10"), &none, false).len(),
+            1
+        );
         let asked: HashSet<String> = ["burial".to_owned()].into();
-        assert!(todo(&library, &covers, day("2026-11-10"), &asked).is_empty());
-        assert!(todo(&library, &covers, day("2026-11-11"), &none).is_empty());
+        assert!(todo(&library, &covers, day("2026-11-10"), &asked, false).is_empty());
+        assert!(todo(&library, &covers, day("2026-11-11"), &none, false).is_empty());
     }
 
     #[test]

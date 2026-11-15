@@ -53,6 +53,9 @@ pub struct Found {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     Check,
+    /// The Artist photos row's button: Pause, Resume, Try again or
+    /// Check again.
+    Photos,
     /// The check's hits: entry ids with the cover the lookup has.
     Checked(Vec<(String, String)>),
     Choice(usize, OnlineChoice),
@@ -81,6 +84,7 @@ fn asked(app: &App) -> Vec<Entry> {
 
 pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
     match message {
+        Message::Photos => return app.photos_button(),
         Message::Check => {
             if app.settings_page.covers.checking {
                 return Task::none();
@@ -285,6 +289,7 @@ pub fn group<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     column![
         group_row("Check for online covers", check_detail, Some(check), tokens),
         group_row("Unused covers", unused_detail, Some(review), tokens),
+        photos_row(app, tokens),
         group_row(
             "Uploads",
             "Scaled to 1000 px on the long side and saved as JPEG; files you commit yourself are \
@@ -296,6 +301,54 @@ pub fn group<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     ]
     .spacing(8)
     .into()
+}
+
+/// Artist photos: the fetch's progress with Pause or Resume and a bar,
+/// "Try again" once Apple stopped answering, and afterwards the totals
+/// with Check again (`covers::backfill::Row`).
+fn photos_row<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let state = app.photos_row();
+    let (raised, track, accent) = (tokens.raised, tokens.track, tokens.accent);
+    // The totals of a run that fetches nothing (not connected) have
+    // nothing to check again.
+    let can = app.photos_active() || app.photos.look.is_some();
+    let action = ui::sized_button(
+        state.button(),
+        ButtonKind::Outline,
+        32.0,
+        *tokens,
+        can.then(|| msg(Message::Photos)),
+    );
+    let line = row![
+        column![
+            text("Artist photos").size(14).font(font::SEMIBOLD),
+            text(state.detail())
+                .size(12.5)
+                .line_height(1.45)
+                .color(tokens.sub),
+        ]
+        .spacing(1)
+        .width(Fill),
+        action,
+    ]
+    .spacing(12)
+    .align_y(Center);
+    let mut content = Column::new().spacing(10).push(line);
+    if let Some(progress) = state.progress() {
+        content = content.push(
+            iced::widget::progress_bar(0.0..=1.0, progress)
+                .girth(4.0)
+                .style(move |_| iced::widget::progress_bar::Style {
+                    background: iced::Background::Color(track),
+                    bar: iced::Background::Color(accent),
+                    border: Border::default().rounded(2),
+                }),
+        );
+    }
+    container(content)
+        .padding([12, 14])
+        .style(move |_| container::background(raised).border(Border::default().rounded(10)))
+        .into()
 }
 
 /// "12 titles use your own covers", "1 title uses your own cover".

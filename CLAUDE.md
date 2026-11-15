@@ -73,6 +73,7 @@ LIBRI_LONG_LISTS=1 cargo run       # section headers and the jump rail on every 
 LIBRI_DROPPED=shows/stranger-things-2016:1 cargo run  # the "season no longer listed" dialog for a show's season
 LIBRI_SOON=discover cargo run      # the Coming soon page on a slice (library, discover, all), with the fake's Discover rows; a mock run
 LIBRI_TRACKS=failed cargo run      # an album's track list on a state: failed ("Couldn't load the track list." with Retry) or loading; in a mock run an album the fake has no list for (Kind of Blue) has no online match, so its tracks are added by hand
+LIBRI_PHOTOS=fetching cargo run    # Settings' Artist photos row on a state: fetching, paused, stopped (the canvas's numbers; with it set, and in any mock run, Apple is never asked)
 LIBRI_LOOKUP=offline cargo run     # forces the Add dialog's lookup state for a look: loading, offline, not-set-up, failed, partial, partial-none (a mock run searches the fixture catalog in src/lookup/fake.rs; a real run asks the providers)
 cargo test --test lookup_live -- --ignored --nocapture --test-threads=1   # asks the real providers once each (AniList, Open Library, Apple Books, Deezer, Wikidata, Apple Music for one artist's photo; TMDB and IGDB with their keys); serial, since Wikidata rate-limits bursts
 ICED_BACKEND=tiny-skia cargo run   # software renderer

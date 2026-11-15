@@ -595,6 +595,8 @@ impl App {
             // rows to look at.
             let _ = app.check_discover();
         }
+        app.photos.look =
+            var("LIBRI_PHOTOS").and_then(|value| covers::backfill::Look::from_env(&value));
         app.artwork.forced_tracks =
             var("LIBRI_TRACKS").and_then(|value| artwork::ForcedTracks::from_env(&value));
         if let Some(state) =
@@ -1127,7 +1129,13 @@ impl App {
     /// not paused, not refused by Apple in this session, not waiting
     /// after a failure.
     fn photos_can_run(&self) -> bool {
-        if self.mock || self.loading || self.photos.paused || self.photos.stopped {
+        // A forced look (`LIBRI_PHOTOS`) shows a state and asks nobody.
+        if self.mock
+            || self.loading
+            || self.photos.paused
+            || self.photos.stopped
+            || self.photos.look.is_some()
+        {
             return false;
         }
         if self.photos.retry_at.is_some_and(|at| self.now < at) {
@@ -1143,6 +1151,59 @@ impl App {
             && (self.covers.get(&record).is_none() || self.covers.ready(&record).is_some())
     }
 
+    /// Whether this run fetches photos at all: a real run with a repo to
+    /// keep them in, or the library kept on this computer.
+    pub fn photos_active(&self) -> bool {
+        !self.mock && (self.engine.is_some() || self.kept_locally)
+    }
+
+    /// Settings' Artist photos row as it reads now.
+    pub fn photos_row(&self) -> covers::backfill::Row {
+        let library = self.repo.library();
+        let left = covers::backfill::todo(
+            library,
+            &self.covers,
+            self.today,
+            self.photos.tried_now(),
+            self.photos.again,
+        )
+        .len();
+        covers::backfill::Row::of(
+            &self.photos,
+            covers::backfill::totals(library, &self.covers),
+            left,
+            self.photos_active(),
+        )
+    }
+
+    /// The row's button: Pause, Resume, Try again or Check again, as
+    /// the row reads. Pause lets the artist being asked about finish.
+    pub fn photos_button(&mut self) -> Task<Message> {
+        use covers::backfill::{Look, Row};
+        // A forced look only steps through its states.
+        if let Some(look) = self.photos.look {
+            self.photos.look = match look {
+                Look::Fetching => Some(Look::Paused),
+                Look::Paused | Look::Stopped => Some(Look::Fetching),
+            };
+            return Task::none();
+        }
+        match self.photos_row() {
+            Row::Fetching { .. } => self.photos.paused = true,
+            Row::Paused { .. } => self.photos.paused = false,
+            Row::Stopped { .. } => {
+                self.photos.stopped = false;
+                self.photos.retry_at = None;
+            }
+            Row::Done(_) => {
+                self.photos.check_again();
+                self.photos.retry_at = None;
+            }
+        }
+        self.photos.save();
+        self.photos_next()
+    }
+
     /// Asks Apple about the next artist with no photo and no fresh
     /// record, one at a time; queues the batch once fifty were tried or
     /// nobody is left.
@@ -1156,10 +1217,12 @@ impl App {
             &self.covers,
             self.today,
             self.photos.tried_now(),
+            self.photos.again,
         );
         let Some(work) = todo.into_iter().next() else {
             // Done only when nobody was passed over after a failure.
             self.queue_photo_batch(self.photos.none_passed_over());
+            self.photos.again = false;
             return Task::none();
         };
         if self.photos.is_full() {

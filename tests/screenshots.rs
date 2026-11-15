@@ -1854,6 +1854,22 @@ fn capture_every_screen() {
                 show_own(app, DRACULA, "books/dracula-1897.first-edition.jpg", false);
             }),
         ),
+        // The Artist photos row while the fetch runs, and after Apple
+        // stopped answering (the canvas's numbers).
+        (
+            Screen::Settings,
+            ("settings-covers-photos", |app| {
+                own_covers(app);
+                app.photos.look = Some(libri::covers::backfill::Look::Fetching);
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-covers-photos-stopped", |app| {
+                own_covers(app);
+                app.photos.look = Some(libri::covers::backfill::Look::Stopped);
+            }),
+        ),
         (
             Screen::Settings,
             ("settings-covers-found", |app| {
