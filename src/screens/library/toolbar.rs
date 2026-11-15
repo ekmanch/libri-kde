@@ -100,7 +100,7 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         let of_artist = |e: &&&Entry| crate::music::artist_of(e).eq_ignore_ascii_case(artist);
         listing.shown.iter().filter(of_artist).count()
     } else {
-        state.count_shown(&listing.shown)
+        state.count_shown(&listing.shown, &app.artwork)
     };
 
     let current = state.view_mode();
@@ -265,7 +265,7 @@ fn filter_panel<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessa
 
     let result = text(format!(
         "{} shown",
-        shown_noun(state, state.count_shown(&listing.shown))
+        shown_noun(state, state.count_shown(&listing.shown, &app.artwork))
     ))
     .size(13)
     .color(tokens.sub)
@@ -420,7 +420,7 @@ pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage>
     // they have an album or a song in.
     let all = ui::status_chip(
         "All",
-        state.count_shown(&base),
+        state.count_shown(&base, &app.artwork),
         state.status.is_none(),
         &tokens,
         msg(Message::Status(None)),
@@ -432,7 +432,7 @@ pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage>
             .copied()
             .filter(|e| e.status == status)
             .collect();
-        let count = state.count_shown(&with_status);
+        let count = state.count_shown(&with_status, &app.artwork);
         let label = browse::status_label(state.single(), status);
         let on = state.status == Some(status);
         chips = chips.push(ui::status_chip(

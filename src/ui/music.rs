@@ -122,7 +122,7 @@ pub fn artist_card<'a, Message: Clone + 'a>(
         .focusable(12.0, tokens)
 }
 
-/// What a song row shows: a song entry or a rated album track.
+/// What a song row shows: a song entry or an album track.
 pub struct SongLook<'a> {
     pub title: &'a str,
     /// "Artist · Year".
@@ -189,8 +189,9 @@ pub fn song_list_row<'a, Message: Clone + 'a>(
         .focusable(10.0, tokens)
 }
 
-/// A song in the grid: a square cover with the title on it, then
-/// "Artist · Year". Fills its grid cell.
+/// A song in the grid: a square cover (the title on its placeholder),
+/// then the title with the rating and "Artist · Year" under it. Fills
+/// its grid cell.
 pub fn song_card<'a, Message: Clone + 'a>(
     look: SongLook<'a>,
     tokens: &Tokens,
@@ -209,11 +210,12 @@ pub fn song_card<'a, Message: Clone + 'a>(
             centered: false,
         }),
     );
-    let caption = row![
+    // A long title is cut off before the rating.
+    let title = row![
         container(
-            text(look.subtitle)
-                .size(12.5)
-                .color(tokens.sub)
+            text(look.title)
+                .size(13.5)
+                .font(font::SEMIBOLD)
                 .wrapping(text::Wrapping::None)
         )
         .width(Fill)
@@ -222,6 +224,16 @@ pub fn song_card<'a, Message: Clone + 'a>(
     ]
     .spacing(8)
     .height(20);
+    let artist = container(
+        text(look.subtitle)
+            .size(12.5)
+            .color(tokens.sub)
+            .wrapping(text::Wrapping::None),
+    )
+    .width(Fill)
+    .height(18)
+    .clip(true);
+    let caption = column![title, artist].padding([0, 2]);
     let text_color = tokens.text;
     button(column![cover, caption].spacing(8))
         .padding(0)

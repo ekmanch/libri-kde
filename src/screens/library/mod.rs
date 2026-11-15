@@ -24,9 +24,10 @@ pub use tags::{all_tags_popover, long_group};
 use super::entry;
 use super::shell::shell;
 use crate::app::{App, Message as AppMessage};
-use crate::artwork::Wants;
+use crate::artwork::{Artwork, TrackList, Wants};
 use crate::browse::{self, Decade, Filter, Row, Section, Sort};
 use crate::model::{Date, Entry, EntryStatus, Library, MediaType, Series, TagCategory};
+use crate::music::Song;
 use crate::settings::Source;
 use crate::tags::{PickerMessage, PickerState};
 use crate::ui;
@@ -528,6 +529,26 @@ pub fn wanted(app: &App, wants: &mut Wants) {
         overview::wanted(app, view, wants);
         return;
     }
+    // An artist searched under Songs: the track lists of their albums,
+    // a few at a time so a search that names many artists is no burst.
+    if state.songs_tab_shown() {
+        let needle = browse::search_needle(&state.query);
+        let listing = state.listing(library, app.today);
+        let albums = listing
+            .shown
+            .iter()
+            .filter(|e| !crate::music::is_song(e) && crate::music::names_artist(e, &needle));
+        let mut loading = 0;
+        for album in albums {
+            if app.artwork.track_list(album) == TrackList::Loading {
+                loading += 1;
+                if loading > TRACK_LISTS_AT_ONCE {
+                    break;
+                }
+            }
+            wants.tracks.push(album.id.clone());
+        }
+    }
     if view == View::Text {
         return;
     }
@@ -549,13 +570,16 @@ pub fn wanted(app: &App, wants: &mut Wants) {
         );
         return;
     }
-    let order = state.cover_order(library, app.today);
+    let order = state.cover_order(library, app.today, &app.artwork);
     wants.covers.extend(
         covers_on_screen(order.len(), state.scroll)
             .into_iter()
             .map(|i| order[i].clone()),
     );
 }
+
+/// How many track lists a Songs search waits for at a time.
+const TRACK_LISTS_AT_ONCE: usize = 6;
 
 impl Message {
     /// Whether the message shows the library, from the sidebar or the All
@@ -1170,9 +1194,9 @@ impl State {
 
     /// How many things of `entries` the list on screen shows, for the
     /// header and the status chips: on Music's tabs the artists, the
-    /// albums or the songs (with the rated tracks a search brings in),
+    /// albums or the songs (with the album tracks a search brings in),
     /// everywhere else the entries themselves.
-    pub fn count_shown(&self, entries: &[&Entry]) -> usize {
+    pub fn count_shown(&self, entries: &[&Entry], artwork: &Artwork) -> usize {
         if !music_tabs_shown(self) {
             return entries.len();
         }
@@ -1183,8 +1207,29 @@ impl State {
                 .collect::<BTreeSet<_>>()
                 .len(),
             MusicTab::Albums => music.filter(|e| !crate::music::is_song(e)).count(),
-            MusicTab::Songs => crate::music::songs_matching(entries, &self.query).len(),
+            MusicTab::Songs => self.songs(entries, artwork).len(),
         }
+    }
+
+    /// The Songs tab's rows for `entries`: the song entries, and under a
+    /// search the album tracks it brings in, an artist's from the track
+    /// lists on this computer.
+    pub fn songs<'a>(&self, entries: &[&'a Entry], artwork: &'a Artwork) -> Vec<Song<'a>> {
+        crate::music::songs_matching(entries, &self.query, |album| {
+            match artwork.track_list(album) {
+                TrackList::Ready(tracks) => Some(tracks),
+                _ => None,
+            }
+        })
+    }
+
+    /// The Songs tab is the list on show.
+    fn songs_tab_shown(&self) -> bool {
+        self.page.is_none()
+            && !self.soon
+            && self.artist.is_none()
+            && self.music_tab == MusicTab::Songs
+            && self.single() == Some(MediaType::Music)
     }
 
     pub fn single(&self) -> Option<MediaType> {
@@ -1324,23 +1369,16 @@ impl State {
     /// The covers the list draws, in its order: as [`Self::display_order`],
     /// but a series folded into one row wants only the part whose cover
     /// stands for it (the one picked, else the first in the series). The
-    /// Songs tab wants one cover per tile, a rated track a search found
-    /// with its album's cover, so the scroll position maps onto the tiles
+    /// Songs tab wants one cover per tile, a track a search found with
+    /// its album's cover, so the scroll position maps onto the tiles
     /// drawn.
-    pub fn cover_order(&self, library: &Library, today: Date) -> Vec<String> {
-        if self.page.is_none()
-            && !self.soon
-            && self.artist.is_none()
-            && self.music_tab == MusicTab::Songs
-            && self.single() == Some(MediaType::Music)
-        {
+    pub fn cover_order(&self, library: &Library, today: Date, artwork: &Artwork) -> Vec<String> {
+        if self.songs_tab_shown() {
             let listing = self.listing(library, today);
-            return crate::music::songs_matching(&listing.shown, &self.query)
+            return self
+                .songs(&listing.shown, artwork)
                 .iter()
-                .map(|song| match song {
-                    crate::music::Song::Entry(e) => e.id.clone(),
-                    crate::music::Song::Track { album, .. } => album.id.clone(),
-                })
+                .map(|song| song.entry().id.clone())
                 .collect();
         }
         if self.page.is_none()
@@ -1393,12 +1431,11 @@ impl State {
                     .filter(|e| !crate::music::is_song(e))
                     .map(|e| e.id.clone())
                     .collect(),
-                (None, MusicTab::Songs) => crate::music::songs_matching(&listing.shown, "")
+                (None, MusicTab::Songs) => listing
+                    .shown
                     .iter()
-                    .filter_map(|song| match song {
-                        crate::music::Song::Entry(e) => Some(e.id.clone()),
-                        crate::music::Song::Track { .. } => None,
-                    })
+                    .filter(|e| crate::music::is_song(e))
+                    .map(|e| e.id.clone())
                     .collect(),
             };
         }
@@ -1792,6 +1829,7 @@ mod tests {
     fn musics_tabs_count_what_they_list() {
         let library = library();
         let today = today();
+        let artwork = Artwork::default();
         let mut state = State::default();
         state.update(Message::ShowType(Some(MediaType::Music)));
         let listing = state.listing(&library, today);
@@ -1805,20 +1843,26 @@ mod tests {
         assert!(albums > 0 && albums < entries);
 
         // An artist counts once, however many albums and songs they have.
-        assert_eq!(state.count_shown(&listing.shown), artists);
+        assert_eq!(state.count_shown(&listing.shown, &artwork), artists);
         let (first, second) = (listing.shown[0], listing.shown[1]);
-        assert_eq!(state.count_shown(&[first, first, second]), 2);
+        assert_eq!(state.count_shown(&[first, first, second], &artwork), 2);
         state.update(Message::MusicTab(MusicTab::Albums));
-        assert_eq!(state.count_shown(&listing.shown), albums);
+        assert_eq!(state.count_shown(&listing.shown, &artwork), albums);
         state.update(Message::MusicTab(MusicTab::Songs));
-        assert_eq!(state.count_shown(&listing.shown), entries - albums);
+        assert_eq!(
+            state.count_shown(&listing.shown, &artwork),
+            entries - albums
+        );
 
         // An artist's page and every other list count their entries.
         state.update(Message::OpenArtist("Metallica".into()));
-        assert_eq!(state.count_shown(&listing.shown), entries);
+        assert_eq!(state.count_shown(&listing.shown, &artwork), entries);
         state.update(Message::ShowType(Some(MediaType::Movies)));
         let movies = state.listing(&library, today);
-        assert_eq!(state.count_shown(&movies.shown), movies.shown.len());
+        assert_eq!(
+            state.count_shown(&movies.shown, &artwork),
+            movies.shown.len()
+        );
     }
 
     #[test]
@@ -1889,7 +1933,7 @@ mod tests {
         else {
             panic!("no series row");
         };
-        let order = state.cover_order(&library, today());
+        let order = state.cover_order(&library, today(), &Artwork::default());
         assert_eq!(order.len(), listing.rows.len());
         assert!(order.contains(&group.parts[0].id));
         for part in &group.parts[1..] {
@@ -2053,7 +2097,9 @@ mod tests {
             .update(Message::ShowType(Some(MediaType::Movies)));
         // Unpinned, so At a glance's pick adds no cover of its own.
         app.library.update(Message::TogglePanel);
-        let order = app.library.cover_order(app.repo.library(), app.today);
+        let order = app
+            .library
+            .cover_order(app.repo.library(), app.today, &app.artwork);
         let last = order.last().unwrap().clone();
         assert_eq!(order.len(), 13, "the fixture's movies");
         app.library.update(Message::Scrolled(Scroll {
@@ -2078,7 +2124,8 @@ mod tests {
         let library = app.repo.library();
         let tiles = |app: &App| -> Vec<String> {
             let listing = app.library.listing(library, app.today);
-            crate::music::songs_matching(&listing.shown, &app.library.query)
+            app.library
+                .songs(&listing.shown, &app.artwork)
                 .iter()
                 .map(|song| song.entry().id.clone())
                 .collect()
@@ -2091,14 +2138,31 @@ mod tests {
                 .iter()
                 .all(|id| library.entry(id).is_some_and(crate::music::is_song))
         );
-        assert_eq!(app.library.cover_order(library, app.today), songs);
+        assert_eq!(
+            app.library.cover_order(library, app.today, &app.artwork),
+            songs
+        );
 
-        // An artist searched: their rated tracks are tiles too, each with
-        // its album's cover, so the scroll maps onto the tiles drawn.
+        // An artist searched: their album tracks are tiles too, each with
+        // its album's cover, so the scroll maps onto the tiles drawn. The
+        // rated ones first, then the whole album once its list is asked
+        // for and here.
         app.library.update(Message::Search("alice in".into()));
+        assert_eq!(tiles(&app).len(), 3, "Dirt's three rated tracks");
+        let wants = crate::screens::wanted(&app);
+        assert_eq!(wants.tracks, ["music/dirt-alice-in-chains"]);
+        let _ = app.artwork.refresh(&wants, library, &app.lookups);
         let found = tiles(&app);
-        assert_eq!(found.len(), 3, "Dirt's three rated tracks");
-        assert_eq!(app.library.cover_order(library, app.today), found);
+        assert_eq!(found.len(), 13, "every track of Dirt, rated or not");
+        assert_eq!(
+            app.library
+                .count_shown(&app.library.listing(library, app.today).shown, &app.artwork),
+            13
+        );
+        assert_eq!(
+            app.library.cover_order(library, app.today, &app.artwork),
+            found
+        );
         app.library.update(Message::Scrolled(Scroll {
             offset: 0.0,
             viewport: 100.0,
@@ -2121,7 +2185,9 @@ mod tests {
             content: 30_000.0,
         }));
         app.library.update(Message::MusicTab(MusicTab::Songs));
-        let order = app.library.cover_order(app.repo.library(), app.today);
+        let order = app
+            .library
+            .cover_order(app.repo.library(), app.today, &app.artwork);
         let wants = crate::screens::wanted(&app);
         assert!(order.iter().all(|id| wants.covers.contains(id)));
     }

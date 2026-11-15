@@ -957,6 +957,19 @@ fn capture_every_screen() {
                 albums(app, View::List);
             }),
         ),
+        // An artist searched under Songs: every track of their albums.
+        (
+            Screen::Library,
+            ("music-songs-search", |app| {
+                albums(app, View::Grid);
+                let _ = app.update(Message::Library(library::Message::MusicTab(
+                    library::MusicTab::Songs,
+                )));
+                let _ = app.update(Message::Library(library::Message::Search(
+                    "alice in".into(),
+                )));
+            }),
+        ),
         // Each music tab has its own sort; Albums and Songs can go by
         // artist.
         (

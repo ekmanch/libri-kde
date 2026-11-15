@@ -1,9 +1,10 @@
 //! Music by artist: the artist list, the Songs list (song entries, and
-//! under a search the rated album tracks it finds), and the matching
+//! under a search the album tracks it finds), and the matching
 //! behind the phone's replace dialogs (DESIGN.md section 5 of the phone's
 //! design).
 
 use crate::browse::Sort;
+use crate::lookup::TrackInfo;
 use crate::model::{Entry, EntryKind, MediaType, Track};
 
 /// Pinned after Z in the artist list.
@@ -98,18 +99,22 @@ pub fn artists<'a>(entries: &[&'a Entry], sort: Sort) -> Vec<Artist<'a>> {
     artists
 }
 
-/// A row on the Songs tab: a song entry, or a rated track of an album.
+/// A row on the Songs tab: a song entry, or a track of an album.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Song<'a> {
     Entry(&'a Entry),
-    Track { album: &'a Entry, track: &'a Track },
+    Track {
+        album: &'a Entry,
+        title: &'a str,
+        rating: Option<u8>,
+    },
 }
 
 impl<'a> Song<'a> {
     pub fn title(&self) -> &'a str {
         match self {
             Song::Entry(entry) => &entry.title,
-            Song::Track { track, .. } => &track.title,
+            Song::Track { title, .. } => title,
         }
     }
 
@@ -123,7 +128,7 @@ impl<'a> Song<'a> {
     pub fn rating(&self) -> Option<u8> {
         match self {
             Song::Entry(entry) => entry.rating,
-            Song::Track { track, .. } => track.rating,
+            Song::Track { rating, .. } => *rating,
         }
     }
 
@@ -138,33 +143,78 @@ impl<'a> Song<'a> {
     }
 }
 
+/// The search (a needle from `browse::search_needle`) names the entry's
+/// artist.
+pub fn names_artist(entry: &Entry, needle: &str) -> bool {
+    !needle.is_empty()
+        && entry
+            .creator
+            .as_deref()
+            .is_some_and(|artist| artist.to_lowercase().contains(needle))
+}
+
+/// Every track of `album`, rated or not, as its details list them: the
+/// fetched list in its order with the stored ratings matched by title,
+/// then the rated tracks that list lacks. Without a fetched list (not
+/// loaded yet, or the album has no online match) the stored tracks.
+fn tracks_of<'a>(album: &'a Entry, fetched: Option<&'a [TrackInfo]>) -> Vec<Song<'a>> {
+    let stored = album.tracks.as_deref().unwrap_or_default();
+    let row = |title: &'a str, rating| Song::Track {
+        album,
+        title,
+        rating,
+    };
+    let Some(fetched) = fetched else {
+        return stored.iter().map(|t| row(&t.title, t.rating)).collect();
+    };
+    let key = crate::lookup::text::track_title_key;
+    let listed = fetched.iter().map(|track| {
+        let rating = stored
+            .iter()
+            .find(|t| key(&t.title) == key(&track.title))
+            .and_then(|t| t.rating);
+        row(&track.title, rating)
+    });
+    let extra = stored
+        .iter()
+        .filter(|t| t.rating.is_some())
+        .filter(|t| !fetched.iter().any(|l| key(&l.title) == key(&t.title)))
+        .map(|t| row(&t.title, t.rating));
+    listed.chain(extra).collect()
+}
+
 /// The Songs tab, in the order of `entries` (the current sort). Without
 /// a search it lists song entries only: the songs saved on their own. A
-/// search also brings in the rated tracks of albums, right where their
-/// album would have been: every rated track of an artist the search
-/// names, and any rated track whose own title holds the search (that
-/// song, not the rest of its album).
-pub fn songs_matching<'a>(entries: &[&'a Entry], query: &str) -> Vec<Song<'a>> {
+/// search also brings in the tracks of albums, right where their album
+/// would have been: every track of an artist the search names, rated or
+/// not (`fetched` gives an album's track list once it is on this
+/// computer; until then its stored tracks stand in), and any rated track
+/// whose own title holds the search (that song, not the rest of its
+/// album).
+pub fn songs_matching<'a>(
+    entries: &[&'a Entry],
+    query: &str,
+    fetched: impl Fn(&'a Entry) -> Option<&'a [TrackInfo]>,
+) -> Vec<Song<'a>> {
     let needle = crate::browse::search_needle(query);
     let mut songs = Vec::new();
     for &entry in entries.iter().filter(|e| e.media == MediaType::Music) {
         if is_song(entry) {
             songs.push(Song::Entry(entry));
+        } else if names_artist(entry, &needle) {
+            songs.extend(tracks_of(entry, fetched(entry)));
         } else if !needle.is_empty() {
-            let by_artist = entry
-                .creator
-                .as_deref()
-                .is_some_and(|artist| artist.to_lowercase().contains(&needle));
             songs.extend(
                 entry
                     .tracks
                     .iter()
                     .flatten()
                     .filter(|track| track.rating.is_some())
-                    .filter(|track| by_artist || track.title.to_lowercase().contains(&needle))
+                    .filter(|track| track.title.to_lowercase().contains(&needle))
                     .map(|track| Song::Track {
                         album: entry,
-                        track,
+                        title: &track.title,
+                        rating: track.rating,
                     }),
             );
         }
@@ -325,7 +375,7 @@ mod tests {
     fn without_a_search_songs_are_song_entries_only() {
         let library = library();
         let entries: Vec<&Entry> = library.entries.iter().collect();
-        let songs = songs_matching(&entries, "");
+        let songs = songs_matching(&entries, "", |_| None);
         assert!(songs.iter().all(|s| matches!(s, Song::Entry(_))));
         let human_fly = songs.iter().find(|s| s.title() == "Human Fly").unwrap();
         assert_eq!(human_fly.subtitle(), "The Cramps · 1981");
@@ -347,25 +397,41 @@ mod tests {
                 .filter(|e| crate::browse::matches_search(e, query))
                 .collect()
         };
-        let songs = songs_matching(&found("alice in"), "alice in");
+        let songs = songs_matching(&found("alice in"), "alice in", |_| None);
         let titles: Vec<&str> = songs.iter().map(|s| s.title()).collect();
         assert_eq!(
             titles,
             ["Them Bones", "Rooster", "Down in a Hole"],
-            "every rated track by the artist"
+            "the stored tracks until the album's list is here"
         );
+
+        // With the album's list: every track by the artist, rated or
+        // not, in the album's order, each rating on its track.
+        let list = crate::lookup::fake::track_list("Alice in Chains", "Dirt").unwrap();
+        let all = songs_matching(&found("alice in"), "alice in", |album| {
+            (album.title == "Dirt").then_some(list.as_slice())
+        });
+        assert_eq!(all.len(), 13);
+        assert!(all.iter().any(|s| s.rating().is_none()), "unrated tracks");
+        assert_eq!(
+            all.iter().filter(|s| s.rating().is_some()).count(),
+            3,
+            "the three rated ones keep their ratings"
+        );
+        assert_eq!(all[0].title(), list[0].title);
+
         let rooster = songs[1];
         assert_eq!(rooster.entry().title, "Dirt", "a track opens its album");
         assert_eq!(rooster.subtitle(), "Alice in Chains · 1992");
 
-        let titles: Vec<&str> = songs_matching(&found("rooster"), "rooster")
+        let titles: Vec<&str> = songs_matching(&found("rooster"), "rooster", |_| None)
             .iter()
             .map(|s| s.title())
             .collect();
         assert_eq!(titles, ["Rooster"], "not the rest of the album");
 
         // An album found by its own title or a tag brings no tracks along.
-        let titles: Vec<&str> = songs_matching(&found("dirt"), "dirt")
+        let titles: Vec<&str> = songs_matching(&found("dirt"), "dirt", |_| None)
             .iter()
             .filter(|s| matches!(s, Song::Track { .. }))
             .map(|s| s.title())

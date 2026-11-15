@@ -20,6 +20,9 @@ fn msg(message: Message) -> AppMessage {
 const CELL_MAX_WIDTH: f32 = 190.0;
 const CELL_WIDTH: f32 = 173.0;
 const CELL_SPACING: f32 = 20.0;
+/// Under a song's cover in the grid: the gap, the title line and the
+/// artist line.
+const SONG_CAPTION: f32 = 46.0;
 /// An artist's card: the photo and two lines under it.
 const ARTIST_HEIGHT: f32 = CELL_WIDTH + 70.0;
 
@@ -150,7 +153,7 @@ fn tab_list<'a>(
             vec![super::entries::block_entries(app, &albums, view, tokens)]
         }
         MusicTab::Songs => {
-            let songs = music::songs_matching(&shown, &state.query);
+            let songs = state.songs(&shown, &app.artwork);
             if songs.is_empty() {
                 return empty("No songs here", tokens);
             }
@@ -305,7 +308,7 @@ fn song_block<'a>(
         View::Grid => grid(rows)
             .fluid(CELL_MAX_WIDTH)
             .spacing(20)
-            .height(grid::aspect_ratio(CELL_WIDTH, CELL_WIDTH + 28.0))
+            .height(grid::aspect_ratio(CELL_WIDTH, CELL_WIDTH + SONG_CAPTION))
             .into(),
         View::List => Column::with_children(rows).spacing(2).into(),
         View::Text => Column::with_children(rows).into(),
