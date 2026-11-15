@@ -1,0 +1,280 @@
+{
+  "about": "Test cases for the artist photo rules, shared by Libri desktop (src/covers/artists.rs) and the phone. Each section is a list of cases for one rule; the rules are in the desktop's docs/DESIGN.md, 'Artist photos'. Keep both copies byte-identical.",
+  "name_key": [
+    {"name": "Adele", "key": "adele"},
+    {"name": "  ADELE ", "key": "adele"},
+    {"name": "Beyoncé", "key": "beyonce"},
+    {"name": "Sigur Rós", "key": "sigur-ros"},
+    {"name": "Mötley Crüe", "key": "motley-crue"},
+    {"name": "The Beatles", "key": "beatles"},
+    {"name": "the beatles", "key": "beatles"},
+    {"name": "The The", "key": "the"},
+    {"name": "The", "key": "the"},
+    {"name": "Them", "key": "them"},
+    {"name": "Theory of a Deadman", "key": "theory-of-a-deadman"},
+    {"name": "Simon & Garfunkel", "key": "simon-and-garfunkel"},
+    {"name": "Simon and Garfunkel", "key": "simon-and-garfunkel"},
+    {"name": "Simon&Garfunkel", "key": "simon-and-garfunkel"},
+    {"name": "AC/DC", "key": "ac-dc"},
+    {"name": "Guns N' Roses", "key": "guns-n-roses"},
+    {"name": "Guns N’ Roses", "key": "guns-n-roses"},
+    {"name": "P!nk", "key": "p-nk"},
+    {"name": "blink-182", "key": "blink-182"},
+    {"name": "Florence + the Machine", "key": "florence-the-machine"},
+    {"name": "Godspeed You! Black Emperor", "key": "godspeed-you-black-emperor"},
+    {"name": "!!!", "key": ""},
+    {"name": "", "key": ""}
+  ],
+  "same_name": [
+    {"a": "The Rolling Stones", "b": "Rolling Stones", "same": true},
+    {"a": "Belle & Sebastian", "b": "belle and sebastian", "same": true},
+    {"a": "Björk", "b": "Bjork", "same": true},
+    {"a": "Ghost", "b": "Ghost B.C.", "same": false},
+    {"a": "Adele", "b": "Adele Roberts", "same": false},
+    {"a": "21", "b": "21 (Deluxe Edition)", "same": false},
+    {"a": "!!!", "b": "???", "same": false}
+  ],
+  "file_path": [
+    {"name": "Massive Attack", "path": "artists/massive-attack.jpg"},
+    {"name": "The Beatles", "path": "artists/the-beatles.jpg"},
+    {"name": "Simon & Garfunkel", "path": "artists/simon-garfunkel.jpg"},
+    {"name": "Beyoncé", "path": "artists/beyonce.jpg"},
+    {"name": "AC/DC", "path": "artists/ac-dc.jpg"},
+    {"name": "Guns N' Roses", "path": "artists/guns-n-roses.jpg"},
+    {"name": "Various Artists", "path": "artists/various-artists.jpg"},
+    {"name": "!!!", "path": null},
+    {"name": "", "path": null}
+  ],
+  "skipped": [
+    {"name": "Various Artists", "skipped": true},
+    {"name": "various artists", "skipped": true},
+    {"name": "Unknown artist", "skipped": true},
+    {"name": "Unknown Artist", "skipped": true},
+    {"name": "The Various Artists", "skipped": true},
+    {"name": "Various", "skipped": false},
+    {"name": "Adele", "skipped": false}
+  ],
+  "og_image": [
+    {
+      "html": "<html><head><meta property=\"og:title\" content=\"Adele on Apple Music\"><meta property=\"og:image\" content=\"https://is1-ssl.mzstatic.com/image/thumb/AMCArtistImages126/v4/aa/bb/cc/aabbcc/file.png/1200x630cw.png\"><meta property=\"og:image:width\" content=\"1200\"></head></html>",
+      "url": "https://is1-ssl.mzstatic.com/image/thumb/AMCArtistImages126/v4/aa/bb/cc/aabbcc/file.png/1200x630cw.png"
+    },
+    {
+      "html": "<meta content=\"https://example.com/a.png/1200x630cw.png\" property=\"og:image\" />",
+      "url": "https://example.com/a.png/1200x630cw.png"
+    },
+    {
+      "html": "<meta property=\"og:image:secure_url\" content=\"https://example.com/secure.png\">\n<meta property=\"og:image\" content=\"https://example.com/a.png?x=1&amp;y=2\">",
+      "url": "https://example.com/a.png?x=1&y=2"
+    },
+    {
+      "html": "<meta name=\"twitter:image\" content=\"https://example.com/t.png\">",
+      "url": null
+    },
+    {
+      "html": "<meta property=\"og:image\" content=\"\">",
+      "url": null
+    },
+    {
+      "html": "",
+      "url": null
+    }
+  ],
+  "photo_url": [
+    {
+      "og_image": "https://is1-ssl.mzstatic.com/image/thumb/AMCArtistImages126/v4/aa/bb/cc/aabbcc/file.png/1200x630cw.png",
+      "art": "photo",
+      "photo": "https://is1-ssl.mzstatic.com/image/thumb/AMCArtistImages126/v4/aa/bb/cc/aabbcc/file.png/640x640cc.jpg"
+    },
+    {
+      "og_image": "https://is5-ssl.mzstatic.com/image/thumb/Features115/v4/11/22/33/112233/mza_1.png/1200x630cw.png",
+      "art": "photo",
+      "photo": "https://is5-ssl.mzstatic.com/image/thumb/Features115/v4/11/22/33/112233/mza_1.png/640x640cc.jpg"
+    },
+    {
+      "og_image": "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/44/55/66/445566/cover.jpg/1200x630cw.png",
+      "art": "album",
+      "photo": null
+    },
+    {
+      "og_image": "https://is1-ssl.mzstatic.com/image/thumb/Video116/v4/77/88/99/778899/clip.jpg/1200x630cw.png",
+      "art": "unknown",
+      "photo": null
+    },
+    {
+      "og_image": "https://music.apple.com/assets/meta/apple-music.png",
+      "art": "unknown",
+      "photo": null
+    }
+  ],
+  "choose": [
+    {
+      "about": "One namesake that lists an owned album.",
+      "name": "Massive Attack",
+      "owned": ["Mezzanine"],
+      "candidates": [{"id": "1", "name": "Massive Attack", "albums": ["Blue Lines", "Mezzanine"]}],
+      "chosen": "1"
+    },
+    {
+      "about": "A single namesake still needs an owned album.",
+      "name": "Adele",
+      "owned": ["21"],
+      "candidates": [{"id": "1", "name": "Adele", "albums": ["Somebody Else's Songs"]}],
+      "chosen": null
+    },
+    {
+      "about": "The namesake with the most owned albums wins.",
+      "name": "Adele",
+      "owned": ["19", "21", "25"],
+      "candidates": [
+        {"id": "1", "name": "Adele", "albums": ["21"]},
+        {"id": "2", "name": "Adele", "albums": ["19", "21", "25", "30"]},
+        {"id": "3", "name": "Adele", "albums": ["Lieder"]}
+      ],
+      "chosen": "2"
+    },
+    {
+      "about": "A tie for the most is no match.",
+      "name": "Ghost",
+      "owned": ["Prequelle", "Impera"],
+      "candidates": [
+        {"id": "1", "name": "Ghost", "albums": ["Prequelle"]},
+        {"id": "2", "name": "Ghost", "albums": ["Impera"]}
+      ],
+      "chosen": null
+    },
+    {
+      "about": "Names are compared by their key, and other names never count.",
+      "name": "The Beatles",
+      "owned": ["Abbey Road"],
+      "candidates": [
+        {"id": "1", "name": "Beatles Tribute Band", "albums": ["Abbey Road", "Revolver"]},
+        {"id": "2", "name": "BEATLES", "albums": ["Abbey Road"]}
+      ],
+      "chosen": "2"
+    },
+    {
+      "about": "Album titles are compared by the same key.",
+      "name": "Sigur Rós",
+      "owned": ["Ágætis byrjun", "( )"],
+      "candidates": [{"id": "1", "name": "Sigur Ros", "albums": ["Agaetis Byrjun", "Takk…"]}],
+      "chosen": "1"
+    },
+    {
+      "about": "An edition note makes another title.",
+      "name": "Adele",
+      "owned": ["21"],
+      "candidates": [{"id": "1", "name": "Adele", "albums": ["21 (Deluxe Edition)"]}],
+      "chosen": null
+    },
+    {
+      "about": "An owned title counts once, however often it is saved or listed.",
+      "name": "Nirvana",
+      "owned": ["Nevermind", "nevermind", "In Utero"],
+      "candidates": [
+        {"id": "1", "name": "Nirvana", "albums": ["Nevermind", "Nevermind"]},
+        {"id": "2", "name": "Nirvana", "albums": ["In Utero"]}
+      ],
+      "chosen": null
+    },
+    {
+      "about": "Nothing owned, nothing chosen.",
+      "name": "Adele",
+      "owned": [],
+      "candidates": [{"id": "1", "name": "Adele", "albums": ["21"]}],
+      "chosen": null
+    },
+    {
+      "about": "No candidates.",
+      "name": "Adele",
+      "owned": ["21"],
+      "candidates": [],
+      "chosen": null
+    }
+  ],
+  "missing": [
+    {
+      "text": "{\n  \"version\": 1,\n  \"artists\": {}\n}\n",
+      "backfilled": null,
+      "slugs": []
+    },
+    {
+      "text": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"}\n  }\n}\n",
+      "backfilled": null,
+      "slugs": ["adele"]
+    },
+    {
+      "text": "{\n  \"version\": 1,\n  \"backfilled\": \"2026-11-16\",\n  \"artists\": {\n    \"ac-dc\": {\"name\": \"AC/DC\", \"tried\": \"2026-11-15\", \"reason\": \"no-photo\"},\n    \"acdc\": {\"name\": \"ACDC\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"},\n    \"sigur-ros\": {\"name\": \"Sigur Rós\", \"tried\": \"2026-11-16\", \"reason\": \"no-match\"},\n    \"the-quote-band\": {\"name\": \"The \\\"Quote\\\" Band\", \"tried\": \"2026-11-16\", \"reason\": \"no-photo\"}\n  }\n}\n",
+      "backfilled": "2026-11-16",
+      "slugs": ["ac-dc", "acdc", "sigur-ros", "the-quote-band"]
+    }
+  ],
+  "missing_rewritten": [
+    {
+      "read": "{\"artists\":{\"b\":{\"reason\":\"no-photo\",\"tried\":\"2026-11-15\",\"name\":\"B\"},\"a\":{\"name\":\"A\",\"tried\":\"2026-11-14\",\"reason\":\"no-match\"}},\"backfilled\":null,\"version\":1}",
+      "written": "{\n  \"version\": 1,\n  \"artists\": {\n    \"a\": {\"name\": \"A\", \"tried\": \"2026-11-14\", \"reason\": \"no-match\"},\n    \"b\": {\"name\": \"B\", \"tried\": \"2026-11-15\", \"reason\": \"no-photo\"}\n  }\n}\n"
+    }
+  ],
+  "missing_refused": [
+    {"text": "{\"version\": 2, \"artists\": {}}"},
+    {"text": "{\"artists\": {}}"},
+    {"text": "{\"version\": 1}"},
+    {"text": "{\"version\": 1, \"artists\": {\"a\": {\"name\": \"A\", \"tried\": \"2026-11\", \"reason\": \"no-match\"}}}"},
+    {"text": "{\"version\": 1, \"artists\": {\"a\": {\"name\": \"A\", \"tried\": \"2026-11-15\", \"reason\": \"offline\"}}}"},
+    {"text": "{\"version\": 1, \"artists\": {\"a\": {\"tried\": \"2026-11-15\", \"reason\": \"no-match\"}}}"},
+    {"text": "not json"}
+  ],
+  "due": [
+    {"tried": "2026-11-15", "today": "2026-11-15", "added": null, "due": false},
+    {"tried": "2026-11-15", "today": "2027-02-12", "added": null, "due": false},
+    {"tried": "2026-11-15", "today": "2027-02-13", "added": null, "due": true},
+    {"tried": "2026-11-15", "today": "2027-06-01", "added": null, "due": true},
+    {"tried": "2026-11-15", "today": "2026-11-20", "added": "2026-11-01", "due": false},
+    {"tried": "2026-11-15", "today": "2026-11-20", "added": "2026-11-15", "due": false},
+    {"tried": "2026-11-15", "today": "2026-11-20", "added": "2026-11-16", "due": true},
+    {"tried": "2026-11-15", "today": "2026-11-16", "added": "2026-11-16", "due": true}
+  ],
+  "cover_order": [
+    {
+      "about": "The most recently added album first.",
+      "saved": [
+        {"kind": "album", "added": "2026-01-10"},
+        {"kind": "album", "added": "2026-03-02"},
+        {"kind": "album", "added": "2025-12-24"}
+      ],
+      "order": [1, 0, 2]
+    },
+    {
+      "about": "Added on the same day: the one later in the file first.",
+      "saved": [
+        {"kind": "album", "added": "2026-03-02"},
+        {"kind": "album", "added": "2026-03-02"},
+        {"kind": "album", "added": "2026-01-10"}
+      ],
+      "order": [1, 0, 2]
+    },
+    {
+      "about": "Every album before any song, however new the song.",
+      "saved": [
+        {"kind": "song", "added": "2026-11-01"},
+        {"kind": "album", "added": "2024-05-05"},
+        {"kind": "song", "added": "2026-11-01"},
+        {"kind": "song", "added": "2025-02-02"}
+      ],
+      "order": [1, 2, 0, 3]
+    },
+    {
+      "about": "Songs alone.",
+      "saved": [
+        {"kind": "song", "added": "2025-02-02"},
+        {"kind": "song", "added": "2026-02-02"}
+      ],
+      "order": [1, 0]
+    },
+    {
+      "about": "Nothing saved, so initials.",
+      "saved": [],
+      "order": []
+    }
+  ]
+}

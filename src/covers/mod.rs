@@ -20,6 +20,7 @@
 //! and pushed with the commit that sets `cover_from` (`sync`). With the
 //! library kept on this computer the folder is all there is.
 
+pub mod artists;
 pub mod picture;
 pub mod source;
 

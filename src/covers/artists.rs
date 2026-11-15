@@ -1,0 +1,555 @@
+//! Artist photos: the rules, with nothing fetched or stored here.
+//!
+//! An artist has one fixed file in the library repo,
+//! `covers/artists/<slug>.jpg`, whoever put it there: fetched from the
+//! artist's Apple Music page, picked in Pick a cover or uploaded. With no
+//! file an artist shows a cover from the library, else their initials.
+//! `covers/artists/_missing.json` records "tried, nothing found", so no
+//! device asks Apple about the same artist again for ninety days.
+//!
+//! The phone follows the same rules, so every rule here is a pure
+//! function and its cases are in `assets/fixtures/artist_photos.json`,
+//! which both apps run (DESIGN.md "Artist photos").
+
+use std::collections::BTreeMap;
+
+use crate::model::Date;
+use crate::model::text::slugify;
+
+/// The folder under `covers/`.
+pub const FOLDER: &str = "artists";
+/// The record of artists tried with nothing found, in that folder.
+pub const MISSING_FILE: &str = "_missing.json";
+/// The last segment of a photo's URL as it is fetched and stored: Apple's
+/// 640 × 640 square JPEG.
+pub const PHOTO_SIZE: &str = "640x640cc.jpg";
+/// How long "nothing found" stands before the artist is tried again.
+pub const RETRY_DAYS: i64 = 90;
+/// The `_missing.json` format.
+pub const MISSING_VERSION: i64 = 1;
+
+/// A name as names and album titles are compared: case, accents and
+/// punctuation aside, "&" as "and", a leading "The" ignored. It is the
+/// slug of the name with " and " for each "&", without a leading "the-"
+/// (kept when nothing else is left: "The The" is "the"). Empty for a
+/// name with no letters or digits, which matches nothing.
+pub fn name_key(name: &str) -> String {
+    let key = slugify(&name.replace('&', " and "));
+    match key.strip_prefix("the-") {
+        Some(rest) if !rest.is_empty() => rest.to_owned(),
+        _ => key,
+    }
+}
+
+/// Whether two names or two album titles are the same by `name_key`.
+pub fn same_name(a: &str, b: &str) -> bool {
+    let key = name_key(a);
+    !key.is_empty() && key == name_key(b)
+}
+
+/// The artist's slug, the entry ids' slug of the name; `None` for a name
+/// with no letters or digits, which never gets a file.
+pub fn slug(name: &str) -> Option<String> {
+    let slug = slugify(name);
+    (!slug.is_empty()).then_some(slug)
+}
+
+/// The artist's file under `covers/`: "artists/massive-attack.jpg".
+pub fn file_path(name: &str) -> Option<String> {
+    slug(name).map(|slug| format!("{FOLDER}/{slug}.jpg"))
+}
+
+/// `_missing.json` under `covers/`.
+pub fn missing_path() -> String {
+    format!("{FOLDER}/{MISSING_FILE}")
+}
+
+/// Whether a path under `covers/` is in the artists folder, which the
+/// Unused covers check leaves alone.
+pub fn is_artist_path(path: &str) -> bool {
+    path.strip_prefix(FOLDER)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// The names no photo is ever looked for: "Various Artists" and "Unknown
+/// artist", compared like any name.
+pub fn is_skipped(name: &str) -> bool {
+    matches!(
+        name_key(name).as_str(),
+        "various-artists" | "unknown-artist"
+    )
+}
+
+/// The `og:image` of an artist's `music.apple.com` page: the `content`
+/// of the first `<meta>` whose `property` is exactly "og:image".
+pub fn og_image(html: &str) -> Option<String> {
+    let mut rest = html;
+    while let Some(at) = rest.find("<meta") {
+        let tag = &rest[at..];
+        let end = tag.find('>')?;
+        let (tag, after) = tag.split_at(end);
+        rest = after;
+        if attribute(tag, "property") == Some("og:image") {
+            return attribute(tag, "content")
+                .filter(|url| !url.is_empty())
+                .map(|url| url.replace("&amp;", "&"));
+        }
+    }
+    None
+}
+
+/// The value of `name="…"` in a tag.
+fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let mut rest = tag;
+    loop {
+        let at = rest.find(name)?;
+        let before = rest[..at].chars().next_back();
+        let value = rest[at + name.len()..].strip_prefix("=\"");
+        rest = &rest[at + name.len()..];
+        if before.is_some_and(char::is_whitespace)
+            && let Some(value) = value
+        {
+            return value.split_once('"').map(|(value, _)| value);
+        }
+    }
+}
+
+/// What an `og:image` shows, told by the bucket in its URL (the segment
+/// after `/image/thumb/`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Art {
+    /// `AMCArtistImages…` or `Features…`: a photo of the artist.
+    Photo,
+    /// `Music…`: an album cover Apple puts there for an artist without a
+    /// photo.
+    Album,
+    /// Any other bucket, which counts as no photo.
+    Unknown,
+}
+
+pub fn art_of(og_image: &str) -> Art {
+    let bucket = og_image
+        .split_once("/image/thumb/")
+        .map_or("", |(_, rest)| rest.split('/').next().unwrap_or_default());
+    if bucket.starts_with("AMCArtistImages") || bucket.starts_with("Features") {
+        Art::Photo
+    } else if bucket.starts_with("Music") {
+        Art::Album
+    } else {
+        Art::Unknown
+    }
+}
+
+/// The photo to fetch for an `og:image`: the same image as a 640 × 640
+/// square JPEG (the share card's last segment, `1200x630cw.png`, replaced
+/// by `640x640cc.jpg`); `None` unless the image is a photo of the artist.
+pub fn photo_url(og_image: &str) -> Option<String> {
+    if art_of(og_image) != Art::Photo {
+        return None;
+    }
+    let (image, size) = og_image.rsplit_once('/')?;
+    (!size.is_empty()).then(|| format!("{image}/{PHOTO_SIZE}"))
+}
+
+/// An Apple artist a name search found, with the titles of their albums.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Candidate {
+    pub id: String,
+    pub name: String,
+    pub albums: Vec<String>,
+}
+
+/// How many of `owned` (the album titles saved for the artist) the
+/// candidate lists, each owned title counted once.
+pub fn owned_count(candidate: &Candidate, owned: &[&str]) -> usize {
+    let listed: Vec<String> = candidate.albums.iter().map(|a| name_key(a)).collect();
+    let mut keys: Vec<String> = owned.iter().map(|title| name_key(title)).collect();
+    keys.sort();
+    keys.dedup();
+    keys.iter()
+        .filter(|key| !key.is_empty() && listed.contains(key))
+        .count()
+}
+
+/// The Apple artist that is the library's `name`: among the candidates
+/// of the same name, the one listing the most owned albums. One that
+/// lists none is no match, even as the only namesake, and a tie for the
+/// most is no match either.
+pub fn choose<'a>(
+    name: &str,
+    owned: &[&str],
+    candidates: &'a [Candidate],
+) -> Option<&'a Candidate> {
+    let mut counted: Vec<(usize, &Candidate)> = candidates
+        .iter()
+        .filter(|candidate| same_name(&candidate.name, name))
+        .map(|candidate| (owned_count(candidate, owned), candidate))
+        .filter(|(count, _)| *count > 0)
+        .collect();
+    counted.sort_by_key(|counted| std::cmp::Reverse(counted.0));
+    match counted.as_slice() {
+        [(_, only)] => Some(only),
+        [(best, first), (next, _), ..] if best > next => Some(first),
+        _ => None,
+    }
+}
+
+/// Why an artist has no photo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reason {
+    /// No Apple artist of the name lists an owned album, or two tie.
+    NoMatch,
+    /// The matched artist's page shows no photo of the artist.
+    NoPhoto,
+}
+
+impl Reason {
+    pub fn key(self) -> &'static str {
+        match self {
+            Reason::NoMatch => "no-match",
+            Reason::NoPhoto => "no-photo",
+        }
+    }
+
+    fn parse(key: &str) -> Option<Reason> {
+        match key {
+            "no-match" => Some(Reason::NoMatch),
+            "no-photo" => Some(Reason::NoPhoto),
+            _ => None,
+        }
+    }
+}
+
+/// One artist of `_missing.json`: the name as the library spells it,
+/// the day Apple was asked and what came of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tried {
+    pub name: String,
+    pub tried: Date,
+    pub reason: Reason,
+}
+
+impl Tried {
+    /// Whether the artist is asked about again on `today`: ninety days
+    /// after the try, or sooner once an entry by the artist was added on
+    /// a later day than the try (`added` is the latest `added` among the
+    /// artist's entries). The device that adds an entry tries at once,
+    /// whatever the day.
+    pub fn is_due(&self, today: Date, added: Option<Date>) -> bool {
+        self.tried.days_until(today) >= RETRY_DAYS || added.is_some_and(|added| added > self.tried)
+    }
+}
+
+/// `_missing.json`: the artists tried with nothing found, by slug, and
+/// the day the desktop's backfill finished.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Missing {
+    /// Written by the backfill's last batch; the phone fetches nothing
+    /// until it is there.
+    pub backfilled: Option<Date>,
+    pub artists: BTreeMap<String, Tried>,
+}
+
+impl Missing {
+    /// Reads the file. Anything but version 1 in the shape below is an
+    /// error, and such a file is left as it is.
+    pub fn decode(text: &str) -> Result<Missing, String> {
+        let json: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        if json["version"].as_i64() != Some(MISSING_VERSION) {
+            return Err(format!("not version {MISSING_VERSION}"));
+        }
+        let date = |value: &serde_json::Value, what: &str| {
+            value
+                .as_str()
+                .and_then(Date::parse)
+                .ok_or_else(|| format!("{what} is not a date"))
+        };
+        let backfilled = match json.get("backfilled") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(value) => Some(date(value, "backfilled")?),
+        };
+        let mut artists = BTreeMap::new();
+        let listed = json["artists"].as_object().ok_or("no artists")?;
+        for (slug, entry) in listed {
+            let name = entry["name"]
+                .as_str()
+                .ok_or_else(|| format!("{slug} has no name"))?;
+            let reason = entry["reason"]
+                .as_str()
+                .and_then(Reason::parse)
+                .ok_or_else(|| format!("{slug} has no known reason"))?;
+            artists.insert(
+                slug.clone(),
+                Tried {
+                    name: name.to_owned(),
+                    tried: date(&entry["tried"], "tried")?,
+                    reason,
+                },
+            );
+        }
+        Ok(Missing {
+            backfilled,
+            artists,
+        })
+    }
+
+    /// The file's bytes: two-space indent, `version`, then `backfilled`
+    /// when set, then `artists` with one artist per line in slug order
+    /// (by code unit; a slug is ASCII), each with `name`, `tried` and
+    /// `reason` in that order, and a newline at the end.
+    pub fn encode(&self) -> String {
+        let quoted = |text: &str| serde_json::Value::from(text).to_string();
+        let mut out = format!("{{\n  \"version\": {MISSING_VERSION},\n");
+        if let Some(day) = self.backfilled {
+            out.push_str(&format!("  \"backfilled\": \"{day}\",\n"));
+        }
+        if self.artists.is_empty() {
+            out.push_str("  \"artists\": {}\n}\n");
+            return out;
+        }
+        out.push_str("  \"artists\": {\n");
+        let lines: Vec<String> = self
+            .artists
+            .iter()
+            .map(|(slug, tried)| {
+                format!(
+                    "    {}: {{\"name\": {}, \"tried\": \"{}\", \"reason\": \"{}\"}}",
+                    quoted(slug),
+                    quoted(&tried.name),
+                    tried.tried,
+                    tried.reason.key()
+                )
+            })
+            .collect();
+        out.push_str(&lines.join(",\n"));
+        out.push_str("\n  }\n}\n");
+        out
+    }
+
+    /// Whether Apple is asked about the artist with `slug` on `today`:
+    /// always without an entry here, else by `Tried::is_due`.
+    pub fn is_due(&self, slug: &str, today: Date, added: Option<Date>) -> bool {
+        self.artists
+            .get(slug)
+            .is_none_or(|tried| tried.is_due(today, added))
+    }
+}
+
+/// One of an artist's entries, as the library cover is picked from them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Saved {
+    pub song: bool,
+    pub added: Date,
+}
+
+/// The order in which an artist's entries lend their cover when the
+/// artist has no file, as indexes into `saved` (the artist's entries in
+/// the file's order): the albums, most recently added first, then the
+/// songs (a song shows its album's cover) the same way; of two added on
+/// the same day the one later in the file comes first. The artist shows
+/// the first of them that has a cover, else their initials.
+pub fn cover_order(saved: &[Saved]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..saved.len()).collect();
+    order.sort_by(|&a, &b| {
+        saved[a]
+            .song
+            .cmp(&saved[b].song)
+            .then(saved[b].added.cmp(&saved[a].added))
+            .then(b.cmp(&a))
+    });
+    order
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    use super::*;
+
+    /// The cases both apps run.
+    const CASES: &str = include_str!("../../assets/fixtures/artist_photos.json");
+
+    fn cases(section: &str) -> Vec<Value> {
+        let json: Value = serde_json::from_str(CASES).expect("the fixture is JSON");
+        let cases = json[section].as_array().cloned().unwrap_or_default();
+        assert!(!cases.is_empty(), "no cases under {section}");
+        cases
+    }
+
+    fn text<'a>(case: &'a Value, key: &str) -> &'a str {
+        case[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("{key} missing in {case}"))
+    }
+
+    fn day(case: &Value, key: &str) -> Date {
+        Date::parse(text(case, key)).expect("a date")
+    }
+
+    fn strings<'a>(case: &'a Value, key: &str) -> Vec<&'a str> {
+        case[key]
+            .as_array()
+            .map(|list| list.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn names_are_compared_by_their_key() {
+        for case in cases("name_key") {
+            assert_eq!(name_key(text(&case, "name")), text(&case, "key"), "{case}");
+        }
+        for case in cases("same_name") {
+            assert_eq!(
+                same_name(text(&case, "a"), text(&case, "b")),
+                case["same"].as_bool().unwrap(),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_artist_has_one_file_unless_the_name_has_no_letters_or_digits() {
+        for case in cases("file_path") {
+            assert_eq!(
+                file_path(text(&case, "name")).as_deref(),
+                case["path"].as_str(),
+                "{case}"
+            );
+        }
+        assert!(is_artist_path("artists/adele.jpg"));
+        assert!(is_artist_path("artists/_missing.json"));
+        assert!(!is_artist_path("music/artists.jpg"));
+        assert!(!is_artist_path("artists-old/adele.jpg"));
+    }
+
+    #[test]
+    fn two_names_are_never_looked_for() {
+        for case in cases("skipped") {
+            assert_eq!(
+                is_skipped(text(&case, "name")),
+                case["skipped"].as_bool().unwrap(),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_page_gives_its_share_image() {
+        for case in cases("og_image") {
+            assert_eq!(
+                og_image(text(&case, "html")).as_deref(),
+                case["url"].as_str(),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_bucket_tells_a_photo_from_album_art() {
+        for case in cases("photo_url") {
+            let art = match art_of(text(&case, "og_image")) {
+                Art::Photo => "photo",
+                Art::Album => "album",
+                Art::Unknown => "unknown",
+            };
+            assert_eq!(art, text(&case, "art"), "{case}");
+            assert_eq!(
+                photo_url(text(&case, "og_image")).as_deref(),
+                case["photo"].as_str(),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_namesake_with_the_most_owned_albums_is_the_artist() {
+        for case in cases("choose") {
+            let candidates: Vec<Candidate> = case["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| Candidate {
+                    id: text(c, "id").to_owned(),
+                    name: text(c, "name").to_owned(),
+                    albums: strings(c, "albums")
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
+                })
+                .collect();
+            let chosen = choose(text(&case, "name"), &strings(&case, "owned"), &candidates);
+            assert_eq!(
+                chosen.map(|c| c.id.as_str()),
+                case["chosen"].as_str(),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_missing_file_is_written_in_one_form() {
+        for case in cases("missing") {
+            let written = text(&case, "text");
+            let missing = Missing::decode(written).unwrap_or_else(|e| panic!("{e}: {case}"));
+            assert_eq!(missing.encode(), written, "{case}");
+            assert_eq!(
+                missing.backfilled.map(|d| d.to_string()).as_deref(),
+                case["backfilled"].as_str(),
+                "{case}"
+            );
+            let slugs: Vec<&str> = missing.artists.keys().map(String::as_str).collect();
+            assert_eq!(slugs, strings(&case, "slugs"), "{case}");
+        }
+        // Another order and other spacing read the same and are written
+        // in the one form.
+        for case in cases("missing_rewritten") {
+            let missing = Missing::decode(text(&case, "read")).expect("readable");
+            assert_eq!(missing.encode(), text(&case, "written"), "{case}");
+        }
+        for case in cases("missing_refused") {
+            assert!(Missing::decode(text(&case, "text")).is_err(), "{case}");
+        }
+    }
+
+    #[test]
+    fn nothing_found_stands_for_ninety_days_or_until_something_is_added() {
+        for case in cases("due") {
+            let tried = Tried {
+                name: "Adele".into(),
+                tried: day(&case, "tried"),
+                reason: Reason::NoMatch,
+            };
+            let added = case["added"].as_str().and_then(Date::parse);
+            assert_eq!(
+                tried.is_due(day(&case, "today"), added),
+                case["due"].as_bool().unwrap(),
+                "{case}"
+            );
+        }
+        let none = Missing::default();
+        assert!(none.is_due("adele", Date::parse("2026-11-15").unwrap(), None));
+    }
+
+    #[test]
+    fn the_library_cover_is_the_latest_album_then_the_latest_song() {
+        for case in cases("cover_order") {
+            let saved: Vec<Saved> = case["saved"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|entry| Saved {
+                    song: text(entry, "kind") == "song",
+                    added: day(entry, "added"),
+                })
+                .collect();
+            let order: Vec<u64> = cover_order(&saved).into_iter().map(|i| i as u64).collect();
+            let expected: Vec<u64> = case["order"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_u64)
+                .collect();
+            assert_eq!(order, expected, "{case}");
+        }
+    }
+}
