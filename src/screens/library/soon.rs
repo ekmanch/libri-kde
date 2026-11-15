@@ -839,7 +839,7 @@ fn list<'a>(
     }
     let view = state.view_mode();
     let names: Vec<String> = groups.iter().map(|g| g.rail(app.today)).collect();
-    let on_rail = (groups.len() >= 2).then(|| rail::Sections::new(names, false));
+    let on_rail = (groups.len() >= 2).then(|| rail::Sections::new(names, false).wide());
     let room = on_rail.as_ref().map_or(rail::LEFT, rail::Sections::room);
     let mut children: Vec<Element<'a, AppMessage>> = if view == View::Grid {
         vec![tiles(app, &groups, slice, tokens)]
@@ -2348,7 +2348,7 @@ mod tests {
         let groups = page_groups(state, &lists);
         assert!(groups.len() >= 2);
         let names = groups.iter().map(|g| g.rail(app.today)).collect();
-        let room = rail::Sections::new(names, false).room();
+        let room = rail::Sections::new(names, false).wide().room();
         let rows = grid_rows(state.list_width, room);
         let keys: Vec<String> = groups
             .iter()
@@ -2387,7 +2387,7 @@ mod tests {
         let lists = Lists::of(&app);
         let groups = page_groups(state, &lists);
         let names: Vec<String> = groups.iter().map(|g| g.rail(app.today)).collect();
-        let room = rail::Sections::new(names.clone(), false).room();
+        let room = rail::Sections::new(names.clone(), false).wide().room();
         let rows = grid_rows(state.list_width, room);
         // A month, since a year or TBD can also be the date under a tile.
         let group = names

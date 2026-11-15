@@ -995,6 +995,66 @@ fn capture_every_screen() {
                 )));
             }),
         ),
+        // A rail for every sort (canvas 2026-11-15, the "Rail: …" demo
+        // starts): the artists by count, the albums by artist and by
+        // when they were added, the songs by year.
+        (
+            Screen::Library,
+            ("music-artists-most-songs-rail", |app| {
+                app.library.force_long = true;
+                show_type(app, MediaType::Music);
+                let _ = app.update(Message::Library(library::Message::Sort(Sort::MostSongs)));
+                measure(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("music-albums-rail-artist", |app| {
+                app.library.force_long = true;
+                albums(app, View::Grid);
+                let _ = app.update(Message::Library(library::Message::Sort(Sort::ArtistAz)));
+                measure(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("music-albums-rail-added", |app| {
+                app.library.force_long = true;
+                albums(app, View::List);
+                let _ = app.update(Message::Library(library::Message::Sort(Sort::NewestAdded)));
+                measure(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("music-songs-rail-year", |app| {
+                app.library.force_long = true;
+                albums(app, View::List);
+                let _ = app.update(Message::Library(library::Message::MusicTab(
+                    library::MusicTab::Songs,
+                )));
+                let _ = app.update(Message::Library(library::Message::Sort(Sort::YearNewest)));
+                measure(app);
+            }),
+        ),
+        // A rail with room for five labels only: decades in place of the
+        // years, thinned, the bubble on one the rail skips.
+        (
+            Screen::Library,
+            ("library-rail-thinned", |app| {
+                app.library.force_long = true;
+                show_type(app, MediaType::Movies);
+                let _ = app.update(Message::Library(library::Message::SetView(View::List)));
+                let _ = app.update(Message::Library(library::Message::Sort(Sort::YearNewest)));
+                measure(app);
+                app.library.viewport = 120.0;
+                let _ = app.update(Message::Library(library::Message::JumpToSection {
+                    label: "2010s".into(),
+                    offset: 0.0,
+                    held: true,
+                }));
+            }),
+        ),
         (
             Screen::Library,
             ("cover-viewer-album", |app| {

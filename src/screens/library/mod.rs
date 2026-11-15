@@ -1333,6 +1333,13 @@ impl State {
         self.force_long || (self.viewport > 0.0 && rows as f32 * row_height >= 3.0 * self.viewport)
     }
 
+    /// How many labels the section rail has room for beside the list as
+    /// it is measured now, so a resized window picks the step of the
+    /// sort's ladder again (`browse::sections`).
+    pub fn rail_fits(&self) -> usize {
+        ui::section_rail::fits(self.viewport)
+    }
+
     /// The long-list rule for a grid `height` px tall, which has no row
     /// height to go by: three screens or more.
     pub fn is_tall(&self, height: f32) -> bool {

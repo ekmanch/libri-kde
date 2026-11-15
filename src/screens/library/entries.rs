@@ -64,8 +64,8 @@ const SIDE: f32 = rail::LEFT;
 /// The list's padding above its first row.
 pub(super) const TOP: f32 = 4.0;
 
-/// A long list of one type in the phone's sections, which follow the sort
-/// (`browse::sections`), with the section rail and the room the list
+/// A long list of one type in sections, which follow the sort
+/// (`browse::row_sections`), with the section rail and the room the list
 /// leaves for it at its right. The text and list views get a header per
 /// section; the grid has the rail alone, its cards in one block.
 fn sectioned<'a>(
@@ -75,52 +75,135 @@ fn sectioned<'a>(
     tokens: &Tokens,
 ) -> Option<(Element<'a, AppMessage>, f32)> {
     let state = &app.library;
-    state.single()?;
-    let sections = browse::row_sections(state.current_sort(), &listing.rows, app.today);
-    if sections.len() < 2 {
-        return None;
-    }
-    let names = sections.iter().map(|s| s.short.clone()).collect();
-    let on_rail = rail::Sections::new(names, state.current_sort() == Sort::TitleAz);
-    let room = on_rail.room();
-    if view == View::Grid {
-        let rows = rail::GridRows::new(
-            state.list_width - SIDE - room,
-            CARD_MAX_WIDTH,
-            CARD_SPACING,
-            CARD_WIDTH / CARD_HEIGHT,
-        );
-        if !state.is_tall(rows.height(listing.rows.len())) {
-            return None;
-        }
-        let counts: Vec<usize> = sections.iter().map(|s| s.rows.len()).collect();
-        let on_rail = on_rail.in_grid(state, &counts, rows);
-        let cards = block(app, &listing.rows, view, tokens);
-        let list = scrolling([cards], vec![on_rail.view(state, tokens)], room);
-        return Some((list, room));
-    }
-    if !state.is_long(listing.shown.len(), view) {
-        return None;
-    }
-    let children = sections.iter().map(|section| {
-        // The count line counts entries, not rows.
-        let entries: usize = section
-            .rows
-            .iter()
+    let media = state.single()?;
+    let sort = state.current_sort();
+    let list = Sectioned {
+        sections: browse::row_sections(sort, &listing.rows, state.rail_fits()),
+        alphabet: sort == Sort::TitleAz,
+        // The long-list rule and the count lines count entries, not rows.
+        entries: listing.shown.len(),
+        cell: card_cell(media),
+    };
+    let entries = |rows: &[Row<'a>]| {
+        rows.iter()
             .map(|row| match row {
                 Row::Entry(_) => 1,
                 Row::Series(group) => group.parts.len(),
             })
-            .sum();
-        column![
-            section_header(&section.label, entries, tokens),
-            block(app, &section.rows, view, tokens)
-        ]
-        .into()
+            .sum()
+    };
+    let (children, on_rail, room) = list.view(app, view, tokens, entries, |rows| {
+        block(app, rows, view, tokens)
     });
-    let on_rail = on_rail.in_list(state);
-    let list = scrolling(children, vec![on_rail.view(state, tokens)], room);
-    Some((list, room))
+    Some((scrolling(children, vec![on_rail?], room), room))
+}
+
+/// The cells of a fluid grid: at most `max_width` wide, `spacing` apart
+/// and `ratio` (width over height) in shape.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Cell {
+    pub max_width: f32,
+    pub spacing: f32,
+    pub ratio: f32,
+}
+
+/// The cells of the grid of a type's entries (`block`).
+pub(super) fn card_cell(media: MediaType) -> Cell {
+    let height = if ui::cover::is_square(media) {
+        ALBUM_CARD_HEIGHT
+    } else {
+        CARD_HEIGHT
+    };
+    Cell {
+        max_width: CARD_MAX_WIDTH,
+        spacing: CARD_SPACING,
+        ratio: CARD_WIDTH / height,
+    }
+}
+
+/// A list of one kind of thing (rows, artists, songs) in the sections of
+/// its sort, as every list of one type shows them.
+pub(super) struct Sectioned<T> {
+    pub sections: Vec<browse::ListSection<T>>,
+    /// The rail lists "#" and A to Z: the orders by title and by artist.
+    pub alphabet: bool,
+    /// How many entries the list holds, for the long-list rule in the
+    /// text and list views.
+    pub entries: usize,
+    /// The grid's cells, to find the rows its sections start in.
+    pub cell: Cell,
+}
+
+impl<T: Clone> Sectioned<T> {
+    /// The list's children, its section rail if it has one, and the room
+    /// it leaves at its right. Once the list is long (three screens) and
+    /// has two sections or more it gets the rail, and in the text and
+    /// list views a header per section with the rail's label and
+    /// `count`; else it is one `block`.
+    pub fn view<'a>(
+        self,
+        app: &'a App,
+        view: View,
+        tokens: &Tokens,
+        count: impl Fn(&[T]) -> usize,
+        block: impl Fn(&[T]) -> Element<'a, AppMessage>,
+    ) -> (
+        Vec<Element<'a, AppMessage>>,
+        Option<Element<'a, AppMessage>>,
+        f32,
+    ) {
+        let state = &app.library;
+        let Sectioned {
+            sections,
+            alphabet,
+            entries,
+            cell,
+        } = self;
+        let names = sections.iter().map(|s| s.label.clone()).collect();
+        let on_rail = rail::Sections::fitted(names, alphabet, state.rail_fits());
+        let room = on_rail.room();
+        let long = sections.len() >= 2
+            && if view == View::Grid {
+                let rows = grid_rows(state.list_width, room, cell);
+                let cards = sections.iter().map(|s| s.items.len()).sum();
+                state.is_tall(rows.height(cards))
+            } else {
+                state.is_long(entries, view)
+            };
+        if !long || view == View::Grid {
+            let items: Vec<T> = sections.iter().flat_map(|s| s.items.clone()).collect();
+            let on_rail = long.then(|| {
+                let counts: Vec<usize> = sections.iter().map(|s| s.items.len()).collect();
+                let rows = grid_rows(state.list_width, room, cell);
+                on_rail.in_grid(state, &counts, rows).view(state, tokens)
+            });
+            let room = if long { room } else { SIDE };
+            return (vec![block(&items)], on_rail, room);
+        }
+        let children = sections
+            .iter()
+            .map(|section| {
+                column![
+                    section_header(&section.label, count(&section.items), tokens),
+                    block(&section.items)
+                ]
+                .into()
+            })
+            .collect();
+        let on_rail = on_rail.in_list(state).view(state, tokens);
+        (children, Some(on_rail), room)
+    }
+}
+
+/// The rows of a grid of `cell`s in a list `list_width` wide that leaves
+/// `room` at its right.
+fn grid_rows(list_width: f32, room: f32, cell: Cell) -> rail::GridRows {
+    rail::GridRows::new(
+        list_width - SIDE - room,
+        cell.max_width,
+        cell.spacing,
+        cell.ratio,
+    )
 }
 
 /// One type in one block, or All and several types grouped by type, in
@@ -201,8 +284,9 @@ pub(super) fn scrolling<'a>(
     layers.into()
 }
 
-/// A long-list section's heading: the decade, letter or rating in gray
-/// caps, and the count.
+/// A long-list section's heading: the rail's label (a letter, a year, a
+/// rating, a month, a count) in the gray of the caps headers, as the rail
+/// writes it ("Nov 26", "2010s"), and the count.
 pub(super) fn section_header<'a>(
     label: &str,
     count: usize,
@@ -210,7 +294,7 @@ pub(super) fn section_header<'a>(
 ) -> Element<'a, AppMessage> {
     container(
         row![
-            text(label.to_uppercase())
+            text(label.to_owned())
                 .size(theme::size::SECTION)
                 .font(font::BOLD)
                 .color(tokens.sub),

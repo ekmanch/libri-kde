@@ -357,6 +357,16 @@ impl Sort {
         matches!(self, Sort::MostAlbums | Sort::MostSongs)
     }
 
+    /// How many steps the sort's ladder of sections has, from fine to
+    /// coarse (`section_label`, `count_label`): letters and ratings have
+    /// the one.
+    pub fn steps(self) -> usize {
+        match self {
+            Sort::TitleAz | Sort::ArtistAz | Sort::RatingHighest => 1,
+            _ => 2,
+        }
+    }
+
     /// The word for the sort in `preferences.json`.
     pub fn key(self) -> &'static str {
         match self {
@@ -604,117 +614,239 @@ pub fn in_series_order(mut parts: Vec<&Entry>) -> Vec<&Entry> {
     parts
 }
 
-/// A section of a long list: its header, the rail's short label and its
-/// entries, in the list's order.
+/// A section of a long list: its label, on its header and on the rail
+/// alike, and what it holds, in the list's order.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ListSection<'a> {
+pub struct ListSection<T> {
     pub label: String,
-    pub short: String,
-    pub entries: Vec<&'a Entry>,
+    pub items: Vec<T>,
 }
 
-/// A section of a long list of rows (series folded), by each row's lead.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RowSection<'a> {
-    pub label: String,
-    pub short: String,
-    pub rows: Vec<Row<'a>>,
-}
-
-/// [`sections`] over rows: a series row files where its lead does.
-pub fn row_sections<'a>(sort: Sort, rows: &[Row<'a>], today: Date) -> Vec<RowSection<'a>> {
-    let mut sections: Vec<RowSection<'a>> = Vec::new();
-    for row in rows {
-        let (label, short) = section_key(sort, row.lead(), today);
-        match sections.last_mut() {
-            Some(last) if last.label == label => last.rows.push(row.clone()),
-            _ => sections.push(RowSection {
-                label,
-                short,
-                rows: vec![row.clone()],
-            }),
-        }
-    }
-    sections
-}
-
-/// The phone's long-list sections of `entries`, already in `sort` order:
-/// decades for the year orders (Older before 1960, undated last), months
-/// of this year and then years for newest added, first letters for the
-/// title order (# for digits), and the ratings down to Unrated. Entries in
-/// a row with the same key share a section.
-pub fn sections<'a>(sort: Sort, entries: &[&'a Entry], today: Date) -> Vec<ListSection<'a>> {
-    let mut sections: Vec<ListSection<'a>> = Vec::new();
-    for &entry in entries {
-        let (label, short) = section_key(sort, entry, today);
-        match sections.last_mut() {
-            Some(last) if last.label == label => last.entries.push(entry),
-            _ => sections.push(ListSection {
-                label,
-                short,
-                entries: vec![entry],
-            }),
-        }
-    }
-    sections
-}
-
-/// The section `entry` is in under `sort`: its header and its short label
-/// for the rail.
-pub fn section_key(sort: Sort, entry: &Entry, today: Date) -> (String, String) {
-    match sort {
-        Sort::TitleAz => {
-            let initial = title_initial(&entry.title).to_string();
-            (initial.clone(), initial)
-        }
-        Sort::ArtistAz => {
-            let (_, key) = crate::music::artist_key(crate::music::artist_of(entry));
-            let initial = title_initial(&key).to_string();
-            (initial.clone(), initial)
-        }
-        Sort::YearNewest | Sort::YearOldest => match entry.year() {
-            None => ("Not released yet".into(), "None".into()),
-            Some(year) if year < 1960 => ("Older".into(), "Older".into()),
-            Some(year) => {
-                let decade = format!("{}s", year / 10 * 10);
-                (decade.clone(), decade)
+/// `items`, already in order, in sections: what follows one another under
+/// the same label shares one. `label` names an item's section at a step
+/// of the sort's ladder (0 the finest, `steps` of them), and the list
+/// takes the finest step whose sections a rail with room for `fits`
+/// labels can show, else the coarsest (which the rail then thins,
+/// [`rail_labels`]).
+pub fn sections<T: Clone>(
+    items: &[T],
+    steps: usize,
+    fits: usize,
+    label: impl Fn(&T, usize) -> String,
+) -> Vec<ListSection<T>> {
+    let at = |step: usize| {
+        let mut sections: Vec<ListSection<T>> = Vec::new();
+        for item in items {
+            let label = label(item, step);
+            match sections.last_mut() {
+                Some(last) if last.label == label => last.items.push(item.clone()),
+                _ => sections.push(ListSection {
+                    label,
+                    items: vec![item.clone()],
+                }),
             }
+        }
+        sections
+    };
+    let mut sections = at(0);
+    for step in 1..steps {
+        if sections.len() <= fits {
+            break;
+        }
+        sections = at(step);
+    }
+    sections
+}
+
+/// [`sections`] of entries in `sort` order, by [`section_label`].
+pub fn entry_sections<'a>(
+    sort: Sort,
+    entries: &[&'a Entry],
+    fits: usize,
+) -> Vec<ListSection<&'a Entry>> {
+    sections(entries, sort.steps(), fits, |entry, step| {
+        section_label(sort, entry, step)
+    })
+}
+
+/// [`sections`] of rows (series folded): a series row files where its
+/// lead does.
+pub fn row_sections<'a>(sort: Sort, rows: &[Row<'a>], fits: usize) -> Vec<ListSection<Row<'a>>> {
+    sections(rows, sort.steps(), fits, |row, step| {
+        section_label(sort, row.lead(), step)
+    })
+}
+
+/// The label for what a list has no value for: an entry with no rating
+/// under the rating order.
+pub const NO_VALUE: &str = "–";
+/// The label of the entries with no release year under the year orders.
+pub const NO_YEAR: &str = "?";
+/// Various Artists' own section in the orders by artist, after the
+/// letters.
+pub const VARIOUS_SECTION: &str = "VA";
+
+/// The section `entry` is in under `sort`, at `step` of the sort's ladder
+/// (decided 2026-11-15, the canvas's "Rail for every sort"). By title or
+/// by artist: the first letter, "#" for a digit (Various Artists on its
+/// own as "VA"). By year: the year, then the decade ("2010s"), "?" with
+/// no year. Newest added: the month ("Nov 26"), then the year. By rating:
+/// 10 to 1, then "–" for unrated.
+pub fn section_label(sort: Sort, entry: &Entry, step: usize) -> String {
+    match sort {
+        Sort::TitleAz => title_initial(&entry.title).to_string(),
+        Sort::ArtistAz => artist_initial(crate::music::artist_of(entry)),
+        Sort::YearNewest | Sort::YearOldest => match entry.year() {
+            None => NO_YEAR.into(),
+            Some(year) if step == 0 => year.to_string(),
+            Some(year) => format!("{}s", year / 10 * 10),
         },
-        Sort::NewestAdded if entry.added.year == today.year => {
-            let month = entry.added.month_name();
-            (month.into(), month[..3].into())
+        Sort::NewestAdded if step == 0 => {
+            let added = entry.added;
+            format!("{} {:02}", &added.month_name()[..3], added.year % 100)
         }
-        Sort::NewestAdded => {
-            let year = entry.added.year.to_string();
-            (year.clone(), year)
-        }
+        Sort::NewestAdded => entry.added.year.to_string(),
         Sort::RatingHighest => match entry.rating {
-            Some(rating) => (rating.to_string(), rating.to_string()),
-            None => ("Unrated".into(), "None".into()),
+            Some(rating) => rating.to_string(),
+            None => NO_VALUE.into(),
         },
-        // One run: no sections and no rail, as on the phone.
-        Sort::MostAlbums | Sort::MostSongs => (sort.label().into(), "Most".into()),
+        // Artists are counted, entries are not: one run.
+        Sort::MostAlbums | Sort::MostSongs => sort.label().into(),
+    }
+}
+
+/// The section of an artist by name: the first letter with a leading
+/// "The" ignored, and Various Artists on its own.
+pub fn artist_initial(name: &str) -> String {
+    if name == crate::music::VARIOUS_ARTISTS {
+        return VARIOUS_SECTION.into();
+    }
+    let (_, key) = crate::music::artist_key(name);
+    title_initial(&key).to_string()
+}
+
+/// The ranges the counts of five and more fall into at the ladder's
+/// coarse step, by their lower ends; the last has no upper end.
+const COUNT_RANGES: [usize; 5] = [5, 10, 20, 50, 100];
+
+/// The section of an artist with `count` albums or songs saved, at `step`
+/// of the ladder, in a list whose highest count is `most`: the exact
+/// count, then the ranges "5–9", "10–19", "20–49", "50–99" and "100+".
+/// Counts under five stay exact, and the highest range the list reaches
+/// reads as its lower end with a plus ("50+").
+pub fn count_label(count: usize, step: usize, most: usize) -> String {
+    let range = |n: usize| COUNT_RANGES.iter().rposition(|&low| n >= low);
+    match range(count) {
+        Some(index) if step > 0 => {
+            let low = COUNT_RANGES[index];
+            match COUNT_RANGES.get(index + 1) {
+                Some(next) if range(most) != Some(index) => format!("{low}–{}", next - 1),
+                _ => format!("{low}+"),
+            }
+        }
+        _ => count.to_string(),
     }
 }
 
 /// The rail's alphabet in the title order: "#" for digits, then A to Z.
-const RAIL_ALPHABET: &str = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+pub const RAIL_ALPHABET: &str = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-/// The section rail's labels for a list whose sections have the short
-/// labels `sections`, in the list's order: each with its section, or
-/// `None` for a letter the list has nothing under. With `alphabet` (the
-/// title order, the artists) the rail always shows "#" and A to Z, the
-/// missing letters filled in where they belong; a section outside the
-/// alphabet ("VA", "Å") keeps its place in the list, after Z when no
-/// letter follows it. The other orders list their sections alone.
-pub fn rail_labels(sections: &[String], alphabet: bool) -> Vec<(String, Option<usize>)> {
+/// What stands on the rail for the sections thinned away between two
+/// labels.
+pub const RAIL_SKIPPED: &str = "•";
+
+/// One label of the section rail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RailMark {
+    pub text: String,
+    /// The section it jumps to; none for a letter the list has nothing
+    /// under.
+    pub section: Option<usize>,
+    /// A "•" for the sections left out between its neighbors; it jumps to
+    /// the middle one.
+    pub skipped: bool,
+}
+
+/// The section rail's labels for a list whose sections have the labels
+/// `sections`, in the list's order, on a rail with room for `fits`
+/// labels. With `alphabet` (the orders by title and by artist) the rail
+/// shows "#" and A to Z, the missing letters filled in where they belong
+/// and bound to no section; a section outside the alphabet ("VA", "Å")
+/// keeps its place in the list, after Z when no letter follows it. The
+/// other orders, and an alphabet the rail has no room for, list the
+/// sections that exist alone. When even those do not fit the labels are
+/// thinned ([`thinned`]).
+pub fn rail_labels(sections: &[String], alphabet: bool, fits: usize) -> Vec<RailMark> {
+    let mark = |text: &str, section| RailMark {
+        text: text.to_owned(),
+        section,
+        skipped: false,
+    };
+    if alphabet {
+        let letters = alphabet_labels(sections);
+        if letters.len() <= fits {
+            return letters
+                .iter()
+                .map(|(text, section)| mark(text, *section))
+                .collect();
+        }
+    }
+    if sections.len() <= fits {
+        return sections
+            .iter()
+            .enumerate()
+            .map(|(index, label)| mark(label, Some(index)))
+            .collect();
+    }
+    thinned(sections.len(), fits)
+        .into_iter()
+        .map(|(section, skipped)| RailMark {
+            skipped,
+            ..mark(
+                if skipped {
+                    RAIL_SKIPPED
+                } else {
+                    &sections[section]
+                },
+                Some(section),
+            )
+        })
+        .collect()
+}
+
+/// `count` sections on a rail with room for only `fits` labels, fewer:
+/// the first and the last kept, evenly spaced ones between them, and
+/// between each two kept a mark for the skipped ones (`true`) that stands
+/// for the middle one. At most `fits` marks, an odd number of them.
+fn thinned(count: usize, fits: usize) -> Vec<(usize, bool)> {
+    let last = count.saturating_sub(1);
+    // Kept and skipped alternate, so an odd number of marks.
+    let marks = if fits % 2 == 1 {
+        fits
+    } else {
+        fits.saturating_sub(1)
+    };
+    let gaps = marks / 2;
+    if gaps == 0 || last == 0 {
+        return vec![(0, false)];
+    }
+    let kept = |i: usize| (i as f32 * last as f32 / gaps as f32).round() as usize;
+    let mut out = vec![(0, false)];
+    for i in 1..=gaps {
+        let (from, to) = (kept(i - 1), kept(i));
+        out.push((from + (to - from) / 2, true));
+        out.push((to, false));
+    }
+    out
+}
+
+/// "#" and A to Z with `sections` among them, each with its section or
+/// none (see [`rail_labels`]).
+fn alphabet_labels(sections: &[String]) -> Vec<(String, Option<usize>)> {
     let present = sections
         .iter()
         .enumerate()
         .map(|(index, label)| (label.clone(), Some(index)));
-    if !alphabet {
-        return present.collect();
-    }
     let letter = |label: &str| {
         let mut chars = label.chars();
         match (chars.next(), chars.next()) {
@@ -1072,78 +1204,159 @@ mod tests {
         );
     }
 
+    fn names(labels: &[&str]) -> Vec<String> {
+        labels.iter().map(|&label| label.to_owned()).collect()
+    }
+
+    /// The rail as text: a label with its section, a missing letter in
+    /// lower case.
+    fn rail(labels: &[&str], alphabet: bool, fits: usize) -> String {
+        rail_labels(&names(labels), alphabet, fits)
+            .into_iter()
+            .map(|mark| match mark.section {
+                Some(index) => format!("{}{index}", mark.text),
+                None => mark.text.to_lowercase(),
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     #[test]
     fn the_rail_fills_in_the_alphabet() {
-        let names = |labels: &[&str]| -> Vec<String> {
-            labels.iter().map(|&label| label.to_owned()).collect()
-        };
-        let rail = |labels: &[&str], alphabet| {
-            rail_labels(&names(labels), alphabet)
-                .into_iter()
-                .map(|(label, section)| match section {
-                    Some(index) => format!("{label}{index}"),
-                    None => label.to_lowercase(),
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
         // The other orders list their sections alone.
         assert_eq!(
-            rail(&["2020s", "1990s", "None"], false),
-            "2020s0 1990s1 None2"
+            rail(&["2020s", "1990s", "?"], false, 30),
+            "2020s0 1990s1 ?2"
         );
         // The title order: every letter, the missing ones without a
         // section.
         assert_eq!(
-            rail(&["#", "B", "D", "Z"], true),
+            rail(&["#", "B", "D", "Z"], true, 30),
             "#0 a B1 c D2 e f g h i j k l m n o p q r s t u v w x y Z3"
         );
         // A section outside the alphabet at the end comes after Z; one
         // between two letters keeps its place.
         assert_eq!(
-            rail(&["A", "T", "VA"], true),
+            rail(&["A", "T", "VA"], true, 30),
             "# A0 b c d e f g h i j k l m n o p q r s T1 u v w x y z VA2"
         );
         assert_eq!(
-            rail(&["E", "É", "F"], true),
+            rail(&["E", "É", "F"], true, 30),
             "# a b c d E0 É1 F2 g h i j k l m n o p q r s t u v w x y z"
         );
+        // No room for the alphabet: the letters the list has.
+        assert_eq!(rail(&["#", "B", "D", "Z"], true, 20), "#0 B1 D2 Z3");
+    }
+
+    #[test]
+    fn a_rail_too_short_for_its_sections_is_thinned() {
+        let years: Vec<String> = (0..12).map(|i| (2026 - i).to_string()).collect();
+        let years: Vec<&str> = years.iter().map(String::as_str).collect();
+        // Room for five: the first, the middle and the last, and a mark
+        // for the middle of what each gap skips.
+        assert_eq!(rail(&years, false, 5), "20260 •3 20206 •8 201511");
+        // An even room leaves one free, since labels and marks alternate.
+        assert_eq!(rail(&years, false, 6), rail(&years, false, 5));
+        assert_eq!(rail(&years, false, 3), "20260 •5 201511");
+        // No room to speak of: the first alone.
+        assert_eq!(rail(&years, false, 2), "20260");
+        assert_eq!(rail(&years, false, 0), "20260");
+        // Every gap skips something, whatever the sizes.
+        for count in 2..60 {
+            for fits in 3..count {
+                let marks = thinned(count, fits);
+                assert!(marks.len() <= fits, "{count} in {fits}");
+                assert_eq!(marks.first(), Some(&(0, false)));
+                assert_eq!(marks.last(), Some(&(count - 1, false)));
+                for three in marks.windows(3).step_by(2) {
+                    let [(from, _), (mid, skipped), (to, _)] = three else {
+                        unreachable!()
+                    };
+                    assert!(*skipped && from < mid && mid < to, "{count} in {fits}");
+                }
+            }
+        }
     }
 
     #[test]
     fn sections_follow_the_sort() {
         let library = library();
-        let today = Date::parse("2026-10-19").unwrap();
         let mut entries: Vec<&Entry> = library.entries.iter().collect();
+        let labels = |sections: &[ListSection<&Entry>]| -> Vec<String> {
+            sections.iter().map(|s| s.label.clone()).collect()
+        };
 
         Sort::TitleAz.apply(&mut entries);
-        let by_title = sections(Sort::TitleAz, &entries, today);
-        let labels: Vec<&str> = by_title.iter().map(|s| s.label.as_str()).collect();
+        let by_title = labels(&entry_sections(Sort::TitleAz, &entries, 30));
         assert!(
-            labels.windows(2).all(|w| w[0] < w[1]),
-            "letters in order: {labels:?}"
+            by_title.windows(2).all(|w| w[0] < w[1]),
+            "letters in order: {by_title:?}"
         );
-        assert!(by_title.iter().all(|s| s.label.len() == 1));
+        assert!(by_title.iter().all(|label| label.chars().count() == 1));
 
+        // Years while the rail has room for them, then decades.
         Sort::YearNewest.apply(&mut entries);
-        let by_year = sections(Sort::YearNewest, &entries, today);
-        let labels: Vec<&str> = by_year.iter().map(|s| s.label.as_str()).collect();
-        assert!(labels.contains(&"2020s"), "{labels:?}");
-        assert!(labels.ends_with(&["Older"]) || labels.ends_with(&["Not released yet"]));
+        let years = labels(&entry_sections(Sort::YearNewest, &entries, 1000));
+        let dated: Vec<&String> = years.iter().filter(|label| *label != NO_YEAR).collect();
+        assert!(dated.len() > 3, "{years:?}");
+        assert!(
+            dated
+                .iter()
+                .all(|label| label.len() == 4 && label.parse::<u16>().is_ok()),
+            "{years:?}"
+        );
+        let decades = labels(&entry_sections(Sort::YearNewest, &entries, 3));
+        assert!(decades.len() < years.len());
+        assert!(decades.contains(&"2020s".to_owned()), "{decades:?}");
 
         Sort::RatingHighest.apply(&mut entries);
-        let by_rating = sections(Sort::RatingHighest, &entries, today);
-        assert_eq!(by_rating.first().map(|s| s.label.as_str()), Some("10"));
-        let last = by_rating.last().unwrap();
+        let by_rating = labels(&entry_sections(Sort::RatingHighest, &entries, 30));
+        assert_eq!(by_rating.first().map(String::as_str), Some("10"));
+        assert_eq!(by_rating.last().map(String::as_str), Some("–"));
+        // One step: no room changes them.
         assert_eq!(
-            (last.label.as_str(), last.short.as_str()),
-            ("Unrated", "None")
+            labels(&entry_sections(Sort::RatingHighest, &entries, 1)),
+            by_rating
         );
 
+        // Months with their year, then years.
         Sort::NewestAdded.apply(&mut entries);
-        let by_added = sections(Sort::NewestAdded, &entries, today);
-        assert_eq!(by_added[0].label, "October");
-        assert_eq!(by_added[0].short, "Oct");
+        let months = labels(&entry_sections(Sort::NewestAdded, &entries, 1000));
+        assert_eq!(months[0], "Oct 26");
+        let added = labels(&entry_sections(Sort::NewestAdded, &entries, 1));
+        assert_eq!(added[0], "2026");
+        assert!(added.len() <= months.len());
+    }
+
+    #[test]
+    fn counts_are_exact_and_then_ranges() {
+        let labels = |counts: &[usize], step| -> Vec<String> {
+            let most = counts.iter().copied().max().unwrap_or(0);
+            counts.iter().map(|&n| count_label(n, step, most)).collect()
+        };
+        let counts = [63, 57, 27, 24, 12, 9, 5, 4, 1, 0];
+        assert_eq!(
+            labels(&counts, 0),
+            ["63", "57", "27", "24", "12", "9", "5", "4", "1", "0"]
+        );
+        // The highest range the list reaches is open-ended; under five
+        // the counts stay exact.
+        assert_eq!(
+            labels(&counts, 1),
+            [
+                "50+", "50+", "20–49", "20–49", "10–19", "5–9", "5–9", "4", "1", "0"
+            ]
+        );
+        assert_eq!(labels(&[140, 99, 7], 1), ["100+", "50–99", "5–9"]);
+        assert_eq!(labels(&[7, 5, 2], 1), ["5+", "5+", "2"]);
+        assert_eq!(labels(&[3, 2], 1), ["3", "2"]);
+    }
+
+    #[test]
+    fn artists_file_under_their_letter_and_various_artists_alone() {
+        assert_eq!(artist_initial("The Beatles"), "B");
+        assert_eq!(artist_initial("2Pac"), "#");
+        assert_eq!(artist_initial(crate::music::VARIOUS_ARTISTS), "VA");
     }
 
     #[test]

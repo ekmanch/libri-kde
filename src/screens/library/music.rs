@@ -4,10 +4,11 @@
 use iced::widget::{Column, column, container, grid, row, text};
 use iced::{Element, Fill, Padding};
 
+use super::entries::{Cell, Sectioned};
 use super::{Listing, Message, MusicTab, View, rail};
 use crate::app::{App, Message as AppMessage};
 use crate::browse::{self, Sort};
-use crate::model::{Date, Entry, MediaType};
+use crate::model::{Entry, MediaType};
 use crate::music::{self, Song};
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, Icon, music::SongLook};
@@ -69,77 +70,32 @@ fn tab_list<'a>(
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let state = &app.library;
-    let mut overlays = Vec::new();
-    let mut room = rail::LEFT;
     // Each tab in its own sort, the still copies beside the picked one too.
     let sort = state.music_sorts.get(tab);
     let shown = state.shown_in_tab(listing, tab);
-    let children: Vec<Element<'a, AppMessage>> = match tab {
+    let fits = state.rail_fits();
+    let cell = |height: f32| Cell {
+        max_width: CELL_MAX_WIDTH,
+        spacing: CELL_SPACING,
+        ratio: CELL_WIDTH / height,
+    };
+    // Every tab is in the sections of its sort, with the section rail
+    // once the list is long.
+    let (children, on_rail, room) = match tab {
         MusicTab::Artists => {
             let artists = music::artists(&shown, sort);
             if artists.is_empty() {
                 return empty("No artists here", tokens);
             }
-            // A long list gets the sort's sections and the section rail;
-            // a long grid the rail alone. The rail lists the alphabet in
-            // the name order.
-            let alphabet = sort == Sort::TitleAz;
-            let sections = |artists| artist_sections(artists, sort, app.today);
-            if view == View::Grid {
-                let sections = sections(artists);
-                let names = sections.iter().map(|s| s.1.clone()).collect();
-                let on_rail = rail::Sections::new(names, alphabet);
-                let rows = rail::GridRows::new(
-                    state.list_width - rail::LEFT - on_rail.room(),
-                    CELL_MAX_WIDTH,
-                    CELL_SPACING,
-                    CELL_WIDTH / ARTIST_HEIGHT,
-                );
-                let counts: Vec<usize> = sections.iter().map(|s| s.2.len()).collect();
-                let long = state.is_tall(rows.height(counts.iter().sum()));
-                if counts.len() >= 2 && long {
-                    room = on_rail.room();
-                    if still.is_none() {
-                        let on_rail = on_rail.in_grid(state, &counts, rows);
-                        overlays.push(on_rail.view(state, tokens));
-                    }
-                }
-                vec![artist_block(
-                    app,
-                    artist_sections_flat(sections),
-                    view,
-                    tokens,
-                )]
-            } else if state.is_long(artists.len(), view) {
-                let sections = sections(artists);
-                if sections.len() >= 2 {
-                    let names: Vec<String> = sections.iter().map(|s| s.1.clone()).collect();
-                    let on_rail = rail::Sections::new(names, alphabet);
-                    room = on_rail.room();
-                    if still.is_none() {
-                        overlays.push(on_rail.in_list(state).view(state, tokens));
-                    }
-                    sections
-                        .into_iter()
-                        .map(|(label, _, artists)| {
-                            column![
-                                super::entries::section_header(&label, artists.len(), tokens),
-                                artist_block(app, artists, view, tokens)
-                            ]
-                            .into()
-                        })
-                        .collect()
-                } else {
-                    vec![artist_block(
-                        app,
-                        artist_sections_flat(sections),
-                        view,
-                        tokens,
-                    )]
-                }
-            } else {
-                vec![artist_block(app, artists, view, tokens)]
+            Sectioned {
+                entries: artists.len(),
+                sections: artist_sections(&artists, sort, fits),
+                alphabet: sort == Sort::TitleAz,
+                cell: cell(ARTIST_HEIGHT),
             }
+            .view(app, view, tokens, <[_]>::len, |artists| {
+                artist_block(app, artists.to_vec(), view, tokens)
+            })
         }
         MusicTab::Albums => {
             let albums: Vec<&Entry> = shown
@@ -150,14 +106,35 @@ fn tab_list<'a>(
             if albums.is_empty() {
                 return empty("No albums here", tokens);
             }
-            vec![super::entries::block_entries(app, &albums, view, tokens)]
+            Sectioned {
+                entries: albums.len(),
+                sections: browse::entry_sections(sort, &albums, fits),
+                alphabet: by_letter(sort),
+                cell: super::entries::card_cell(MediaType::Music),
+            }
+            .view(app, view, tokens, <[_]>::len, |albums| {
+                super::entries::block_entries(app, albums, view, tokens)
+            })
         }
         MusicTab::Songs => {
             let songs = state.songs(&shown, &app.artwork);
             if songs.is_empty() {
                 return empty("No songs here", tokens);
             }
-            vec![song_block(app, &songs, view, false, tokens)]
+            // A track of an album sits where its album sorts, so in its
+            // album's section.
+            let sections = browse::sections(&songs, sort.steps(), fits, |song, step| {
+                browse::section_label(sort, song.entry(), step)
+            });
+            Sectioned {
+                entries: songs.len(),
+                sections,
+                alphabet: by_letter(sort),
+                cell: cell(CELL_WIDTH + SONG_CAPTION),
+            }
+            .view(app, view, tokens, <[_]>::len, |songs| {
+                song_block(app, songs, view, false, tokens)
+            })
         }
     };
     match still {
@@ -172,7 +149,7 @@ fn tab_list<'a>(
                 .width(Fill);
             ui::scrolled(column, offset).into()
         }
-        None => super::entries::scrolling(children, overlays, room),
+        None => super::entries::scrolling(children, on_rail.into_iter().collect(), room),
     }
 }
 
@@ -187,43 +164,32 @@ fn empty<'a>(title: &str, tokens: &Tokens) -> Element<'a, AppMessage> {
     )
 }
 
-/// The sections of an artist list already in `sort` order. By name: the
-/// first letter with a leading "The" ignored, and Various Artists on its
-/// own at the end. In the other orders: the section of the entry that
-/// places the artist (`Artist::lead`), as in every long list. Each is
-/// (header, rail label, artists).
-#[allow(clippy::type_complexity)]
-fn artist_sections(
-    artists: Vec<music::Artist<'_>>,
-    sort: Sort,
-    today: Date,
-) -> Vec<(String, String, Vec<music::Artist<'_>>)> {
-    let mut sections: Vec<(String, String, Vec<music::Artist<'_>>)> = Vec::new();
-    for artist in artists {
-        let (label, short) = if sort != Sort::TitleAz {
-            browse::section_key(sort, artist.lead, today)
-        } else if artist.name == music::VARIOUS_ARTISTS {
-            (music::VARIOUS_ARTISTS.to_owned(), "VA".to_owned())
-        } else {
-            let (_, key) = music::artist_key(artist.name);
-            let initial = browse::title_initial(&key).to_string();
-            (initial.clone(), initial)
-        };
-        match sections.last_mut() {
-            Some(last) if last.0 == label => last.2.push(artist),
-            _ => sections.push((label, short, vec![artist])),
-        }
-    }
-    sections
+/// Whether the rail lists the alphabet under `sort`: by title, by artist.
+fn by_letter(sort: Sort) -> bool {
+    matches!(sort, Sort::TitleAz | Sort::ArtistAz)
 }
 
-fn artist_sections_flat(
-    sections: Vec<(String, String, Vec<music::Artist<'_>>)>,
-) -> Vec<music::Artist<'_>> {
-    sections
-        .into_iter()
-        .flat_map(|(_, _, artists)| artists)
-        .collect()
+/// The sections of an artist list already in `sort` order, for a rail
+/// with room for `fits` labels. By name: the first letter with a leading
+/// "The" ignored, and Various Artists on its own at the end. By count:
+/// how many albums or songs are saved, exact and then in ranges
+/// (`browse::count_label`). Newest added: the section of the entry that
+/// places the artist (`Artist::lead`), the month and then the year.
+fn artist_sections<'a>(
+    artists: &[music::Artist<'a>],
+    sort: Sort,
+    fits: usize,
+) -> Vec<browse::ListSection<music::Artist<'a>>> {
+    let counted = |artist: &music::Artist<'_>| match sort {
+        Sort::MostAlbums => artist.albums.len(),
+        _ => artist.songs.len(),
+    };
+    let most = artists.iter().map(counted).max().unwrap_or(0);
+    browse::sections(artists, sort.steps(), fits, |artist, step| match sort {
+        Sort::TitleAz => browse::artist_initial(artist.name),
+        Sort::MostAlbums | Sort::MostSongs => browse::count_label(counted(artist), step, most),
+        _ => browse::section_label(sort, artist.lead, step),
+    })
 }
 
 fn artist_block<'a>(
@@ -363,4 +329,115 @@ fn section<'a>(title: &str, count: usize, tokens: &Tokens) -> Element<'a, AppMes
     )
     .padding(Padding::new(0.0).top(14).bottom(10))
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fixtures;
+    use crate::model::codec;
+    use crate::screens::Screen;
+
+    fn labels(sections: &[browse::ListSection<music::Artist<'_>>]) -> Vec<String> {
+        sections.iter().map(|s| s.label.clone()).collect()
+    }
+
+    #[test]
+    fn artists_by_count_are_in_sections_of_exact_counts_and_then_ranges() {
+        let library = codec::decode(fixtures::LIBRARY_JSON).unwrap();
+        let entry = &library.entries[0];
+        let artist = |name: &'static str, albums: usize, songs: usize| music::Artist {
+            name,
+            lead: entry,
+            albums: vec![entry; albums],
+            songs: vec![entry; songs],
+        };
+        // In the order by songs, as `music::artists` gives them.
+        let artists = [
+            artist("Daft Punk", 9, 63),
+            artist("Hans Zimmer", 14, 57),
+            artist("Massive Attack", 4, 27),
+            artist("Pink Floyd", 15, 24),
+            artist("Adele", 5, 12),
+            artist("Nina Simone", 1, 3),
+            artist(music::VARIOUS_ARTISTS, 2, 3),
+        ];
+        // Room for every count: exact, and two artists with three songs
+        // share a section.
+        assert_eq!(
+            labels(&artist_sections(&artists, Sort::MostSongs, 30)),
+            ["63", "57", "27", "24", "12", "3"]
+        );
+        // Room for five: the ranges, the highest one open-ended.
+        let ranges = artist_sections(&artists, Sort::MostSongs, 5);
+        assert_eq!(labels(&ranges), ["50+", "20–49", "10–19", "3"]);
+        assert_eq!(ranges[0].items.len(), 2);
+        // By name, whatever the room: letters, Various Artists alone.
+        let mut by_name = artists.to_vec();
+        by_name.sort_by_key(|a| music::artist_key(a.name));
+        assert_eq!(
+            labels(&artist_sections(&by_name, Sort::TitleAz, 2)),
+            ["A", "D", "H", "M", "N", "P", "VA"]
+        );
+    }
+
+    /// Music on `tab` in `sort`, long, as the window draws it.
+    fn headers(tab: MusicTab, sort: Sort) -> Vec<String> {
+        let mut app = App::new(Screen::Library);
+        app.library.force_long = true;
+        let _ = app.update(msg(Message::ShowType(Some(MediaType::Music))));
+        let _ = app.update(msg(Message::MusicTab(tab)));
+        let _ = app.update(msg(Message::SetView(View::List)));
+        let _ = app.update(msg(Message::Sort(sort)));
+        let state = &app.library;
+        let listing = state.listing(app.repo.library(), app.today);
+        let shown = state.shown_in_tab(&listing, tab);
+        let fits = state.rail_fits();
+        let found: Vec<String> = match tab {
+            MusicTab::Artists => {
+                labels(&artist_sections(&music::artists(&shown, sort), sort, fits))
+            }
+            _ => {
+                let listed: Vec<&Entry> = shown
+                    .iter()
+                    .copied()
+                    .filter(|e| music::is_song(e) == (tab == MusicTab::Songs))
+                    .collect();
+                browse::entry_sections(sort, &listed, fits)
+                    .into_iter()
+                    .map(|s| s.label)
+                    .collect()
+            }
+        };
+        // Each is a header in the list, in the rail's words; one section
+        // alone has none.
+        let mut ui = iced_test::Simulator::with_size(
+            crate::app::settings(),
+            crate::app::WINDOW_SIZE,
+            app.view(),
+        );
+        for label in &found {
+            assert_eq!(
+                ui.find(label.as_str()).is_ok(),
+                found.len() >= 2,
+                "{tab:?} {sort:?}: {label}"
+            );
+        }
+        found
+    }
+
+    #[test]
+    fn every_music_tab_is_in_sections_under_every_sort() {
+        for sort in Sort::FOR_ARTISTS {
+            let found = headers(MusicTab::Artists, sort);
+            assert!(found.len() >= 2, "artists, {sort:?}: {found:?}");
+        }
+        for sort in Sort::WITH_ARTIST {
+            let found = headers(MusicTab::Albums, sort);
+            assert!(found.len() >= 2, "albums, {sort:?}: {found:?}");
+        }
+        // The fixture's few songs were all added in one month.
+        assert_eq!(headers(MusicTab::Songs, Sort::NewestAdded), ["Oct 25"]);
+        assert_eq!(headers(MusicTab::Songs, Sort::YearNewest), ["1981", "1969"]);
+    }
 }

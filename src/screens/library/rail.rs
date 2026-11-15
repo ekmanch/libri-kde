@@ -9,6 +9,7 @@ use iced::Element;
 use super::{Message, State};
 use crate::app::Message as AppMessage;
 use crate::browse;
+use crate::browse::RailMark;
 use crate::theme::Tokens;
 use crate::ui::{self, RailLabel, SectionRail};
 
@@ -66,14 +67,14 @@ impl GridRows {
 
 /// A list's sections as the rail needs them.
 pub(super) struct Sections {
-    /// Each section's short label, in the list's order.
+    /// Each section's label, in the list's order.
     names: Vec<String>,
-    /// The rail's labels, and the section each stands for (none for a
-    /// letter with nothing under it).
-    labels: Vec<RailLabel>,
-    targets: Vec<Option<usize>>,
+    /// The rail's labels, and the section each stands for.
+    marks: Vec<RailMark>,
     /// The rail shows the whole alphabet, spread over its height.
-    alphabet: bool,
+    spread: bool,
+    /// The rail is at its widest whatever its labels.
+    wide: bool,
     /// Where each section starts, as the scroll offset that shows it.
     tops: Vec<f32>,
     /// The section at the top of the view.
@@ -81,29 +82,72 @@ pub(super) struct Sections {
 }
 
 impl Sections {
-    /// The sections with the short labels `names`; `alphabet` for the
-    /// title order and the artists, where the rail lists "#" and A to Z.
+    /// The sections with the labels `names` on a rail with room for all
+    /// of them; `alphabet` for the orders by title and by artist, where
+    /// the rail lists "#" and A to Z.
     pub fn new(names: Vec<String>, alphabet: bool) -> Sections {
-        let (labels, targets) = browse::rail_labels(&names, alphabet)
-            .into_iter()
-            .map(|(text, section)| {
-                let present = section.is_some();
-                (RailLabel { text, present }, section)
-            })
-            .unzip();
+        Sections::fitted(names, alphabet, usize::MAX)
+    }
+
+    /// [`Sections::new`] on a rail with room for `fits` labels
+    /// (`State::rail_fits`): without room for the alphabet it lists the
+    /// sections alone, and without room for those it is thinned.
+    pub fn fitted(names: Vec<String>, alphabet: bool, fits: usize) -> Sections {
+        let marks = browse::rail_labels(&names, alphabet, fits);
+        let whole = names.len().max(browse::RAIL_ALPHABET.len());
         Sections {
+            spread: alphabet && marks.len() >= whole,
             names,
-            labels,
-            targets,
-            alphabet,
+            marks,
+            wide: false,
             tops: Vec::new(),
             shown: None,
         }
     }
 
+    /// The rail at its widest whatever the labels: the Coming soon page,
+    /// whose months come and go with the slices.
+    pub fn wide(mut self) -> Sections {
+        self.wide = true;
+        self
+    }
+
+    fn labels(&self) -> Vec<RailLabel> {
+        self.marks
+            .iter()
+            .map(|mark| RailLabel {
+                text: mark.text.clone(),
+                present: mark.section.is_some(),
+            })
+            .collect()
+    }
+
     /// The room the list leaves at its right for the rail.
     pub fn room(&self) -> f32 {
-        ui::section_rail::room(&self.labels)
+        ui::section_rail::room(&self.labels(), self.wide)
+    }
+
+    /// The rail shows fewer labels than the list has sections.
+    fn thinned(&self) -> bool {
+        self.marks.len() < self.names.len()
+    }
+
+    /// The label that stands for `section`: its own, or on a thinned rail
+    /// the "•" between the two labels it lies between.
+    fn mark_of(&self, section: usize) -> Option<usize> {
+        let kept = |mark: &RailMark| !mark.skipped && mark.section.is_some();
+        let own = self
+            .marks
+            .iter()
+            .position(|mark| kept(mark) && mark.section == Some(section));
+        if own.is_some() || !self.thinned() {
+            return own;
+        }
+        let after = self
+            .marks
+            .iter()
+            .position(|mark| kept(mark) && mark.section > Some(section));
+        Some(after.map_or(0, |index| index.saturating_sub(1)))
     }
 
     /// In a list with a header per section, each a child of the list's
@@ -164,35 +208,58 @@ impl Sections {
 
     /// The rail, as a layer over the list.
     pub fn view<'a>(self, state: &State, tokens: &Tokens) -> Element<'a, AppMessage> {
-        let label_of = |section: usize| {
-            self.targets
-                .iter()
-                .position(|target| *target == Some(section))
-        };
         let current = self.current(state);
-        let dragged = current.filter(|_| state.rail_drag).and_then(label_of);
-        let current = current.and_then(label_of);
+        let thinned = self.thinned();
+        // The bubble names the section itself, level with its label; on a
+        // thinned rail as far down the labels as the section is down the
+        // list.
+        let bubble = current.filter(|_| state.rail_drag).and_then(|section| {
+            let at = if thinned {
+                let along = (section as f32 + 0.5) / self.names.len() as f32;
+                along * self.marks.len() as f32 - 0.5
+            } else {
+                self.mark_of(section)? as f32
+            };
+            Some((self.names[section].clone(), at))
+        });
+        let current = current.and_then(|section| self.mark_of(section));
+        let labels = self.labels();
+        let count = self.names.len();
         let Sections {
             names,
-            labels,
-            targets,
-            alphabet,
+            marks,
+            spread,
+            wide,
             tops,
             ..
         } = self;
+        let jump = move |section: usize, held: bool| {
+            AppMessage::Library(Message::JumpToSection {
+                label: names[section].clone(),
+                offset: tops.get(section).copied().unwrap_or_default(),
+                held,
+            })
+        };
+        // Held, the rail stops at every section: its labels, or thinned
+        // all the sections between them too.
+        let stops = if thinned {
+            (0..count)
+                .map(|section| Some(jump(section, true)))
+                .collect()
+        } else {
+            marks
+                .iter()
+                .map(|mark| mark.section.map(|section| jump(section, true)))
+                .collect()
+        };
         SectionRail {
             labels,
             current,
-            dragged,
-            spread: alphabet,
-            on_jump: Box::new(move |label, held| {
-                let section = targets[label].unwrap_or_default();
-                AppMessage::Library(Message::JumpToSection {
-                    label: names[section].clone(),
-                    offset: tops.get(section).copied().unwrap_or_default(),
-                    held,
-                })
-            }),
+            bubble,
+            spread,
+            wide,
+            on_jump: Box::new(move |label| jump(marks[label].section.unwrap_or_default(), false)),
+            stops,
             on_release: AppMessage::Library(Message::RailReleased),
         }
         .view(tokens)
@@ -360,8 +427,37 @@ mod tests {
         assert_eq!(sections.shown, Some(1), "a few px early");
         // The alphabet's other letters are on the rail, with nothing to
         // jump to.
-        assert_eq!(sections.labels.len(), 27);
-        assert_eq!(sections.targets[1], Some(0), "A, after #");
-        assert_eq!(sections.targets[4], None, "D");
+        assert_eq!(sections.marks.len(), 27);
+        assert!(sections.spread);
+        assert_eq!(sections.marks[1].section, Some(0), "A, after #");
+        assert_eq!(sections.marks[4].section, None, "D");
+    }
+
+    #[test]
+    fn a_thinned_rail_marks_the_dot_a_skipped_section_is_under() {
+        let years: Vec<String> = (0..12).map(|i| (2026 - i).to_string()).collect();
+        // Room for five: 2026 • 2020 • 2015.
+        let sections = Sections::fitted(years.clone(), false, 5);
+        assert!(sections.thinned() && !sections.spread);
+        assert_eq!(sections.marks.len(), 5);
+        assert_eq!(sections.mark_of(0), Some(0));
+        assert_eq!(sections.mark_of(2), Some(1), "2024, under the first dot");
+        assert_eq!(sections.mark_of(6), Some(2), "2020, on the rail");
+        assert_eq!(sections.mark_of(7), Some(3));
+        assert_eq!(sections.mark_of(11), Some(4));
+        // The rail is narrow or wide by the labels it shows.
+        assert_eq!(sections.room(), 66.0, "four characters");
+        let letters = Sections::fitted(names(&["A", "B", "C"]), false, 30);
+        assert_eq!(letters.room(), 44.0);
+        assert_eq!(Sections::new(names(&["5–9", "4"]), false).room(), 44.0);
+        assert_eq!(
+            Sections::new(names(&["Nov", "Dec"]), false).wide().room(),
+            66.0
+        );
+        // An alphabet with no room: the letters the list has, from the
+        // top.
+        let short = Sections::fitted(names(&["A", "B", "C"]), true, 20);
+        assert_eq!(short.marks.len(), 3);
+        assert!(!short.spread && !short.thinned());
     }
 }
