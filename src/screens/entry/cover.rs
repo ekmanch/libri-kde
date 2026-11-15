@@ -252,7 +252,7 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
     }
     let mut cover = column![face, words].spacing(14).align_x(Center);
     if !view.changing {
-        cover = cover.push(change_button(&tokens));
+        cover = cover.push(change_button(Message::ChangeCover, &tokens));
     }
 
     // Pick a cover beside the cover; alone where the window has no room
@@ -289,7 +289,7 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
 }
 
 /// A round button on the dark backdrop: ×, and ‹ › beside the cover.
-fn round_button<'a>(
+pub(super) fn round_button<'a>(
     icon: Icon,
     size: f32,
     icon_size: f32,
@@ -318,7 +318,7 @@ fn round_button<'a>(
 
 /// Change cover…, an opaque dark button with a lighter outline, so it
 /// reads over whatever the backdrop lets through.
-fn change_button<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
+pub(super) fn change_button<'a>(message: Message, tokens: &Tokens) -> Element<'a, AppMessage> {
     button(
         container(
             text("Change cover…")
@@ -330,7 +330,7 @@ fn change_button<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
     )
     .height(36)
     .padding([0, 16])
-    .on_press(msg(Message::ChangeCover))
+    .on_press(msg(message))
     .style(|_, status| button::Style {
         background: Some(
             if matches!(status, button::Status::Hovered) {

@@ -412,7 +412,9 @@ mod tests {
         assert_eq!(wants.covers.first(), Some(&best));
         assert!(wants.images.is_empty());
         // With a file in the repo, the file alone.
-        let file = app.set_artist_photo(&name, b"jpeg", false, None).unwrap();
+        let file = app
+            .set_artist_photo(&name, b"jpeg", crate::covers::PhotoKind::Fetched, None)
+            .unwrap();
         assert_eq!(artist_shows(&app, &name), ArtistShows::Photo(file.url()));
         let mut wants = crate::artwork::Wants::default();
         want_artist(&app, &name, &mut wants);

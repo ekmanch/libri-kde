@@ -2,7 +2,7 @@
 //! narrowed by search, status, the Filter popover and the tag pickers.
 
 mod entries;
-mod music;
+pub mod music;
 mod overview;
 mod page;
 mod panel;

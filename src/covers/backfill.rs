@@ -85,6 +85,16 @@ fn artists_of(library: &Library) -> Vec<(Work, Date)> {
     out
 }
 
+/// The library's artist `name` as Apple is asked about them, with the
+/// album titles saved for them.
+pub fn work_for(library: &Library, name: &str) -> Option<Work> {
+    let slug = artists::slug(name)?;
+    artists_of(library)
+        .into_iter()
+        .map(|(work, _)| work)
+        .find(|work| work.slug == slug)
+}
+
 /// How the library's artists stand: with a file, recorded as tried with
 /// nothing found, or still to ask.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -393,6 +403,12 @@ impl State {
         self.again = true;
         self.tried_now.clear();
         self.passed_over = false;
+    }
+
+    /// Use automatic: the artist may be asked about again in this
+    /// session.
+    pub fn ask_again(&mut self, slug: &str) {
+        self.tried_now.remove(slug);
     }
 
     /// Apple's answer about the artist could not be used (a server

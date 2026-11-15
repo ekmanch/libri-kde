@@ -2,6 +2,7 @@
 //! beside the list, the Add and Edit dialog with its tag picker, Add to
 //! plan and the delete confirmation.
 
+pub mod artist;
 mod cover;
 pub mod pick;
 pub use cover::want_large;
@@ -64,6 +65,8 @@ pub enum Dialog {
     /// The details' cover, large in the middle of the window, with Pick a
     /// cover beside it once Change cover… is pressed.
     Cover(Box<CoverView>),
+    /// An artist's photo, large, with Pick a cover for it (`artist`).
+    Artist(Box<artist::ArtistView>),
     /// An album's own track list, made by hand (`tracks`).
     Tracks(Box<tracks::Form>),
 }
@@ -610,6 +613,8 @@ pub enum Message {
     /// Pick a cover's own doings: Upload, Fit your cover, the online
     /// cover question.
     Covers(pick::Message),
+    /// The artist's photo viewer and its Pick a cover.
+    Artist(artist::Message),
     /// The Delete dialog's "Also delete its cover file".
     ToggleDeleteCovers,
     /// The viewer's other matches came.
@@ -2193,6 +2198,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             }
         }
         Message::Covers(message) => return pick::update(app, message),
+        Message::Artist(message) => return artist::update(app, message),
         // A pick in Pick a cover, from the viewer or the form: saved at
         // once on an entry of the library, kept for Save in the form.
         Message::PickCover(cover_from) => pick::pick(app, cover_from),
@@ -2520,6 +2526,10 @@ fn creator_tags(
 pub fn wanted(app: &App, wants: &mut Wants) {
     if let Some(Dialog::Cover(view)) = &app.dialog {
         cover::wanted(app, view, wants);
+        return;
+    }
+    if let Some(Dialog::Artist(view)) = &app.dialog {
+        artist::wanted(app, view, wants);
         return;
     }
     let Some(Dialog::Form(form)) = &app.dialog else {
@@ -3211,6 +3221,12 @@ pub fn dismiss_top(app: &mut App) -> bool {
             }
             true
         }
+        Some(Dialog::Artist(view)) => {
+            if !pick::dismiss_inner(&mut view.pick) && !std::mem::take(&mut view.changing) {
+                app.dialog = None;
+            }
+            true
+        }
         Some(Dialog::Form(form)) => {
             if form.replace.take().is_none()
                 && form.new_tag.take().is_none()
@@ -3295,6 +3311,7 @@ pub fn overlay<'a>(app: &'a App, base: Element<'a, AppMessage>) -> Element<'a, A
         Dialog::AddToPlan { id } => dialogs::add_to_plan(app, id),
         Dialog::SeasonDropped { id, season } => dialogs::season_dropped(app, id, *season),
         Dialog::Cover(view) => cover::view(app, view),
+        Dialog::Artist(view) => artist::view(app, view),
         Dialog::Tracks(form) => tracks::view(app, form),
     });
     ui::modal(base, dialog, AppMessage::Entry(on_dismiss), &tokens)

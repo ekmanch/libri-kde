@@ -563,6 +563,14 @@ impl Artwork {
         }
     }
 
+    /// Where an image is on this computer, once it is.
+    pub fn image_path(&self, url: &str) -> Option<PathBuf> {
+        match self.image_states.get(url) {
+            Some(ImageState::Ready(path)) => Some(path.clone()),
+            _ => None,
+        }
+    }
+
     /// An image's width and height, once it is on this computer and was
     /// wanted in `Wants::sizes`.
     pub fn image_size(&self, url: &str) -> Option<(u32, u32)> {

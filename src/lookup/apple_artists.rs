@@ -13,13 +13,16 @@
 //! as rate limited at once, and the caller stops the photo work for the
 //! session. The Add dialog's lookups keep their own back-off.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::Value;
 
 use super::http::{self, Http, int_at, objects_at, str_at};
+use super::store::JsonFile;
 use super::{Failure, FailureKind};
 use crate::covers::artists::{self, Candidate, Reason};
 
@@ -58,7 +61,97 @@ pub struct Namesake {
     pub page: String,
 }
 
+/// Another Apple artist of the name, for the artist's Pick a cover: its
+/// page, and one of its albums to tell it by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Other {
+    pub id: String,
+    pub page: String,
+    pub album: Option<String>,
+}
+
+/// What Pick a cover offers from Apple for an artist: the matched
+/// artist's photo, and the other artists of the name, whose pages are
+/// read only when asked for.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Choices {
+    pub suggested: Option<String>,
+    pub others: Vec<Other>,
+}
+
+/// What was asked before, kept in `apple_artists.json` under the cache
+/// folder, so Pick a cover reads no page twice: the namesakes with their
+/// albums by name key, and each artist's photo URL (none for a page
+/// without one) by id.
+#[derive(Debug, Default)]
+struct Kept {
+    names: HashMap<String, Vec<(Candidate, String)>>,
+    photos: HashMap<String, Option<String>>,
+}
+
+const KEPT_VERSION: i64 = 1;
+
+impl Kept {
+    fn read(json: &Value) -> Kept {
+        let mut kept = Kept::default();
+        if json["version"].as_i64() != Some(KEPT_VERSION) {
+            return kept;
+        }
+        for (key, list) in json["names"].as_object().into_iter().flatten() {
+            let list = list
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|item| {
+                    Some((
+                        Candidate {
+                            id: str_at(item, "id")?.to_owned(),
+                            name: str_at(item, "name")?.to_owned(),
+                            albums: http::strings_at(item, "albums")
+                                .map(str::to_owned)
+                                .collect(),
+                        },
+                        str_at(item, "page")?.to_owned(),
+                    ))
+                })
+                .collect();
+            kept.names.insert(key.clone(), list);
+        }
+        for (id, url) in json["photos"].as_object().into_iter().flatten() {
+            kept.photos
+                .insert(id.clone(), url.as_str().map(str::to_owned));
+        }
+        kept
+    }
+
+    fn to_json(&self) -> Value {
+        let names: serde_json::Map<String, Value> = self
+            .names
+            .iter()
+            .map(|(key, list)| {
+                let list: Vec<Value> = list
+                    .iter()
+                    .map(|(c, page)| {
+                        serde_json::json!({
+                            "id": c.id, "name": c.name, "page": page, "albums": c.albums,
+                        })
+                    })
+                    .collect();
+                (key.clone(), Value::Array(list))
+            })
+            .collect();
+        let photos: serde_json::Map<String, Value> = self
+            .photos
+            .iter()
+            .map(|(id, url)| (id.clone(), serde_json::json!(url)))
+            .collect();
+        serde_json::json!({"version": KEPT_VERSION, "names": names, "photos": photos})
+    }
+}
+
 pub struct AppleArtists {
+    file: Option<JsonFile>,
+    kept: Mutex<Kept>,
     api: Arc<Http>,
     pages: Http,
     images: Http,
@@ -81,7 +174,20 @@ impl Default for AppleArtists {
 
 impl AppleArtists {
     pub fn new() -> AppleArtists {
+        AppleArtists::at(None)
+    }
+
+    /// With `apple_artists.json` in `cache`, the cache folder.
+    pub fn at(cache: Option<&Path>) -> AppleArtists {
+        let file = cache.map(|cache| JsonFile(cache.join("apple_artists.json")));
+        let kept = file
+            .as_ref()
+            .and_then(JsonFile::read)
+            .map(|json| Kept::read(&json))
+            .unwrap_or_default();
         AppleArtists {
+            file,
+            kept: Mutex::new(kept),
             api: super::books::apple_http(),
             pages: Http::with_rate_limit_statuses(PAGE_GAP, &[429, 403]),
             images: Http::new(Duration::from_millis(200)),
@@ -140,6 +246,66 @@ impl AppleArtists {
         Ok(albums_in(&json))
     }
 
+    fn keep(&self, change: impl FnOnce(&mut Kept)) {
+        let mut kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
+        change(&mut kept);
+        if let Some(file) = &self.file {
+            let _ = file.write(&kept.to_json());
+        }
+    }
+
+    /// `candidates` as kept from an earlier ask, else asked now.
+    fn candidates_kept(&self, name: &str) -> Reply<Vec<(Candidate, String)>> {
+        let key = artists::name_key(name);
+        let known = {
+            let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
+            kept.names.get(&key).cloned()
+        };
+        match known {
+            Some(list) => Ok(list),
+            None => self.candidates(name),
+        }
+    }
+
+    /// The photo on the page of the artist `id`, read once and kept.
+    pub fn photo_of(&self, id: &str, page: &str) -> Reply<Option<String>> {
+        let known = {
+            let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
+            kept.photos.get(id).cloned()
+        };
+        if let Some(url) = known {
+            return Ok(url);
+        }
+        let url = self.photo_on(page)?;
+        self.keep(|kept| {
+            kept.photos.insert(id.to_owned(), url.clone());
+        });
+        Ok(url)
+    }
+
+    /// What the artist's Pick a cover offers from Apple: the matched
+    /// artist's photo, and the other artists of the name with one album
+    /// each, their pages unread.
+    pub fn choices(&self, name: &str, owned: &[String]) -> Reply<Choices> {
+        let owned: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let listed = self.candidates_kept(name)?;
+        let candidates: Vec<Candidate> = listed.iter().map(|(c, _)| c.clone()).collect();
+        let chosen = artists::choose(name, &owned, &candidates).map(|c| c.id.clone());
+        let mut choices = Choices::default();
+        for (candidate, page) in &listed {
+            if Some(&candidate.id) == chosen.as_ref() {
+                choices.suggested = self.photo_of(&candidate.id, page)?;
+            } else {
+                choices.others.push(Other {
+                    id: candidate.id.clone(),
+                    page: page.clone(),
+                    album: candidate.albums.first().cloned(),
+                });
+            }
+        }
+        Ok(choices)
+    }
+
     /// The namesakes with their album lists, for `artists::choose`.
     pub fn candidates(&self, name: &str) -> Reply<Vec<(Candidate, String)>> {
         let mut out = Vec::new();
@@ -154,6 +320,9 @@ impl AppleArtists {
                 namesake.page,
             ));
         }
+        self.keep(|kept| {
+            kept.names.insert(artists::name_key(name), out.clone());
+        });
         Ok(out)
     }
 
@@ -196,7 +365,11 @@ impl AppleArtists {
             .find(|(candidate, _)| candidate.id == chosen.id)
             .map(|(_, page)| page.as_str())
             .unwrap_or_default();
-        match self.photo_on(page)? {
+        let photo = self.photo_on(page)?;
+        self.keep(|kept| {
+            kept.photos.insert(chosen.id.clone(), photo.clone());
+        });
+        match photo {
             Some(url) => Ok(Found::Photo(self.image(&url)?)),
             None => Ok(Found::Missing(Reason::NoPhoto)),
         }
@@ -291,6 +464,29 @@ mod tests {
             {"wrapperType": "track", "trackName": "Hello"},
         ]});
         assert_eq!(albums_in(&answer), ["21", "25"]);
+    }
+
+    #[test]
+    fn what_was_asked_is_kept_and_read_back() {
+        let mut kept = Kept::default();
+        kept.names.insert(
+            "adele".into(),
+            vec![(
+                Candidate {
+                    id: "1".into(),
+                    name: "Adele".into(),
+                    albums: vec!["21".into(), "25".into()],
+                },
+                "https://music.apple.com/us/artist/adele/1".into(),
+            )],
+        );
+        kept.photos
+            .insert("1".into(), Some("https://x/640x640cc.jpg".into()));
+        kept.photos.insert("2".into(), None);
+        let again = Kept::read(&kept.to_json());
+        assert_eq!(again.names, kept.names);
+        assert_eq!(again.photos, kept.photos);
+        assert!(Kept::read(&json!({"version": 9})).names.is_empty());
     }
 
     #[test]

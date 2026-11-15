@@ -808,6 +808,52 @@ fn capture_every_screen() {
                 select(app, BABY);
             }),
         ),
+        // An artist's photo large (Ctrl+click), Pick a cover for it, the
+        // other artists of the name, and a picture of the owner's own
+        // with Use automatic.
+        (
+            Screen::Library,
+            ("artist-photo", |app| {
+                show_type(app, MediaType::Music);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                let artist = |message| Message::Entry(entry::Message::Artist(message));
+                let _ = app.update(artist(entry::artist::Message::View("Pink Floyd".into())));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("artist-photo-pick", |app| {
+                show_type(app, MediaType::Music);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                let artist = |message| Message::Entry(entry::Message::Artist(message));
+                let _ = app.update(artist(entry::artist::Message::View("Pink Floyd".into())));
+                let _ = app.update(artist(entry::artist::Message::Change));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("artist-photo-others", |app| {
+                show_type(app, MediaType::Music);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                let artist = |message| Message::Entry(entry::Message::Artist(message));
+                let _ = app.update(artist(entry::artist::Message::View("Pink Floyd".into())));
+                let _ = app.update(artist(entry::artist::Message::Change));
+                let _ = app.update(artist(entry::artist::Message::ShowOthers));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("artist-photo-own", |app| {
+                show_type(app, MediaType::Music);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                let artist = |message| Message::Entry(entry::Message::Artist(message));
+                let _ = app.update(artist(entry::artist::Message::View("Pink Floyd".into())));
+                let _ = app.update(artist(entry::artist::Message::Change));
+                let _ = app.update(artist(entry::artist::Message::Pick(
+                    entry::artist::Source::Deezer("fake:deezer".into()),
+                )));
+            }),
+        ),
         // The cover viewer from details, and Pick a cover beside it.
         (
             Screen::Library,

@@ -53,7 +53,7 @@ fn msg(message: Message) -> AppMessage {
 
 /// The panel, its five columns of tiles and the gaps.
 pub const PANEL_WIDTH: f32 = 760.0;
-const PANEL_PADDING: f32 = 22.0;
+pub(super) const PANEL_PADDING: f32 = 22.0;
 const COLUMNS: f32 = 5.0;
 const TILE_GAP: f32 = 12.0;
 /// Fit your cover and the online cover question.
@@ -207,6 +207,9 @@ pub struct Subject {
     pub stored: bool,
     /// The song the picker was opened on, when this is its album.
     pub song: Option<String>,
+    /// The artist whose photo is picked (`artist`), by name: the file
+    /// is then the artist's one fixed file, and there is no entry.
+    pub artist: Option<String>,
 }
 
 impl Subject {
@@ -220,6 +223,7 @@ impl Subject {
             keep_mine: entry.cover_keep_mine == Some(true),
             stored: true,
             song,
+            artist: None,
         }
     }
 
@@ -259,6 +263,20 @@ pub fn subject(app: &App) -> Option<Subject> {
             Some(Subject::of(owner, song))
         }
         Dialog::Form(form) if form.cover_dialog => Some(form_subject(app, form)),
+        Dialog::Artist(view) if view.changing => {
+            let slug = covers::artists::slug(&view.name)?;
+            Some(Subject {
+                id: format!("{}/{slug}", covers::artists::FOLDER),
+                media: MediaType::Music,
+                title: view.name.clone(),
+                year: None,
+                current: app.covers.artist_file(&view.name).map(covers::File::url),
+                keep_mine: false,
+                stored: true,
+                song: None,
+                artist: Some(view.name.clone()),
+            })
+        }
         _ => None,
     }
 }
@@ -291,6 +309,7 @@ fn form_subject(app: &App, form: &Form) -> Subject {
         keep_mine: form.cover_keep_mine == Some(true),
         stored: false,
         song: None,
+        artist: None,
     }
 }
 
@@ -298,6 +317,7 @@ fn state(app: &App) -> Option<&PickState> {
     match app.dialog.as_ref()? {
         Dialog::Cover(view) => Some(&view.pick),
         Dialog::Form(form) => Some(&form.pick),
+        Dialog::Artist(view) => Some(&view.pick),
         _ => None,
     }
 }
@@ -306,6 +326,7 @@ fn state_mut(app: &mut App) -> Option<&mut PickState> {
     match app.dialog.as_mut()? {
         Dialog::Cover(view) => Some(&mut view.pick),
         Dialog::Form(form) => Some(&mut form.pick),
+        Dialog::Artist(view) => Some(&mut view.pick),
         _ => None,
     }
 }
@@ -430,7 +451,7 @@ fn online_known(app: &App, subject: &Subject) -> bool {
 
 /// A file's size as the tile judges its shape: the session's record,
 /// else read from the file.
-fn shape_of(app: &App, state: &PickState, path: &str) -> Option<(u32, u32)> {
+pub(super) fn shape_of(app: &App, state: &PickState, path: &str) -> Option<(u32, u32)> {
     state
         .shapes
         .iter()
@@ -633,9 +654,21 @@ fn make(bytes: Vec<u8>) -> Result<Upload, String> {
 /// gives the path under `covers/`.
 fn store(app: &mut App, upload: &Upload) -> Option<String> {
     let subject = subject(app)?;
-    let name = covers::upload_name(subject.slug(), &upload.prepared.sha);
-    let path = format!("{}/{name}", covers::folder(subject.media));
-    app.add_cover_file(&path, &upload.prepared.bytes)?;
+    let path = match &subject.artist {
+        // An artist has one fixed file, which the upload becomes.
+        Some(name) => {
+            let summary = Some(format!("Set the photo of {name}"));
+            let kind = covers::PhotoKind::Uploaded;
+            app.set_artist_photo(name, &upload.prepared.bytes, kind, summary)?
+                .path
+        }
+        None => {
+            let name = covers::upload_name(subject.slug(), &upload.prepared.sha);
+            let path = format!("{}/{name}", covers::folder(subject.media));
+            app.add_cover_file(&path, &upload.prepared.bytes)?;
+            path
+        }
+    };
     app.covers.keep_original(&path, upload.original.clone());
     if let Some(state) = state_mut(app) {
         state.fresh.retain(|fresh| *fresh != path);
@@ -662,6 +695,10 @@ pub fn pick(app: &mut App, cover_from: Option<String>) {
         }
         return;
     };
+    // An artist's file is the choice: nothing is stored on an entry.
+    if subject.artist.is_some() {
+        return;
+    }
     let keep_mine =
         (covers::is_repo(cover_from.as_deref()) && online_known(app, &subject)).then_some(true);
     if subject.stored {
@@ -882,6 +919,11 @@ pub fn panel<'a>(app: &'a App, on_done: EntryMessage, tokens: &Tokens) -> Elemen
     if let Some(fit) = &state.fit {
         return fit_view(app, &subject, state, fit, tokens);
     }
+    if subject.artist.is_some() {
+        let tile =
+            ((PANEL_WIDTH - 2.0 * PANEL_PADDING - (COLUMNS - 1.0) * TILE_GAP) / COLUMNS).floor();
+        return super::artist::picker(app, state, tile, tokens);
+    }
     picker(app, &subject, state, on_done, tokens)
 }
 
@@ -899,7 +941,7 @@ fn section_head<'a>(name: String, note: String, tokens: &Tokens) -> Element<'a, 
     .into()
 }
 
-fn grid<'a>(tiles: Vec<Element<'a, AppMessage>>) -> Element<'a, AppMessage> {
+pub(super) fn grid<'a>(tiles: Vec<Element<'a, AppMessage>>) -> Element<'a, AppMessage> {
     Row::with_children(tiles)
         .spacing(TILE_GAP)
         .wrap()

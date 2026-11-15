@@ -164,6 +164,38 @@ pub fn size_label(bytes: u64) -> String {
     }
 }
 
+/// How an artist's photo came to be the artist's file, as this computer
+/// remembers it (`covers.json`): the file itself says nothing, so on
+/// another computer, or with the cache cleared, it is not known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhotoKind {
+    /// Apple's photo of the matched artist: the fetch's, or the
+    /// Suggested tile.
+    Fetched,
+    /// Another picture picked in Pick a cover.
+    Picked,
+    Uploaded,
+}
+
+impl PhotoKind {
+    fn key(self) -> &'static str {
+        match self {
+            PhotoKind::Fetched => "fetched",
+            PhotoKind::Picked => "picked",
+            PhotoKind::Uploaded => "uploaded",
+        }
+    }
+
+    fn parse(key: &str) -> Option<PhotoKind> {
+        match key {
+            "fetched" => Some(PhotoKind::Fetched),
+            "picked" => Some(PhotoKind::Picked),
+            "uploaded" => Some(PhotoKind::Uploaded),
+            _ => None,
+        }
+    }
+}
+
 /// One file under `covers/`: its path there ("movies/the-mummy-1999.jpg"),
 /// its size and git's blob sha.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -309,6 +341,9 @@ pub struct Covers {
     /// The pictures uploaded in this session as they were picked, so Fit
     /// your cover crops the picture itself and not its scaled copy.
     originals: Vec<(String, std::sync::Arc<Vec<u8>>)>,
+    /// How each artist's photo on this computer came to be, by path:
+    /// the blob it was said of, and the kind.
+    kinds: HashMap<String, (String, PhotoKind)>,
     /// `artists/_missing.json` as GitHub has it (the copy on this
     /// computer) and as the app reads it, with the queued edits on top.
     missing_remote: Missing,
@@ -344,6 +379,16 @@ impl Covers {
                     .filter_map(|(path, sha)| Some((path.clone(), sha.as_str()?.to_owned())))
                     .collect();
             }
+            if let Some(Value::Object(kinds)) = json.get("kinds") {
+                covers.kinds = kinds
+                    .iter()
+                    .filter_map(|(path, kind)| {
+                        let sha = kind["sha"].as_str()?.to_owned();
+                        let kind = PhotoKind::parse(kind["kind"].as_str()?)?;
+                        Some((path.clone(), (sha, kind)))
+                    })
+                    .collect();
+            }
             covers.files = covers.remote.clone();
         }
         covers.load_missing();
@@ -370,7 +415,13 @@ impl Covers {
             .iter()
             .map(|(path, sha)| (path.clone(), Value::String(sha.clone())))
             .collect();
-        let _ = file.write(&json!({"version": VERSION, "files": files, "have": have}));
+        let kinds: serde_json::Map<String, Value> = self
+            .kinds
+            .iter()
+            .map(|(path, (sha, kind))| (path.clone(), json!({"sha": sha, "kind": kind.key()})))
+            .collect();
+        let _ =
+            file.write(&json!({"version": VERSION, "files": files, "have": have, "kinds": kinds}));
     }
 
     pub fn files(&self) -> &[File] {
@@ -448,6 +499,22 @@ impl Covers {
     /// The artist's file, when there is one.
     pub fn artist_file(&self, name: &str) -> Option<&File> {
         self.get(&artists::file_path(name)?)
+    }
+
+    /// Remembers how the photo at `path`, as it is on this computer now,
+    /// came to be.
+    pub fn set_kind(&mut self, path: &str, kind: PhotoKind) {
+        if let Some(sha) = self.have.get(path).cloned() {
+            self.kinds.insert(path.to_owned(), (sha, kind));
+            self.save();
+        }
+    }
+
+    /// How the photo at `path` came to be, when this computer made it
+    /// and it is still that picture.
+    pub fn kind(&self, path: &str) -> Option<PhotoKind> {
+        let (sha, kind) = self.kinds.get(path)?;
+        (self.have.get(path) == Some(sha)).then_some(*kind)
     }
 
     /// The blobs a fixed-name path may hold on GitHub when a change made

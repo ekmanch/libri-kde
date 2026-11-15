@@ -529,6 +529,7 @@ impl App {
                 cache.as_deref(),
             );
             app.photos = covers::backfill::State::at(storage::data_dir().as_deref());
+            app.apple = Arc::new(lookup::apple_artists::AppleArtists::at(cache.as_deref()));
             if app.kept_locally {
                 app.covers.scan();
             }
@@ -1292,6 +1293,7 @@ impl App {
                     self.photos.retry_at = Some(self.now + covers::backfill::RETRY);
                     return Task::none();
                 }
+                self.covers.set_kind(&path, covers::PhotoKind::Fetched);
                 self.artwork.forget_image(&covers::cover_from(&path));
                 covers::Change::Put {
                     path,
@@ -1416,14 +1418,14 @@ impl App {
 
     /// Saves `bytes` as the artist's photo, over the one there, and
     /// queues it: a JPEG as Apple served it or as an upload was scaled.
-    /// `picked` says the owner chose it. The artist is no longer missing.
+    /// `kind` says how it came to be. The artist is no longer missing.
     /// `summary` names a commit the file makes on its own. Nothing for a
     /// name that gets no file.
     pub fn set_artist_photo(
         &mut self,
         name: &str,
         bytes: &[u8],
-        picked: bool,
+        kind: covers::PhotoKind,
         summary: Option<String>,
     ) -> Option<covers::File> {
         let path = covers::artists::file_path(name)?;
@@ -1436,9 +1438,15 @@ impl App {
             }
         };
         self.photos_dropped.retain(|dropped| *dropped != path);
+        self.covers.set_kind(&path, kind);
         let url = file.url();
         self.artwork.forget_image(&url);
-        let change = covers::Change::Put { path, seen, picked };
+        // The owner chose the picture, also when it is Apple's.
+        let change = covers::Change::Put {
+            path,
+            seen,
+            picked: true,
+        };
         self.change_cover_files(vec![change], summary);
         Some(file)
     }
@@ -1831,6 +1839,10 @@ impl App {
             }
             Message::Library(L::Select(id) | L::OpenSeriesPart(id)) => {
                 Message::Entry(entry::Message::ViewCover(id))
+            }
+            // An artist's row or card, in every view: the photo, large.
+            Message::Library(L::OpenArtist(name)) if !shift => {
+                Message::Entry(entry::Message::Artist(entry::artist::Message::View(name)))
             }
             Message::Library(L::ShowType(Some(media))) => Message::Library(L::ToggleType(media)),
             // A type chip on the Coming soon page adds or removes the type.
@@ -3522,7 +3534,7 @@ mod tests {
         connected(&mut app);
         let queued = |app: &App| app.engine.as_ref().unwrap().pending().changes();
         let file = app
-            .set_artist_photo("Massive Attack", b"jpeg", true, None)
+            .set_artist_photo("Massive Attack", b"jpeg", covers::PhotoKind::Picked, None)
             .expect("a name with a slug");
         assert_eq!(file.path, "artists/massive-attack.jpg");
         assert_eq!(
@@ -3536,7 +3548,10 @@ mod tests {
         assert!(app.covers.artist_file("Massive Attack").is_some());
         assert!(app.save_due.is_some());
         // A name with no letters or digits never gets a file.
-        assert!(app.set_artist_photo("!!!", b"jpeg", true, None).is_none());
+        assert!(
+            app.set_artist_photo("!!!", b"jpeg", covers::PhotoKind::Picked, None)
+                .is_none()
+        );
         // Use automatic takes it away again.
         app.remove_artist_photo("Massive Attack", None);
         assert!(app.covers.artist_file("Massive Attack").is_none());
@@ -3546,7 +3561,7 @@ mod tests {
         ));
         // The push found another device's photo there: the pick is
         // dropped and kept to be told.
-        app.set_artist_photo("Massive Attack", b"jpeg", true, None);
+        app.set_artist_photo("Massive Attack", b"jpeg", covers::PhotoKind::Picked, None);
         app.covers_dropped(vec![
             sync::commit::Dropped {
                 path: "artists/massive-attack.jpg".into(),
