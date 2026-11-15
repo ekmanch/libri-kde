@@ -109,6 +109,29 @@ pub fn artists<'a>(entries: &[&'a Entry], sort: Sort) -> Vec<Artist<'a>> {
     artists
 }
 
+/// The entries that lend an artist their cover while the artist has no
+/// photo of their own, best first (`covers::artists::cover_order`): of
+/// everything saved by `name` in the library, whatever the list shows,
+/// the albums most recently added first and then the songs. The artist
+/// shows the first of them that has a cover.
+pub fn library_covers<'a>(entries: &'a [Entry], name: &str) -> Vec<&'a Entry> {
+    let by: Vec<&Entry> = entries
+        .iter()
+        .filter(|e| e.media == MediaType::Music && artist_of(e).eq_ignore_ascii_case(name))
+        .collect();
+    let saved: Vec<crate::covers::artists::Saved> = by
+        .iter()
+        .map(|entry| crate::covers::artists::Saved {
+            song: is_song(entry),
+            added: entry.added,
+        })
+        .collect();
+    crate::covers::artists::cover_order(&saved)
+        .into_iter()
+        .map(|i| by[i])
+        .collect()
+}
+
 /// A row on the Songs tab: a song entry, or a track of an album.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Song<'a> {
@@ -316,6 +339,43 @@ mod tests {
             .unwrap();
         assert!(beatles < creedence, "Beatles sorts under B");
         assert_eq!(names.first(), Some(&"2Pac"), "digits first");
+    }
+
+    #[test]
+    fn an_artists_library_covers_are_their_albums_newest_added_first_then_their_songs() {
+        let mut library = crate::model::codec::decode(crate::fixtures::LIBRARY_JSON).unwrap();
+        let day = |text: &str| crate::model::Date::parse(text).unwrap();
+        let mut by_artist: Vec<Entry> = library
+            .entries
+            .iter()
+            .filter(|e| e.media == MediaType::Music && !is_song(e))
+            .take(1)
+            .cloned()
+            .collect();
+        let base = by_artist.remove(0);
+        let made = |id: &str, song: bool, added: &str| {
+            let mut entry = base.clone();
+            entry.id = id.into();
+            entry.creator = Some("Test Artist".into());
+            entry.kind = song.then_some(EntryKind::Song);
+            entry.added = day(added);
+            entry
+        };
+        library.entries.extend([
+            made("music/song", true, "2026-11-01"),
+            made("music/old", false, "2025-01-01"),
+            made("music/new-a", false, "2026-03-02"),
+            made("music/new-b", false, "2026-03-02"),
+        ]);
+        let ids: Vec<&str> = library_covers(&library.entries, "test artist")
+            .into_iter()
+            .map(|e| e.id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            ["music/new-b", "music/new-a", "music/old", "music/song"]
+        );
+        assert!(library_covers(&library.entries, "Nobody").is_empty());
     }
 
     #[test]

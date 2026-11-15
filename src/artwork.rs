@@ -1,4 +1,4 @@
-//! Covers, artist photos and the other things the lookups fetch for the
+//! Covers and the other things the lookups fetch for the
 //! screens (a season's episodes, a series' parts, an album's track list,
 //! IGDB's platforms), as the app keeps them between frames. The screens
 //! say what they show (`Wants`), the app queues what is missing, runs a
@@ -72,7 +72,7 @@ const FAKE_MATCHED: &str = "fake";
 pub const PRUNE_DELAY: Duration = Duration::from_secs(15);
 
 /// What the screens show right now, so the missing pieces are fetched:
-/// entries whose covers are on screen, artists whose photos are, image
+/// entries whose covers are on screen, image
 /// URLs the form shows (match thumbnails), and the entries whose series,
 /// season or track list is open. `large` are the cover viewer's sharper
 /// copies, fetched ahead of everything else and without waiting for a
@@ -85,7 +85,6 @@ pub struct Wants {
     pub sizes: Vec<String>,
     pub backdrops: Vec<String>,
     pub covers: Vec<String>,
-    pub artists: Vec<String>,
     pub images: Vec<String>,
     pub series: Vec<String>,
     pub episodes: Vec<(String, u32)>,
@@ -215,10 +214,6 @@ pub enum Message {
         key: String,
         outcome: Result<(Option<String>, Option<String>), FailureKind>,
     },
-    ArtistResolved {
-        key: String,
-        outcome: Result<Option<String>, FailureKind>,
-    },
     ImageFetched {
         url: String,
         outcome: Result<PathBuf, ImageFailure>,
@@ -271,7 +266,6 @@ pub struct Artwork {
     images: Arc<ImageStore>,
     file: Option<JsonFile>,
     records: HashMap<String, Record>,
-    artists: HashMap<String, Record>,
     failures: HashMap<String, (FailureKind, Instant)>,
     resolving: HashSet<String>,
     queue: Vec<Job>,
@@ -308,7 +302,6 @@ pub struct Artwork {
 #[derive(Debug, Clone)]
 enum Job {
     Entry(Box<Entry>),
-    Artist(String),
 }
 
 impl std::fmt::Debug for Artwork {
@@ -336,7 +329,6 @@ impl Artwork {
             images: Arc::new(ImageStore::at(dir)),
             file,
             records: HashMap::new(),
-            artists: HashMap::new(),
             failures: HashMap::new(),
             resolving: HashSet::new(),
             queue: Vec::new(),
@@ -379,10 +371,8 @@ impl Artwork {
             }
         };
         read(&mut self.records, json.get("entries"));
-        read(&mut self.artists, json.get("artists"));
         if lookup::http::int_at(&json, "version") != Some(VERSION) {
             self.records.retain(|_, r| r.url.is_some());
-            self.artists.retain(|_, r| r.url.is_some());
             self.mark_dirty();
         }
     }
@@ -418,7 +408,6 @@ impl Artwork {
         let _ = file.write(&json!({
             "version": VERSION,
             "entries": map(&self.records),
-            "artists": map(&self.artists),
         }));
         self.dirty = false;
         self.changed_at = None;
@@ -592,20 +581,6 @@ impl Artwork {
         matches!(self.image_states.get(url), Some(ImageState::Failed(until)) if Instant::now() < *until)
     }
 
-    fn artist_key(name: &str) -> String {
-        name.trim().to_lowercase()
-    }
-
-    /// The artist's photo, once it is on this computer.
-    pub fn artist_photo(&self, name: &str) -> Option<image::Handle> {
-        let url = self
-            .artists
-            .get(&Artwork::artist_key(name))?
-            .url
-            .as_deref()?;
-        self.image(url)
-    }
-
     pub fn series_for(&self, entry: &Entry) -> Option<&SeriesState> {
         self.series.get(&entry.id)
     }
@@ -735,9 +710,6 @@ impl Artwork {
                 }
             }
         }
-        for name in &wants.artists {
-            self.want_artist(name);
-        }
         for url in &wants.images {
             self.want_image(url);
         }
@@ -813,35 +785,6 @@ impl Artwork {
         }
     }
 
-    fn want_artist(&mut self, name: &str) {
-        let key = Artwork::artist_key(name);
-        if lookup::NO_PHOTO.contains(&key.as_str()) {
-            return;
-        }
-        if let Some(record) = self.artists.get(&key) {
-            match &record.url {
-                Some(url) => {
-                    let url = url.clone();
-                    self.want_image(&url);
-                    return;
-                }
-                None if Timestamp::now().0 - record.resolved.0 < MISS_RETRY => return,
-                None => {}
-            }
-        }
-        let job = format!("artist:{key}");
-        if self.failures.contains_key(&job) || self.resolving.contains(&job) {
-            return;
-        }
-        if !self
-            .queue
-            .iter()
-            .any(|j| matches!(j, Job::Artist(n) if *n == name))
-        {
-            self.queue.push(Job::Artist(name.to_owned()));
-        }
-    }
-
     /// Starts the blurred copy of an image that is on this computer.
     fn want_backdrop(&mut self, url: &str) -> Option<Task<Message>> {
         if self.backdrops.contains_key(url) || self.blurring.contains(url) {
@@ -913,25 +856,6 @@ impl Artwork {
                         },
                     ));
                 }
-                Job::Artist(name) => {
-                    let key = Artwork::artist_key(&name);
-                    if service.is_instant() {
-                        let outcome = resolve_artist(service, &name).map_err(|f| f.kind);
-                        self.artist_resolved(key, outcome);
-                        continue;
-                    }
-                    self.resolving.insert(format!("artist:{key}"));
-                    let service = service.clone();
-                    tasks.push(Task::perform(
-                        crate::app::blocking(move || Ok(resolve_artist(&service, &name))),
-                        move |result| Message::ArtistResolved {
-                            key: key.clone(),
-                            outcome: result
-                                .unwrap_or_else(|_| Err(lookup::Failure::other("no answer")))
-                                .map_err(|f| f.kind),
-                        },
-                    ));
-                }
             }
         }
         // The fake has no images to fetch; nothing leaves a mock run.
@@ -984,31 +908,6 @@ impl Artwork {
             Err(kind) => {
                 self.failures
                     .insert(format!("entry:{id}"), (kind, Instant::now()));
-            }
-        }
-    }
-
-    fn artist_resolved(&mut self, key: String, outcome: Result<Option<String>, FailureKind>) {
-        self.resolving.remove(&format!("artist:{key}"));
-        match outcome {
-            Ok(url) => {
-                if let Some(url) = &url {
-                    self.want_image(url);
-                }
-                self.artists.insert(
-                    key.clone(),
-                    Record {
-                        key,
-                        url,
-                        source: None,
-                        resolved: Timestamp::now(),
-                    },
-                );
-                self.mark_dirty();
-            }
-            Err(kind) => {
-                self.failures
-                    .insert(format!("artist:{key}"), (kind, Instant::now()));
             }
         }
     }
@@ -1246,7 +1145,6 @@ impl Artwork {
     pub fn update(&mut self, message: Message, library: &Library) -> Task<Message> {
         match message {
             Message::CoverResolved { id, key, outcome } => self.cover_resolved(id, key, outcome),
-            Message::ArtistResolved { key, outcome } => self.artist_resolved(key, outcome),
             Message::ImageFetched { url, outcome } => {
                 self.downloading.remove(&url);
                 let state = match outcome {
@@ -1362,7 +1260,6 @@ impl Artwork {
         let wanted = self
             .records
             .values()
-            .chain(self.artists.values())
             .filter_map(|r| r.url.clone())
             .chain(extra.iter().cloned())
             .flat_map(|url| {
@@ -1398,16 +1295,9 @@ impl Artwork {
         }
         self.pruned = true;
         let ids: HashSet<&str> = library.entries.iter().map(|e| e.id.as_str()).collect();
-        let names: HashSet<String> = library
-            .entries
-            .iter()
-            .filter(|e| e.media == MediaType::Music)
-            .map(|e| Artwork::artist_key(crate::music::artist_of(e)))
-            .collect();
-        let before = self.records.len() + self.artists.len();
+        let before = self.records.len();
         self.records.retain(|id, _| ids.contains(id.as_str()));
-        self.artists.retain(|key, _| names.contains(key));
-        if self.records.len() + self.artists.len() != before {
+        if self.records.len() != before {
             self.mark_dirty();
         }
         self.flush(true);
@@ -1488,8 +1378,10 @@ pub fn resolve_cover(service: &Service, entry: &Entry) -> Reply<(Option<String>,
     Ok((None, None))
 }
 
-/// An artist's photo from the music source; `None` when it has no artist
-/// of that name, or no music source is set up.
+/// An artist's photo from the music source, for the artist's Pick a
+/// cover alone ("Another photo"): it is never shown on its own any more
+/// (DESIGN.md "Artist photos"). `None` when the source has no artist of
+/// that name, or no music source is set up.
 pub fn resolve_artist(service: &Service, name: &str) -> Reply<Option<String>> {
     match service.music() {
         Some(music) => music.artist_photo_url(name),

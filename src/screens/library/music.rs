@@ -169,6 +169,55 @@ fn by_letter(sort: Sort) -> bool {
     matches!(sort, Sort::TitleAz | Sort::ArtistAz)
 }
 
+/// What stands for an artist (DESIGN.md "Artist photos").
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArtistShows<'a> {
+    /// The artist's file in the library repo, by its image key.
+    Photo(String),
+    /// A cover from the library: this entry's.
+    Cover(&'a Entry),
+    Initials,
+}
+
+/// What the artist called `name` shows: their file in the repo, whoever
+/// put it there (the initials until it is on this computer, rather than
+/// a cover that the photo then replaces); else the first of their
+/// entries, in `music::library_covers` order, whose cover is here; else
+/// their initials.
+pub fn artist_shows<'a>(app: &'a App, name: &str) -> ArtistShows<'a> {
+    if let Some(file) = app.covers.artist_file(name) {
+        return ArtistShows::Photo(file.url());
+    }
+    music::library_covers(&app.repo.library().entries, name)
+        .into_iter()
+        .find(|entry| app.artwork.cover(entry).is_some())
+        .map_or(ArtistShows::Initials, ArtistShows::Cover)
+}
+
+/// The image drawn for the artist, when there is one on this computer.
+pub fn artist_image(app: &App, name: &str) -> Option<iced::widget::image::Handle> {
+    match artist_shows(app, name) {
+        ArtistShows::Photo(url) => app.artwork.image(&url),
+        ArtistShows::Cover(entry) => app.artwork.cover(entry),
+        ArtistShows::Initials => None,
+    }
+}
+
+/// Asks for what the artist shows: their file, else the covers of their
+/// entries, best first, up to the first one that is here.
+pub fn want_artist(app: &App, name: &str, wants: &mut crate::artwork::Wants) {
+    if let Some(file) = app.covers.artist_file(name) {
+        wants.images.push(file.url());
+        return;
+    }
+    for entry in music::library_covers(&app.repo.library().entries, name) {
+        wants.covers.push(entry.id.clone());
+        if app.artwork.cover(entry).is_some() {
+            break;
+        }
+    }
+}
+
 /// The sections of an artist list already in `sort` order, for a rail
 /// with room for `fits` labels. By name: the first letter with a leading
 /// "The" ignored, and Various Artists on its own at the end. By count:
@@ -201,7 +250,7 @@ fn artist_block<'a>(
     let rows = artists.into_iter().map(|artist| {
         let open = msg(Message::OpenArtist(artist.name.to_owned()));
         let summary = artist.summary();
-        let photo = app.artwork.artist_photo(artist.name);
+        let photo = artist_image(app, artist.name);
         match view {
             View::Text => column![
                 ui::music::artist_row(artist.name, summary, tokens, open),
@@ -340,6 +389,35 @@ mod tests {
 
     fn labels(sections: &[browse::ListSection<music::Artist<'_>>]) -> Vec<String> {
         sections.iter().map(|s| s.label.clone()).collect()
+    }
+
+    #[test]
+    fn an_artist_shows_their_file_else_a_library_cover_else_initials() {
+        let mut app = App::new(crate::screens::Screen::Library);
+        let (name, best) = {
+            let entries = &app.repo.library().entries;
+            let album = entries
+                .iter()
+                .find(|e| e.media == MediaType::Music && !music::is_song(e))
+                .expect("the fixture has an album");
+            let name = music::artist_of(album).to_owned();
+            let best = music::library_covers(entries, &name)[0].id.clone();
+            (name, best)
+        };
+        // No cover is on this computer in a test: initials, with the
+        // artist's best entry asked for.
+        assert_eq!(artist_shows(&app, &name), ArtistShows::Initials);
+        let mut wants = crate::artwork::Wants::default();
+        want_artist(&app, &name, &mut wants);
+        assert_eq!(wants.covers.first(), Some(&best));
+        assert!(wants.images.is_empty());
+        // With a file in the repo, the file alone.
+        let file = app.set_artist_photo(&name, b"jpeg", false, None).unwrap();
+        assert_eq!(artist_shows(&app, &name), ArtistShows::Photo(file.url()));
+        let mut wants = crate::artwork::Wants::default();
+        want_artist(&app, &name, &mut wants);
+        assert_eq!(wants.images, [file.url()]);
+        assert!(wants.covers.is_empty());
     }
 
     #[test]

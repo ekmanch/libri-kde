@@ -566,11 +566,9 @@ pub fn wanted(app: &App, wants: &mut Wants) {
     {
         let listing = state.listing(library, app.today);
         let artists = crate::music::artists(&listing.shown, state.current_sort());
-        wants.artists.extend(
-            covers_on_screen(artists.len(), state.scroll)
-                .into_iter()
-                .map(|i| artists[i].name.to_owned()),
-        );
+        for i in covers_on_screen(artists.len(), state.scroll) {
+            music::want_artist(app, artists[i].name, wants);
+        }
         return;
     }
     let order = state.cover_order(library, app.today, &app.artwork);
