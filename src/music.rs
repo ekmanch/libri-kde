@@ -3,6 +3,8 @@
 //! behind the phone's replace dialogs (DESIGN.md section 5 of the phone's
 //! design).
 
+use std::cmp::Reverse;
+
 use crate::browse::Sort;
 use crate::lookup::TrackInfo;
 use crate::model::{Entry, EntryKind, MediaType, Track};
@@ -64,9 +66,11 @@ impl Artist<'_> {
 
 /// Every artist with an album or a song among `entries`, which are in
 /// `sort` order. The artists follow that sort: by name in the title order
-/// (`artist_key`), and in the others each where their first entry is (the
-/// one added last, the newest or oldest release, the highest rated). Each
-/// artist's entries keep their order.
+/// (`artist_key`), by how many of their albums or songs are saved in the
+/// two orders by count (the most first, ties by name), and in the others
+/// each where their first entry is (the one added last, the newest or
+/// oldest release, the highest rated). Each artist's entries keep their
+/// order.
 pub fn artists<'a>(entries: &[&'a Entry], sort: Sort) -> Vec<Artist<'a>> {
     let mut artists: Vec<Artist<'a>> = Vec::new();
     for &entry in entries.iter().filter(|e| e.media == MediaType::Music) {
@@ -93,8 +97,15 @@ pub fn artists<'a>(entries: &[&'a Entry], sort: Sort) -> Vec<Artist<'a>> {
             artist.albums.push(entry);
         }
     }
-    if matches!(sort, Sort::TitleAz | Sort::ArtistAz) {
-        artists.sort_by_key(|a| artist_key(a.name));
+    match sort {
+        Sort::TitleAz | Sort::ArtistAz => artists.sort_by_key(|a| artist_key(a.name)),
+        Sort::MostAlbums => {
+            artists.sort_by_key(|a| (Reverse(a.albums.len()), artist_key(a.name)));
+        }
+        Sort::MostSongs => {
+            artists.sort_by_key(|a| (Reverse(a.songs.len()), artist_key(a.name)));
+        }
+        _ => {}
     }
     artists
 }
@@ -348,6 +359,54 @@ mod tests {
             .map(|a| a.name)
             .collect();
         assert_ne!(newest, by_name);
+    }
+
+    #[test]
+    fn artists_by_how_much_is_saved() {
+        let mut library = library();
+        // Two more albums by one artist and two songs by another.
+        let mut extra = |creator: &str, kind: Option<EntryKind>, n: usize| {
+            let mut entry = library
+                .entries
+                .iter()
+                .find(|e| e.media == MediaType::Music)
+                .unwrap()
+                .clone();
+            entry.id = format!("music/extra-{n}");
+            entry.title = format!("Extra {n}");
+            entry.creator = Some(creator.to_owned());
+            entry.kind = kind;
+            library.entries.push(entry);
+        };
+        extra("The Cramps", Some(EntryKind::Song), 1);
+        extra("The Cramps", Some(EntryKind::Song), 2);
+        extra("Alice in Chains", Some(EntryKind::Album), 3);
+        extra("Alice in Chains", Some(EntryKind::Album), 4);
+        for (sort, first) in [
+            (Sort::MostAlbums, "Alice in Chains"),
+            (Sort::MostSongs, "The Cramps"),
+        ] {
+            let mut entries: Vec<&Entry> = library.entries.iter().collect();
+            sort.apply(&mut entries);
+            let artists = artists(&entries, sort);
+            assert_eq!(artists[0].name, first, "{sort:?}");
+            let count = |a: &Artist| match sort {
+                Sort::MostAlbums => a.albums.len(),
+                _ => a.songs.len(),
+            };
+            for pair in artists.windows(2) {
+                let (a, b) = (&pair[0], &pair[1]);
+                assert!(count(a) >= count(b), "{sort:?}: the most first");
+                if count(a) == count(b) {
+                    assert!(
+                        artist_key(a.name) <= artist_key(b.name),
+                        "{sort:?}: ties by name, {} before {}",
+                        a.name,
+                        b.name
+                    );
+                }
+            }
+        }
     }
 
     #[test]

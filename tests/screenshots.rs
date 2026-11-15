@@ -982,6 +982,19 @@ fn capture_every_screen() {
                 )));
             }),
         ),
+        // The artists by how many of their albums are saved.
+        (
+            Screen::Library,
+            ("music-artists-most-albums", |app| {
+                let _ = app.update(Message::Library(library::Message::ShowType(Some(
+                    MediaType::Music,
+                ))));
+                let _ = app.update(Message::Library(library::Message::Sort(Sort::MostAlbums)));
+                let _ = app.update(Message::Library(library::Message::Toggle(
+                    library::Popup::Sort,
+                )));
+            }),
+        ),
         (
             Screen::Library,
             ("cover-viewer-album", |app| {

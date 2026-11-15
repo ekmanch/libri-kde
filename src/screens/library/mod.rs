@@ -104,11 +104,13 @@ impl MusicSorts {
     }
 
     /// Sets a tab's sort. The Artists tab has no order by artist of its
-    /// own (that is its order by name), so there it is left as it was.
+    /// own (that is its order by name), and only it has the orders by
+    /// count, so a tab given one it does not have is left as it was.
     pub fn set(&mut self, tab: MusicTab, sort: Sort) {
         match tab {
             MusicTab::Artists if sort == Sort::ArtistAz => {}
             MusicTab::Artists => self.artists = sort,
+            _ if sort.by_count() => {}
             MusicTab::Albums => self.albums = sort,
             MusicTab::Songs => self.songs = sort,
         }
@@ -874,7 +876,7 @@ impl State {
             Message::Sort(sort) => {
                 if self.single() == Some(MediaType::Music) {
                     self.music_sorts.set(self.music_tab, sort);
-                } else if sort != Sort::ArtistAz {
+                } else if sort != Sort::ArtistAz && !sort.by_count() {
                     self.sort = sort;
                 }
                 self.popup = None;
@@ -1165,12 +1167,15 @@ impl State {
     }
 
     /// The Sort menu's choices for the list shown: Music's Albums and
-    /// Songs can go by artist as well.
+    /// Songs can go by artist as well, and its Artists by how many albums
+    /// or songs are saved.
     pub fn sort_choices(&self) -> &'static [Sort] {
-        if self.single() == Some(MediaType::Music) && self.music_tab != MusicTab::Artists {
+        if self.single() != Some(MediaType::Music) {
+            &Sort::ALL
+        } else if self.music_tab != MusicTab::Artists {
             &Sort::WITH_ARTIST
         } else {
-            &Sort::ALL
+            &Sort::FOR_ARTISTS
         }
     }
 
@@ -1783,15 +1788,21 @@ mod tests {
         state.update(Message::Sort(Sort::YearOldest));
         state.update(Message::ShowType(Some(MediaType::Music)));
         assert_eq!(state.current_sort(), Sort::NewestAdded, "not the movies'");
-        assert_eq!(state.sort_choices(), &Sort::ALL[..], "artists: no Artist");
+        assert_eq!(state.sort_choices(), &Sort::FOR_ARTISTS[..]);
+        assert!(!state.sort_choices().contains(&Sort::ArtistAz));
+        state.update(Message::Sort(Sort::MostAlbums));
+        assert_eq!(state.current_sort(), Sort::MostAlbums);
         state.update(Message::Sort(Sort::TitleAz));
         state.update(Message::MusicTab(MusicTab::Albums));
         assert_eq!(state.current_sort(), Sort::NewestAdded);
         assert_eq!(state.sort_choices(), &Sort::WITH_ARTIST[..]);
         state.update(Message::Sort(Sort::ArtistAz));
+        state.update(Message::Sort(Sort::MostAlbums));
+        assert_eq!(state.current_sort(), Sort::ArtistAz, "the artists' alone");
         state.update(Message::MusicTab(MusicTab::Songs));
         assert_eq!(state.sort_choices(), &Sort::WITH_ARTIST[..]);
         state.update(Message::Sort(Sort::RatingHighest));
+        state.update(Message::Sort(Sort::MostSongs));
         assert_eq!(
             state.music_sorts,
             MusicSorts {
@@ -1805,6 +1816,8 @@ mod tests {
         state.update(Message::ShowType(Some(MediaType::Movies)));
         assert_eq!(state.current_sort(), Sort::YearOldest, "untouched by Music");
         assert_eq!(state.sort_choices(), &Sort::ALL[..]);
+        state.update(Message::Sort(Sort::MostSongs));
+        assert_eq!(state.current_sort(), Sort::YearOldest);
 
         // The albums by artist; and a tab beside the picked one in its
         // own order, as it slides past.

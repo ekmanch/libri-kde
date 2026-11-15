@@ -400,7 +400,7 @@ mod tests {
             .panels
             .insert(ViewKey::Type(MediaType::Movies), false);
         app.library.music_sorts = MusicSorts {
-            artists: Sort::TitleAz,
+            artists: Sort::MostSongs,
             albums: Sort::NewestAdded,
             songs: Sort::ArtistAz,
         };

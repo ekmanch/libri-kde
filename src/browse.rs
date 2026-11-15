@@ -314,6 +314,12 @@ pub enum Sort {
     YearNewest,
     YearOldest,
     RatingHighest,
+    /// By how many of the artist's albums are saved: Music's Artists
+    /// only.
+    MostAlbums,
+    /// By how many of the artist's songs are saved (song entries, never
+    /// an album's tracks): Music's Artists only.
+    MostSongs,
 }
 
 impl Sort {
@@ -336,6 +342,22 @@ impl Sort {
         Sort::RatingHighest,
     ];
 
+    /// The choices of Music's Artists: by what is saved of each too.
+    pub const FOR_ARTISTS: [Sort; 7] = [
+        Sort::NewestAdded,
+        Sort::TitleAz,
+        Sort::YearNewest,
+        Sort::YearOldest,
+        Sort::RatingHighest,
+        Sort::MostAlbums,
+        Sort::MostSongs,
+    ];
+
+    /// Whether the sort is one of the Artists tab's own, by a count.
+    pub fn by_count(self) -> bool {
+        matches!(self, Sort::MostAlbums | Sort::MostSongs)
+    }
+
     /// The word for the sort in `preferences.json`.
     pub fn key(self) -> &'static str {
         match self {
@@ -345,11 +367,16 @@ impl Sort {
             Sort::YearNewest => "year_newest",
             Sort::YearOldest => "year_oldest",
             Sort::RatingHighest => "rating",
+            Sort::MostAlbums => "most_albums",
+            Sort::MostSongs => "most_songs",
         }
     }
 
     pub fn from_key(key: &str) -> Option<Sort> {
-        Sort::WITH_ARTIST.into_iter().find(|sort| sort.key() == key)
+        Sort::WITH_ARTIST
+            .into_iter()
+            .chain(Sort::FOR_ARTISTS)
+            .find(|sort| sort.key() == key)
     }
 
     pub fn label(self) -> &'static str {
@@ -360,6 +387,8 @@ impl Sort {
             Sort::YearNewest => "Year, newest first",
             Sort::YearOldest => "Year, oldest first",
             Sort::RatingHighest => "Rating, highest first",
+            Sort::MostAlbums => "Most albums",
+            Sort::MostSongs => "Most songs",
         }
     }
 
@@ -372,6 +401,8 @@ impl Sort {
             Sort::YearNewest => "Year ↓",
             Sort::YearOldest => "Year ↑",
             Sort::RatingHighest => "Rating ↓",
+            Sort::MostAlbums => "Most albums",
+            Sort::MostSongs => "Most songs",
         }
     }
 
@@ -398,7 +429,9 @@ impl Sort {
                     .cmp(&a.added)
                     .then(position[b.id.as_str()].cmp(&position[a.id.as_str()]))
             }),
-            Sort::TitleAz => entries.sort_by(by_title),
+            // The counts order the artists (`music::artists`); what is
+            // saved of one, on their page, goes by title.
+            Sort::TitleAz | Sort::MostAlbums | Sort::MostSongs => entries.sort_by(by_title),
             // The artists in the Artists tab's order by name, each one's
             // titles A to Z.
             Sort::ArtistAz => entries.sort_by(|a, b| {
@@ -660,6 +693,8 @@ pub fn section_key(sort: Sort, entry: &Entry, today: Date) -> (String, String) {
             Some(rating) => (rating.to_string(), rating.to_string()),
             None => ("Unrated".into(), "None".into()),
         },
+        // One run: no sections and no rail, as on the phone.
+        Sort::MostAlbums | Sort::MostSongs => (sort.label().into(), "Most".into()),
     }
 }
 
@@ -1148,9 +1183,11 @@ mod tests {
         let beatles = keys.iter().position(|k| k.0.1 == "beatles");
         assert!(beatles.is_some(), "The Beatles file under B: {keys:?}");
         assert!(Sort::ALL.iter().all(|sort| *sort != Sort::ArtistAz));
-        for sort in Sort::WITH_ARTIST {
+        for sort in Sort::WITH_ARTIST.into_iter().chain(Sort::FOR_ARTISTS) {
             assert_eq!(Sort::from_key(sort.key()), Some(sort));
         }
+        assert!(Sort::ALL.iter().all(|sort| !sort.by_count()));
+        assert!(Sort::WITH_ARTIST.iter().all(|sort| !sort.by_count()));
     }
 
     #[test]
