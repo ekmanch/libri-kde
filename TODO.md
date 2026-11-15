@@ -222,7 +222,7 @@ The parts below catch up with the phone's canvas revisions of 2026-10-18 to 2026
 
 ## Polish
 
-Everything found along the way that no phase planned: improvements, canvas revisions, bugs and follow-ups. New items go here, under the area they touch, unless they belong to a phase's own scope. Commits for them use `(polish)` in place of a phase.
+Everything found along the way that no phase planned: improvements, canvas revisions, bugs and follow-ups. New items go here, under the area they touch, unless they belong to a phase's own scope. Commits for them have no phase suffix.
 
 ### Lookups
 
