@@ -198,6 +198,19 @@ pub fn missing_text(
     }
 }
 
+/// Whether `edits` put an artist's photo in the repo. The missing record
+/// is then read again, with or without edits of its own: a photo the
+/// owner picked for an artist Apple had none for takes the artist off it.
+pub fn adds_photo(root: &str, edits: &[(String, Edit)]) -> bool {
+    edits.iter().any(|(path, edit)| {
+        *edit != Edit::Delete
+            && path
+                .strip_prefix(root)
+                .and_then(|rest| rest.strip_prefix('/'))
+                .is_some_and(|rest| artists::slug_of_path(rest).is_some())
+    })
+}
+
 /// Makes the commit on `target`'s branch: `library` as the library file
 /// when it changed, and `changes` to the cover files, whose uploads are
 /// read from `covers_dir`. `expected` is the blob the library file must
@@ -237,9 +250,10 @@ pub fn run(
     };
     let plan = plan_guarded(&tree, &root, changes, &local_sha);
     let dropped = plan.dropped;
-    if !plan.missing.is_empty() {
-        let at = format!("{root}/{}", artists::missing_path());
-        let theirs = match tree.iter().any(|file| file.path == at) {
+    let at = format!("{root}/{}", artists::missing_path());
+    let listed = tree.iter().any(|file| file.path == at);
+    if !plan.missing.is_empty() || (listed && adds_photo(&root, &plan.edits)) {
+        let theirs = match listed {
             true => client.file_raw(&at, &target.branch, None)?,
             false => None,
         };
@@ -459,6 +473,32 @@ mod tests {
             plan_guarded(&[], "covers", &undone, &|_| None),
             Plan::default()
         );
+    }
+
+    #[test]
+    fn a_picked_photo_takes_the_artist_off_the_missing_record() {
+        let theirs = "{\n  \"version\": 1,\n  \"artists\": {\n    \"can\": {\"name\": \"Can\", \"tried\": \"2026-11-14\", \"reason\": \"no-photo\"},\n    \"neu\": {\"name\": \"Neu!\", \"tried\": \"2026-11-14\", \"reason\": \"no-match\"}\n  }\n}\n";
+        // A pick carries no edit of the record, only the file.
+        let made = plan_guarded(
+            &[],
+            "covers",
+            &[put("artists/can.jpg", &[None], true)],
+            &|_| None,
+        );
+        assert!(made.missing.is_empty());
+        assert!(adds_photo("covers", &made.edits));
+        let text = missing_text(&[], "covers", &made.edits, &made.missing, Some(theirs))
+            .expect("the record changes");
+        let merged = artists::Missing::decode(&text).unwrap();
+        let slugs: Vec<&str> = merged.artists.keys().map(String::as_str).collect();
+        assert_eq!(slugs, ["neu"]);
+        // A title's cover, or a photo taken away, does not read the record.
+        let cover = (
+            "covers/music/low.jpg".to_owned(),
+            Edit::Upload("music/low.jpg".into()),
+        );
+        let gone = ("covers/artists/can.jpg".to_owned(), Edit::Delete);
+        assert!(!adds_photo("covers", &[cover, gone]));
     }
 
     #[test]
