@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
+use self::artists::{Missing, MissingEdit};
 use crate::github::{self, blob_sha};
 use crate::lookup::store::JsonFile;
 use crate::model::{Entry, Library, MediaType};
@@ -203,6 +204,26 @@ pub enum Change {
         from: String,
         to: String,
     },
+    /// A file under a fixed name (an artist's photo), written only over
+    /// what this computer saw there: `seen` lists the blobs the path may
+    /// hold on GitHub, `None` for no file. Over anything else the upload
+    /// is dropped and GitHub's file taken, so of two devices that put a
+    /// photo there before syncing the first to push wins. `picked` says
+    /// the owner chose the picture, who is then told it was dropped.
+    Put {
+        path: String,
+        seen: Vec<Option<String>>,
+        picked: bool,
+    },
+    /// The fixed-name file deleted (Use automatic), only while it is
+    /// still one of the blobs `seen`.
+    Remove {
+        path: String,
+        seen: Vec<Option<String>>,
+    },
+    /// An edit to `artists/_missing.json`, merged per artist into the
+    /// repo's copy when the commit is made.
+    Missing(MissingEdit),
 }
 
 impl Change {
@@ -211,18 +232,56 @@ impl Change {
             Change::Upload { path } => json!({"change": "upload", "path": path}),
             Change::Delete { path } => json!({"change": "delete", "path": path}),
             Change::Move { from, to } => json!({"change": "move", "path": from, "to": to}),
+            Change::Put { path, seen, picked } => {
+                json!({"change": "put", "path": path, "seen": seen, "picked": picked})
+            }
+            Change::Remove { path, seen } => {
+                json!({"change": "remove", "path": path, "seen": seen})
+            }
+            Change::Missing(edit) => {
+                let mut json = edit.to_json();
+                json["change"] = json!("missing");
+                json
+            }
         }
     }
 
     pub fn from_json(json: &Value) -> Option<Change> {
-        let path = json["path"].as_str()?.to_owned();
+        let path = || json["path"].as_str().map(str::to_owned);
+        let seen = || -> Option<Vec<Option<String>>> {
+            Some(
+                json["seen"]
+                    .as_array()?
+                    .iter()
+                    .map(|sha| sha.as_str().map(str::to_owned))
+                    .collect(),
+            )
+        };
         match json["change"].as_str()? {
-            "upload" => Some(Change::Upload { path }),
-            "delete" => Some(Change::Delete { path }),
+            "upload" => Some(Change::Upload { path: path()? }),
+            "delete" => Some(Change::Delete { path: path()? }),
             "move" => Some(Change::Move {
-                from: path,
+                from: path()?,
                 to: json["to"].as_str()?.to_owned(),
             }),
+            "put" => Some(Change::Put {
+                path: path()?,
+                seen: seen()?,
+                picked: json["picked"].as_bool().unwrap_or(false),
+            }),
+            "remove" => Some(Change::Remove {
+                path: path()?,
+                seen: seen()?,
+            }),
+            "missing" => MissingEdit::from_json(json).map(Change::Missing),
+            _ => None,
+        }
+    }
+
+    /// The fixed-name path the change writes or deletes on a condition.
+    pub fn guarded_path(&self) -> Option<&str> {
+        match self {
+            Change::Put { path, .. } | Change::Remove { path, .. } => Some(path),
             _ => None,
         }
     }
@@ -249,6 +308,13 @@ pub struct Covers {
     /// The pictures uploaded in this session as they were picked, so Fit
     /// your cover crops the picture itself and not its scaled copy.
     originals: Vec<(String, std::sync::Arc<Vec<u8>>)>,
+    /// `artists/_missing.json` as GitHub has it (the copy on this
+    /// computer) and as the app reads it, with the queued edits on top.
+    missing_remote: Missing,
+    missing: Missing,
+    /// Where the artists' photos are drawn from: copies named after
+    /// their blob under the cache folder.
+    shown_dir: Option<PathBuf>,
     /// A listing is on its way, and when the last one came.
     pub listing: bool,
     pub listed: Option<Instant>,
@@ -261,6 +327,7 @@ impl Covers {
         let mut covers = Covers {
             dir,
             file: cache.map(|cache| JsonFile(cache.join("covers.json"))),
+            shown_dir: cache.map(|cache| cache.join(artists::FOLDER)),
             ..Covers::default()
         };
         if let Some(json) = covers.file.as_ref().and_then(JsonFile::read)
@@ -278,6 +345,7 @@ impl Covers {
             }
             covers.files = covers.remote.clone();
         }
+        covers.load_missing();
         covers
     }
 
@@ -335,7 +403,108 @@ impl Covers {
         {
             return None;
         }
-        local.is_file().then_some(local)
+        if !local.is_file() {
+            return None;
+        }
+        Some(self.shown_copy(path, have).unwrap_or(local))
+    }
+
+    /// An artist's photo keeps one name whatever the picture, and iced
+    /// keeps a decoded image by its path, so a replaced photo would go
+    /// on showing the old one. It is drawn from a copy named after its
+    /// blob instead, `artists/<slug>.<sha>.jpg` under the cache folder,
+    /// made the first time it is asked for.
+    fn shown_copy(&self, path: &str, sha: &str) -> Option<PathBuf> {
+        let slug = artists::slug_of_path(path)?;
+        let dir = self.shown_dir.as_ref()?;
+        let local = self.local_path(path)?;
+        let copy = dir.join(format!("{slug}.{}.jpg", &sha[..sha.len().min(12)]));
+        if copy.is_file() {
+            return Some(copy);
+        }
+        std::fs::create_dir_all(dir).ok()?;
+        // The copies of the pictures the artist had before.
+        for old in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let name = old.file_name().to_string_lossy().into_owned();
+            if belongs(&name, slug) {
+                let _ = std::fs::remove_file(old.path());
+            }
+        }
+        std::fs::hard_link(&local, &copy)
+            .or_else(|_| std::fs::copy(&local, &copy).map(|_| ()))
+            .ok()?;
+        Some(copy)
+    }
+
+    // The artists' photos (`artists`).
+
+    /// The artists tried with nothing found, with this computer's queued
+    /// edits.
+    pub fn missing(&self) -> &Missing {
+        &self.missing
+    }
+
+    /// The artist's file, when there is one.
+    pub fn artist_file(&self, name: &str) -> Option<&File> {
+        self.get(&artists::file_path(name)?)
+    }
+
+    /// The blobs a fixed-name path may hold on GitHub when a change made
+    /// now is pushed: what GitHub listed, the copy on this computer, and
+    /// what the changes still queued for the path allowed.
+    pub fn seen(&self, path: &str, queued: &[Change]) -> Vec<Option<String>> {
+        let mut seen = vec![
+            self.remote
+                .iter()
+                .find(|file| file.path == path)
+                .map(|file| file.sha.clone()),
+        ];
+        seen.extend(self.have.get(path).cloned().map(Some));
+        for change in queued {
+            if let Change::Put {
+                path: at, seen: s, ..
+            }
+            | Change::Remove { path: at, seen: s } = change
+                && at == path
+            {
+                seen.extend(s.iter().cloned());
+            }
+        }
+        let mut unique = Vec::new();
+        for sha in seen {
+            if !unique.contains(&sha) {
+                unique.push(sha);
+            }
+        }
+        unique
+    }
+
+    /// Reads GitHub's `_missing.json` from its copy on this computer. A
+    /// copy that cannot be read counts as empty here and is never
+    /// written over (`artists::merged_missing`).
+    pub fn load_missing(&mut self) {
+        let path = artists::missing_path();
+        self.missing_remote = self
+            .remote
+            .iter()
+            .any(|file| file.path == path)
+            .then(|| self.local_path(&path))
+            .flatten()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|text| Missing::decode(&text).ok())
+            .unwrap_or_default();
+        self.missing = self.missing_remote.clone();
+    }
+
+    /// A push dropped this computer's file at `path` for GitHub's: the
+    /// copy here goes, and GitHub's is fetched when it is next shown.
+    pub fn dropped(&mut self, path: &str) {
+        if let Some(local) = self.local_path(path) {
+            let _ = crate::storage::remove_if_exists(&local);
+        }
+        self.have.remove(path);
+        self.files.retain(|file| file.path != path);
+        self.save();
     }
 
     /// Whether the copy of `path` is being fetched, or failed a moment
@@ -396,16 +565,34 @@ impl Covers {
     /// The shown list from GitHub's and the queued changes.
     pub fn rebuild(&mut self, queued: &[Change]) {
         let mut files = self.remote.clone();
+        let mut edits = Vec::new();
         for change in queued {
             self.apply_to(&mut files, change);
+            if let Change::Missing(edit) = change {
+                edits.push(edit.clone());
+            }
         }
         files.sort_by(|a, b| a.path.cmp(&b.path));
         self.files = files;
+        self.missing = self.merged_missing(&edits);
+    }
+
+    /// GitHub's record with `edits` on top, without the artists that
+    /// have a file in the shown list.
+    fn merged_missing(&self, edits: &[MissingEdit]) -> Missing {
+        let with_file: HashSet<&str> = self
+            .files
+            .iter()
+            .filter_map(|file| artists::slug_of_path(&file.path))
+            .collect();
+        self.missing_remote
+            .clone()
+            .merged(edits, |slug| with_file.contains(slug))
     }
 
     fn apply_to(&self, files: &mut Vec<File>, change: &Change) {
         match change {
-            Change::Upload { path } => {
+            Change::Upload { path } | Change::Put { path, .. } => {
                 files.retain(|file| file.path != *path);
                 let size = self
                     .local_path(path)
@@ -417,7 +604,10 @@ impl Covers {
                     sha: self.have.get(path).cloned().unwrap_or_default(),
                 });
             }
-            Change::Delete { path } => files.retain(|file| file.path != *path),
+            Change::Delete { path } | Change::Remove { path, .. } => {
+                files.retain(|file| file.path != *path)
+            }
+            Change::Missing(_) => {}
             Change::Move { from, to } => {
                 if let Some(at) = files.iter().position(|file| file.path == *from) {
                     let mut moved = files.remove(at);
@@ -455,12 +645,21 @@ impl Covers {
     /// (the library is kept on this computer), so GitHub's list follows.
     pub fn apply(&mut self, change: &Change, settled: bool) {
         match change {
-            Change::Upload { .. } => {}
-            Change::Delete { path } => {
+            Change::Upload { .. } | Change::Put { .. } => {}
+            Change::Delete { path } | Change::Remove { path, .. } => {
                 if let Some(local) = self.local_path(path) {
                     let _ = crate::storage::remove_if_exists(&local);
                 }
                 self.have.remove(path);
+            }
+            Change::Missing(edit) => {
+                self.missing.apply(edit);
+                if settled {
+                    // The library is kept on this computer: the file here
+                    // is the record.
+                    self.missing_remote.apply(edit);
+                    self.write_missing();
+                }
             }
             Change::Move { from, to } => {
                 if let (Some(old), Some(new)) = (self.local_path(from), self.local_path(to))
@@ -483,7 +682,29 @@ impl Covers {
         if settled {
             self.remote = self.files.clone();
         }
+        // An artist with a file is no longer missing.
+        let with_file: HashSet<&str> = self
+            .files
+            .iter()
+            .filter_map(|file| artists::slug_of_path(&file.path))
+            .collect();
+        self.missing
+            .artists
+            .retain(|slug, _| !with_file.contains(slug.as_str()));
         self.save();
+    }
+
+    /// Writes the record to this computer's folder (the library kept
+    /// here, with no GitHub to merge into).
+    fn write_missing(&mut self) {
+        let path = artists::missing_path();
+        let Some(local) = self.local_path(&path) else {
+            return;
+        };
+        let text = self.missing_remote.encode();
+        if write_bytes(&local, text.as_bytes()).is_ok() {
+            self.have.insert(path, blob_sha(text.as_bytes()));
+        }
     }
 
     /// The folder on this computer as the whole list: the library is
@@ -522,6 +743,7 @@ impl Covers {
         self.remote = files.clone();
         self.files = files;
         self.listed = Some(Instant::now());
+        self.load_missing();
         self.save();
     }
 
@@ -533,6 +755,8 @@ impl Covers {
         self.fetching.clear();
         self.failed.clear();
         self.originals.clear();
+        self.missing_remote = Missing::default();
+        self.missing = Missing::default();
         self.listed = None;
         self.listing = false;
         if delete_files {
@@ -631,7 +855,11 @@ impl Covers {
         self.files
             .iter()
             .filter(|file| {
-                !used.contains(file.path.as_str()) && !Covers::matches_a_title(file, &titles)
+                // The artists' folder is not the titles': its photos and
+                // `_missing.json` are never unused covers.
+                !artists::is_artist_path(&file.path)
+                    && !used.contains(file.path.as_str())
+                    && !Covers::matches_a_title(file, &titles)
             })
             .collect()
     }
@@ -886,6 +1114,179 @@ mod tests {
         ]);
         assert_eq!(covers.candidates(&entry).len(), 2);
         assert!(covers.unused(&library).is_empty());
+    }
+
+    #[test]
+    fn the_new_changes_are_queued_in_json() {
+        let tried = artists::Tried {
+            name: "Adele".into(),
+            tried: crate::model::Date::parse("2026-11-15").unwrap(),
+            reason: artists::Reason::NoMatch,
+        };
+        let changes = [
+            Change::Put {
+                path: "artists/adele.jpg".into(),
+                seen: vec![None, Some("abc".into())],
+                picked: true,
+            },
+            Change::Remove {
+                path: "artists/adele.jpg".into(),
+                seen: vec![Some("abc".into())],
+            },
+            Change::Missing(MissingEdit::Set {
+                slug: "adele".into(),
+                tried,
+            }),
+            Change::Missing(MissingEdit::Remove {
+                slug: "adele".into(),
+            }),
+            Change::Missing(MissingEdit::Backfilled(
+                crate::model::Date::parse("2026-11-16").unwrap(),
+            )),
+        ];
+        for change in changes {
+            assert_eq!(Change::from_json(&change.to_json()), Some(change));
+        }
+    }
+
+    #[test]
+    fn an_artists_photo_is_drawn_from_a_copy_named_after_its_blob() {
+        let dir = TempDir::new("covers");
+        let mut covers = Covers::at(Some(dir.path("covers")), Some(&dir.0));
+        covers.store("artists/adele.jpg", b"first").unwrap();
+        let first = covers.ready("artists/adele.jpg").unwrap();
+        assert!(first.starts_with(dir.path("artists")), "{first:?}");
+        assert_eq!(std::fs::read(&first).unwrap(), b"first");
+        // Replaced under the same name: another path, so no decoded
+        // image is reused, and the old copy is gone.
+        covers.store("artists/adele.jpg", b"second").unwrap();
+        let second = covers.ready("artists/adele.jpg").unwrap();
+        assert_ne!(first, second);
+        assert_eq!(std::fs::read(&second).unwrap(), b"second");
+        assert!(!first.exists());
+        // A title's cover is drawn from the folder itself.
+        covers.store("music/a.1234567.jpg", b"cover").unwrap();
+        assert_eq!(
+            covers.ready("music/a.1234567.jpg").unwrap(),
+            dir.path("covers").join("music/a.1234567.jpg")
+        );
+    }
+
+    #[test]
+    fn a_fixed_name_remembers_what_it_may_replace() {
+        let dir = TempDir::new("covers");
+        let mut covers = Covers::at(Some(dir.path("covers")), Some(&dir.0));
+        assert_eq!(covers.seen("artists/adele.jpg", &[]), [None]);
+        covers.store("artists/adele.jpg", b"first").unwrap();
+        let first = Change::Put {
+            path: "artists/adele.jpg".into(),
+            seen: vec![None],
+            picked: true,
+        };
+        // A second pick before the first is pushed may meet no file or
+        // the first.
+        assert_eq!(
+            covers.seen("artists/adele.jpg", std::slice::from_ref(&first)),
+            [None, Some(blob_sha(b"first"))]
+        );
+        // GitHub lists another device's photo: that is what was seen
+        covers.listed(
+            vec![File {
+                path: "artists/adele.jpg".into(),
+                size: 5,
+                sha: "theirs".into(),
+            }],
+            &[],
+        );
+        // (with the copy here, which a push of this computer's made).
+        assert_eq!(
+            covers.seen("artists/adele.jpg", &[]),
+            [Some("theirs".to_owned()), Some(blob_sha(b"first"))]
+        );
+        // A push dropped this computer's file: GitHub's is fetched.
+        covers.store("artists/adele.jpg", b"mine").unwrap();
+        covers.dropped("artists/adele.jpg");
+        assert!(covers.ready("artists/adele.jpg").is_none());
+        assert!(!dir.path("covers").join("artists/adele.jpg").exists());
+    }
+
+    #[test]
+    fn the_missing_record_is_githubs_with_the_queued_edits() {
+        let dir = TempDir::new("covers");
+        let mut covers = Covers::at(Some(dir.path("covers")), Some(&dir.0));
+        let day = crate::model::Date::parse("2026-11-15").unwrap();
+        let tried = |name: &str| artists::Tried {
+            name: name.into(),
+            tried: day,
+            reason: artists::Reason::NoPhoto,
+        };
+        let mut theirs = Missing::default();
+        theirs.artists.insert("can".into(), tried("Can"));
+        theirs.artists.insert("adele".into(), tried("Adele"));
+        let text = theirs.encode();
+        write_bytes(
+            &dir.path("covers").join("artists/_missing.json"),
+            text.as_bytes(),
+        )
+        .unwrap();
+        let listing = |extra: &[&str]| {
+            let mut files = vec![File {
+                path: artists::missing_path(),
+                size: text.len() as u64,
+                sha: blob_sha(text.as_bytes()),
+            }];
+            files.extend(extra.iter().map(|path| File {
+                path: (*path).to_owned(),
+                size: 1,
+                sha: "photo".into(),
+            }));
+            files
+        };
+        let queued = [Change::Missing(MissingEdit::Set {
+            slug: "burial".into(),
+            tried: tried("Burial"),
+        })];
+        covers.listed(listing(&[]), &queued);
+        covers.load_missing();
+        covers.rebuild(&queued);
+        let slugs =
+            |covers: &Covers| -> Vec<String> { covers.missing().artists.keys().cloned().collect() };
+        assert_eq!(slugs(&covers), ["adele", "burial", "can"]);
+        assert!(covers.missing().is_due("low", day, None));
+        assert!(!covers.missing().is_due("can", day, None));
+        // A photo for Adele appears on GitHub: no longer missing.
+        covers.listed(listing(&["artists/adele.jpg"]), &queued);
+        assert_eq!(slugs(&covers), ["burial", "can"]);
+        // The record is gone from GitHub: only the queued edit is left.
+        covers.listed(Vec::new(), &queued);
+        covers.load_missing();
+        covers.rebuild(&queued);
+        assert_eq!(slugs(&covers), ["burial"]);
+    }
+
+    #[test]
+    fn the_artists_folder_is_never_unused_covers() {
+        let covers = Covers::with_files(
+            [
+                "artists/adele.jpg",
+                "artists/_missing.json",
+                "music/stray.jpg",
+            ]
+            .into_iter()
+            .map(|path| File {
+                path: path.to_owned(),
+                size: 1,
+                sha: "sha".into(),
+            })
+            .collect(),
+        );
+        let library = library();
+        let unused: Vec<&str> = covers
+            .unused(&library)
+            .into_iter()
+            .map(|file| file.path.as_str())
+            .collect();
+        assert_eq!(unused, ["music/stray.jpg"]);
     }
 
     #[test]

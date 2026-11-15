@@ -335,6 +335,116 @@ impl Missing {
     }
 }
 
+/// One change to `_missing.json`, queued until the commit that carries
+/// it: the file is never sent whole, since another device may have added
+/// to it meanwhile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MissingEdit {
+    /// Apple was asked about the artist and nothing was found.
+    Set { slug: String, tried: Tried },
+    /// The artist has a file now, or is asked about again.
+    Remove { slug: String },
+    /// The backfill finished on this day.
+    Backfilled(Date),
+}
+
+impl MissingEdit {
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            MissingEdit::Set { slug, tried } => serde_json::json!({
+                "set": slug,
+                "name": tried.name,
+                "tried": tried.tried.to_string(),
+                "reason": tried.reason.key(),
+            }),
+            MissingEdit::Remove { slug } => serde_json::json!({"remove": slug}),
+            MissingEdit::Backfilled(day) => serde_json::json!({"backfilled": day.to_string()}),
+        }
+    }
+
+    pub fn from_json(json: &serde_json::Value) -> Option<MissingEdit> {
+        if let Some(slug) = json["set"].as_str() {
+            return Some(MissingEdit::Set {
+                slug: slug.to_owned(),
+                tried: Tried {
+                    name: json["name"].as_str()?.to_owned(),
+                    tried: json["tried"].as_str().and_then(Date::parse)?,
+                    reason: json["reason"].as_str().and_then(Reason::parse)?,
+                },
+            });
+        }
+        if let Some(slug) = json["remove"].as_str() {
+            return Some(MissingEdit::Remove {
+                slug: slug.to_owned(),
+            });
+        }
+        json["backfilled"]
+            .as_str()
+            .and_then(Date::parse)
+            .map(MissingEdit::Backfilled)
+    }
+}
+
+impl Missing {
+    pub fn apply(&mut self, edit: &MissingEdit) {
+        match edit {
+            MissingEdit::Set { slug, tried } => {
+                self.artists.insert(slug.clone(), tried.clone());
+            }
+            MissingEdit::Remove { slug } => {
+                self.artists.remove(slug);
+            }
+            // The first day stands: the backfill is done once.
+            MissingEdit::Backfilled(day) => {
+                self.backfilled.get_or_insert(*day);
+            }
+        }
+    }
+
+    /// The record after `edits` on top of this one, in their order, and
+    /// without the artists that have a file (`has_file`, by slug): an
+    /// entry is removed when a file for the artist appears, whoever put
+    /// it there.
+    pub fn merged(mut self, edits: &[MissingEdit], has_file: impl Fn(&str) -> bool) -> Missing {
+        for edit in edits {
+            self.apply(edit);
+        }
+        self.artists.retain(|slug, _| !has_file(slug));
+        self
+    }
+}
+
+/// `_missing.json` as a commit writes it: the repo's copy (`theirs`, none
+/// when there is no file yet) with this device's `edits` on top, per
+/// artist. `Ok(None)` when that changes nothing, and no file is made for
+/// an empty record. A copy that cannot be read is an error and is left
+/// as it is; the edits are then dropped.
+pub fn merged_missing(
+    theirs: Option<&str>,
+    edits: &[MissingEdit],
+    has_file: impl Fn(&str) -> bool,
+) -> Result<Option<String>, String> {
+    let base = match theirs {
+        Some(text) => Missing::decode(text)?,
+        None => Missing::default(),
+    };
+    let merged = base.merged(edits, has_file);
+    if theirs.is_none() && merged == Missing::default() {
+        return Ok(None);
+    }
+    let text = merged.encode();
+    Ok((theirs != Some(text.as_str())).then_some(text))
+}
+
+/// The slug of an artist's file at `path` under `covers/`:
+/// "artists/adele.jpg" is "adele".
+pub fn slug_of_path(path: &str) -> Option<&str> {
+    path.strip_prefix(FOLDER)?
+        .strip_prefix('/')?
+        .strip_suffix(".jpg")
+        .filter(|slug| !slug.is_empty() && !slug.contains('/'))
+}
+
 /// One of an artist's entries, as the library cover is picked from them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Saved {
@@ -509,6 +619,37 @@ mod tests {
         for case in cases("missing_refused") {
             assert!(Missing::decode(text(&case, "text")).is_err(), "{case}");
         }
+    }
+
+    #[test]
+    fn the_missing_file_is_merged_per_artist() {
+        for case in cases("missing_merge") {
+            let edits: Vec<MissingEdit> = case["edits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|edit| MissingEdit::from_json(edit).unwrap_or_else(|| panic!("{edit}")))
+                .collect();
+            // The edits are queued in this form.
+            for (edit, json) in edits.iter().zip(case["edits"].as_array().unwrap()) {
+                assert_eq!(&edit.to_json(), json, "{case}");
+            }
+            let files = strings(&case, "files");
+            let merged = merged_missing(case["theirs"].as_str(), &edits, |slug| {
+                files.contains(&slug)
+            });
+            match case["refused"].as_bool() {
+                Some(true) => assert!(merged.is_err(), "{case}"),
+                _ => assert_eq!(
+                    merged.expect("readable").as_deref(),
+                    case["written"].as_str(),
+                    "{case}"
+                ),
+            }
+        }
+        assert_eq!(slug_of_path("artists/adele.jpg"), Some("adele"));
+        assert_eq!(slug_of_path("artists/_missing.json"), None);
+        assert_eq!(slug_of_path("music/adele.jpg"), None);
     }
 
     #[test]

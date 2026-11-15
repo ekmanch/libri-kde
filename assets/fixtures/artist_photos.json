@@ -224,6 +224,44 @@
     {"text": "{\"version\": 1, \"artists\": {\"a\": {\"tried\": \"2026-11-15\", \"reason\": \"no-match\"}}}"},
     {"text": "not json"}
   ],
+  "missing_merge": [
+    {
+      "about": "No file in the repo yet and nothing to record: none is made.",
+      "theirs": null, "edits": [], "files": [], "written": null
+    },
+    {
+      "about": "The first entry makes the file.",
+      "theirs": null, "edits": [{"set": "burial", "name": "Burial", "tried": "2026-11-16", "reason": "no-photo"}], "files": [], "written": "{\n  \"version\": 1,\n  \"artists\": {\n    \"burial\": {\"name\": \"Burial\", \"tried\": \"2026-11-16\", \"reason\": \"no-photo\"}\n  }\n}\n"
+    },
+    {
+      "about": "An entry another device added meanwhile is kept.",
+      "theirs": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"}\n  }\n}\n", "edits": [{"set": "burial", "name": "Burial", "tried": "2026-11-16", "reason": "no-photo"}], "files": [], "written": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"},\n    \"burial\": {\"name\": \"Burial\", \"tried\": \"2026-11-16\", \"reason\": \"no-photo\"}\n  }\n}\n"
+    },
+    {
+      "about": "Nothing changes: nothing is written.",
+      "theirs": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"},\n    \"burial\": {\"name\": \"Burial\", \"tried\": \"2026-11-16\", \"reason\": \"no-photo\"}\n  }\n}\n", "edits": [{"set": "burial", "name": "Burial", "tried": "2026-11-16", "reason": "no-photo"}], "files": [], "written": null
+    },
+    {
+      "about": "An artist with a file is removed, whoever recorded them, and never added.",
+      "theirs": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"}\n  }\n}\n", "edits": [{"set": "burial", "name": "Burial", "tried": "2026-11-16", "reason": "no-photo"}], "files": ["adele", "burial"], "written": "{\n  \"version\": 1,\n  \"artists\": {}\n}\n"
+    },
+    {
+      "about": "Edits apply in their order.",
+      "theirs": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"}\n  }\n}\n", "edits": [{"set": "burial", "name": "Burial", "tried": "2026-11-16", "reason": "no-photo"}, {"remove": "burial"}, {"remove": "adele"}, {"set": "burial", "name": "Burial", "tried": "2026-11-16", "reason": "no-photo"}], "files": [], "written": "{\n  \"version\": 1,\n  \"artists\": {\n    \"burial\": {\"name\": \"Burial\", \"tried\": \"2026-11-16\", \"reason\": \"no-photo\"}\n  }\n}\n"
+    },
+    {
+      "about": "The backfill's day is written once and the first day stands.",
+      "theirs": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"}\n  }\n}\n", "edits": [{"backfilled": "2026-11-16"}, {"backfilled": "2026-11-20"}], "files": [], "written": "{\n  \"version\": 1,\n  \"backfilled\": \"2026-11-16\",\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"}\n  }\n}\n"
+    },
+    {
+      "about": "A file that is not in the form is rewritten in it.",
+      "theirs": "{\"version\":1,\"artists\":{}}", "edits": [], "files": [], "written": "{\n  \"version\": 1,\n  \"artists\": {}\n}\n"
+    },
+    {
+      "about": "A file that cannot be read is left as it is.",
+      "theirs": "{\"version\": 2, \"artists\": {}}", "edits": [{"set": "burial", "name": "Burial", "tried": "2026-11-16", "reason": "no-photo"}], "files": [], "refused": true
+    }
+  ],
   "due": [
     {"tried": "2026-11-15", "today": "2026-11-15", "added": null, "due": false},
     {"tried": "2026-11-15", "today": "2027-02-12", "added": null, "due": false},

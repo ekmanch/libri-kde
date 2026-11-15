@@ -199,6 +199,10 @@ pub struct App {
     /// The owner's own covers in the library repo: the files GitHub
     /// lists under `covers/`, and the copies on this computer.
     pub covers: Covers,
+    /// The artists' files (paths under `covers/`) whose picked picture a
+    /// push dropped, since another device had put one there first; the
+    /// artist's viewer says so once.
+    pub photos_dropped: Vec<String>,
     /// Discover: what the daily check found for the Coming soon page, and
     /// the items marked Not interested.
     pub discover: discover::State,
@@ -309,7 +313,7 @@ pub enum SyncMessage {
     /// The wallet was written or cleared.
     WalletDone(Result<(), String>),
     /// A GitHub call came back, for the engine of that generation.
-    Answer(Box<Answer>, u64),
+    Answer(Box<Answer>, u64, Vec<sync::commit::Dropped>),
 }
 
 impl Message {
@@ -694,6 +698,7 @@ impl App {
             lookups: Arc::new(Service::fake()),
             artwork: Artwork::default(),
             covers: Covers::default(),
+            photos_dropped: Vec::new(),
             discover: discover::State::default(),
             preferences: PreferencesFile::default(),
             connection_file: ConnectionFile::default(),
@@ -954,10 +959,11 @@ impl App {
         let call = Task::perform(
             blocking(move || Ok(perform(&client, &target, covers_dir.as_deref(), request))),
             move |result| {
-                let answer = result.unwrap_or_else(|error| {
-                    Answer::Raw(Err(github::Failure::new(github::FailureKind::Other, error)))
+                let (answer, dropped) = result.unwrap_or_else(|error| {
+                    let failure = github::Failure::new(github::FailureKind::Other, error);
+                    (Answer::Raw(Err(failure)), Vec::new())
                 });
-                Message::Sync(SyncMessage::Answer(Box::new(answer), generation))
+                Message::Sync(SyncMessage::Answer(Box::new(answer), generation, dropped))
             },
         );
         Task::batch([call, listing])
@@ -1023,6 +1029,9 @@ impl App {
                         // Each cover on screen is looked for again: a
                         // file replaced on GitHub is fetched anew.
                         self.artwork.forget_repo_images();
+                        // The artists tried with nothing found, when
+                        // GitHub's record is not the copy here.
+                        return self.download_covers(&[covers::artists::missing_path()]);
                     }
                     Err(error) => {
                         self.covers.listing = false;
@@ -1032,6 +1041,12 @@ impl App {
             }
             CoversMessage::Fetched { path, outcome } => {
                 self.covers.fetched(&path, &outcome);
+                if path == covers::artists::missing_path() {
+                    let queued = self.queued_cover_changes();
+                    self.covers.load_missing();
+                    self.covers.rebuild(&queued);
+                    return Task::none();
+                }
                 let url = covers::cover_from(&path);
                 match self.covers.ready(&path) {
                     Some(local) => self.artwork.set_image(&url, local),
@@ -1059,36 +1074,46 @@ impl App {
                 None => missing.push(path.to_owned()),
             }
         }
+        self.download_covers(&missing)
+    }
+
+    /// The cover file changes waiting for the next commit.
+    fn queued_cover_changes(&self) -> Vec<covers::Change> {
+        self.engine
+            .as_ref()
+            .map(|engine| engine.pending().changes())
+            .unwrap_or_default()
+    }
+
+    /// Fetches the files at `paths` under `covers/` that GitHub lists and
+    /// this computer lacks.
+    fn download_covers(&mut self, paths: &[String]) -> Task<Message> {
         let (Some(client), Some(engine)) = (&self.github, &self.engine) else {
             return Task::none();
         };
         let target = engine.target().clone();
-        let tasks = self
-            .covers
-            .to_fetch(&missing)
-            .into_iter()
-            .filter_map(|path| {
-                let to = self.covers.local_path(&path)?;
-                let (client, target) = (client.clone(), target.clone());
-                let fetched = path.clone();
-                Some(Task::perform(
-                    blocking(move || {
-                        Ok(covers::download(
-                            &client,
-                            &target.branch,
-                            &target.file,
-                            &fetched,
-                            &to,
-                        ))
-                    }),
-                    move |result| {
-                        Message::Covers(CoversMessage::Fetched {
-                            path: path.clone(),
-                            outcome: result.unwrap_or_else(Err),
-                        })
-                    },
-                ))
-            });
+        let tasks = self.covers.to_fetch(paths).into_iter().filter_map(|path| {
+            let to = self.covers.local_path(&path)?;
+            let (client, target) = (client.clone(), target.clone());
+            let fetched = path.clone();
+            Some(Task::perform(
+                blocking(move || {
+                    Ok(covers::download(
+                        &client,
+                        &target.branch,
+                        &target.file,
+                        &fetched,
+                        &to,
+                    ))
+                }),
+                move |result| {
+                    Message::Covers(CoversMessage::Fetched {
+                        path: path.clone(),
+                        outcome: result.unwrap_or_else(Err),
+                    })
+                },
+            ))
+        });
         Task::batch(tasks.collect::<Vec<_>>())
     }
 
@@ -1120,6 +1145,61 @@ impl App {
         Some(file)
     }
 
+    /// What a push dropped for GitHub's file: the copies here go, and the
+    /// artists whose picture the owner had picked are kept to be told
+    /// (`photos_dropped`).
+    fn covers_dropped(&mut self, dropped: Vec<sync::commit::Dropped>) {
+        for file in dropped {
+            self.covers.dropped(&file.path);
+            self.artwork.forget_image(&covers::cover_from(&file.path));
+            if file.picked && !self.photos_dropped.contains(&file.path) {
+                self.photos_dropped.push(file.path);
+            }
+        }
+    }
+
+    /// Saves `bytes` as the artist's photo, over the one there, and
+    /// queues it: a JPEG as Apple served it or as an upload was scaled.
+    /// `picked` says the owner chose it. The artist is no longer missing.
+    /// `summary` names a commit the file makes on its own. Nothing for a
+    /// name that gets no file.
+    pub fn set_artist_photo(
+        &mut self,
+        name: &str,
+        bytes: &[u8],
+        picked: bool,
+        summary: Option<String>,
+    ) -> Option<covers::File> {
+        let path = covers::artists::file_path(name)?;
+        let seen = self.covers.seen(&path, &self.queued_cover_changes());
+        let file = match self.covers.store(&path, bytes) {
+            Ok(file) => file,
+            Err(error) => {
+                eprintln!("libri: could not store the photo {path}: {error}");
+                return None;
+            }
+        };
+        self.photos_dropped.retain(|dropped| *dropped != path);
+        let url = file.url();
+        self.artwork.forget_image(&url);
+        let change = covers::Change::Put { path, seen, picked };
+        self.change_cover_files(vec![change], summary);
+        Some(file)
+    }
+
+    /// Use automatic: the artist's photo is deleted, here at once and on
+    /// GitHub with the next commit, while it is still the one seen.
+    pub fn remove_artist_photo(&mut self, name: &str, summary: Option<String>) {
+        let Some(path) = covers::artists::file_path(name) else {
+            return;
+        };
+        if self.covers.get(&path).is_none() {
+            return;
+        }
+        let seen = self.covers.seen(&path, &self.queued_cover_changes());
+        self.change_cover_files(vec![covers::Change::Remove { path, seen }], summary);
+    }
+
     /// Deletes or moves cover files: on this computer at once, on GitHub
     /// with the next commit. `summary` names a commit they make on their
     /// own (no library change goes with them).
@@ -1137,7 +1217,12 @@ impl App {
                     self.artwork.forget_image(&covers::cover_from(from));
                     self.artwork.forget_image(&covers::cover_from(to));
                 }
-                covers::Change::Upload { .. } => {}
+                covers::Change::Remove { path, .. } => {
+                    self.artwork.forget_image(&covers::cover_from(path));
+                }
+                covers::Change::Upload { .. }
+                | covers::Change::Put { .. }
+                | covers::Change::Missing(_) => {}
             }
             self.covers.apply(&change, !queued);
             if let Some(engine) = &mut self.engine {
@@ -1768,16 +1853,28 @@ impl App {
                     eprintln!("libri: {error}");
                 }
             }
-            Message::Sync(SyncMessage::Answer(_, generation))
+            Message::Sync(SyncMessage::Answer(_, generation, _))
                 if generation != self.engine_generation => {}
-            Message::Sync(SyncMessage::Answer(answer, _)) => {
+            Message::Sync(SyncMessage::Answer(answer, _, dropped)) => {
                 self.record_token_expiry();
                 let Some(engine) = &mut self.engine else {
                     return Task::none();
                 };
+                let files_before = engine.pending().files().len();
                 let outcome = engine.answer(*answer, self.repo.library());
+                let files_landed = engine.pending().files().len() < files_before;
                 self.refresh_sync_state();
-                return self.run(outcome);
+                self.covers_dropped(dropped);
+                let next = self.run(outcome);
+                // Cover files went up: GitHub's list is asked for again,
+                // which also brings `_missing.json` as it was merged and
+                // the file GitHub kept over one dropped here.
+                let listing = if files_landed {
+                    self.list_covers()
+                } else {
+                    Task::none()
+                };
+                return Task::batch([next, listing]);
             }
             Message::Key(KeyPress::Backspace) => {
                 if let Some(picker) = self.picker_mut() {
@@ -2463,8 +2560,9 @@ fn perform(
     target: &Target,
     covers_dir: Option<&std::path::Path>,
     request: Request,
-) -> Answer {
-    match request {
+) -> (Answer, Vec<sync::commit::Dropped>) {
+    let mut dropped = Vec::new();
+    let answer = match request {
         Request::Raw { etag } => {
             Answer::Raw(client.file_raw(&target.file, &target.branch, etag.as_deref()))
         }
@@ -2484,20 +2582,27 @@ fn perform(
             message,
             sha,
             files,
-        } => Answer::Put(sync::commit::run(
-            client,
-            target,
-            covers_dir,
-            library.as_deref(),
-            &message,
-            sha.as_deref(),
-            &files,
-        )),
+        } => Answer::Put(
+            sync::commit::run(
+                client,
+                target,
+                covers_dir,
+                library.as_deref(),
+                &message,
+                sha.as_deref(),
+                &files,
+            )
+            .map(|committed| {
+                dropped = committed.dropped;
+                committed.result
+            }),
+        ),
         Request::Commits { limit } => {
             Answer::Commits(client.commits(&target.file, &target.branch, limit))
         }
         Request::Repo => Answer::Repo(client.repo()),
-    }
+    };
+    (answer, dropped)
 }
 
 /// The id `step` places after `current` in `order`: the first with no
@@ -3148,6 +3253,51 @@ mod tests {
     }
 
     #[test]
+    fn an_artists_photo_is_queued_over_what_was_seen_and_a_dropped_pick_is_kept_to_tell() {
+        let mut app = App::new(Screen::Library);
+        connected(&mut app);
+        let queued = |app: &App| app.engine.as_ref().unwrap().pending().changes();
+        let file = app
+            .set_artist_photo("Massive Attack", b"jpeg", true, None)
+            .expect("a name with a slug");
+        assert_eq!(file.path, "artists/massive-attack.jpg");
+        assert_eq!(
+            queued(&app),
+            [covers::Change::Put {
+                path: "artists/massive-attack.jpg".into(),
+                seen: vec![None],
+                picked: true,
+            }]
+        );
+        assert!(app.covers.artist_file("Massive Attack").is_some());
+        assert!(app.save_due.is_some());
+        // A name with no letters or digits never gets a file.
+        assert!(app.set_artist_photo("!!!", b"jpeg", true, None).is_none());
+        // Use automatic takes it away again.
+        app.remove_artist_photo("Massive Attack", None);
+        assert!(app.covers.artist_file("Massive Attack").is_none());
+        assert!(matches!(
+            queued(&app).last(),
+            Some(covers::Change::Remove { .. })
+        ));
+        // The push found another device's photo there: the pick is
+        // dropped and kept to be told.
+        app.set_artist_photo("Massive Attack", b"jpeg", true, None);
+        app.covers_dropped(vec![
+            sync::commit::Dropped {
+                path: "artists/massive-attack.jpg".into(),
+                picked: true,
+            },
+            sync::commit::Dropped {
+                path: "artists/adele.jpg".into(),
+                picked: false,
+            },
+        ]);
+        assert_eq!(app.photos_dropped, ["artists/massive-attack.jpg"]);
+        assert!(app.covers.artist_file("Massive Attack").is_none());
+    }
+
+    #[test]
     fn a_change_is_queued_for_github_and_the_save_falls_due() {
         let mut app = App::new(Screen::Library);
         connected(&mut app);
@@ -3344,6 +3494,7 @@ mod tests {
         let _ = app.update(Message::Sync(SyncMessage::Answer(
             Box::new(Answer::Raw(Ok(None))),
             first,
+            Vec::new(),
         )));
         assert!(
             app.engine.as_ref().unwrap().running(),
@@ -3354,6 +3505,7 @@ mod tests {
         let _ = app.update(Message::Sync(SyncMessage::Answer(
             Box::new(Answer::Raw(Ok(Some(github::RawFile::new(bytes, None))))),
             app.engine_generation,
+            Vec::new(),
         )));
         assert_eq!(
             app.engine.as_ref().unwrap().status().phase,
