@@ -103,12 +103,13 @@ impl MusicSorts {
         }
     }
 
-    /// Sets a tab's sort. The Artists tab has no order by artist of its
-    /// own (that is its order by name), and only it has the orders by
-    /// count, so a tab given one it does not have is left as it was.
+    /// Sets a tab's sort. The Artists tab has its four alone
+    /// (`Sort::FOR_ARTISTS`: no order by artist, year or rating), and
+    /// only it has the orders by count, so a tab given one it does not
+    /// have is left as it was.
     pub fn set(&mut self, tab: MusicTab, sort: Sort) {
         match tab {
-            MusicTab::Artists if sort == Sort::ArtistAz => {}
+            MusicTab::Artists if !Sort::FOR_ARTISTS.contains(&sort) => {}
             MusicTab::Artists => self.artists = sort,
             _ if sort.by_count() => {}
             MusicTab::Albums => self.albums = sort,
@@ -1167,8 +1168,8 @@ impl State {
     }
 
     /// The Sort menu's choices for the list shown: Music's Albums and
-    /// Songs can go by artist as well, and its Artists by how many albums
-    /// or songs are saved.
+    /// Songs can go by artist as well; its Artists have four, by when
+    /// added, by name and by how many albums or songs are saved.
     pub fn sort_choices(&self) -> &'static [Sort] {
         if self.single() != Some(MediaType::Music) {
             &Sort::ALL
@@ -1792,6 +1793,12 @@ mod tests {
         assert!(!state.sort_choices().contains(&Sort::ArtistAz));
         state.update(Message::Sort(Sort::MostAlbums));
         assert_eq!(state.current_sort(), Sort::MostAlbums);
+        // An artist has no year and no rating to go by.
+        for sort in [Sort::YearNewest, Sort::YearOldest, Sort::RatingHighest] {
+            assert!(!state.sort_choices().contains(&sort));
+            state.update(Message::Sort(sort));
+            assert_eq!(state.current_sort(), Sort::MostAlbums, "{sort:?}");
+        }
         state.update(Message::Sort(Sort::TitleAz));
         state.update(Message::MusicTab(MusicTab::Albums));
         assert_eq!(state.current_sort(), Sort::NewestAdded);

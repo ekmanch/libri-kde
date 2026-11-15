@@ -342,13 +342,12 @@ impl Sort {
         Sort::RatingHighest,
     ];
 
-    /// The choices of Music's Artists: by what is saved of each too.
-    pub const FOR_ARTISTS: [Sort; 7] = [
+    /// The choices of Music's Artists: when added, by name and by what
+    /// is saved of each. An artist has no year and no rating of their
+    /// own, so the orders by those are left out.
+    pub const FOR_ARTISTS: [Sort; 4] = [
         Sort::NewestAdded,
         Sort::TitleAz,
-        Sort::YearNewest,
-        Sort::YearOldest,
-        Sort::RatingHighest,
         Sort::MostAlbums,
         Sort::MostSongs,
     ];
