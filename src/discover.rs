@@ -192,6 +192,9 @@ impl Outcome {
 pub struct Settings {
     pub enabled: bool,
     pub languages: Vec<String>,
+    /// The default platform of Settings, which dates a game; set by the
+    /// app from the preferences, where the desktop keeps it for now.
+    pub platform: Option<String>,
     unfollowed: BTreeMap<String, BTreeSet<String>>,
     followed: BTreeMap<String, BTreeSet<String>>,
 }
@@ -201,6 +204,7 @@ impl Default for Settings {
         Settings {
             enabled: true,
             languages: vec!["en".to_owned()],
+            platform: None,
             unfollowed: BTreeMap::new(),
             followed: BTreeMap::new(),
         }
@@ -1232,7 +1236,14 @@ impl Check<'_> {
                     && part.source.is_some()
                     && (!out
                         || lookup::is_recent_or_ahead(Some(released), self.today, EDITION_WINDOW));
-                if out && !asks_edition {
+                // A game out elsewhere within the last year may still be
+                // to come on the default platform.
+                let asks_platform = media == MediaType::Games
+                    && self.settings.platform.is_some()
+                    && part.source.is_some()
+                    && (!out
+                        || lookup::is_recent_or_ahead(Some(released), self.today, EDITION_WINDOW));
+                if out && !asks_edition && !asks_platform {
                     continue;
                 }
                 let owned = parts.iter().any(|p| {
@@ -1251,7 +1262,17 @@ impl Check<'_> {
                     }
                     released = edition.released.unwrap_or(released);
                 }
-                if released.is_released_on(self.today) {
+                // A game is dated by the default platform when it is
+                // listed for it: no date while it has none there.
+                let mut released = Some(released);
+                if asks_platform
+                    && let Some(part_source) = &part.source
+                    && let Some(games) = self.service.source_of(part_source)
+                    && let Asked::Got(Some(game)) = self.ask(games, || games.game(part_source))?
+                {
+                    released = game.released_for(self.settings.platform.as_deref());
+                }
+                if released.is_some_and(|r| r.is_released_on(self.today)) {
                     continue;
                 }
                 let key = part.source.clone().unwrap_or_else(|| {
@@ -1277,7 +1298,7 @@ impl Check<'_> {
                     title: part.title.clone(),
                     sub: None,
                     creator: part.creator.clone().or_else(|| lead.creator.clone()),
-                    released: Some(released),
+                    released,
                     why: format!("Part of {display} · {in_library} in your library"),
                     description,
                     found: self.first_found(&key),
@@ -1583,6 +1604,8 @@ impl Check<'_> {
                         hit.released = edition.released;
                     }
                 }
+            } else if hit.media == MediaType::Games {
+                hit.released = hit.released_for(self.settings.platform.as_deref());
             } else if hit.media == MediaType::Movies {
                 let reply = || source.movie_date(&hit.source);
                 if let Asked::Got(Some(date)) = self.ask(source, reply)? {

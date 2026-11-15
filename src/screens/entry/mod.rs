@@ -160,6 +160,9 @@ pub struct Form {
     pub pick: pick::PickState,
     /// A game lookup narrowed to one platform, and its picker.
     pub platform_filter: Option<String>,
+    /// The date the picked platforms gave a game, while Released still
+    /// reads it: a date typed over it is the owner's and stays.
+    pub platform_date: Option<String>,
     pub platform_open: bool,
     pub platform_query: String,
     /// "Look up again": the lookup pane open in Edit.
@@ -747,6 +750,7 @@ impl Form {
             cover_album: None,
             pick: pick::PickState::default(),
             platform_filter: None,
+            platform_date: None,
             platform_open: false,
             platform_query: String::new(),
             again: false,
@@ -1214,6 +1218,7 @@ impl Form {
             self.fill(&found, ctx.library, ctx.platform);
         }
         self.picked_match = Some(found.clone());
+        self.date_by_platforms(true);
         self.choices = None;
         self.choices_loading = false;
         if ctx.service.is_instant() {
@@ -1235,7 +1240,36 @@ impl Form {
         }
         self.take_lookup_fields(full, true);
         self.picked_match = Some(full.clone());
+        self.date_by_platforms(true);
         self.suggest(full, library);
+    }
+
+    /// A game's date is its release on the platforms picked: the first
+    /// of them it comes out on, and its first release anywhere when the
+    /// lookup has no date for them (owner's rule, 2026-11-15). It follows the platforms as they are ticked until
+    /// the owner types a date (`always` for a pick, which replaces the
+    /// date anyway). A match with no dates by platform keeps its own.
+    fn date_by_platforms(&mut self, always: bool) {
+        let Some(found) = &self.picked_match else {
+            return;
+        };
+        if self.media != MediaType::Games || found.platform_releases.is_empty() {
+            return;
+        }
+        if !always && self.platform_date.as_deref() != Some(self.released.trim()) {
+            return;
+        }
+        let picked = self
+            .platforms
+            .iter()
+            .filter(|p| self.platforms_on.contains(*p))
+            .map(String::as_str);
+        self.released = found
+            .released_on(picked)
+            .or(found.released)
+            .map(|r| r.to_string())
+            .unwrap_or_default();
+        self.platform_date = Some(self.released.clone());
     }
 
     /// Opens Pick a cover and asks for the other matches once. It opens
@@ -2820,6 +2854,7 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
                 }
                 form.platforms_on.insert(platform);
             }
+            form.date_by_platforms(false);
         }
         Message::OpenOtherPlatform => form.other_platform = Some(String::new()),
         Message::OtherPlatform(name) => form.other_platform = Some(name),
@@ -2834,6 +2869,7 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
                     form.platforms.push(name.clone());
                 }
                 form.platforms_on.insert(name);
+                form.date_by_platforms(false);
             }
         }
         Message::ToggleFormat(format) => {
@@ -3312,6 +3348,54 @@ mod tests {
         app.settings.platform = Some("Steam Deck".into());
         send(&mut app, Message::Pick(0));
         assert_eq!(form(&app).platforms_on.len(), 4);
+    }
+
+    #[test]
+    fn a_games_date_is_its_release_on_the_platforms_picked() {
+        let mut app = app();
+        app.settings.platform = Some("PC".into());
+        send(&mut app, Message::Add);
+        send(&mut app, Message::Type(MediaType::Games));
+        send(&mut app, Message::Query("lords of shadow".into()));
+        assert_eq!(
+            form(&app).matches()[0].released.unwrap().to_string(),
+            "2010-10-05",
+            "the row keeps the first release anywhere"
+        );
+        send(&mut app, Message::Pick(0));
+        let f = form(&app);
+        assert_eq!(f.platforms_on.iter().collect::<Vec<_>>(), ["PC"]);
+        assert_eq!(f.released, "2013-08-27", "the default platform's date");
+
+        // The date follows the platforms ticked: the first of them.
+        send(&mut app, Message::TogglePlatform("Xbox 360".into()));
+        assert_eq!(form(&app).released, "2010-10-05");
+        send(&mut app, Message::TogglePlatform("Xbox 360".into()));
+        assert_eq!(form(&app).released, "2013-08-27");
+        // A platform the lookup has no date for, or none picked: the
+        // first release anywhere.
+        send(&mut app, Message::TogglePlatform("PC".into()));
+        send(&mut app, Message::TogglePlatform("PC".into()));
+        assert_eq!(form(&app).released, "2013-08-27");
+        send(&mut app, Message::TogglePlatform("PC".into()));
+        send(&mut app, Message::OpenOtherPlatform);
+        send(&mut app, Message::OtherPlatform("Steam Deck".into()));
+        send(&mut app, Message::AddOtherPlatform);
+        assert_eq!(form(&app).released, "2010-10-05");
+        send(&mut app, Message::TogglePlatform("Steam Deck".into()));
+        assert_eq!(form(&app).released, "2010-10-05");
+
+        // A date the owner typed stays whatever is ticked.
+        send(&mut app, Message::Released("2014".into()));
+        send(&mut app, Message::TogglePlatform("PC".into()));
+        assert_eq!(form(&app).released, "2014");
+
+        // A search on one platform dates the rows by it too.
+        send(&mut app, Message::PickPlatform(Some("PC".into())));
+        assert_eq!(
+            form(&app).matches()[0].released.unwrap().to_string(),
+            "2013-08-27"
+        );
     }
 
     #[test]

@@ -2329,12 +2329,14 @@ impl App {
         let today = self.today;
         let previous = self.discover.record.clone();
         if service.is_instant() {
-            let settings = discover::Settings::default();
+            let mut settings = discover::Settings::default();
+            settings.platform = self.settings.platform.clone();
             let outcome = discover::run(&service, &library, today, &settings, &previous, None);
             self.discover.finish(outcome, now);
             return Task::none();
         }
         let github = self.github.clone();
+        let platform = self.settings.platform.clone();
         let target = self.engine.as_ref().map(|engine| engine.target().clone());
         let file = self.discover.file().map(std::path::Path::to_path_buf);
         let settings_file = self
@@ -2344,7 +2346,8 @@ impl App {
         Task::perform(
             blocking(move || {
                 let remote = github.as_deref().zip(target.as_ref());
-                let settings = discover::read_settings(remote, settings_file.as_deref())?;
+                let mut settings = discover::read_settings(remote, settings_file.as_deref())?;
+                settings.platform = platform;
                 Ok(discover::run(
                     &service,
                     &library,

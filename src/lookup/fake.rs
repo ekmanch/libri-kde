@@ -48,10 +48,26 @@ impl Row {
             // A made-up image per match, so the cover picker has choices;
             // nothing is ever fetched for it.
             cover_url: Some(format!("fake://cover/{}", self.source)),
+            platform_releases: RELEASED_ON
+                .iter()
+                .filter(|(source, _, _)| *source == self.source)
+                .filter_map(|(_, platform, date)| {
+                    Some(((*platform).to_owned(), Released::parse(date)?))
+                })
+                .collect(),
             ..Match::new(self.media, self.title, self.source)
         }
     }
 }
+
+/// The games the fake dates per platform (the id, the platform, its
+/// release there): Lords of Shadow came to the PC three years after the
+/// consoles. A platform left out has no date yet.
+const RELEASED_ON: &[(&str, &str, &str)] = &[
+    ("igdb:2012", "PlayStation 3", "2010-10-05"),
+    ("igdb:2012", "Xbox 360", "2010-10-05"),
+    ("igdb:2012", "PC", "2013-08-27"),
+];
 
 /// The game platforms the fake knows, A to Z: the name and its other
 /// names, which a search matches too.
@@ -1094,6 +1110,7 @@ impl Source for Fake {
     ) -> Reply<Hits> {
         let mut hits = search(MediaType::Games, query, Some(&platform.name));
         for hit in &mut hits {
+            hit.released = hit.released_on([platform.name.as_str()]);
             hit.searched_platform = Some(platform.name.clone());
         }
         hits.truncate(limit);
@@ -1112,6 +1129,10 @@ impl Source for Fake {
             super::text::pick_by_title_and_year(&hits, title, year, |m| &m.title, Match::year)
                 .map(|i| hits[i].clone()),
         )
+    }
+
+    fn game(&self, source: &str) -> Reply<Option<Match>> {
+        Ok(by_source(source).filter(|m| m.media == MediaType::Games))
     }
 
     fn details(&self, found: &Match) -> Reply<Match> {

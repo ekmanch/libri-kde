@@ -6,8 +6,8 @@
 //! cargo test --test lookup_live -- --ignored --nocapture
 //! ```
 
-use libri::lookup::{Keys, Service};
-use libri::model::MediaType;
+use libri::lookup::{FollowKind, Keys, Service};
+use libri::model::{Date, MediaType};
 
 #[test]
 #[ignore = "asks the real providers; run with --ignored"]
@@ -72,6 +72,37 @@ fn the_real_providers_answer_a_search_and_a_pick() {
         platforms.iter().find(|p| p.name == "Super Nintendo")
     );
     assert!(platforms.len() > 100);
+    // A game is dated per platform by its full release: Hades left early
+    // access on the PC in 2020, two years after it started.
+    let hades = service.search("hades", MediaType::Games, None);
+    let hit = hades
+        .matches
+        .iter()
+        .find(|m| m.source == "igdb:113112")
+        .expect("Hades among the matches");
+    println!("  Hades per platform: {:?}", hit.platform_releases);
+    assert_eq!(
+        hit.released_on(["PC"]).map(|r| r.to_string()).as_deref(),
+        Some("2020-09-17")
+    );
+    // The game by its id, for the daily check, and a studio's games with
+    // a release on any platform still to come.
+    let igdb = service.source_of("igdb:113112").expect("IGDB");
+    let game = igdb.game("igdb:113112").expect("an answer").expect("Hades");
+    assert_eq!(game.released_for(Some("PC")), hit.released_on(["PC"]));
+    // Rockstar North, by its id.
+    let today = Date::parse("2026-11-15").expect("a date");
+    let coming = igdb
+        .creator_releases("igdb:company:365", FollowKind::Studios, today)
+        .expect("the studio's games");
+    for game in &coming {
+        println!(
+            "  {}: first {:?}, on PC {:?}",
+            game.title,
+            game.released.map(|r| r.to_string()),
+            game.released_for(Some("PC")).map(|r| r.to_string())
+        );
+    }
 }
 
 #[test]

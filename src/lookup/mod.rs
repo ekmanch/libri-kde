@@ -159,6 +159,10 @@ pub struct Match {
     /// A game found in a search on one platform: that platform's name,
     /// which the form picks. Never stored.
     pub searched_platform: Option<String>,
+    /// A game's first full release on each platform the lookup dates it
+    /// on, the platforms named as the form names them. Empty when the
+    /// lookup dates the game as a whole. Never stored.
+    pub platform_releases: Vec<(String, Released)>,
 }
 
 impl Match {
@@ -190,6 +194,48 @@ impl Match {
             edition: None,
             edition_year: None,
             searched_platform: None,
+            platform_releases: Vec::new(),
+        }
+    }
+
+    /// When the game comes out for someone who plays on `platforms`: its
+    /// first release on any of them. `released` itself when none is named
+    /// or the lookup has no dates by platform; `None` when it has them
+    /// but none for these, since a date on another platform says nothing
+    /// about this one.
+    pub fn released_on<'a>(
+        &self,
+        platforms: impl IntoIterator<Item = &'a str>,
+    ) -> Option<Released> {
+        let mut platforms = platforms.into_iter().peekable();
+        if self.platform_releases.is_empty() || platforms.peek().is_none() {
+            return self.released;
+        }
+        platforms
+            .filter_map(|platform| {
+                self.platform_releases
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(platform))
+                    .map(|(_, released)| *released)
+            })
+            .min_by_key(|released| released.available_from())
+    }
+
+    /// When a game comes out for someone who plays on `default` (the
+    /// default platform of Settings): its release there when the lookup
+    /// lists the game for it, `None` while it has no date there yet; its
+    /// first release anywhere when the game is not listed for it, or
+    /// with no default.
+    pub fn released_for(&self, default: Option<&str>) -> Option<Released> {
+        match default {
+            Some(default)
+                if self.platforms.iter().any(|p| {
+                    crate::model::text::normalize_platform(p).eq_ignore_ascii_case(default)
+                }) =>
+            {
+                self.released_on([default])
+            }
+            _ => self.released,
         }
     }
 
@@ -671,6 +717,12 @@ pub trait Source: Send + Sync {
         _source: &str,
         _languages: &[String],
     ) -> Reply<Option<EditionRelease>> {
+        Ok(None)
+    }
+
+    /// The game with this id as the lookup has it now, with its dates per
+    /// platform; `None` from a source without games.
+    fn game(&self, _source: &str) -> Reply<Option<Match>> {
         Ok(None)
     }
 

@@ -33,12 +33,14 @@ const PLATFORMS_MAX_AGE: i64 = 30 * 86_400;
 
 const FIELDS: &str = "name,first_release_date,summary,cover.image_id,platforms.name,\
     involved_companies.company.name,involved_companies.developer,genres.name,\
-    language_supports.language.locale,language_supports.language_support_type";
+    language_supports.language.locale,language_supports.language_support_type,\
+    release_dates.platform,release_dates.date,release_dates.date_format,release_dates.status";
 /// `FIELDS` and what ranks a search hit: its platforms' types, how many
 /// ratings it has and the game it is a port of.
 const SEARCH_FIELDS: &str = "name,first_release_date,summary,cover.image_id,platforms.name,\
     involved_companies.company.name,involved_companies.developer,genres.name,\
     language_supports.language.locale,language_supports.language_support_type,\
+    release_dates.platform,release_dates.date,release_dates.date_format,release_dates.status,\
     platforms.platform_type,platforms.id,total_rating_count,parent_game";
 /// The collections a game is in, with their games: the series and its
 /// parts. `game_type` tells main games and remakes from bundles, DLC,
@@ -55,6 +57,13 @@ const COMPUTER: i64 = 6;
 /// Platforms nobody adds a game for: handheld LCD games and pre-smartphone
 /// mobiles.
 const MINOR_PLATFORMS: [i64; 2] = [411, 55];
+/// IGDB's release statuses that are no release of the full game: alpha,
+/// beta, early access, offline, cancelled and advanced access (the days
+/// ahead a dearer edition buys).
+const NOT_FULL: [i64; 6] = [1, 2, 3, 4, 5, 34];
+/// Of those, the ones that put nothing in anyone's hands: offline and
+/// cancelled.
+const NO_RELEASE: [i64; 2] = [4, 5];
 /// IGDB's `language_support_type` id for spoken audio.
 const AUDIO_SUPPORT: i64 = 1;
 /// IGDB's game types that count as a part of a series: a main game, a
@@ -265,6 +274,13 @@ impl Igdb {
                 .map(str::to_owned)
                 .collect(),
             language: Igdb::language(game),
+            platform_releases: objects_at(game, "platforms")
+                .filter_map(|p| {
+                    let on = Igdb::released_on(game, Some(int_at(p, "id")?))?;
+                    let name = Igdb::platform_name(str_at(p, "name")?);
+                    Some((text::normalize_platform(&name), on))
+                })
+                .collect(),
             cover_url: image_id.map(Igdb::cover_url_for),
             ..Match::new(MediaType::Games, name, format!("igdb:{id}"))
         })
@@ -374,12 +390,18 @@ impl Igdb {
 
     /// The game's first release on `platform_id` (any platform with
     /// `None`), as precise as IGDB has it: a year-only date sits on
-    /// December 31, so its format says what is known.
+    /// December 31, so its format says what is known. The full release
+    /// counts, so Hades is 2020 and not its early access of 2018; a game
+    /// with early access alone is dated by that.
     fn released_on(game: &Value, platform_id: Option<i64>) -> Option<Released> {
-        let first = objects_at(game, "release_dates")
-            .filter(|r| platform_id.is_none_or(|id| int_at(r, "platform") == Some(id)))
-            .filter_map(|r| int_at(r, "date").map(|date| (date, r)))
-            .min_by_key(|(date, _)| *date)?;
+        let first_without = |left_out: &[i64]| {
+            objects_at(game, "release_dates")
+                .filter(|r| platform_id.is_none_or(|id| int_at(r, "platform") == Some(id)))
+                .filter(|r| int_at(r, "status").is_none_or(|s| !left_out.contains(&s)))
+                .filter_map(|r| int_at(r, "date").map(|date| (date, r)))
+                .min_by_key(|(date, _)| *date)
+        };
+        let first = first_without(&NOT_FULL).or_else(|| first_without(&NO_RELEASE))?;
         let day = Igdb::day_of(first.0);
         Some(match int_at(first.1, "date_format") {
             Some(0) => day,
@@ -581,8 +603,7 @@ impl Source for Igdb {
         limit: usize,
     ) -> Reply<Hits> {
         let games = self.games(&format!(
-            "search {}; fields {FIELDS},release_dates.platform,release_dates.date,\
-             release_dates.date_format; where {WHERE} & platforms = ({}); limit {limit};",
+            "search {}; fields {FIELDS}; where {WHERE} & platforms = ({}); limit {limit};",
             Igdb::quote(query),
             platform.id
         ))?;
@@ -673,8 +694,15 @@ impl Source for Igdb {
             }))
     }
 
-    /// The games the company is involved in from thirty days ago on,
-    /// soonest first; packs and updates left out.
+    fn game(&self, source: &str) -> Reply<Option<Match>> {
+        let id = Igdb::parse(source)?;
+        let games = self.games(&format!("fields {FIELDS}; where id = {id}; limit 1;"))?;
+        Ok(games.first().and_then(Igdb::hit))
+    }
+
+    /// The games the company is involved in with a release on any
+    /// platform from thirty days ago on (a port still to come counts),
+    /// the newest first; packs and updates left out.
     fn creator_releases(
         &self,
         provider_id: &str,
@@ -690,8 +718,8 @@ impl Source for Igdb {
         let from = epoch.days_until(today.add_days(-30)) * 86_400;
         let games = self.games(&format!(
             "fields {SEARCH_FIELDS}; where involved_companies.company = {id} & \
-             first_release_date >= {from} & version_parent = null & game_type != (13, 14); \
-             sort first_release_date asc; limit 50;"
+             release_dates.date >= {from} & version_parent = null & game_type != (13, 14); \
+             sort first_release_date desc; limit 50;"
         ))?;
         Ok(games.iter().filter_map(Igdb::hit).collect())
     }
@@ -910,6 +938,58 @@ mod tests {
             "1992-03-07"
         );
         assert_eq!(Igdb::released_on(&game, Some(99)), None);
+    }
+
+    #[test]
+    fn a_hit_is_dated_per_platform_by_its_full_release() {
+        // Hades: early access on PC two years before 1.0, which came to
+        // the Switch the same day; a platform with no dated row has none.
+        let game: Value = serde_json::from_str(
+            r#"{"id": 113112, "name": "Hades", "first_release_date": 1600300800,
+                "platforms": [{"id": 6, "name": "PC (Microsoft Windows)"},
+                    {"id": 130, "name": "Nintendo Switch"}, {"id": 167, "name": "PlayStation 5"}],
+                "release_dates": [
+                    {"platform": 6, "date": 1544140800, "date_format": 0, "status": 3},
+                    {"platform": 6, "date": 1600300800, "date_format": 0, "status": 6},
+                    {"platform": 130, "date": 1600300800, "date_format": 0},
+                    {"platform": 167, "date_format": 7, "status": 6}]}"#,
+        )
+        .unwrap();
+        let hit = Igdb::hit(&game).unwrap();
+        let dates: Vec<(&str, String)> = hit
+            .platform_releases
+            .iter()
+            .map(|(platform, released)| (platform.as_str(), released.to_string()))
+            .collect();
+        assert_eq!(
+            dates,
+            [
+                ("PC", "2020-09-17".to_owned()),
+                ("Switch", "2020-09-17".to_owned())
+            ]
+        );
+        assert_eq!(hit.released_on(["PC"]).unwrap().to_string(), "2020-09-17");
+        assert_eq!(hit.released_on(["PlayStation 5"]), None, "not dated there");
+        assert_eq!(hit.released_on(["Amiga", "Switch"]), hit.released);
+        assert_eq!(hit.released_on([]), hit.released, "no platform named");
+        // The default platform: its date, none while it has none there,
+        // and the first release anywhere when the game is not on it.
+        assert_eq!(hit.released_for(Some("PC")), hit.released_on(["PC"]));
+        assert_eq!(hit.released_for(Some("PlayStation 5")), None);
+        assert_eq!(hit.released_for(Some("Amiga")), hit.released);
+        assert_eq!(hit.released_for(None), hit.released);
+
+        // Early access alone dates the game; a cancelled release never.
+        let early: Value = serde_json::from_str(
+            r#"{"release_dates": [{"platform": 6, "date": 1544140800, "date_format": 0, "status": 3},
+                {"platform": 48, "date": 1500000000, "date_format": 0, "status": 5}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            Igdb::released_on(&early, Some(6)).unwrap().to_string(),
+            "2018-12-07"
+        );
+        assert_eq!(Igdb::released_on(&early, Some(48)), None);
     }
 
     #[test]
