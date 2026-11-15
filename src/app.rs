@@ -76,6 +76,10 @@ fn window_settings() -> window::Settings {
 /// does not answer "not responding".
 const EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// How often the artists are gone through for one with no photo to ask
+/// Apple about, while nobody is being asked.
+const PHOTOS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Closes the app without waiting for the network. Dropping tokio's
 /// runtime waits for every blocking call still running, up to
 /// `lookup::http::TIMEOUT` a request, with the main thread blocked. So the
@@ -86,6 +90,7 @@ const EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
 fn quit() -> Task<Message> {
     Task::future(async {
         discover::cancel();
+        lookup::apple_artists::cancel();
         std::thread::spawn(|| {
             std::thread::sleep(EXIT_GRACE);
             std::process::exit(0);
@@ -203,6 +208,13 @@ pub struct App {
     /// push dropped, since another device had put one there first; the
     /// artist's viewer says so once.
     pub photos_dropped: Vec<String>,
+    /// The artist photos' fetching: who is being asked about, and the
+    /// batch held for its commit (`covers::backfill`).
+    pub photos: covers::backfill::State,
+    /// Apple Music, for the artists' photos.
+    pub apple: Arc<lookup::apple_artists::AppleArtists>,
+    /// When the artists are next gone through for one to ask about.
+    photos_due: Instant,
     /// Discover: what the daily check found for the Coming soon page, and
     /// the items marked Not interested.
     pub discover: discover::State,
@@ -278,6 +290,11 @@ pub enum Message {
     Discover(discover::Message),
     /// The owner's own covers: GitHub's list of them, and a file fetched.
     Covers(CoversMessage),
+    /// Apple's answer about an artist's photo (`photos_next`).
+    PhotoFound {
+        work: covers::backfill::Work,
+        result: Result<lookup::apple_artists::Found, lookup::Failure>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -511,6 +528,7 @@ impl App {
                 storage::data_dir().map(|dir| dir.join(covers::FOLDER)),
                 cache.as_deref(),
             );
+            app.photos = covers::backfill::State::at(storage::data_dir().as_deref());
             if app.kept_locally {
                 app.covers.scan();
             }
@@ -699,6 +717,9 @@ impl App {
             artwork: Artwork::default(),
             covers: Covers::default(),
             photos_dropped: Vec::new(),
+            photos: covers::backfill::State::default(),
+            apple: Arc::default(),
+            photos_due: Instant::now(),
             discover: discover::State::default(),
             preferences: PreferencesFile::default(),
             connection_file: ConnectionFile::default(),
@@ -889,6 +910,9 @@ impl App {
         } else {
             self.covers.clear(true);
         }
+        // A batch held for a commit has no repo to go to any more; its
+        // photos stay in the folder when the library is kept.
+        self.photos.clear();
         if keep {
             if let Some(connection) = &mut self.connection {
                 connection.local = true;
@@ -1020,11 +1044,7 @@ impl App {
                 }
                 match result {
                     Ok(files) => {
-                        let queued = self
-                            .engine
-                            .as_ref()
-                            .map(|engine| engine.pending().changes())
-                            .unwrap_or_default();
+                        let queued = self.queued_cover_changes();
                         self.covers.listed(files, &queued);
                         // Each cover on screen is looked for again: a
                         // file replaced on GitHub is fetched anew.
@@ -1077,12 +1097,185 @@ impl App {
         self.download_covers(&missing)
     }
 
-    /// The cover file changes waiting for the next commit.
+    /// The cover file changes waiting for a commit: the queue's, and the
+    /// artist photos' batch that is not queued yet.
     fn queued_cover_changes(&self) -> Vec<covers::Change> {
-        self.engine
+        let mut changes = self
+            .engine
             .as_ref()
             .map(|engine| engine.pending().changes())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        changes.extend(self.photos.held().iter().cloned());
+        changes
+    }
+
+    // The artists' photos from Apple Music (`covers::backfill`,
+    // `lookup::apple_artists`; DESIGN.md "Artist photos").
+
+    /// Whether a lookup of the Add and Edit dialog is on its way.
+    fn lookup_running(&self) -> bool {
+        match &self.dialog {
+            Some(entry::Dialog::Form(form) | entry::Dialog::Tags(form)) => {
+                form.searching || form.fetching.is_some() || form.choices_loading
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether the photo work may ask Apple now: a real run that knows
+    /// which files and records GitHub has (or keeps the library here),
+    /// not paused, not refused by Apple in this session, not waiting
+    /// after a failure.
+    fn photos_can_run(&self) -> bool {
+        if self.mock || self.loading || self.photos.paused || self.photos.stopped {
+            return false;
+        }
+        if self.photos.retry_at.is_some_and(|at| self.now < at) {
+            return false;
+        }
+        if self.engine.is_none() {
+            return self.kept_locally;
+        }
+        // GitHub's list came, and its `_missing.json` is the copy here.
+        let record = covers::artists::missing_path();
+        self.github.is_some()
+            && self.covers.listed.is_some()
+            && (self.covers.get(&record).is_none() || self.covers.ready(&record).is_some())
+    }
+
+    /// Asks Apple about the next artist with no photo and no fresh
+    /// record, one at a time; queues the batch once fifty were tried or
+    /// nobody is left.
+    fn photos_next(&mut self) -> Task<Message> {
+        self.photos_due = self.now + PHOTOS_INTERVAL;
+        if self.photos.running.is_some() || !self.photos_can_run() {
+            return Task::none();
+        }
+        let todo = covers::backfill::todo(
+            self.repo.library(),
+            &self.covers,
+            self.today,
+            self.photos.tried_now(),
+        );
+        let Some(work) = todo.into_iter().next() else {
+            // Done only when nobody was passed over after a failure.
+            self.queue_photo_batch(self.photos.none_passed_over());
+            return Task::none();
+        };
+        if self.photos.is_full() {
+            self.queue_photo_batch(false);
+        }
+        self.photos.running = Some(work.name.clone());
+        let apple = self.apple.clone();
+        let asked = work.clone();
+        Task::perform(
+            blocking(move || Ok(apple.find(&asked.name, &asked.owned))),
+            move |result| Message::PhotoFound {
+                work: work.clone(),
+                result: result.unwrap_or_else(|error| Err(lookup::Failure::other(error))),
+            },
+        )
+    }
+
+    /// Hands the held batch to the queue as one commit's worth. `done`
+    /// says nobody is left to ask: the backfill's day is written then,
+    /// once, for the phone to see.
+    fn queue_photo_batch(&mut self, done: bool) {
+        if self.engine.is_none() {
+            return;
+        }
+        let day = (done && self.covers.missing().backfilled.is_none()).then_some(self.today);
+        let Some((changes, summary)) = self.photos.take(day) else {
+            return;
+        };
+        if let Some(engine) = &mut self.engine {
+            for change in changes {
+                engine.queue_file(change, Some(summary.clone()));
+            }
+        }
+        let queued = self.queued_cover_changes();
+        self.covers.rebuild(&queued);
+        self.save_due = Some(Instant::now() + sync::DEBOUNCE);
+        self.refresh_sync_state();
+    }
+
+    /// Apple answered about an artist. A photo is stored and shown at
+    /// once; "nothing found" is recorded; both wait in the batch. A
+    /// refusal stops the work for the session, and any other failure
+    /// (offline, a server error) is not an answer: the artist is asked
+    /// again later.
+    fn photo_found(
+        &mut self,
+        work: covers::backfill::Work,
+        result: Result<lookup::apple_artists::Found, lookup::Failure>,
+    ) -> Task<Message> {
+        use lookup::apple_artists::Found;
+        self.photos.running = None;
+        let local = self.engine.is_none();
+        let change = match result {
+            Ok(Found::Photo(bytes)) => {
+                let Some(path) = covers::artists::file_path(&work.name) else {
+                    return Task::none();
+                };
+                // Picked or uploaded while Apple was being asked: the
+                // owner's stands.
+                if self.covers.get(&path).is_some() {
+                    self.photos.asked(&work.slug);
+                    return self.photos_next();
+                }
+                let seen = self.covers.seen(&path, &self.queued_cover_changes());
+                if let Err(error) = self.covers.store(&path, &bytes) {
+                    eprintln!("libri: could not store the photo {path}: {error}");
+                    self.photos.retry_at = Some(self.now + covers::backfill::RETRY);
+                    return Task::none();
+                }
+                self.artwork.forget_image(&covers::cover_from(&path));
+                covers::Change::Put {
+                    path,
+                    seen,
+                    picked: false,
+                }
+            }
+            Ok(Found::Missing(reason)) => {
+                covers::Change::Missing(covers::artists::MissingEdit::Set {
+                    slug: work.slug.clone(),
+                    tried: covers::artists::Tried {
+                        name: work.name.clone(),
+                        tried: self.today,
+                        reason,
+                    },
+                })
+            }
+            Err(failure) if lookup::apple_artists::refused(&failure) => {
+                eprintln!(
+                    "libri: Apple stopped answering ({failure}); no more photos this session"
+                );
+                self.photos.stopped = true;
+                return Task::none();
+            }
+            Err(failure) if failure.kind == lookup::FailureKind::Offline => {
+                eprintln!("libri: no answer about {}: {failure}", work.name);
+                self.photos.retry_at = Some(self.now + covers::backfill::RETRY);
+                return Task::none();
+            }
+            Err(failure) => {
+                // Not an answer and not Apple refusing: this artist waits
+                // for the next session and the others go on.
+                eprintln!("libri: no photo of {} for now: {failure}", work.name);
+                self.photos.pass_over(&work.slug);
+                return self.photos_next();
+            }
+        };
+        if local {
+            // The library is kept on this computer: made at once.
+            self.covers.apply(&change, true);
+            self.photos.asked(&work.slug);
+        } else {
+            self.photos.tried(&work.slug, change);
+            let queued = self.queued_cover_changes();
+            self.covers.rebuild(&queued);
+        }
+        self.photos_next()
     }
 
     /// Fetches the files at `paths` under `covers/` that GitHub lists and
@@ -1499,7 +1692,14 @@ impl App {
         }
         self.keep_matches();
         let lookups = self.refresh_lookups();
-        Task::batch([task, lookups])
+        // The photo work gives way to a lookup in the Add dialog.
+        self.apple.hold(self.lookup_running());
+        let photos = if now >= self.photos_due {
+            self.photos_next()
+        } else {
+            Task::none()
+        };
+        Task::batch([task, lookups, photos])
     }
 
     /// Writes the online matches found on this computer for albums with
@@ -2116,6 +2316,7 @@ impl App {
             Message::Settings(message) => return screens::settings::update(self, message),
             Message::Token(message) => return token::update(self, message),
             Message::Covers(message) => return self.covers_update(message),
+            Message::PhotoFound { work, result } => return self.photo_found(work, result),
             Message::Lookup(artwork::Message::Prune) => {
                 // Discover's covers belong to no entry; the prune keeps
                 // them too, hidden ones included.
@@ -3295,6 +3496,55 @@ mod tests {
         ]);
         assert_eq!(app.photos_dropped, ["artists/massive-attack.jpg"]);
         assert!(app.covers.artist_file("Massive Attack").is_none());
+    }
+
+    #[test]
+    fn apples_answers_wait_in_a_batch_and_are_queued_whole() {
+        use lookup::apple_artists::Found;
+        let mut app = App::new(Screen::Library);
+        connected(&mut app);
+        let work = |name: &str| covers::backfill::Work {
+            name: name.into(),
+            slug: covers::artists::slug(name).unwrap(),
+            owned: Vec::new(),
+        };
+        let queued = |app: &App| app.engine.as_ref().unwrap().pending().files().len();
+        let _ = app.photo_found(work("Adele"), Ok(Found::Photo(b"jpeg".to_vec())));
+        let reason = covers::artists::Reason::NoMatch;
+        let _ = app.photo_found(work("Burial"), Ok(Found::Missing(reason)));
+        // Shown and recorded at once, with nothing queued yet.
+        assert!(app.covers.artist_file("Adele").is_some());
+        assert!(app.covers.missing().artists.contains_key("burial"));
+        assert_eq!(queued(&app), 0);
+        assert_eq!(app.photos.held().len(), 2);
+        // Nobody left: the batch is queued with the backfill's day, under
+        // one summary.
+        app.queue_photo_batch(true);
+        assert!(app.photos.held().is_empty());
+        let files = app.engine.as_ref().unwrap().pending().files().to_vec();
+        assert_eq!(files.len(), 3);
+        assert!(files.iter().all(|file| {
+            file.summary.as_deref() == Some("Add photos of 1 artist, 1 without one")
+        }));
+        assert!(matches!(
+            files[2].change,
+            covers::Change::Missing(covers::artists::MissingEdit::Backfilled(_))
+        ));
+        assert!(app.covers.artist_file("Adele").is_some());
+        assert!(app.covers.missing().backfilled.is_some());
+        // The day is written once.
+        app.queue_photo_batch(true);
+        assert_eq!(queued(&app), 3);
+
+        // Apple refusing stops the work; a server error only passes the
+        // artist over, and the backfill is then not done.
+        let refused = lookup::Failure::new(lookup::FailureKind::RateLimited, "403");
+        let _ = app.photo_found(work("Can"), Err(refused));
+        assert!(app.photos.stopped);
+        assert!(app.photos.none_passed_over());
+        let _ = app.photo_found(work("Can"), Err(lookup::Failure::other("500")));
+        assert!(!app.photos.none_passed_over());
+        assert!(app.photos.tried_now().contains("can"));
     }
 
     #[test]

@@ -21,6 +21,7 @@
 //! library kept on this computer the folder is all there is.
 
 pub mod artists;
+pub mod backfill;
 pub mod picture;
 pub mod source;
 

@@ -7,6 +7,7 @@
 //! No provider is named anywhere in the UI but Settings › About.
 
 mod anilist;
+pub mod apple_artists;
 pub mod books;
 mod deezer;
 pub mod fake;

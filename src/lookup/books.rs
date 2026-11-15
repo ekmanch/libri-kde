@@ -299,14 +299,27 @@ fn work_id(source: &str) -> Reply<&str> {
 /// requests a minute per address, so requests keep three seconds apart and
 /// a 403 counts as rate limited.
 pub struct ITunes {
-    http: Http,
+    http: std::sync::Arc<Http>,
+}
+
+/// The one client for `itunes.apple.com`: the books lookup and the
+/// artist photos' match (`apple_artists`) share its limiter, since Apple
+/// counts the requests per address, not per kind.
+pub fn apple_http() -> std::sync::Arc<Http> {
+    static SHARED: std::sync::OnceLock<std::sync::Arc<Http>> = std::sync::OnceLock::new();
+    SHARED
+        .get_or_init(|| {
+            std::sync::Arc::new(Http::with_rate_limit_statuses(
+                Duration::from_secs(3),
+                &[429, 403],
+            ))
+        })
+        .clone()
 }
 
 impl ITunes {
     fn new() -> ITunes {
-        ITunes {
-            http: Http::with_rate_limit_statuses(Duration::from_secs(3), &[429, 403]),
-        }
+        ITunes { http: apple_http() }
     }
 
     fn results(&self, path: &str, query: &[(&str, &str)]) -> Reply<Vec<Match>> {

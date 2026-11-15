@@ -312,3 +312,30 @@ fn wikidata_knows_who_died() {
     );
     assert!(!found.contains_key("Massive Attack"));
 }
+
+/// Apple Music for an artist's photo: one search, the namesakes' album
+/// lists, one artist page and one image (DESIGN.md "Artist photos").
+#[test]
+#[ignore = "asks Apple and reads one artist page; run with --ignored"]
+fn apple_finds_an_artists_photo_and_tells_a_namesake_apart() {
+    use libri::covers::artists::Reason;
+    use libri::lookup::apple_artists::{AppleArtists, Found};
+    let apple = AppleArtists::new();
+    let namesakes = apple.namesakes("Massive Attack").expect("Apple answers");
+    println!("Massive Attack: {} namesake(s)", namesakes.len());
+    for namesake in &namesakes {
+        println!("  {} {} {}", namesake.id, namesake.name, namesake.page);
+    }
+    assert!(!namesakes.is_empty());
+    match apple.find("Massive Attack", &["Mezzanine".to_owned()]) {
+        Ok(Found::Photo(bytes)) => {
+            let size = libri::lookup::store::image_size(&bytes);
+            println!("photo: {} bytes, {size:?}", bytes.len());
+            assert_eq!(size, Some((640, 640)));
+        }
+        other => panic!("no photo of Massive Attack: {other:?}"),
+    }
+    // An album nobody of the name has: no match, and no page is read.
+    let none = apple.find("Massive Attack", &["Not An Album Of Theirs".to_owned()]);
+    assert_eq!(none.ok(), Some(Found::Missing(Reason::NoMatch)));
+}

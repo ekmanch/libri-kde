@@ -111,6 +111,17 @@ impl Http {
         })
     }
 
+    /// A GET under the limiter, sent once: a refusal comes back as it is,
+    /// for a caller that stops at the first one (the artist photos).
+    pub fn get_once(&self, url: &str, headers: &[(&str, &str)]) -> Reply<Response> {
+        self.limiter.wait();
+        let mut request = self.agent.get(url);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        Response::read(request.call().map_err(transport_failure)?)
+    }
+
     /// A POST of `body` with `headers`.
     pub fn post(&self, url: &str, headers: &[(&str, &str)], body: &str) -> Reply<Response> {
         self.send(|| {
