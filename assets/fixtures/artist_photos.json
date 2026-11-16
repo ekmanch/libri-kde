@@ -31,13 +31,58 @@
     {"a": "Björk", "b": "Bjork", "same": true},
     {"a": "Ghost", "b": "Ghost B.C.", "same": false},
     {"a": "Adele", "b": "Adele Roberts", "same": false},
-    {"a": "21", "b": "21 (Deluxe Edition)", "same": false},
     {"a": "!!!", "b": "???", "same": false}
+  ],
+  "title_core": [
+    {"title": "Mezzanine", "core": "Mezzanine"},
+    {"title": "Texas Moon - EP", "core": "Texas Moon"},
+    {"title": "My Silly Boy - Single", "core": "My Silly Boy"},
+    {"title": "Hits - single", "core": "Hits"},
+    {"title": "Abbey Road (Remastered)", "core": "Abbey Road"},
+    {"title": "  21 (Deluxe Edition)  ", "core": "21"},
+    {"title": "A Sense of Purpose (The Mirror's Truth Version)", "core": "A Sense of Purpose"},
+    {"title": "Texas Flood (Live at Montreux, 1982) - Single", "core": "Texas Flood"},
+    {"title": "On the Floor (Remixes) [feat. Pitbull] - EP", "core": "On the Floor"},
+    {"title": "The Beatles (White Album) (Super Deluxe Edition) [2018 Remix & Remaster]", "core": "The Beatles"},
+    {"title": "Gladiator: 20th Anniversary Edition", "core": "Gladiator: 20th Anniversary Edition"},
+    {"title": "2:a Augusti 1985 (Live)", "core": "2:a Augusti 1985"},
+    {"title": "(What's the Story) Morning Glory?", "core": "(What's the Story) Morning Glory?"},
+    {"title": "(I)", "core": "(I)"},
+    {"title": "( )", "core": "( )"},
+    {"title": "Single", "core": "Single"},
+    {"title": "Deep-EP", "core": "Deep-EP"},
+    {"title": "Live (unfinished", "core": "Live (unfinished"},
+    {"title": "Blue [Deluxe] (Live) - EP - Single", "core": "Blue"}
+  ],
+  "same_title": [
+    {"a": "Mezzanine", "b": "mezzanine", "same": true},
+    {"a": "Texas Moon", "b": "Texas Moon - EP", "same": true},
+    {"a": "Papaoutai (Afro Soul)", "b": "Papaoutai (Afro Soul) - Single", "same": true},
+    {"a": "21", "b": "21 (Deluxe Edition)", "same": true},
+    {"a": "Abbey Road", "b": "Abbey Road (Super Deluxe Edition) [2019 Remix & Remaster]", "same": true},
+    {"a": "Another Green World (2004 Remaster)", "b": "Another Green World", "same": true},
+    {"a": "Long Way Down (Deluxe)", "b": "Long Way Down (Expanded Edition)", "same": true},
+    {"a": "Hollow Knight Silksong", "b": "Hollow Knight: Silksong (Original Soundtrack)", "same": true},
+    {"a": "Phantom", "b": "Phantom (Edit) - Single", "same": true},
+    {"a": "On The Floor", "b": "On the Floor (Remixes) [feat. Pitbull] - EP", "same": true},
+    {"a": "Jingle Bells", "b": "Jingle Bells (with The Ken Lane Singers) [78rpm Version]", "same": true},
+    {"a": "Bastion (Original Soundtrack)", "b": "Bastion Original Soundtrack", "same": true},
+    {"a": "21", "b": "25 (Deluxe Edition)", "same": false},
+    {"a": "Gladiator", "b": "Gladiator: 20th Anniversary Edition", "same": false},
+    {"a": "2;a augusti", "b": "2:a Augusti 1985 (Live)", "same": false},
+    {"a": "Requiem - Five Anthems", "b": "Rutter: Requiem and Five Anthems", "same": false},
+    {"a": "Requiem", "b": "Brahms: Ein Deutsches Requiem, Op. 45 (A German Requiem)", "same": false},
+    {"a": "Time Out", "b": "Time Out of Mind", "same": false},
+    {"a": "( )", "b": "(Live)", "same": false},
+    {"a": "", "b": " - Single", "same": false}
   ],
   "file_path": [
     {"name": "Massive Attack", "path": "artists/massive-attack.jpg"},
     {"name": "The Beatles", "path": "artists/the-beatles.jpg"},
     {"name": "Simon & Garfunkel", "path": "artists/simon-garfunkel.jpg"},
+    {"name": "The Hollands!", "path": "artists/the-hollands.jpg"},
+    {"name": "COKA$IAN", "path": "artists/coka-ian.jpg"},
+    {"name": "Choir of King's College, Cambridge", "path": "artists/choir-of-kings-college-cambridge.jpg"},
     {"name": "Beyoncé", "path": "artists/beyonce.jpg"},
     {"name": "AC/DC", "path": "artists/ac-dc.jpg"},
     {"name": "Guns N' Roses", "path": "artists/guns-n-roses.jpg"},
@@ -161,10 +206,51 @@
       "chosen": "1"
     },
     {
-      "about": "An edition note makes another title.",
+      "about": "An edition note at the end is the same title (same_title).",
       "name": "Adele",
       "owned": ["21"],
       "candidates": [{"id": "1", "name": "Adele", "albums": ["21 (Deluxe Edition)"]}],
+      "chosen": "1"
+    },
+    {
+      "about": "Apple's \" - EP\" and \" - Single\" are left aside.",
+      "name": "Khruangbin",
+      "owned": ["Texas Moon"],
+      "candidates": [{"id": "1", "name": "Khruangbin", "albums": ["Texas Moon - EP", "Mordechai"]}],
+      "chosen": "1"
+    },
+    {
+      "about": "The note may be on the saved title.",
+      "name": "Brian Eno",
+      "owned": ["Another Green World (2004 Remaster)"],
+      "candidates": [{"id": "1", "name": "Brian Eno", "albums": ["Another Green World", "Discreet Music"]}],
+      "chosen": "1"
+    },
+    {
+      "about": "Two saved editions of one album count once, so this is a tie.",
+      "name": "Tom Odell",
+      "owned": ["Long Way Down", "Long Way Down (Deluxe)"],
+      "candidates": [
+        {"id": "1", "name": "Tom Odell", "albums": ["Long Way Down", "Long Way Down (Expanded Edition)"]},
+        {"id": "2", "name": "Tom Odell", "albums": ["Long Way Down - Single"]}
+      ],
+      "chosen": null
+    },
+    {
+      "about": "Words outside the brackets must agree: no match.",
+      "name": "The Lyndhurst Orchestra",
+      "owned": ["Gladiator"],
+      "candidates": [{"id": "1", "name": "The Lyndhurst Orchestra", "albums": ["Gladiator: 20th Anniversary Edition"]}],
+      "chosen": null
+    },
+    {
+      "about": "A self-titled album two namesakes both list is a tie.",
+      "name": "The Blues Brothers",
+      "owned": ["The Blues Brothers"],
+      "candidates": [
+        {"id": "1", "name": "The Blues Brothers", "albums": ["The Blues Brothers (Original Soundtrack Recording)", "Briefcase Full of Blues"]},
+        {"id": "2", "name": "Blues Brothers", "albums": ["Blues Brothers"]}
+      ],
       "chosen": null
     },
     {

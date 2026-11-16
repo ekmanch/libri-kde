@@ -41,10 +41,62 @@ pub fn name_key(name: &str) -> String {
     }
 }
 
-/// Whether two names or two album titles are the same by `name_key`.
+/// Whether two artist names are the same by `name_key`.
 pub fn same_name(a: &str, b: &str) -> bool {
     let key = name_key(a);
     !key.is_empty() && key == name_key(b)
+}
+
+/// A title without the notes at its end: a trailing " - Single" or
+/// " - EP" (whatever the case) and a trailing part in round or square
+/// brackets, from its last opening bracket, taken off one after another
+/// until none is left. A title that would end up empty keeps what it
+/// had: "(What's the Story) Morning Glory?" and "(I)" stay whole.
+pub fn title_core(title: &str) -> &str {
+    let mut core = title.trim();
+    loop {
+        let shorter = without_suffix(core, " - single")
+            .or_else(|| without_suffix(core, " - ep"))
+            .or_else(|| without_bracket(core, '(', ')'))
+            .or_else(|| without_bracket(core, '[', ']'))
+            .map(str::trim_end);
+        match shorter {
+            Some(shorter) if !shorter.is_empty() => core = shorter,
+            _ => return core,
+        }
+    }
+}
+
+fn without_suffix<'a>(title: &'a str, suffix: &str) -> Option<&'a str> {
+    let at = title.len().checked_sub(suffix.len())?;
+    (title.is_char_boundary(at) && title[at..].eq_ignore_ascii_case(suffix)).then(|| &title[..at])
+}
+
+fn without_bracket(title: &str, open: char, close: char) -> Option<&str> {
+    title
+        .ends_with(close)
+        .then(|| title.rfind(open))
+        .flatten()
+        .map(|at| &title[..at])
+}
+
+/// The keys a title is compared by: the title's own and its core's
+/// (`title_core`), the empty ones left out.
+fn title_keys(title: &str) -> Vec<String> {
+    let mut keys = vec![name_key(title), name_key(title_core(title))];
+    keys.dedup();
+    keys.retain(|key| !key.is_empty());
+    keys
+}
+
+/// Whether two album titles, or two song titles, are the same: by
+/// `name_key`, each as it is written or without the notes at its end, so
+/// "Texas Moon" is "Texas Moon - EP", "Abbey Road" is "Abbey Road
+/// (Remastered)" and "Another Green World (2004 Remaster)" is "Another
+/// Green World". Words outside the brackets still have to agree.
+pub fn same_title(a: &str, b: &str) -> bool {
+    let b = title_keys(b);
+    title_keys(a).iter().any(|key| b.contains(key))
 }
 
 /// The artist's slug, the entry ids' slug of the name; `None` for a name
@@ -159,16 +211,29 @@ pub struct Candidate {
     pub albums: Vec<String>,
 }
 
+/// How many of `saved` (titles saved for the artist) are among `listed`
+/// by `same_title`. Saved titles that differ only in the notes at their
+/// end ("Birthdays" and "Birthdays (Deluxe)") count once.
+fn listed_count(listed: &[String], saved: &[&str]) -> usize {
+    let listed: Vec<String> = listed.iter().flat_map(|title| title_keys(title)).collect();
+    let mut counted: Vec<String> = Vec::new();
+    for title in saved {
+        let keys = title_keys(title);
+        // The core's key comes last and names the title.
+        let Some(named) = keys.last() else {
+            continue;
+        };
+        if !counted.contains(named) && keys.iter().any(|key| listed.contains(key)) {
+            counted.push(named.clone());
+        }
+    }
+    counted.len()
+}
+
 /// How many of `owned` (the album titles saved for the artist) the
 /// candidate lists, each owned title counted once.
 pub fn owned_count(candidate: &Candidate, owned: &[&str]) -> usize {
-    let listed: Vec<String> = candidate.albums.iter().map(|a| name_key(a)).collect();
-    let mut keys: Vec<String> = owned.iter().map(|title| name_key(title)).collect();
-    keys.sort();
-    keys.dedup();
-    keys.iter()
-        .filter(|key| !key.is_empty() && listed.contains(key))
-        .count()
+    listed_count(&candidate.albums, owned)
 }
 
 /// The Apple artist that is the library's `name`: among the candidates
@@ -514,6 +579,23 @@ mod tests {
                 case["same"].as_bool().unwrap(),
                 "{case}"
             );
+        }
+    }
+
+    #[test]
+    fn titles_are_compared_with_and_without_the_notes_at_their_end() {
+        for case in cases("title_core") {
+            assert_eq!(
+                title_core(text(&case, "title")),
+                text(&case, "core"),
+                "{case}"
+            );
+        }
+        for case in cases("same_title") {
+            let (a, b) = (text(&case, "a"), text(&case, "b"));
+            let same = case["same"].as_bool().unwrap();
+            assert_eq!(same_title(a, b), same, "{case}");
+            assert_eq!(same_title(b, a), same, "{case}");
         }
     }
 
