@@ -19,14 +19,15 @@
 //! else the change is dropped and reported, and GitHub's file stands.
 //! `artists/_missing.json` is never sent whole: the queued edits are
 //! merged per artist into the repo's copy as it is when the commit is
-//! made (`covers::artists::merged_missing`).
+//! made (`covers::artists::merged_missing`), and an artist who got a
+//! file or left the library leaves the record there.
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use crate::connection::Target;
 use crate::covers::artists::{self, MissingEdit};
-use crate::covers::{self, Change};
+use crate::covers::{self, Change, backfill};
 use crate::github::{Client, Failure, FailureKind, PutResult, Reply, TreeEdit, TreeFile, blob_sha};
 
 /// What the commit does to one cover file, by its path in the repo.
@@ -174,13 +175,15 @@ pub fn plan_guarded(
 
 /// `_missing.json` as the commit writes it, or `None` to leave it:
 /// `theirs` (the repo's copy) with `missing` merged in, without the
-/// artists that have a file once `edits` are made.
+/// artists that have a file once `edits` are made and without those the
+/// library no longer has (`in_library`, by slug).
 pub fn missing_text(
     tree: &[TreeFile],
     root: &str,
     edits: &[(String, Edit)],
     missing: &[MissingEdit],
     theirs: Option<&str>,
+    in_library: &dyn Fn(&str) -> bool,
 ) -> Option<String> {
     let has_file = |slug: &str| {
         let path = format!("{root}/{}/{slug}.jpg", artists::FOLDER);
@@ -189,7 +192,7 @@ pub fn missing_text(
             None => tree.iter().any(|file| file.path == path),
         }
     };
-    match artists::merged_missing(theirs, missing, has_file) {
+    match artists::merged_missing(theirs, missing, has_file, in_library) {
         Ok(text) => text,
         Err(error) => {
             eprintln!("libri: sync: _missing.json on GitHub is left as it is: {error}");
@@ -258,7 +261,23 @@ pub fn run(
             false => None,
         };
         let theirs = theirs.as_ref().map(|raw| raw.text().unwrap_or("not UTF-8"));
-        if let Some(text) = missing_text(&tree, &root, &plan.edits, &plan.missing, theirs) {
+        // The library as this commit leaves it: the one it carries, else
+        // the branch's. One that cannot be read drops nobody.
+        let slugs = match library {
+            Some(bytes) => std::str::from_utf8(bytes).ok().and_then(backfill::slugs_in),
+            None => client
+                .file_raw(&target.file, &target.branch, None)?
+                .and_then(|raw| raw.text().ok().and_then(backfill::slugs_in)),
+        };
+        let in_library = |slug: &str| slugs.as_ref().is_none_or(|slugs| slugs.contains(slug));
+        if let Some(text) = missing_text(
+            &tree,
+            &root,
+            &plan.edits,
+            &plan.missing,
+            theirs,
+            &in_library,
+        ) {
             edits.push((at, TreeEdit::Text(text)));
         }
     }
@@ -487,8 +506,16 @@ mod tests {
         );
         assert!(made.missing.is_empty());
         assert!(adds_photo("covers", &made.edits));
-        let text = missing_text(&[], "covers", &made.edits, &made.missing, Some(theirs))
-            .expect("the record changes");
+        let all = |_: &str| true;
+        let text = missing_text(
+            &[],
+            "covers",
+            &made.edits,
+            &made.missing,
+            Some(theirs),
+            &all,
+        )
+        .expect("the record changes");
         let merged = artists::Missing::decode(&text).unwrap();
         let slugs: Vec<&str> = merged.artists.keys().map(String::as_str).collect();
         assert_eq!(slugs, ["neu"]);
@@ -518,16 +545,39 @@ mod tests {
         ];
         let theirs = "{\n  \"version\": 1,\n  \"artists\": {\n    \"can\": {\"name\": \"Can\", \"tried\": \"2026-11-14\", \"reason\": \"no-photo\"}\n  }\n}\n";
         let made = plan_guarded(&[], "covers", &changes, &|_| None);
-        let text = missing_text(&[], "covers", &made.edits, &made.missing, Some(theirs))
-            .expect("the record changes");
+        let all = |_: &str| true;
+        let text = missing_text(
+            &[],
+            "covers",
+            &made.edits,
+            &made.missing,
+            Some(theirs),
+            &all,
+        )
+        .expect("the record changes");
         let merged = artists::Missing::decode(&text).unwrap();
         // The other device's artist is kept, this one's added, and the
         // artist whose photo goes up in this commit is not missing.
         let slugs: Vec<&str> = merged.artists.keys().map(String::as_str).collect();
         assert_eq!(slugs, ["burial", "can"]);
+        // An artist no entry names any more leaves the record, whoever
+        // recorded them.
+        let left = |slug: &str| slug != "can";
+        let text = missing_text(
+            &[],
+            "covers",
+            &made.edits,
+            &made.missing,
+            Some(theirs),
+            &left,
+        )
+        .expect("the record changes");
+        let merged = artists::Missing::decode(&text).unwrap();
+        let slugs: Vec<&str> = merged.artists.keys().map(String::as_str).collect();
+        assert_eq!(slugs, ["burial"]);
         // A copy that cannot be read is left alone.
         assert_eq!(
-            missing_text(&[], "covers", &made.edits, &made.missing, Some("{}")),
+            missing_text(&[], "covers", &made.edits, &made.missing, Some("{}"), &all),
             None
         );
     }

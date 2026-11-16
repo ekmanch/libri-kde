@@ -538,33 +538,42 @@ impl Missing {
     }
 
     /// The record after `edits` on top of this one, in their order, and
-    /// without the artists that have a file (`has_file`, by slug): an
-    /// entry is removed when a file for the artist appears, whoever put
-    /// it there.
-    pub fn merged(mut self, edits: &[MissingEdit], has_file: impl Fn(&str) -> bool) -> Missing {
+    /// without the artists that have a file (`has_file`, by slug) or are
+    /// no longer in the library (`in_library`, by slug): an entry leaves
+    /// when a file for the artist appears, whoever put it there, or when
+    /// no entry names the artist any more, and for no other reason.
+    pub fn merged(
+        mut self,
+        edits: &[MissingEdit],
+        has_file: impl Fn(&str) -> bool,
+        in_library: impl Fn(&str) -> bool,
+    ) -> Missing {
         for edit in edits {
             self.apply(edit);
         }
-        self.artists.retain(|slug, _| !has_file(slug));
+        self.artists
+            .retain(|slug, _| !has_file(slug) && in_library(slug));
         self
     }
 }
 
 /// `_missing.json` as a commit writes it: the repo's copy (`theirs`, none
 /// when there is no file yet) with this device's `edits` on top, per
-/// artist. `Ok(None)` when that changes nothing, and no file is made for
-/// an empty record. A copy that cannot be read is an error and is left
-/// as it is; the edits are then dropped.
+/// artist, without the artists that have a file or have left the library
+/// (`Missing::merged`). `Ok(None)` when that changes nothing, and no file
+/// is made for an empty record. A copy that cannot be read is an error
+/// and is left as it is; the edits are then dropped.
 pub fn merged_missing(
     theirs: Option<&str>,
     edits: &[MissingEdit],
     has_file: impl Fn(&str) -> bool,
+    in_library: impl Fn(&str) -> bool,
 ) -> Result<Option<String>, String> {
     let base = match theirs {
         Some(text) => Missing::decode(text)?,
         None => Missing::default(),
     };
-    let merged = base.merged(edits, has_file);
+    let merged = base.merged(edits, has_file, in_library);
     if theirs.is_none() && merged == Missing::default() {
         return Ok(None);
     }
@@ -807,9 +816,17 @@ mod tests {
                 assert_eq!(&edit.to_json(), json, "{case}");
             }
             let files = strings(&case, "files");
-            let merged = merged_missing(case["theirs"].as_str(), &edits, |slug| {
-                files.contains(&slug)
-            });
+            // `library` lists the slugs of the library's artists; a case
+            // without it has everyone in the library.
+            let library = case["library"]
+                .is_array()
+                .then(|| strings(&case, "library"));
+            let merged = merged_missing(
+                case["theirs"].as_str(),
+                &edits,
+                |slug| files.contains(&slug),
+                |slug| library.as_ref().is_none_or(|all| all.contains(&slug)),
+            );
             match case["refused"].as_bool() {
                 Some(true) => assert!(merged.is_err(), "{case}"),
                 _ => assert_eq!(

@@ -92,6 +92,19 @@ fn artists_of(library: &Library) -> Vec<(Work, Date)> {
     out
 }
 
+/// The slugs of the artists in the library file `text`, for the missing
+/// record's merge (an artist no entry names leaves the record); `None`
+/// for a file that cannot be read, which then drops nobody.
+pub fn slugs_in(text: &str) -> Option<HashSet<String>> {
+    let library = crate::model::codec::decode(text).ok()?;
+    Some(
+        artists_of(&library)
+            .into_iter()
+            .map(|(work, _)| work.slug)
+            .collect(),
+    )
+}
+
 /// The library's artist `name` as Apple is asked about them, with the
 /// album titles saved for them.
 pub fn work_for(library: &Library, name: &str) -> Option<Work> {
@@ -538,6 +551,12 @@ mod tests {
         assert_eq!(work[0].owned, ["21", "Hello (the album)"]);
         assert_eq!(work[0].songs, ["Hello"]);
         assert!(work[1].songs.is_empty());
+        // The record's merge knows the same artists by their slugs.
+        let slugs = slugs_in(&crate::model::codec::encode(&library)).expect("readable");
+        let mut slugs: Vec<&str> = slugs.iter().map(String::as_str).collect();
+        slugs.sort_unstable();
+        assert_eq!(slugs, ["adele", "burial", "can", "the-beatles"]);
+        assert_eq!(slugs_in("not a library"), None);
         assert_eq!(
             totals(&library, &covers),
             Totals {

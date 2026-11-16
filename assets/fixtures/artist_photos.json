@@ -420,6 +420,14 @@
       "theirs": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"}\n  }\n}\n", "edits": [{"set": "burial", "name": "Burial", "tried": "2026-11-16", "reason": "no-photo"}], "files": ["adele", "burial"], "written": "{\n  \"version\": 1,\n  \"artists\": {}\n}\n"
     },
     {
+      "about": "An artist no longer in the library is removed, whoever recorded them, and never added; 'library' lists the slugs of the library's artists, and a case without it has them all.",
+      "theirs": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"},\n    \"twin-peaks\": {\"name\": \"Twin Peaks\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"}\n  }\n}\n", "edits": [{"set": "solo-g", "name": "Solo G", "tried": "2026-11-16", "reason": "no-photo"}, {"set": "burial", "name": "Burial", "tried": "2026-11-16", "reason": "no-photo"}], "files": [], "library": ["adele", "burial", "can"], "written": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"},\n    \"burial\": {\"name\": \"Burial\", \"tried\": \"2026-11-16\", \"reason\": \"no-photo\"}\n  }\n}\n"
+    },
+    {
+      "about": "Everyone recorded is still in the library: nothing is written.",
+      "theirs": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"}\n  }\n}\n", "edits": [], "files": [], "library": ["adele"], "written": null
+    },
+    {
       "about": "Edits apply in their order.",
       "theirs": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"}\n  }\n}\n", "edits": [{"set": "burial", "name": "Burial", "tried": "2026-11-16", "reason": "no-photo"}, {"remove": "burial"}, {"remove": "adele"}, {"set": "burial", "name": "Burial", "tried": "2026-11-16", "reason": "no-photo"}], "files": [], "written": "{\n  \"version\": 1,\n  \"artists\": {\n    \"burial\": {\"name\": \"Burial\", \"tried\": \"2026-11-16\", \"reason\": \"no-photo\"}\n  }\n}\n"
     },

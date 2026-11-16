@@ -646,7 +646,9 @@ impl Covers {
     }
 
     /// GitHub's record with `edits` on top, without the artists that
-    /// have a file in the shown list.
+    /// have a file in the shown list. An artist who left the library
+    /// stays here until a commit writes the record (`sync::commit`); no
+    /// screen counts one.
     fn merged_missing(&self, edits: &[MissingEdit]) -> Missing {
         let with_file: HashSet<&str> = self
             .files
@@ -655,7 +657,7 @@ impl Covers {
             .collect();
         self.missing_remote
             .clone()
-            .merged(edits, |slug| with_file.contains(slug))
+            .merged(edits, |slug| with_file.contains(slug), |_| true)
     }
 
     fn apply_to(&self, files: &mut Vec<File>, change: &Change) {
