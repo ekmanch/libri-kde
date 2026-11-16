@@ -3,7 +3,9 @@
 //! Three kinds of request, each with its own pace. The match goes through
 //! the iTunes Search API on the books lookup's client and limiter (the
 //! same host and the same limit of about twenty requests a minute): one
-//! search for the artists of the name, then each namesake's album list.
+//! search for the artists of the name, then each namesake's album list,
+//! and, when none of them lists an owned album, one song search for each
+//! of up to three saved songs.
 //! The photo is read from the matched artist's `music.apple.com` page,
 //! the one exception to "no scraping" (DESIGN.md "Artist photos"): one
 //! page every two to four seconds with random spacing. The image itself
@@ -81,11 +83,13 @@ pub struct Choices {
 
 /// What was asked before, kept in `apple_artists.json` under the cache
 /// folder, so Pick a cover reads no page twice: the namesakes with their
-/// albums by name key, and each artist's photo URL (none for a page
-/// without one) by id.
+/// albums (and the songs found under their ids) by name key, the songs
+/// searched for by name key (each as its title's key), and each artist's
+/// photo URL (none for a page without one) by id.
 #[derive(Debug, Default)]
 struct Kept {
     names: HashMap<String, Vec<(Candidate, String)>>,
+    songs: HashMap<String, Vec<String>>,
     photos: HashMap<String, Option<String>>,
 }
 
@@ -110,12 +114,20 @@ impl Kept {
                             albums: http::strings_at(item, "albums")
                                 .map(str::to_owned)
                                 .collect(),
+                            songs: http::strings_at(item, "songs").map(str::to_owned).collect(),
                         },
                         str_at(item, "page")?.to_owned(),
                     ))
                 })
                 .collect();
             kept.names.insert(key.clone(), list);
+        }
+        for (key, asked) in json["songs"].as_object().into_iter().flatten() {
+            let asked = asked.as_array().into_iter().flatten();
+            kept.songs.insert(
+                key.clone(),
+                asked.filter_map(Value::as_str).map(str::to_owned).collect(),
+            );
         }
         for (id, url) in json["photos"].as_object().into_iter().flatten() {
             kept.photos
@@ -134,6 +146,7 @@ impl Kept {
                     .map(|(c, page)| {
                         serde_json::json!({
                             "id": c.id, "name": c.name, "page": page, "albums": c.albums,
+                            "songs": c.songs,
                         })
                     })
                     .collect();
@@ -145,7 +158,9 @@ impl Kept {
             .iter()
             .map(|(id, url)| (id.clone(), serde_json::json!(url)))
             .collect();
-        serde_json::json!({"version": KEPT_VERSION, "names": names, "photos": photos})
+        serde_json::json!({
+            "version": KEPT_VERSION, "names": names, "songs": self.songs, "photos": photos,
+        })
     }
 }
 
@@ -246,6 +261,70 @@ impl AppleArtists {
         Ok(albums_in(&json))
     }
 
+    /// The tracks a search for the artist's song `title` finds, each as
+    /// its artist's id and its name. One request, on the same client and
+    /// limiter as the other searches, and refused like them.
+    pub fn song_rows(&self, name: &str, title: &str) -> Reply<Vec<(String, String)>> {
+        let term = format!("{name} {title}");
+        let json = self.api(
+            "/search",
+            &[
+                ("term", term.as_str()),
+                ("media", "music"),
+                ("entity", "song"),
+                ("limit", "50"),
+            ],
+        )?;
+        Ok(songs_in(&json))
+    }
+
+    /// `listed` with the artist's saved songs searched for, when the
+    /// albums tell nothing: no namesake lists an owned album and there
+    /// are songs to ask about (`artists::songs_asked`, three at most). A
+    /// song is searched for once; what the searches found is kept with
+    /// the namesakes.
+    fn with_songs(
+        &self,
+        name: &str,
+        owned: &[&str],
+        songs: &[&str],
+        mut listed: Vec<(Candidate, String)>,
+    ) -> Reply<Vec<(Candidate, String)>> {
+        let candidates: Vec<Candidate> = listed.iter().map(|(c, _)| c.clone()).collect();
+        if listed.is_empty() || artists::lists_owned(name, owned, &candidates) {
+            return Ok(listed);
+        }
+        let key = artists::name_key(name);
+        let mut asked = {
+            let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
+            kept.songs.get(&key).cloned().unwrap_or_default()
+        };
+        let mut changed = false;
+        for title in artists::songs_asked(songs) {
+            let title_key = artists::name_key(title);
+            if asked.contains(&title_key) {
+                continue;
+            }
+            for (id, track) in self.song_rows(name, title)? {
+                let by = listed.iter_mut().find(|(candidate, _)| candidate.id == id);
+                if let Some((candidate, _)) = by
+                    && !candidate.songs.contains(&track)
+                {
+                    candidate.songs.push(track);
+                }
+            }
+            asked.push(title_key);
+            changed = true;
+        }
+        if changed {
+            self.keep(|kept| {
+                kept.names.insert(key.clone(), listed.clone());
+                kept.songs.insert(key, asked);
+            });
+        }
+        Ok(listed)
+    }
+
     fn keep(&self, change: impl FnOnce(&mut Kept)) {
         let mut kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
         change(&mut kept);
@@ -286,11 +365,13 @@ impl AppleArtists {
     /// What the artist's Pick a cover offers from Apple: the matched
     /// artist's photo, and the other artists of the name with one album
     /// each, their pages unread.
-    pub fn choices(&self, name: &str, owned: &[String]) -> Reply<Choices> {
+    pub fn choices(&self, name: &str, owned: &[String], songs: &[String]) -> Reply<Choices> {
         let owned: Vec<&str> = owned.iter().map(String::as_str).collect();
-        let listed = self.candidates_kept(name)?;
+        let songs: Vec<&str> = songs.iter().map(String::as_str).collect();
+        let listed = self.with_songs(name, &owned, &songs, self.candidates_kept(name)?)?;
         let candidates: Vec<Candidate> = listed.iter().map(|(c, _)| c.clone()).collect();
-        let chosen = artists::choose(name, &owned, &candidates).map(|c| c.id.clone());
+        let chosen =
+            artists::choose_artist(name, &owned, &songs, &candidates).map(|c| c.id.clone());
         let mut choices = Choices::default();
         for (candidate, page) in &listed {
             if Some(&candidate.id) == chosen.as_ref() {
@@ -316,12 +397,16 @@ impl AppleArtists {
                     id: namesake.id,
                     name: namesake.name,
                     albums,
+                    songs: Vec::new(),
                 },
                 namesake.page,
             ));
         }
+        // Asked anew: the songs searched for before go with the old list.
         self.keep(|kept| {
-            kept.names.insert(artists::name_key(name), out.clone());
+            let key = artists::name_key(name);
+            kept.songs.remove(&key);
+            kept.names.insert(key, out.clone());
         });
         Ok(out)
     }
@@ -352,12 +437,14 @@ impl AppleArtists {
     }
 
     /// Asks Apple about the library's artist `name`, whose saved album
-    /// titles are `owned`: the match, its page, the photo.
-    pub fn find(&self, name: &str, owned: &[String]) -> Reply<Found> {
+    /// titles are `owned` and whose saved songs are `songs`: the match,
+    /// its page, the photo.
+    pub fn find(&self, name: &str, owned: &[String], songs: &[String]) -> Reply<Found> {
         let owned: Vec<&str> = owned.iter().map(String::as_str).collect();
-        let listed = self.candidates(name)?;
+        let songs: Vec<&str> = songs.iter().map(String::as_str).collect();
+        let listed = self.with_songs(name, &owned, &songs, self.candidates(name)?)?;
         let candidates: Vec<Candidate> = listed.iter().map(|(c, _)| c.clone()).collect();
-        let Some(chosen) = artists::choose(name, &owned, &candidates) else {
+        let Some(chosen) = artists::choose_artist(name, &owned, &songs, &candidates) else {
             return Ok(Found::Missing(Reason::NoMatch));
         };
         let page = listed
@@ -422,6 +509,18 @@ pub fn albums_in(json: &Value) -> Vec<String> {
         .collect()
 }
 
+/// The tracks of a song search's answer, each as its artist's id and its
+/// name.
+pub fn songs_in(json: &Value) -> Vec<(String, String)> {
+    objects_at(json, "results")
+        .filter(|item| str_at(item, "wrapperType") == Some("track"))
+        .filter_map(|item| {
+            let id = int_at(item, "artistId")?.to_string();
+            Some((id, str_at(item, "trackName")?.to_owned()))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -467,6 +566,27 @@ mod tests {
     }
 
     #[test]
+    fn a_song_search_gives_each_track_with_its_artists_id() {
+        let answer = json!({"results": [
+            {"wrapperType": "track", "artistId": 171366, "artistName": "Frank Sinatra",
+             "trackName": "Jingle Bells (with The Ken Lane Singers)"},
+            {"wrapperType": "track", "artistId": 799597, "trackName": "Jingle Bells"},
+            {"wrapperType": "track", "trackName": "No artist id"},
+            {"wrapperType": "collection", "artistId": 1, "collectionName": "Christmas"},
+        ]});
+        assert_eq!(
+            songs_in(&answer),
+            [
+                (
+                    "171366".to_owned(),
+                    "Jingle Bells (with The Ken Lane Singers)".to_owned()
+                ),
+                ("799597".to_owned(), "Jingle Bells".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
     fn what_was_asked_is_kept_and_read_back() {
         let mut kept = Kept::default();
         kept.names.insert(
@@ -476,6 +596,7 @@ mod tests {
                     id: "1".into(),
                     name: "Adele".into(),
                     albums: vec!["21".into(), "25".into()],
+                    songs: vec!["Hello".into()],
                 },
                 "https://music.apple.com/us/artist/adele/1".into(),
             )],
@@ -483,8 +604,10 @@ mod tests {
         kept.photos
             .insert("1".into(), Some("https://x/640x640cc.jpg".into()));
         kept.photos.insert("2".into(), None);
+        kept.songs.insert("adele".into(), vec!["hello".into()]);
         let again = Kept::read(&kept.to_json());
         assert_eq!(again.names, kept.names);
+        assert_eq!(again.songs, kept.songs);
         assert_eq!(again.photos, kept.photos);
         assert!(Kept::read(&json!({"version": 9})).names.is_empty());
     }

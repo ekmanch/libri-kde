@@ -152,6 +152,12 @@
       "photo": null
     }
   ],
+  "songs_asked": [
+    {"songs": [], "asked": []},
+    {"songs": ["Jingle Bells"], "asked": ["Jingle Bells"]},
+    {"songs": ["Betlehems stjärna", "Deck the Halls", "Nu tändas tusen juleljus", "Staffan var en stalledräng"], "asked": ["Betlehems stjärna", "Deck the Halls", "Nu tändas tusen juleljus"]},
+    {"songs": ["Stilla natt", "Stilla Natt (Live)", "!!!", "Advent", "Hosianna, Davids son", "Bella notte"], "asked": ["Stilla natt", "Advent", "Hosianna, Davids son"]}
+  ],
   "choose": [
     {
       "about": "One namesake that lists an owned album.",
@@ -250,6 +256,88 @@
       "candidates": [
         {"id": "1", "name": "The Blues Brothers", "albums": ["The Blues Brothers (Original Soundtrack Recording)", "Briefcase Full of Blues"]},
         {"id": "2", "name": "Blues Brothers", "albums": ["Blues Brothers"]}
+      ],
+      "chosen": null
+    },
+    {
+      "about": "No album saved: the namesake under whose id a saved song was found.",
+      "name": "Frank Sinatra",
+      "owned": [],
+      "songs": ["Jingle Bells"],
+      "candidates": [
+        {"id": "1", "name": "Frank Sinatra", "albums": ["Christmas"], "songs": ["Jingle Bells (with The Ken Lane Singers)"]},
+        {"id": "2", "name": "Frank Sinatra", "albums": ["Tribute"], "songs": []}
+      ],
+      "chosen": "1"
+    },
+    {
+      "about": "A song's album that no namesake lists falls back to the songs too.",
+      "name": "Slaughterhouse",
+      "owned": ["SHADYXV"],
+      "songs": ["Psychopath Killer"],
+      "candidates": [
+        {"id": "1", "name": "Slaughterhouse", "albums": ["Welcome to: Our House"], "songs": ["Psychopath Killer (feat. Eminem & Yelawolf)"]},
+        {"id": "2", "name": "SlaughterHouse", "albums": ["Demo"]}
+      ],
+      "chosen": "1"
+    },
+    {
+      "about": "The searches found the song under no namesake: no match, even for the only namesake.",
+      "name": "ABBA",
+      "owned": [],
+      "songs": ["Happy New Year"],
+      "candidates": [{"id": "1", "name": "ABBA", "albums": ["Super Trouper"], "songs": ["Andante, Andante"]}],
+      "chosen": null
+    },
+    {
+      "about": "The namesake with the most saved songs wins.",
+      "name": "Katie Melua",
+      "owned": [],
+      "songs": ["Cradle Song", "O Holy Night", "The Little Swallow"],
+      "candidates": [
+        {"id": "1", "name": "Katie Melua", "albums": [], "songs": ["O Holy Night"]},
+        {"id": "2", "name": "Katie Melua", "albums": [], "songs": ["Cradle Song", "O Holy Night", "O Holy Night (Live)"]}
+      ],
+      "chosen": "2"
+    },
+    {
+      "about": "A tie between songs is no match.",
+      "name": "Stockholm Singers",
+      "owned": [],
+      "songs": ["Stilla natt"],
+      "candidates": [
+        {"id": "1", "name": "Stockholm Singers", "albums": [], "songs": ["Stilla natt"]},
+        {"id": "2", "name": "Stockholm Singers", "albums": [], "songs": ["Stilla Natt (Live)"]}
+      ],
+      "chosen": null
+    },
+    {
+      "about": "Only the first three saved songs are asked about and count (songs_asked).",
+      "name": "Adolf Fredriks Flickkör",
+      "owned": [],
+      "songs": ["Betlehems stjärna", "Deck the Halls", "Nu tändas tusen juleljus", "Staffan var en stalledräng"],
+      "candidates": [{"id": "1", "name": "Adolf Fredriks Flickkör", "albums": [], "songs": ["Staffan var en stalledräng"]}],
+      "chosen": null
+    },
+    {
+      "about": "A namesake lists an owned album: the songs are not looked at.",
+      "name": "In Flames",
+      "owned": ["A Sense of Purpose (The Mirror's Truth Version)"],
+      "songs": ["The Chosen Pessimist"],
+      "candidates": [
+        {"id": "1", "name": "In Flames", "albums": ["A Sense of Purpose"]},
+        {"id": "2", "name": "In Flames", "albums": [], "songs": ["The Chosen Pessimist"]}
+      ],
+      "chosen": "1"
+    },
+    {
+      "about": "A tie between albums is never broken by a song.",
+      "name": "Ghost",
+      "owned": ["Prequelle", "Impera"],
+      "songs": ["Rats"],
+      "candidates": [
+        {"id": "1", "name": "Ghost", "albums": ["Prequelle"], "songs": ["Rats"]},
+        {"id": "2", "name": "Ghost", "albums": ["Impera"]}
       ],
       "chosen": null
     },

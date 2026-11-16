@@ -203,12 +203,18 @@ pub fn photo_url(og_image: &str) -> Option<String> {
     (!size.is_empty()).then(|| format!("{image}/{PHOTO_SIZE}"))
 }
 
-/// An Apple artist a name search found, with the titles of their albums.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// How many of an artist's saved songs Apple is asked about, at most.
+pub const SONGS_ASKED: usize = 3;
+
+/// An Apple artist a name search found, with the titles of their albums
+/// and, when their songs were searched for (`choose_artist`), the names
+/// of the tracks those searches found under this artist's id.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Candidate {
     pub id: String,
     pub name: String,
     pub albums: Vec<String>,
+    pub songs: Vec<String>,
 }
 
 /// How many of `saved` (titles saved for the artist) are among `listed`
@@ -236,19 +242,17 @@ pub fn owned_count(candidate: &Candidate, owned: &[&str]) -> usize {
     listed_count(&candidate.albums, owned)
 }
 
-/// The Apple artist that is the library's `name`: among the candidates
-/// of the same name, the one listing the most owned albums. One that
-/// lists none is no match, even as the only namesake, and a tie for the
-/// most is no match either.
-pub fn choose<'a>(
+/// The one with the highest count above zero among the candidates named
+/// `name`; none when nobody counts or two tie for the most.
+fn most<'a>(
     name: &str,
-    owned: &[&str],
     candidates: &'a [Candidate],
+    count: impl Fn(&Candidate) -> usize,
 ) -> Option<&'a Candidate> {
     let mut counted: Vec<(usize, &Candidate)> = candidates
         .iter()
         .filter(|candidate| same_name(&candidate.name, name))
-        .map(|candidate| (owned_count(candidate, owned), candidate))
+        .map(|candidate| (count(candidate), candidate))
         .filter(|(count, _)| *count > 0)
         .collect();
     counted.sort_by_key(|counted| std::cmp::Reverse(counted.0));
@@ -256,6 +260,73 @@ pub fn choose<'a>(
         [(_, only)] => Some(only),
         [(best, first), (next, _), ..] if best > next => Some(first),
         _ => None,
+    }
+}
+
+/// The Apple artist that is the library's `name`, by albums: among the
+/// candidates of the same name, the one listing the most owned albums.
+/// One that lists none is no match, even as the only namesake, and a tie
+/// for the most is no match either.
+pub fn choose<'a>(
+    name: &str,
+    owned: &[&str],
+    candidates: &'a [Candidate],
+) -> Option<&'a Candidate> {
+    most(name, candidates, |candidate| owned_count(candidate, owned))
+}
+
+/// Whether some candidate of the name lists an owned album. When none
+/// does, the artist's saved songs are searched for instead.
+pub fn lists_owned(name: &str, owned: &[&str], candidates: &[Candidate]) -> bool {
+    candidates
+        .iter()
+        .any(|candidate| same_name(&candidate.name, name) && owned_count(candidate, owned) > 0)
+}
+
+/// The saved songs Apple is asked about: the first `SONGS_ASKED` of
+/// `songs` (the artist's saved song titles in the library's order), a
+/// title counted once by `same_title` and one with no key left out.
+pub fn songs_asked<'a>(songs: &[&'a str]) -> Vec<&'a str> {
+    let mut asked: Vec<&str> = Vec::new();
+    for &song in songs {
+        if asked.len() == SONGS_ASKED {
+            break;
+        }
+        if !name_key(song).is_empty() && !asked.iter().any(|&other| same_title(other, song)) {
+            asked.push(song);
+        }
+    }
+    asked
+}
+
+/// The Apple artist that is the library's `name`, by songs: among the
+/// candidates of the same name, the one under whose id the searches
+/// found the most of the songs asked about (`songs_asked`); none found
+/// is no match, and so is a tie for the most.
+pub fn choose_by_songs<'a>(
+    name: &str,
+    songs: &[&str],
+    candidates: &'a [Candidate],
+) -> Option<&'a Candidate> {
+    let asked = songs_asked(songs);
+    most(name, candidates, |candidate| {
+        listed_count(&candidate.songs, &asked)
+    })
+}
+
+/// The Apple artist that is the library's `name`: by albums (`choose`);
+/// by songs (`choose_by_songs`) only when no candidate of the name lists
+/// an owned album, so a tie between albums is never broken by a song.
+pub fn choose_artist<'a>(
+    name: &str,
+    owned: &[&str],
+    songs: &[&str],
+    candidates: &'a [Candidate],
+) -> Option<&'a Candidate> {
+    if lists_owned(name, owned, candidates) {
+        choose(name, owned, candidates)
+    } else {
+        choose_by_songs(name, songs, candidates)
     }
 }
 
@@ -600,6 +671,17 @@ mod tests {
     }
 
     #[test]
+    fn at_most_three_saved_songs_are_asked_about() {
+        for case in cases("songs_asked") {
+            assert_eq!(
+                songs_asked(&strings(&case, "songs")),
+                strings(&case, "asked"),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
     fn an_artist_has_one_file_unless_the_name_has_no_letters_or_digits() {
         for case in cases("file_path") {
             assert_eq!(
@@ -660,16 +742,24 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .map(|c| Candidate {
-                    id: text(c, "id").to_owned(),
-                    name: text(c, "name").to_owned(),
-                    albums: strings(c, "albums")
-                        .into_iter()
-                        .map(str::to_owned)
-                        .collect(),
+                .map(|c| {
+                    let owned = |key: &str| strings(c, key).into_iter().map(str::to_owned);
+                    Candidate {
+                        id: text(c, "id").to_owned(),
+                        name: text(c, "name").to_owned(),
+                        albums: owned("albums").collect(),
+                        songs: owned("songs").collect(),
+                    }
                 })
                 .collect();
-            let chosen = choose(text(&case, "name"), &strings(&case, "owned"), &candidates);
+            // `songs` are the artist's saved songs, and a candidate's
+            // `songs` what the searches for them found under its id.
+            let chosen = choose_artist(
+                text(&case, "name"),
+                &strings(&case, "owned"),
+                &strings(&case, "songs"),
+                &candidates,
+            );
             assert_eq!(
                 chosen.map(|c| c.id.as_str()),
                 case["chosen"].as_str(),

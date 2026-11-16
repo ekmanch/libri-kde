@@ -253,7 +253,8 @@ fn change(app: &mut App) -> Task<AppMessage> {
         return Task::none();
     };
     let name = view.name.clone();
-    let owned = backfill::work_for(library, &name).map_or_else(Vec::new, |work| work.owned);
+    let (owned, songs) = backfill::work_for(library, &name)
+        .map_or_else(Default::default, |work| (work.owned, work.songs));
     let skipped = artists::is_skipped(&name);
     let Some(Dialog::Artist(view)) = &mut app.dialog else {
         return Task::none();
@@ -269,7 +270,7 @@ fn change(app: &mut App) -> Task<AppMessage> {
     view.loading = true;
     let (asked, deezer_for) = (name.clone(), name.clone());
     let choices = Task::perform(
-        crate::app::blocking(move || Ok(apple.choices(&asked, &owned))),
+        crate::app::blocking(move || Ok(apple.choices(&asked, &owned, &songs))),
         move |result| {
             msg(Message::Choices {
                 name: name.clone(),

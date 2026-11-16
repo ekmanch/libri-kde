@@ -41,6 +41,9 @@ pub struct Work {
     /// The album titles saved for the artist: their albums, and the
     /// albums their saved songs name.
     pub owned: Vec<String>,
+    /// The titles of their saved songs, in the library's order: asked
+    /// about only when no album tells who the artist is.
+    pub songs: Vec<String>,
 }
 
 /// Every artist of the library that can have a file (a name with a slug
@@ -66,6 +69,7 @@ fn artists_of(library: &Library) -> Vec<(Work, Date)> {
                     name: name.to_owned(),
                     slug,
                     owned: Vec::new(),
+                    songs: Vec::new(),
                 },
                 entry.added,
             ));
@@ -74,6 +78,9 @@ fn artists_of(library: &Library) -> Vec<(Work, Date)> {
         let (work, added) = &mut out[index];
         *added = (*added).max(entry.added);
         let title = if music::is_song(entry) {
+            if !work.songs.contains(&entry.title) {
+                work.songs.push(entry.title.clone());
+            }
             entry.album.as_deref().unwrap_or_default()
         } else {
             entry.title.as_str()
@@ -529,6 +536,8 @@ mod tests {
         assert_eq!(names(&work), ["Adele", "The Beatles", "Burial", "Can"]);
         // An artist's albums, and the albums their songs name.
         assert_eq!(work[0].owned, ["21", "Hello (the album)"]);
+        assert_eq!(work[0].songs, ["Hello"]);
+        assert!(work[1].songs.is_empty());
         assert_eq!(
             totals(&library, &covers),
             Totals {

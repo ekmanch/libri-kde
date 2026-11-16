@@ -1233,7 +1233,7 @@ impl App {
         let apple = self.apple.clone();
         let asked = work.clone();
         Task::perform(
-            blocking(move || Ok(apple.find(&asked.name, &asked.owned))),
+            blocking(move || Ok(apple.find(&asked.name, &asked.owned, &asked.songs))),
             move |result| Message::PhotoFound {
                 work: work.clone(),
                 result: result.unwrap_or_else(|error| Err(lookup::Failure::other(error))),
@@ -3585,6 +3585,7 @@ mod tests {
             name: name.into(),
             slug: covers::artists::slug(name).unwrap(),
             owned: Vec::new(),
+            songs: Vec::new(),
         };
         let queued = |app: &App| app.engine.as_ref().unwrap().pending().files().len();
         let _ = app.photo_found(work("Adele"), Ok(Found::Photo(b"jpeg".to_vec())));

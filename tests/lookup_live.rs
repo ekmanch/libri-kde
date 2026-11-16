@@ -327,7 +327,7 @@ fn apple_finds_an_artists_photo_and_tells_a_namesake_apart() {
         println!("  {} {} {}", namesake.id, namesake.name, namesake.page);
     }
     assert!(!namesakes.is_empty());
-    match apple.find("Massive Attack", &["Mezzanine".to_owned()]) {
+    match apple.find("Massive Attack", &["Mezzanine".to_owned()], &[]) {
         Ok(Found::Photo(bytes)) => {
             let size = libri::lookup::store::image_size(&bytes);
             println!("photo: {} bytes, {size:?}", bytes.len());
@@ -336,6 +336,21 @@ fn apple_finds_an_artists_photo_and_tells_a_namesake_apart() {
         other => panic!("no photo of Massive Attack: {other:?}"),
     }
     // An album nobody of the name has: no match, and no page is read.
-    let none = apple.find("Massive Attack", &["Not An Album Of Theirs".to_owned()]);
+    let none = apple.find(
+        "Massive Attack",
+        &["Not An Album Of Theirs".to_owned()],
+        &[],
+    );
     assert_eq!(none.ok(), Some(Found::Missing(Reason::NoMatch)));
+    // No album saved, only a song: the song search tells who it is.
+    let rows = apple
+        .song_rows("Massive Attack", "Teardrop")
+        .expect("Apple answers");
+    println!("Teardrop: {} track(s)", rows.len());
+    let ids: Vec<&str> = namesakes.iter().map(|n| n.id.as_str()).collect();
+    assert!(
+        rows.iter().any(|(id, track)| ids.contains(&id.as_str())
+            && libri::covers::artists::same_title(track, "Teardrop")),
+        "{rows:?}"
+    );
 }
