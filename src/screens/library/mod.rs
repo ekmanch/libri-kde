@@ -346,6 +346,15 @@ pub enum Message {
     PickTag(String),
     Status(Option<EntryStatus>),
     Search(String),
+    /// The search field's ✕: the text is cleared and the cursor stays in
+    /// the field. The tags and the other filters stay as they are.
+    ClearSearch,
+    /// Esc went to a text field, which let go of the cursor: in the
+    /// search field with text in it, that clears the text.
+    EscapeInField,
+    /// "+N more" after the tags a search suggests: Filter by tags,
+    /// searching for the same text.
+    MoreTags,
     SetView(View),
     /// Selects an entry, or deselects it when it is selected.
     Select(String),
@@ -838,6 +847,16 @@ impl State {
                 self.deselect();
             }
             Message::Search(query) => self.query = query,
+            Message::ClearSearch => self.query.clear(),
+            // The app clears the search when the field had the cursor.
+            Message::EscapeInField => {}
+            Message::MoreTags => {
+                self.close_popovers();
+                self.picker = Some(PickerState {
+                    query: browse::search_needle(&self.query),
+                    ..PickerState::default()
+                });
+            }
             Message::SetView(view) => {
                 self.views.insert(self.view_key(), view);
             }
@@ -1718,6 +1737,49 @@ mod tests {
                 .iter()
                 .any(|e| e.id == seasonal.id)
         );
+    }
+
+    #[test]
+    fn clearing_the_search_keeps_the_tags_and_the_other_filters() {
+        let mut state = State::default();
+        state.update(Message::ShowType(Some(MediaType::Music)));
+        state.update(Message::Search("ro".into()));
+        // A suggested tag is a tag filter like any other; the text stays.
+        state.update(Message::ToggleTag("rock".into(), None));
+        state.update(Message::ToggleDecade(Decade::of(Some(1973)).unwrap()));
+        assert_eq!((state.query.as_str(), state.filter.count()), ("ro", 2));
+        state.update(Message::ClearSearch);
+        assert_eq!(state.query, "");
+        assert_eq!(state.filter.tags, ["rock"]);
+        assert_eq!(state.filter_count(), 2);
+    }
+
+    #[test]
+    fn more_tags_opens_filter_by_tags_on_the_search() {
+        let mut state = State::default();
+        state.update(Message::Search(" #Clas ".into()));
+        state.update(Message::MoreTags);
+        assert_eq!(state.picker.as_ref().unwrap().query, "clas");
+        assert_eq!(state.query, " #Clas ", "the search stays");
+    }
+
+    #[test]
+    fn esc_in_the_search_field_clears_its_text_once() {
+        let mut app = App::new(crate::screens::Screen::Library);
+        let esc = || crate::app::Message::Library(Message::EscapeInField);
+        let _ = app.update(crate::app::Message::Library(Message::Search("dune".into())));
+        // Under a popover the field that took Esc is not the search.
+        app.library.update(Message::Toggle(Popup::AllTags));
+        let _ = app.update(esc());
+        assert_eq!(app.library.query, "dune");
+        app.library.update(Message::ClosePopup);
+        let _ = app.update(esc());
+        assert_eq!(app.library.query, "");
+        // Emptied, Esc is the field's own again: nothing more happens.
+        app.library
+            .update(Message::Select("movies/the-mummy-1999".into()));
+        let _ = app.update(esc());
+        assert!(app.library.selected.is_some());
     }
 
     #[test]

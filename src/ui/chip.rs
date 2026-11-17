@@ -62,6 +62,32 @@ pub fn status_chip<'a, Message: Clone + 'a>(
     )
 }
 
+/// A tag the search suggests as a filter: "#classic 79", outlined like
+/// a status chip that is not picked, the count in the secondary color.
+/// The mockup's border is dashed; iced 0.14 draws only solid borders.
+pub fn suggested_chip<'a, Message: Clone + 'a>(
+    label: String,
+    count: usize,
+    tokens: &Tokens,
+    on_press: Message,
+) -> Element<'a, Message> {
+    let content = row![
+        text(label).size(13).font(font::MEDIUM),
+        mono(count.to_string(), 11.5, tokens.sub),
+    ]
+    .spacing(6)
+    .align_y(Center);
+    chip(
+        content,
+        28.0,
+        Padding::from([0, 11]),
+        tokens.text,
+        false,
+        tokens,
+        on_press,
+    )
+}
+
 /// An active filter in the chips row, removed by a click: "#horror ×",
 /// with a type's dot in front for a picked type, and a tag's role after
 /// it in the secondary color ("#clint-eastwood · Director").

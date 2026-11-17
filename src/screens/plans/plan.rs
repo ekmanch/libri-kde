@@ -952,6 +952,7 @@ fn pool<'a>(
                 |q| msg(Message::PoolQuery(q)),
                 None,
                 None,
+                None,
                 tokens
             ),
             ui::scroll(rows).height(Fill),

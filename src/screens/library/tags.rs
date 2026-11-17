@@ -141,6 +141,7 @@ pub fn all_tags_popover<'a>(app: &'a App) -> Element<'a, AppMessage> {
         |query| msg(Message::AllTagsSearch(query)),
         None,
         None,
+        None,
         &tokens,
     );
 

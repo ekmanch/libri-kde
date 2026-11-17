@@ -1,21 +1,29 @@
-use iced::widget::{container, row, text_input};
+use iced::widget::{button, container, row, text_input};
 use iced::{Background, Border, Center, Color, Element, Fill};
 
-use super::{Icon, icon, mono};
+use super::{FocusExt, Icon, icon, mono};
 use crate::theme::{Tokens, size};
 
 /// The search box: a magnifier, the field, and an optional shortcut hint
 /// ("Ctrl K") on the right. One outline around all of it. `id` lets a
-/// shortcut focus the field.
+/// shortcut focus the field. With `on_clear`, a field that holds text
+/// shows a ✕ in place of the hint and its outline in the accent.
 pub fn search_field<'a, Message: Clone + 'a>(
     placeholder: &str,
     value: &'a str,
     on_input: impl Fn(String) -> Message + 'a,
     shortcut: Option<&'a str>,
+    on_clear: Option<Message>,
     id: Option<&'static str>,
     tokens: &Tokens,
 ) -> Element<'a, Message> {
     let tokens = *tokens;
+    let on_clear = on_clear.filter(|_| !value.is_empty());
+    let outline = if on_clear.is_some() {
+        tokens.accent
+    } else {
+        tokens.line
+    };
     let mut input = text_input(placeholder, value).on_input(on_input);
     if let Some(id) = id {
         input = input.id(id);
@@ -34,7 +42,22 @@ pub fn search_field<'a, Message: Clone + 'a>(
     let mut content = row![icon(Icon::Search, 16.0, tokens.sub), input]
         .spacing(8)
         .align_y(Center);
-    if let Some(shortcut) = shortcut {
+    if let Some(on_clear) = on_clear {
+        content = content.push(
+            button(container(icon(Icon::Close, 13.0, tokens.sub)).center(22))
+                .width(22)
+                .height(22)
+                .padding(0)
+                .on_press(on_clear)
+                .style(move |_, status| button::Style {
+                    background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+                        .then_some(Background::Color(tokens.hover)),
+                    border: Border::default().rounded(11),
+                    ..button::Style::default()
+                })
+                .focusable(11.0, &tokens),
+        );
+    } else if let Some(shortcut) = shortcut {
         let line = tokens.line;
         content = content.push(
             container(mono(shortcut, 11.0, tokens.sub))
@@ -52,7 +75,7 @@ pub fn search_field<'a, Message: Clone + 'a>(
         .align_y(Center)
         .style(move |_| {
             container::background(tokens.field)
-                .border(Border::default().rounded(8).width(1).color(tokens.line))
+                .border(Border::default().rounded(8).width(1).color(outline))
         })
         .into()
 }

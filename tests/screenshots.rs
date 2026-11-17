@@ -281,6 +281,10 @@ fn add_in_state(app: &mut App, state: LookupState) {
 }
 
 /// Music's Albums tab in `view`.
+fn search(app: &mut App, text: &str) {
+    let _ = app.update(Message::Library(library::Message::Search(text.into())));
+}
+
 fn albums(app: &mut App, view: View) {
     show_type(app, MediaType::Music);
     let _ = app.update(Message::Library(library::Message::MusicTab(
@@ -1945,6 +1949,36 @@ fn capture_every_screen() {
         (
             Screen::Settings,
             ("settings-flat", |app| app.settings.flat = true),
+        ),
+        // The search: a ✕ and the accent outline while it holds text,
+        // and the tags it names as chips after the status chips.
+        (
+            Screen::Library,
+            ("search-tags", |app| {
+                albums(app, View::Grid);
+                search(app, "ro");
+            }),
+        ),
+        (
+            Screen::Library,
+            ("search-tags-picked", |app| {
+                albums(app, View::Grid);
+                search(app, "ro");
+                let pick = library::Message::ToggleTag("rock".into(), None);
+                let _ = app.update(Message::Library(pick));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("search-tags-artists", |app| {
+                show_type(app, MediaType::Music);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                search(app, "ro");
+            }),
+        ),
+        (
+            Screen::Library,
+            ("search-tags-everything", |app| search(app, "an")),
         ),
     ];
 

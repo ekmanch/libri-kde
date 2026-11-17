@@ -37,6 +37,7 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
         &state.query,
         |query| msg(Message::Search(query)),
         Some("Ctrl K"),
+        Some(msg(Message::ClearSearch)),
         Some(SEARCH_ID),
         &tokens,
     ))
@@ -380,9 +381,78 @@ fn rating_cell<'a>(n: u8, on: bool, tokens: &Tokens) -> Element<'a, AppMessage> 
     .focusable(7.0, &tokens)
 }
 
-/// The status chips with counts, then the active filters as removable
-/// chips (several types, the overview's two, tags, decades, seasonal,
-/// rating), then "Clear all".
+/// The tags the search names, as chips to narrow by (canvas revision of
+/// 2026-11-17, as on the phone): the word "Tags", up to
+/// `browse::SUGGESTED_TAGS` chips with how many entries of the types on
+/// show carry each (on an artist's page, of the artist's), then
+/// "+N more", which opens Filter by tags on the same text. A click adds
+/// the tag to the filter; the search and the other suggestions stay.
+fn suggested_tags<'a>(app: &'a App, tokens: &Tokens) -> Vec<Element<'a, AppMessage>> {
+    let state = &app.library;
+    // What the search looks through: the types on show, seasonal-only
+    // entries too.
+    let searched = app.repo.library().entries.iter().filter(|e| {
+        (state.types.is_empty() || state.types.contains(&e.media))
+            && state
+                .artist
+                .as_ref()
+                .is_none_or(|artist| crate::music::artist_of(e).eq_ignore_ascii_case(artist))
+    });
+    let found = browse::tag_suggestions(searched, &state.query, &state.filter.tags);
+    if found.is_empty() {
+        return Vec::new();
+    }
+    let label = text("TAGS")
+        .size(11)
+        .font(font::SEMIBOLD)
+        .color(tokens.sub)
+        .height(28)
+        .align_y(Center);
+    let mut chips: Vec<Element<'a, AppMessage>> = vec![
+        container(label)
+            .padding(Padding::new(0.0).left(10).right(2))
+            .into(),
+    ];
+    chips.extend(
+        found
+            .iter()
+            .take(browse::SUGGESTED_TAGS)
+            .map(|&(tag, count)| {
+                let chip = ui::suggested_chip(
+                    format!("#{tag}"),
+                    count,
+                    tokens,
+                    msg(Message::ToggleTag(tag.to_owned(), None)),
+                );
+                ui::tooltip(chip, format!("Show only #{tag}"), tokens)
+            }),
+    );
+    if found.len() > browse::SUGGESTED_TAGS {
+        let ink = tokens.ink;
+        chips.push(
+            button(
+                text(format!("+{} more", found.len() - browse::SUGGESTED_TAGS))
+                    .size(13)
+                    .font(font::SEMIBOLD)
+                    .height(Fill)
+                    .align_y(Center),
+            )
+            .height(28)
+            .padding([0, 4])
+            .on_press(msg(Message::MoreTags))
+            .style(move |_, _| button::Style {
+                text_color: ink,
+                ..button::Style::default()
+            })
+            .focusable(6.0, tokens),
+        );
+    }
+    chips
+}
+
+/// The status chips with counts, then the tags the search suggests, then
+/// the active filters as removable chips (several types, the overview's
+/// two, tags, decades, seasonal, rating), then "Clear all".
 pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
     let state = &app.library;
@@ -443,6 +513,8 @@ pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage>
             msg(Message::Status(Some(status))),
         ));
     }
+
+    chips = chips.extend(suggested_tags(app, &tokens));
 
     let mut active = Vec::new();
     // Each removable chip keeps 6 px more room than the status chips.
@@ -532,6 +604,76 @@ pub fn chips<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The window as it draws, to look for words in.
+    fn window(app: &App) -> iced_test::Simulator<'_, AppMessage> {
+        iced_test::Simulator::with_size(crate::app::settings(), crate::app::WINDOW_SIZE, app.view())
+    }
+
+    #[test]
+    fn a_search_offers_the_tags_it_names_until_they_are_picked() {
+        let mut app = App::new(crate::screens::Screen::Library);
+        let send = |app: &mut App, message| {
+            let _ = app.update(msg(message));
+        };
+        send(&mut app, Message::ShowType(Some(MediaType::Music)));
+        send(&mut app, Message::MusicTab(MusicTab::Albums));
+        // One letter offers nothing.
+        send(&mut app, Message::Search("r".into()));
+        assert!(window(&app).find("#electronic").is_err());
+        send(&mut app, Message::Search("ro".into()));
+        {
+            let mut ui = window(&app);
+            for words in ["#rock", "#electronic"] {
+                assert!(ui.find(words).is_ok(), "{words}");
+            }
+            assert!(ui.find("+1 more").is_err());
+        }
+        // A click picks the tag as a filter; the text and the other
+        // suggestion stay, and the picked one is offered no more.
+        let messages: Vec<AppMessage> = {
+            let mut ui = window(&app);
+            let _ = ui.click("#electronic");
+            ui.into_messages().collect()
+        };
+        for message in messages {
+            let _ = app.update(message);
+        }
+        assert_eq!(app.library.filter.tags, ["electronic"]);
+        assert_eq!(app.library.query, "ro");
+        assert_eq!(app.library.filter_count(), 1);
+        let found = browse::tag_suggestions(
+            app.repo.library().entries_of(MediaType::Music),
+            &app.library.query,
+            &app.library.filter.tags,
+        );
+        assert_eq!(found, [("rock", 6)]);
+        assert!(window(&app).find("#rock").is_ok());
+        // On Artists too.
+        send(&mut app, Message::MusicTab(MusicTab::Artists));
+        assert!(window(&app).find("#rock").is_ok());
+    }
+
+    #[test]
+    fn more_than_five_suggestions_fold_into_a_link() {
+        let mut app = App::new(crate::screens::Screen::Library);
+        let _ = app.update(msg(Message::Search("an".into())));
+        let found = browse::tag_suggestions(&app.repo.library().entries, "an", &[]);
+        assert!(found.len() > browse::SUGGESTED_TAGS, "{found:?}");
+        let more = format!("+{} more", found.len() - browse::SUGGESTED_TAGS);
+        let messages: Vec<AppMessage> = {
+            let mut ui = window(&app);
+            let _ = ui.click(more.as_str());
+            ui.into_messages().collect()
+        };
+        assert!(
+            matches!(
+                messages.as_slice(),
+                [AppMessage::Library(Message::MoreTags)]
+            ),
+            "{messages:?}"
+        );
+    }
 
     #[test]
     fn counts_read_as_words() {

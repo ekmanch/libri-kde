@@ -1033,6 +1033,36 @@ pub fn matches_entry(entry: &Entry, needle: &str) -> bool {
         || entry.tags.iter().any(|tag| tag.contains(needle))
 }
 
+/// How many letters a search holds before tags are suggested for it.
+pub const SUGGEST_FROM: usize = 2;
+/// How many suggested tags show before "+N more".
+pub const SUGGESTED_TAGS: usize = 5;
+
+/// The tags a search suggests as filters, as on the phone: the tags on
+/// `entries` whose name holds the search (as `search_needle` reads it),
+/// each with how many of the entries carry it, the most used first and
+/// ties A to Z. A tag in `picked` is left out, and a search of fewer
+/// than `SUGGEST_FROM` letters suggests nothing.
+pub fn tag_suggestions<'a>(
+    entries: impl IntoIterator<Item = &'a Entry>,
+    query: &str,
+    picked: &[String],
+) -> Vec<(&'a str, usize)> {
+    let needle = search_needle(query);
+    if needle.chars().count() < SUGGEST_FROM {
+        return Vec::new();
+    }
+    let mut counts = BTreeMap::<&str, usize>::new();
+    for tag in entries.into_iter().flat_map(|entry| &entry.tags) {
+        if tag.contains(&needle) && !picked.contains(tag) {
+            *counts.entry(tag).or_default() += 1;
+        }
+    }
+    let mut counts: Vec<_> = counts.into_iter().collect();
+    counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    counts
+}
+
 /// How a status reads for a type: "Watching" for a show in progress,
 /// "Saved" for music that is done.
 pub fn status_label(media: Option<MediaType>, status: EntryStatus) -> &'static str {
@@ -1490,6 +1520,25 @@ mod tests {
         assert!(matches_search(mummy, "MUMMY"));
         assert!(matches_search(mummy, "#lightheart"));
         assert!(!matches_search(mummy, "dracula"));
+    }
+
+    #[test]
+    fn a_search_suggests_the_tags_it_names_most_used_first() {
+        let library = library();
+        let music = || library.entries_of(MediaType::Music);
+        let found = tag_suggestions(music(), "Classic", &[]);
+        assert_eq!(found, [("classic", 6)]);
+        // A leading "#" is ignored, and a picked tag is not offered
+        // again.
+        let found = tag_suggestions(music(), "#ro", &[]);
+        assert_eq!(found, [("rock", 6), ("electronic", 2)]);
+        let found = tag_suggestions(music(), "ro", &["rock".into()]);
+        assert_eq!(found, [("electronic", 2)]);
+        let found = tag_suggestions(music(), "o", &[]);
+        assert!(found.is_empty(), "one letter suggests nothing");
+        // Counted over the entries given: every type has more.
+        let everywhere = tag_suggestions(&library.entries, "classic", &[]);
+        assert!(everywhere[0].1 > 6);
     }
 
     #[test]

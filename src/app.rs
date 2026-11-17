@@ -2235,6 +2235,32 @@ impl App {
                     return entry::update(self, entry::Message::Edit(id));
                 }
             }
+            // The ✕ leaves the cursor in the field.
+            Message::Library(library::Message::ClearSearch) => {
+                self.library.update(library::Message::ClearSearch);
+                return operation::focus(library::SEARCH_ID);
+            }
+            // A text field took Esc and let go of the cursor. With nothing
+            // open over the library that field is the search: holding
+            // text, it is cleared and keeps the cursor, so the next Esc
+            // does what Esc did before.
+            Message::Library(library::Message::EscapeInField) => {
+                let state = &self.library;
+                let bare = self.screen == Screen::Library
+                    && self.dialog.is_none()
+                    && self.plan_dialog.is_none()
+                    && !self.token_warning
+                    && !self.conflict_open
+                    && state.picker.is_none()
+                    && state.popup.is_none()
+                    && state.details_pop.is_none()
+                    && state.page.is_none()
+                    && !state.soon;
+                if bare && !state.query.is_empty() {
+                    self.library.update(library::Message::ClearSearch);
+                    return operation::focus(library::SEARCH_ID);
+                }
+            }
             Message::Entry(message) => {
                 let opens_form = matches!(message, entry::Message::Add);
                 let task = entry::update(self, message);
@@ -2282,14 +2308,16 @@ impl App {
                 return tags::jump(offset);
             }
             // The groups holding a chosen tag start open.
-            Message::Library(library::Message::OpenPicker) => {
+            Message::Library(
+                message @ (library::Message::OpenPicker | library::Message::MoreTags),
+            ) => {
                 let library = self.repo.library();
                 let open = tags::groups_with_picks(
                     library.tags.iter().map(|(&c, names)| (c, names.as_slice())),
                     |tag| library.is_multi_category(tag),
                     |tag, category| self.library.filter.has_tag(tag, category),
                 );
-                self.library.update(library::Message::OpenPicker);
+                self.library.update(message);
                 if let Some(picker) = &mut self.library.picker {
                     picker.open = open;
                 }
@@ -2499,6 +2527,19 @@ impl App {
             subscriptions.push(event::listen_with(|event, _status, _window| match event {
                 Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                     Some(Message::Library(library::Message::Wheel(delta)))
+                }
+                _ => None,
+            }));
+        }
+        // Esc in the search field: the field takes it and lets go of the
+        // cursor, so the press never comes as a shortcut.
+        if self.screen == Screen::Library && !self.library.query.is_empty() {
+            subscriptions.push(event::listen_with(|event, status, _window| match event {
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: Key::Named(Named::Escape),
+                    ..
+                }) if status == event::Status::Captured => {
+                    Some(Message::Library(library::Message::EscapeInField))
                 }
                 _ => None,
             }));

@@ -139,6 +139,7 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
             move |query| map(PickerMessage::Query(query)),
             None,
             None,
+            None,
             tokens,
         );
         let mut body = Column::new().spacing(12).push(search);
@@ -458,6 +459,7 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
             &placeholder,
             query,
             move |query| map(PickerMessage::DrillQuery(query)),
+            None,
             None,
             None,
             tokens,

@@ -572,6 +572,7 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         &form.query,
         |query| msg(Message::Query(query)),
         None,
+        None,
         Some(LOOKUP_ID),
         tokens,
     ));
@@ -1011,6 +1012,7 @@ fn platform_picker<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element
         "Search, e.g. SNES or Genesis",
         &form.platform_query,
         |q| msg(Message::PlatformQuery(q)),
+        None,
         None,
         None,
         tokens,
