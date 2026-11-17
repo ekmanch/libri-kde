@@ -19,7 +19,7 @@ Desktop front end (KDE Plasma on CachyOS) for my personal media library: movies,
 
 - `app`: state, `Message`, `update`, `view`, window settings and font loading.
 - `theme`: design tokens from the mockup (backgrounds, type colors, accents, fonts, text sizes). Never hard-code a color or font in a screen; add it here.
-- `ui`: widgets shared by every screen (buttons, headers, icons). UI that repeats across screens is one shared widget here, never copied.
+- `ui`: widgets shared by every screen (buttons, headers, icons). UI that repeats across screens is one shared widget here, never copied. `ui::context` is the right-click menu: the layer that draws it at the pointer, and its rows; `screens::library::menu` says what the menu holds for a title, a series or an artist and what each item sends.
 - `screens`: one module per screen (splash, setup, library, plans, settings), the window shell and the token warning.
 - `model`: the `library.json` model and `model::codec`, the canonical JSON encoding.
 - `repo`: the `LibraryRepository` trait, every change as an `Operation` with its summary, and the implementations: the local file (`LocalLibraryRepository`) and the fixture in memory for the tests.

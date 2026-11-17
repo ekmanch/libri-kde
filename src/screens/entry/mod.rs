@@ -2265,22 +2265,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::TogglePlan(plan) => {
             if let Some(Dialog::AddToPlan { id }) = &app.dialog {
                 let id = id.clone();
-                let library = app.repo.library();
-                let in_plan = library
-                    .plan(&plan)
-                    .is_some_and(|p| p.item_for(&id).is_some());
-                let done = library
-                    .entry(&id)
-                    .is_some_and(|e| e.status == EntryStatus::Done);
-                let operation = if in_plan {
-                    Operation::RemovePlanItem { plan, entry: id }
-                } else {
-                    Operation::SetPlanItem {
-                        plan,
-                        item: new_item(id, done),
-                    }
-                };
-                app.apply(operation);
+                toggle_plan(app, id, plan);
             }
         }
         message => return form_update(app, message),
@@ -2679,6 +2664,27 @@ pub fn save_note(app: &mut App) {
     {
         app.apply(Operation::SetNote { id, note });
     }
+}
+
+/// Adds entry `id` to `plan`, or takes it out when it is in it: a row of
+/// the Add to plan dialog, or of the right-click menu's submenu.
+pub fn toggle_plan(app: &mut App, id: String, plan: String) {
+    let library = app.repo.library();
+    let in_plan = library
+        .plan(&plan)
+        .is_some_and(|p| p.item_for(&id).is_some());
+    let done = library
+        .entry(&id)
+        .is_some_and(|e| e.status == EntryStatus::Done);
+    let operation = if in_plan {
+        Operation::RemovePlanItem { plan, entry: id }
+    } else {
+        Operation::SetPlanItem {
+            plan,
+            item: new_item(id, done),
+        }
+    };
+    app.apply(operation);
 }
 
 /// A new plan item; an entry already done is a repeat (a rewatch or

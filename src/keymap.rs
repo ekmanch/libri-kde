@@ -24,11 +24,13 @@ pub enum Action {
     /// on Music the tab before (Artists ← Albums ← Songs) and after.
     SoonPrev,
     SoonNext,
+    /// The right-click menu for the selected title.
+    Menu,
 }
 
 impl Action {
     /// In the order Settings lists them.
-    pub const ALL: [Action; 10] = [
+    pub const ALL: [Action; 11] = [
         Action::Search,
         Action::Panel,
         Action::Add,
@@ -39,6 +41,7 @@ impl Action {
         Action::Settings,
         Action::SoonPrev,
         Action::SoonNext,
+        Action::Menu,
     ];
 
     pub fn label(self) -> &'static str {
@@ -53,6 +56,7 @@ impl Action {
             Action::Settings => "Settings",
             Action::SoonPrev => "Coming soon, Music and plans: previous list or tab",
             Action::SoonNext => "Coming soon, Music and plans: next list or tab",
+            Action::Menu => "Menu for the selected title",
         }
     }
 
@@ -69,6 +73,7 @@ impl Action {
             Action::Settings => "settings",
             Action::SoonPrev => "soon_prev",
             Action::SoonNext => "soon_next",
+            Action::Menu => "menu",
         }
     }
 
@@ -88,6 +93,7 @@ impl Action {
             Action::Settings => (true, false, false, ","),
             Action::SoonPrev => (false, false, true, "←"),
             Action::SoonNext => (false, false, true, "→"),
+            Action::Menu => (false, false, false, "Menu"),
         };
         Combo {
             ctrl,
@@ -126,6 +132,7 @@ impl Combo {
                 Named::ArrowRight => "→".into(),
                 Named::ArrowUp => "↑".into(),
                 Named::ArrowDown => "↓".into(),
+                Named::ContextMenu => "Menu".into(),
                 other => format!("{other:?}"),
             },
             Key::Unidentified => return None,
@@ -235,13 +242,14 @@ impl Keymap {
             .unwrap_or_else(|| action.default_combo())
     }
 
-    /// The action `combo` runs. Ctrl+F also searches, as long as no
-    /// shortcut has taken it.
+    /// The action `combo` runs. Ctrl+F also searches and Shift+F10 also
+    /// opens the menu, as long as no shortcut has taken them.
     pub fn action_for(&self, combo: &Combo) -> Option<Action> {
         Action::ALL
             .into_iter()
             .find(|&a| self.combo(a) == *combo)
             .or_else(|| (*combo == Combo::plain("F").with_ctrl()).then_some(Action::Search))
+            .or_else(|| (*combo == Combo::plain("F10").with_shift()).then_some(Action::Menu))
     }
 
     pub fn is_changed(&self) -> bool {
@@ -345,6 +353,12 @@ mod tests {
         assert_eq!(map.action_for(&ctrl_f), Some(Action::Search));
         map.bind(Action::Add, ctrl_f.clone()).unwrap();
         assert_eq!(map.action_for(&ctrl_f), Some(Action::Add));
+        // The Menu key opens the menu, and Shift+F10 too.
+        let menu = Combo::of(&Key::Named(Named::ContextMenu), Modifiers::empty()).unwrap();
+        assert_eq!(menu.to_string(), "Menu");
+        assert_eq!(map.action_for(&menu), Some(Action::Menu));
+        let shift_f10 = Combo::of(&Key::Named(Named::F10), Modifiers::SHIFT).unwrap();
+        assert_eq!(map.action_for(&shift_f10), Some(Action::Menu));
 
         let saved = Keymap::from_prefs(&map.to_prefs());
         assert_eq!(saved, map);

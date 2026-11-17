@@ -299,11 +299,15 @@ fn shelf_cover<'a>(
             .height(Fill)
             .style(move |_| container::background(veil))
     ];
-    button(content)
+    let cover = button(content)
         .padding(0)
         .on_press(msg(Message::Select(entry.id.clone())))
-        .style(text_button(tokens.text))
-        .focusable(8.0, tokens)
+        .style(text_button(tokens.text));
+    let marked = app.library.menu_on_entry(&entry.id);
+    super::menu::area(
+        super::menu::Target::Entry(entry.id.clone()),
+        ui::Focusable::new(cover, tokens.ink, 8.0).backed(marked.then_some(tokens.selection)),
+    )
 }
 
 /// How an overview row starts: a type dot (text view) or a small cover
@@ -407,8 +411,13 @@ pub(super) fn overview_row<'a>(
         .height(height)
         .padding([4, 8])
         .on_press(msg(Message::Select(entry.id.clone())))
-        .style(ui::row_style(tokens, selected, 0.0))
+        .style(ui::row_style(
+            tokens,
+            selected || app.library.menu_on_entry(&entry.id),
+            0.0,
+        ))
         .focusable(0.0, tokens);
+    let row_button = super::menu::area(super::menu::Target::Entry(entry.id.clone()), row_button);
     column![
         row_button,
         container(space())

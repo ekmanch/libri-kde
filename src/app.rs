@@ -392,6 +392,9 @@ impl Message {
                     | L::RestoreFound(_)
                     | L::OpenTypePop
                     | L::CloseTypePop
+                    | L::Pointer(_)
+                    | L::MenuSub(_)
+                    | L::CloseMenu
             ),
             Message::Key(key) => matches!(
                 key,
@@ -471,6 +474,8 @@ pub enum KeyPress {
     Right,
     /// E: edits the selected entry.
     Edit,
+    /// The Menu key or Shift+F10: the selected title's right-click menu.
+    Menu,
 }
 
 impl App {
@@ -1713,6 +1718,33 @@ impl App {
             }
             message => self.click_with_modifiers(message),
         };
+        self.act(message)
+    }
+
+    /// Does what `message` says, as it is: `update_at` has made a key
+    /// press or a click with Ctrl held into it already. The right-click
+    /// menu's items come here too, each as the message a click or a
+    /// button elsewhere sends, whatever keys are held meanwhile.
+    pub(crate) fn act(&mut self, message: Message) -> Task<Message> {
+        let now = self.now;
+        if let Message::Library(library::Message::Menu(action)) = message {
+            return library::menu::run(self, action);
+        }
+        // Under the open menu the arrow keys move nothing, and a shortcut
+        // that goes elsewhere closes it.
+        if self.library.menu.is_some() {
+            match &message {
+                Message::Key(KeyPress::Up | KeyPress::Down | KeyPress::Left | KeyPress::Right) => {
+                    return Task::none();
+                }
+                Message::Key(
+                    KeyPress::Search | KeyPress::New | KeyPress::Edit | KeyPress::Menu,
+                )
+                | Message::History(_)
+                | Message::Show(_) => self.library.menu = None,
+                _ => {}
+            }
+        }
         if self.library.note_draft.is_some() && message.leaves_note() {
             entry::save_note(self);
         }
@@ -1879,6 +1911,7 @@ impl App {
                 Action::Search => Some(Message::Key(KeyPress::Search)),
                 Action::Add => Some(Message::Key(KeyPress::New)),
                 Action::Edit => Some(Message::Key(KeyPress::Edit)),
+                Action::Menu => Some(Message::Key(KeyPress::Menu)),
                 Action::Close => Some(Message::Key(KeyPress::Escape)),
                 Action::Back => Some(Message::History(Direction::Back)),
                 Action::Forward => Some(Message::History(Direction::Forward)),
@@ -2235,6 +2268,24 @@ impl App {
                     return entry::update(self, entry::Message::Edit(id));
                 }
             }
+            Message::Key(KeyPress::Menu) => {
+                if self.screen == Screen::Library
+                    && self.dialog.is_none()
+                    && self.plan_dialog.is_none()
+                    && self.library.picker.is_none()
+                    && !self.token_warning
+                    && !self.conflict_open
+                {
+                    return library::menu::open_for_selected(self);
+                }
+            }
+            // The menu opens on the library itself, never under a dialog.
+            Message::Library(library::Message::OpenMenu(_) | library::Message::OpenMenuAt(..))
+                if self.dialog.is_some()
+                    || self.plan_dialog.is_some()
+                    || self.token_warning
+                    || self.conflict_open
+                    || self.screen != Screen::Library => {}
             // The ✕ leaves the cursor in the field.
             Message::Library(library::Message::ClearSearch) => {
                 self.library.update(library::Message::ClearSearch);
@@ -2254,6 +2305,7 @@ impl App {
                     && state.picker.is_none()
                     && state.popup.is_none()
                     && state.details_pop.is_none()
+                    && state.menu.is_none()
                     && state.page.is_none()
                     && !state.soon;
                 if bare && !state.query.is_empty() {

@@ -285,6 +285,19 @@ fn search(app: &mut App, text: &str) {
     let _ = app.update(Message::Library(library::Message::Search(text.into())));
 }
 
+use library::menu::Target as MenuTarget;
+
+/// The right-click menu for `target`, as if the pointer were at `at`,
+/// with a submenu open.
+fn menu(app: &mut App, target: MenuTarget, at: (f32, f32), sub: Option<library::menu::Sub>) {
+    let point = iced::Point::new(at.0, at.1);
+    let _ = app.update(Message::Library(library::Message::Pointer(point)));
+    let _ = app.update(Message::Library(library::Message::OpenMenu(target)));
+    if let Some(sub) = sub {
+        let _ = app.update(Message::Library(library::Message::MenuSub(sub)));
+    }
+}
+
 fn albums(app: &mut App, view: View) {
     show_type(app, MediaType::Music);
     let _ = app.update(Message::Library(library::Message::MusicTab(
@@ -1979,6 +1992,71 @@ fn capture_every_screen() {
         (
             Screen::Library,
             ("search-tags-everything", |app| search(app, "an")),
+        ),
+        // The right-click menu: on a title in the grid, with each of its
+        // submenus, on a song's row, an artist, a series and on Home.
+        (
+            Screen::Library,
+            ("menu-title", |app| {
+                show_type(app, MediaType::Movies);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                menu(app, MenuTarget::Entry(BABY.into()), (548.0, 236.0), None);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("menu-status", |app| {
+                show_type(app, MediaType::Movies);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                let sub = Some(library::menu::Sub::Status);
+                menu(app, MenuTarget::Entry(BABY.into()), (548.0, 236.0), sub);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("menu-plan", |app| {
+                show_type(app, MediaType::Movies);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                let sub = Some(library::menu::Sub::Plan);
+                menu(app, MenuTarget::Entry(BABY.into()), (1300.0, 620.0), sub);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("menu-song", |app| {
+                show_type(app, MediaType::Music);
+                let songs = library::Message::MusicTab(library::MusicTab::Songs);
+                let _ = app.update(Message::Library(songs));
+                let song = "music/bad-moon-rising-creedence-clearwater-revival";
+                menu(app, MenuTarget::Entry(song.into()), (620.0, 300.0), None);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("menu-artist", |app| {
+                show_type(app, MediaType::Music);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Grid)));
+                let artist = MenuTarget::Artist("The Pogues".into());
+                menu(app, artist, (900.0, 250.0), None);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("menu-series", |app| {
+                app.library.force_long = true;
+                show_type(app, MediaType::Books);
+                let series = MenuTarget::Series {
+                    media: MediaType::Books,
+                    name: "Berserk".into(),
+                };
+                menu(app, series, (930.0, 250.0), None);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("menu-home", |app| {
+                menu(app, MenuTarget::Entry(BABY.into()), (700.0, 300.0), None);
+            }),
         ),
     ];
 

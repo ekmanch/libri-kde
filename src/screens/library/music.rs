@@ -5,7 +5,7 @@ use iced::widget::{Column, column, container, grid, row, text};
 use iced::{Element, Fill, Padding};
 
 use super::entries::{Cell, Sectioned};
-use super::{Listing, Message, MusicTab, View, rail};
+use super::{Listing, Message, MusicTab, View, menu, rail};
 use crate::app::{App, Message as AppMessage};
 use crate::browse::{self, Sort};
 use crate::model::{Entry, MediaType};
@@ -251,15 +251,18 @@ fn artist_block<'a>(
         let open = msg(Message::OpenArtist(artist.name.to_owned()));
         let summary = artist.summary();
         let photo = artist_image(app, artist.name);
-        match view {
+        let marked = app.library.menu_on_artist(artist.name);
+        let name = artist.name;
+        let row = match view {
             View::Text => column![
-                ui::music::artist_row(artist.name, summary, tokens, open),
+                ui::music::artist_row(name, summary, marked, tokens, open),
                 ui::rule(tokens.line.scale_alpha(0.5))
             ]
             .into(),
-            View::List => ui::music::artist_list_row(photo, artist.name, summary, tokens, open),
-            View::Grid => ui::music::artist_card(photo, artist.name, summary, tokens, open),
-        }
+            View::List => ui::music::artist_list_row(photo, name, summary, marked, tokens, open),
+            View::Grid => ui::music::artist_card(photo, name, summary, marked, tokens, open),
+        };
+        menu::area(menu::Target::Artist(name.to_owned()), row)
     });
     match view {
         View::Grid => grid(rows)
@@ -306,10 +309,11 @@ fn song_block<'a>(
             image: app.artwork.cover(entry),
             type_color: tokens.type_color(MediaType::Music),
             selected: selected == Some(entry.id.as_str()) && matches!(song, Song::Entry(_)),
+            menu: app.library.menu_on_entry(&entry.id),
         };
-        // A track opens its album.
+        // A track opens its album, and has its album's menu.
         let open = msg(Message::Select(entry.id.clone()));
-        match view {
+        let row = match view {
             View::Text => column![
                 ui::music::song_row(look, tokens, open),
                 ui::rule(tokens.line.scale_alpha(0.5))
@@ -317,7 +321,8 @@ fn song_block<'a>(
             .into(),
             View::List => ui::music::song_list_row(look, tokens, open),
             View::Grid => ui::music::song_card(look, tokens, open),
-        }
+        };
+        menu::area(menu::Target::Entry(entry.id.clone()), row)
     });
     match view {
         View::Grid => grid(rows)
@@ -329,6 +334,9 @@ fn song_block<'a>(
         View::Text => Column::with_children(rows).into(),
     }
 }
+
+/// The songs of an artist's page, for the menu's "Show songs".
+pub const SONGS_ID: &str = "library-artist-songs";
 
 /// One artist: their albums, then their songs.
 fn artist_page<'a>(
@@ -358,9 +366,14 @@ fn artist_page<'a>(
     }
     if !artist.songs.is_empty() {
         let songs: Vec<Song<'a>> = artist.songs.iter().map(|&e| Song::Entry(e)).collect();
-        page = page
-            .push(section("Songs", songs.len(), tokens))
-            .push(song_block(app, &songs, view, true, tokens));
+        // Found by its id, for the menu's "Show songs".
+        page = page.push(
+            container(column![
+                section("Songs", songs.len(), tokens),
+                song_block(app, &songs, view, true, tokens)
+            ])
+            .id(SONGS_ID),
+        );
     }
     page.into()
 }

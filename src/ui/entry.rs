@@ -5,7 +5,7 @@ use iced::widget::svg::{self, Svg};
 use iced::widget::{Space, button, column, container, image, row, stack, text};
 use iced::{Background, Border, Center, Color, Element, Fill, FillPortion, Length, Padding};
 
-use super::{FocusExt, Icon, cover, icon, mono, row_style};
+use super::{FocusExt, Focusable, Icon, cover, icon, mono, row_style};
 use crate::model::EntryStatus;
 use crate::theme::{self, Tokens, font};
 
@@ -31,6 +31,9 @@ pub struct EntryLook {
     /// "#horror  #dark".
     pub tags: String,
     pub selected: bool,
+    /// The right-click menu is open on it: marked like a selected row,
+    /// and in the grid by a fill around the card.
+    pub menu: bool,
     /// Another entry is selected, so the grid dims this one.
     pub dimmed: bool,
     /// A series as one row: how many parts are in the library.
@@ -129,17 +132,16 @@ pub fn entry_card<'a, Message: Clone + 'a>(
     } else {
         card.into()
     };
-    button(content)
-        .padding(0)
-        .on_press(on_press)
-        .style({
-            let text_color = tokens.text;
-            move |_, _| button::Style {
-                text_color,
-                ..button::Style::default()
-            }
-        })
-        .focusable(8.0, tokens)
+    let card = button(content).padding(0).on_press(on_press).style({
+        let text_color = tokens.text;
+        move |_, _| button::Style {
+            text_color,
+            ..button::Style::default()
+        }
+    });
+    Focusable::new(card, tokens.ink, 8.0)
+        .backed(look.menu.then_some(tokens.selection))
+        .into()
 }
 
 /// The disc in a cover's corner: a check for done, a half-filled ring for
@@ -203,7 +205,7 @@ pub fn entry_list_row<'a, Message: Clone + 'a>(
         .width(Fill)
         .padding([8, 12])
         .on_press(on_press)
-        .style(row_style(tokens, look.selected, 10.0))
+        .style(row_style(tokens, look.selected || look.menu, 10.0))
         .focusable(10.0, tokens)
 }
 
@@ -280,7 +282,7 @@ pub fn entry_table_row<'a, Message: Clone + 'a>(
         .height(42)
         .padding([0, 12])
         .on_press(on_press)
-        .style(row_style(tokens, look.selected, 0.0))
+        .style(row_style(tokens, look.selected || look.menu, 0.0))
         .focusable(0.0, tokens)
 }
 

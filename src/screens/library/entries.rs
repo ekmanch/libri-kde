@@ -4,7 +4,7 @@
 use iced::widget::{Column, column, container, grid, row, scrollable, space, stack, text};
 use iced::{Background, Border, Element, Fill, Padding, Shadow, Vector};
 
-use super::{Listing, Message, View, rail};
+use super::{Listing, Message, View, menu, rail};
 use crate::app::{App, Message as AppMessage};
 use crate::browse::{self, Row, Sort};
 use crate::model::{Entry, MediaType};
@@ -493,9 +493,19 @@ pub(super) fn block<'a>(
     // details pane can keep it in view (`reveal`).
     let looks = rows.iter().map(|row| {
         let (look, on_press) = look(app, row, view, tokens);
-        (row_id(&row.lead().id), look, on_press)
+        let target = match row {
+            Row::Entry(entry) => menu::Target::Entry(entry.id.clone()),
+            Row::Series(group) => menu::Target::Series {
+                media: group.media,
+                name: group.name.clone(),
+            },
+        };
+        ((row_id(&row.lead().id), target), look, on_press)
     });
-    let found = |id: String, row: Element<'a, AppMessage>| container(row).id(id).into();
+    // A right-click on the row or card opens its menu.
+    let found = |(id, target): (String, menu::Target), row: Element<'a, AppMessage>| {
+        container(menu::area(target, row)).id(id).into()
+    };
     // A block is one type: albums get square cells.
     let square = rows
         .first()
@@ -574,6 +584,7 @@ fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryL
                 rating: entry.rating.map_or("—".into(), |r| format!("{r}/10")),
                 tags: tags.join("  "),
                 selected: is_selected,
+                menu: state.menu_on_entry(&entry.id),
                 dimmed: view == View::Grid && state.pane_open() && !is_selected,
                 stack: None,
                 new_season: entry.has_new_season(today),
@@ -606,6 +617,7 @@ fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryL
                 rating: String::new(),
                 tags: String::new(),
                 selected: series_on,
+                menu: state.menu_on_series(group.media, &group.name),
                 dimmed: view == View::Grid && state.pane_open() && !series_on,
                 stack: Some(group.parts.len()),
                 new_season: false,

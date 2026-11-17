@@ -4,7 +4,7 @@
 use iced::widget::{button, column, container, image, row, text};
 use iced::{Center, Color, Element, Fill};
 
-use super::{FocusExt, cover, mono, row_style};
+use super::{FocusExt, Focusable, cover, mono, row_style};
 use crate::theme::{self, Tokens, font};
 
 /// "AC" for Alice in Chains, "B" for The Beatles: the first letters of
@@ -49,10 +49,12 @@ pub fn artist_disc<'a, Message: 'a>(
     )
 }
 
-/// An artist in the text view: the name, then what is saved.
+/// An artist in the text view: the name, then what is saved. `marked`
+/// while the right-click menu is open on the artist, as in every view.
 pub fn artist_row<'a, Message: Clone + 'a>(
     name: &'a str,
     summary: String,
+    marked: bool,
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
@@ -68,7 +70,7 @@ pub fn artist_row<'a, Message: Clone + 'a>(
         .height(42)
         .padding([0, 12])
         .on_press(on_press)
-        .style(row_style(tokens, false, 0.0))
+        .style(row_style(tokens, marked, 0.0))
         .focusable(0.0, tokens)
 }
 
@@ -77,6 +79,7 @@ pub fn artist_list_row<'a, Message: Clone + 'a>(
     photo: Option<image::Handle>,
     name: &'a str,
     summary: String,
+    marked: bool,
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
@@ -94,7 +97,7 @@ pub fn artist_list_row<'a, Message: Clone + 'a>(
         .width(Fill)
         .padding([8, 12])
         .on_press(on_press)
-        .style(row_style(tokens, false, 10.0))
+        .style(row_style(tokens, marked, 10.0))
         .focusable(10.0, tokens)
 }
 
@@ -104,6 +107,7 @@ pub fn artist_card<'a, Message: Clone + 'a>(
     photo: Option<image::Handle>,
     name: &'a str,
     summary: String,
+    marked: bool,
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
@@ -118,7 +122,7 @@ pub fn artist_card<'a, Message: Clone + 'a>(
     button(content)
         .padding([8, 0])
         .on_press(on_press)
-        .style(row_style(tokens, false, 12.0))
+        .style(row_style(tokens, marked, 12.0))
         .focusable(12.0, tokens)
 }
 
@@ -135,6 +139,8 @@ pub struct SongLook<'a> {
     pub image: Option<image::Handle>,
     pub type_color: Color,
     pub selected: bool,
+    /// The right-click menu is open on it.
+    pub menu: bool,
 }
 
 /// A song in the text view: a type dot, the title, "Artist · Year" and
@@ -158,7 +164,7 @@ pub fn song_row<'a, Message: Clone + 'a>(
         .height(42)
         .padding([0, 12])
         .on_press(on_press)
-        .style(row_style(tokens, look.selected, 0.0))
+        .style(row_style(tokens, look.selected || look.menu, 0.0))
         .focusable(0.0, tokens)
 }
 
@@ -185,7 +191,7 @@ pub fn song_list_row<'a, Message: Clone + 'a>(
         .width(Fill)
         .padding([8, 12])
         .on_press(on_press)
-        .style(row_style(tokens, look.selected, 10.0))
+        .style(row_style(tokens, look.selected || look.menu, 10.0))
         .focusable(10.0, tokens)
 }
 
@@ -235,14 +241,16 @@ pub fn song_card<'a, Message: Clone + 'a>(
     .clip(true);
     let caption = column![title, artist].padding([0, 2]);
     let text_color = tokens.text;
-    button(column![cover, caption].spacing(8))
+    let card = button(column![cover, caption].spacing(8))
         .padding(0)
         .on_press(on_press)
         .style(move |_, _| button::Style {
             text_color,
             ..button::Style::default()
-        })
-        .focusable(8.0, tokens)
+        });
+    Focusable::new(card, tokens.ink, 8.0)
+        .backed(look.menu.then_some(tokens.selection))
+        .into()
 }
 
 #[cfg(test)]

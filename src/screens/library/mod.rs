@@ -2,6 +2,7 @@
 //! narrowed by search, status, the Filter popover and the tag pickers.
 
 mod entries;
+pub mod menu;
 pub mod music;
 mod overview;
 mod page;
@@ -15,7 +16,7 @@ mod toolbar;
 use std::collections::{BTreeSet, HashMap};
 
 use iced::widget::{column, container, mouse_area, row};
-use iced::{Element, Fill};
+use iced::{Element, Fill, Point};
 
 pub use overview::short_release;
 pub use soon::{Slice, SliceSlide};
@@ -328,6 +329,11 @@ pub struct State {
     pub tab_scroll: HashMap<MusicTab, f32>,
     /// The type panel's Coming soon popover is open.
     pub type_pop: bool,
+    /// The right-click menu, open on a title, a series or an artist.
+    pub menu: Option<menu::Menu>,
+    /// Where the right button last went down, in the window: a menu
+    /// opens there.
+    pub pointer: Point,
 }
 
 #[derive(Debug, Clone)]
@@ -467,6 +473,21 @@ pub enum Message {
     /// The popover's "Open Coming soon ›": the page on Library, narrowed
     /// to the panel's types.
     OpenSoonForTypes,
+    // The right-click menu (canvas revision of 2026-11-17).
+    /// The right button went down here, in the window.
+    Pointer(Point),
+    /// A right-click on a title, a series or an artist: its menu, at
+    /// the pointer.
+    OpenMenu(menu::Target),
+    /// The Menu key or Shift+F10: the menu at this point, or at a fixed
+    /// spot when the title's row is not on screen.
+    OpenMenuAt(menu::Target, Option<Point>),
+    /// A row with a submenu: opens it, or closes it when it is open.
+    MenuSub(menu::Sub),
+    /// Esc or a click outside the menu.
+    CloseMenu,
+    /// An item of the menu.
+    Menu(menu::Action),
 }
 
 /// How many of a long list's covers are asked for at a time: the ones
@@ -647,6 +668,7 @@ impl State {
         self.picker = None;
         self.season_menu = None;
         self.cover_dialog = None;
+        self.menu = None;
         self.artist_turned(artist, left);
     }
 
@@ -699,6 +721,22 @@ impl State {
             Message::JumpToSection { .. } | Message::Scrolled(_) | Message::GroupsMeasured(_)
         ) {
             self.rail_drag = false;
+        }
+        // The menu is over the list: anything the list does but follow
+        // along closes it.
+        if !matches!(
+            message,
+            Message::Pointer(_)
+                | Message::OpenMenu(_)
+                | Message::OpenMenuAt(..)
+                | Message::MenuSub(_)
+                | Message::Scrolled(_)
+                | Message::HomeScrolled(_)
+                | Message::GroupsMeasured(_)
+                | Message::Wheel(_)
+                | Message::RailReleased
+        ) {
+            self.menu = None;
         }
         match message {
             Message::ShowType(media) => {
@@ -849,13 +887,27 @@ impl State {
             Message::Search(query) => self.query = query,
             Message::ClearSearch => self.query.clear(),
             // The app clears the search when the field had the cursor.
-            Message::EscapeInField => {}
+            Message::EscapeInField | Message::Menu(_) | Message::CloseMenu => {}
             Message::MoreTags => {
                 self.close_popovers();
                 self.picker = Some(PickerState {
                     query: browse::search_needle(&self.query),
                     ..PickerState::default()
                 });
+            }
+            Message::Pointer(point) => self.pointer = point,
+            Message::OpenMenu(target) => self.open_menu(target, self.pointer),
+            Message::OpenMenuAt(target, at) => {
+                self.open_menu(target, at.unwrap_or(menu::KEY_POINT));
+            }
+            Message::MenuSub(sub) => {
+                if let Some(menu) = &mut self.menu {
+                    menu.sub = if menu.sub == Some(sub) {
+                        None
+                    } else {
+                        Some(sub)
+                    };
+                }
             }
             Message::SetView(view) => {
                 self.views.insert(self.view_key(), view);
@@ -1039,9 +1091,43 @@ impl State {
         }
     }
 
-    /// Esc: the tag picker first, then a popover. False when nothing was
-    /// open.
+    /// The menu for `target` at `at`, with every popover closed.
+    fn open_menu(&mut self, target: menu::Target, at: Point) {
+        self.close_popovers();
+        self.type_pop = false;
+        self.menu = Some(menu::Menu {
+            target,
+            at,
+            sub: None,
+        });
+    }
+
+    /// Whether the right-click menu is open on the entry `id`, which is
+    /// marked like a selected one meanwhile.
+    pub fn menu_on_entry(&self, id: &str) -> bool {
+        matches!(&self.menu, Some(menu::Menu { target: menu::Target::Entry(on), .. }) if on == id)
+    }
+
+    /// Whether the right-click menu is open on the artist `name`.
+    pub fn menu_on_artist(&self, name: &str) -> bool {
+        matches!(&self.menu, Some(menu::Menu { target: menu::Target::Artist(on), .. }) if on == name)
+    }
+
+    /// Whether the right-click menu is open on the series `name`.
+    pub fn menu_on_series(&self, media: MediaType, name: &str) -> bool {
+        matches!(
+            &self.menu,
+            Some(menu::Menu { target: menu::Target::Series { media: on, name: named }, .. })
+                if *on == media && Series::same(named, name)
+        )
+    }
+
+    /// Esc: the right-click menu first, then the tag picker, then a
+    /// popover. False when nothing was open.
     pub fn dismiss_top(&mut self) -> bool {
+        if self.menu.take().is_some() {
+            return true;
+        }
         if self.season_menu.take().is_some()
             || self.cover_dialog.take().is_some()
             || std::mem::take(&mut self.type_pop)
@@ -1136,9 +1222,10 @@ impl State {
         self.selected.is_some() || self.series.is_some() || self.found.is_some()
     }
 
-    /// Closes every popover: the Filter, Sort and All tags popovers and
-    /// the details pane's rating pickers.
+    /// Closes every popover: the Filter, Sort and All tags popovers, the
+    /// details pane's rating pickers and the right-click menu.
     pub fn close_popovers(&mut self) {
+        self.menu = None;
         self.popup = None;
         self.details_rating_open = false;
         self.details_pop = None;
@@ -1593,7 +1680,13 @@ pub fn view<'a>(app: &'a App) -> Element<'a, AppMessage> {
     } else {
         AppMessage::Library(Message::ClosePicker)
     };
-    ui::modal(shell(app, main), picker, close, &tokens)
+    // The right-click menu's layer is over everything of the screen, and
+    // there whether or not a menu is open.
+    iced::widget::stack![
+        ui::modal(shell(app, main), picker, close, &tokens),
+        menu::layer(app)
+    ]
+    .into()
 }
 
 /// Scrolls the list, or Home, back to where it was before a page took
@@ -1622,6 +1715,12 @@ pub fn reveal<T: Send + 'static>(state: &State, id: &str) -> iced::Task<T> {
         return iced::Task::none();
     }
     iced::advanced::widget::operate(reveal::Reveal::new(LIST_ID, &entries::row_id(id)))
+}
+
+/// Brings the songs of the artist's page on show into view (the menu's
+/// "Show songs"): the page lists the albums first.
+pub fn reveal_songs<T: Send + 'static>() -> iced::Task<T> {
+    iced::advanced::widget::operate(reveal::Reveal::new(LIST_ID, music::SONGS_ID))
 }
 
 /// The repository and branch, quietly at the bottom of the content; on

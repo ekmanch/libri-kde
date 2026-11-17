@@ -4,7 +4,7 @@
 use iced::advanced::widget::Id;
 use iced::advanced::widget::operation::{self, Operation, Outcome, Scrollable};
 use iced::widget::scrollable::AbsoluteOffset;
-use iced::{Rectangle, Vector};
+use iced::{Point, Rectangle, Vector};
 
 /// Room kept above a revealed row, for the pinned type header.
 const TOP: f32 = 64.0;
@@ -73,6 +73,67 @@ impl<T: Send + 'static> Operation<T> for Reveal {
     }
 }
 
+/// Finds where an entry's row is on screen: its top left corner in the
+/// window, or `None` when the list does not show it (scrolled away, or
+/// not in the list at all).
+pub struct Locate {
+    list: Id,
+    row: Id,
+    /// The list's bounds on screen and how far it is scrolled.
+    view: Option<(Rectangle, f32)>,
+    found: Option<Rectangle>,
+}
+
+impl Locate {
+    pub fn new(list: &'static str, row: &str) -> Locate {
+        Locate {
+            list: Id::new(list),
+            row: Id::from(row.to_owned()),
+            view: None,
+            found: None,
+        }
+    }
+}
+
+impl Operation<Option<Point>> for Locate {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Option<Point>>)) {
+        operate(self);
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&Id>,
+        bounds: Rectangle,
+        _content_bounds: Rectangle,
+        translation: Vector,
+        _state: &mut dyn Scrollable,
+    ) {
+        if id == Some(&self.list) {
+            self.view = Some((bounds, translation.y));
+        }
+    }
+
+    fn container(&mut self, id: Option<&Id>, bounds: Rectangle) {
+        if id == Some(&self.row) {
+            self.found = Some(bounds);
+        }
+    }
+
+    fn finish(&self) -> Outcome<Option<Point>> {
+        Outcome::Some(match (self.view, self.found) {
+            (Some((list, offset)), Some(row)) => on_screen(list, row, offset),
+            _ => None,
+        })
+    }
+}
+
+/// The corner of `row` (as laid out in the list's content) in a `list`
+/// scrolled by `offset`, when its top is in view.
+fn on_screen(list: Rectangle, row: Rectangle, offset: f32) -> Option<Point> {
+    let y = row.y - offset;
+    (y >= list.y && y < list.y + list.height).then_some(Point::new(row.x, y))
+}
+
 /// The offset that shows a row from `top` to `bottom` (in the content) in
 /// a viewport `height` tall scrolled to `offset`, or `None` when it shows
 /// already. A row taller than the room shows from its top.
@@ -91,6 +152,15 @@ pub fn offset_to_show(top: f32, bottom: f32, offset: f32, height: f32) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_row_is_located_where_the_scrolled_list_shows_it() {
+        let list = Rectangle::new(Point::new(240.0, 120.0), iced::Size::new(900.0, 700.0));
+        let row = Rectangle::new(Point::new(264.0, 1124.0), iced::Size::new(850.0, 68.0));
+        assert_eq!(on_screen(list, row, 800.0), Some(Point::new(264.0, 324.0)));
+        assert_eq!(on_screen(list, row, 0.0), None, "below the view");
+        assert_eq!(on_screen(list, row, 1100.0), None, "above the view");
+    }
 
     #[test]
     fn a_row_in_view_stays_where_it_is() {

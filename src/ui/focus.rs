@@ -23,7 +23,13 @@ pub struct Focusable<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer
     /// The ring drawn just inside the bounds, for a widget clipped by its
     /// parent (a segment of a joined group).
     inside: bool,
+    /// A fill behind the child that reaches `BACKING` px past its bounds:
+    /// how a card is marked, where a row would turn the selection gray.
+    backing: Option<Color>,
 }
+
+/// How far past a card its backing reaches.
+const BACKING: f32 = 8.0;
 
 impl<'a, Message, Theme, Renderer> Focusable<'a, Message, Theme, Renderer> {
     /// `child` with a focus ring in `ring`, rounded by `radius` (the
@@ -38,7 +44,14 @@ impl<'a, Message, Theme, Renderer> Focusable<'a, Message, Theme, Renderer> {
             ring,
             radius,
             inside: false,
+            backing: None,
         }
+    }
+
+    /// Marks the child with a fill of `color` behind and around it.
+    pub fn backed(mut self, color: Option<Color>) -> Self {
+        self.backing = color;
+        self
     }
 
     /// Draws the ring inside the bounds instead of around them.
@@ -218,6 +231,16 @@ where
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
+        if let Some(color) = self.backing {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: layout.bounds().expand(BACKING),
+                    border: Border::default().rounded(self.radius + BACKING / 2.0),
+                    ..renderer::Quad::default()
+                },
+                color,
+            );
+        }
         self.child.as_widget().draw(
             &tree.children[0],
             renderer,
