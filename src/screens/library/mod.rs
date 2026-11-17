@@ -352,6 +352,9 @@ pub enum Message {
     PickTag(String),
     Status(Option<EntryStatus>),
     Search(String),
+    /// A key typed in the window with no field active: a new search
+    /// with this text, and the cursor to the search field (the app).
+    Typed(String),
     /// The search field's ✕: the text is cleared and the cursor stays in
     /// the field. The tags and the other filters stay as they are.
     ClearSearch,
@@ -884,7 +887,7 @@ impl State {
                 self.status = status;
                 self.deselect();
             }
-            Message::Search(query) => self.query = query,
+            Message::Search(query) | Message::Typed(query) => self.query = query,
             Message::ClearSearch => self.query.clear(),
             // The app clears the search when the field had the cursor.
             Message::EscapeInField | Message::Menu(_) | Message::CloseMenu => {}
@@ -1231,6 +1234,22 @@ impl State {
         self.details_pop = None;
         self.track_rating_open = None;
         self.season_menu = None;
+    }
+
+    /// Whether the search field is on show with nothing open over the
+    /// library, so typing in the window may start a search.
+    pub fn search_free(&self) -> bool {
+        self.page.is_none()
+            && !self.soon
+            && self.picker.is_none()
+            && self.popup.is_none()
+            && self.menu.is_none()
+            && !self.type_pop
+            && !self.details_rating_open
+            && self.details_pop.is_none()
+            && self.track_rating_open.is_none()
+            && self.season_menu.is_none()
+            && self.cover_dialog.is_none()
     }
 
     /// Whether a click on the list's empty space closes the details:
@@ -2395,7 +2414,11 @@ mod tests {
         ))));
         assert_eq!(app.library.music_tab, MusicTab::Artists);
         let key = |app: &mut App, named| {
-            let _ = app.update(AppMessage::KeyPressed(Key::Named(named), Modifiers::SHIFT));
+            let _ = app.update(AppMessage::KeyPressed(
+                Key::Named(named),
+                Modifiers::SHIFT,
+                None,
+            ));
         };
         key(&mut app, Named::ArrowRight);
         assert_eq!(app.library.music_tab, MusicTab::Albums);

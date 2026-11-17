@@ -619,6 +619,21 @@ fn capture_every_screen() {
                 let _ = app.update(Message::KeyPressed(
                     iced::keyboard::Key::Character("k".into()),
                     iced::keyboard::Modifiers::CTRL,
+                    None,
+                ));
+            }),
+        ),
+        // A plain letter would start a search.
+        (
+            Screen::Settings,
+            ("settings-keys-plain", |app| {
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::Record(libri::keymap::Action::Edit),
+                ));
+                let _ = app.update(Message::KeyPressed(
+                    iced::keyboard::Key::Character("e".into()),
+                    iced::keyboard::Modifiers::empty(),
+                    Some("e".into()),
                 ));
             }),
         ),

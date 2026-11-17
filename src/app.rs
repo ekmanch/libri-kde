@@ -80,6 +80,11 @@ const EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
 /// Apple about, while nobody is being asked.
 const PHOTOS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// How long after typing started a search a key no widget took still
+/// goes after it: the search field has the cursor only once iced has run
+/// the focus task, and two keys can come in one batch of events.
+const TYPED_ON: std::time::Duration = std::time::Duration::from_millis(300);
+
 /// Closes the app without waiting for the network. Dropping tokio's
 /// runtime waits for every blocking call still running, up to
 /// `lookup::http::TIMEOUT` a request, with the main thread blocked. So the
@@ -159,6 +164,9 @@ pub struct App {
     pub today: Date,
     /// The keyboard modifiers held now, for Ctrl+click.
     pub modifiers: keyboard::Modifiers,
+    /// When typing in the window last started a search, for the key
+    /// pressed before the search field has the cursor (`TYPED_ON`).
+    typed_at: Option<Instant>,
     /// The keyboard shortcuts, as Settings › Keyboard and mouse set them.
     pub keymap: Keymap,
     pub repo: Box<dyn LibraryRepository>,
@@ -260,8 +268,9 @@ pub enum Message {
     Key(KeyPress),
     /// A key press no widget took, turned into a shortcut by the keymap
     /// (`App::shortcut`), or into a new shortcut while Settings records
-    /// one.
-    KeyPressed(Key, keyboard::Modifiers),
+    /// one. With the text the press types, if any: a plain key that is
+    /// no shortcut starts a search with it (`App::typed`).
+    KeyPressed(Key, keyboard::Modifiers, Option<String>),
     Modifiers(keyboard::Modifiers),
     /// The mouse's Back or Forward button, or Alt+Left and Alt+Right.
     History(Direction),
@@ -379,6 +388,7 @@ impl Message {
                     | L::SeasonMenu(_)
                     | L::Picker(_)
                     | L::Search(_)
+                    | L::Typed(_)
                     | L::ScrollList(_)
                     | L::JumpToSection { .. }
                     | L::RailReleased
@@ -705,6 +715,7 @@ impl App {
             token_warning: false,
             today: Date::today(),
             modifiers: keyboard::Modifiers::default(),
+            typed_at: None,
             keymap: Keymap::default(),
             repo: Box::new(repo),
             library: library::State::default(),
@@ -1663,8 +1674,12 @@ impl App {
         {
             self.library.tab_slide = None;
         }
+        // The search field has the cursor and takes the keys itself.
+        if let Message::Library(library::Message::Search(_)) = &message {
+            self.typed_at = None;
+        }
         let message = match message {
-            Message::KeyPressed(key, modifiers) => match self.shortcut(&key, modifiers) {
+            Message::KeyPressed(key, modifiers, text) => match self.shortcut(&key, modifiers) {
                 Some(message) => {
                     // Shift+arrow over a plan's tabs slides the way the
                     // arrow points, where a click on a segment swaps at
@@ -1688,7 +1703,10 @@ impl App {
                     }
                     message
                 }
-                None => return Task::none(),
+                None => match self.typed(modifiers, text.as_deref()) {
+                    Some(text) => Message::Library(library::Message::Typed(text)),
+                    None => return Task::none(),
+                },
             },
             // A side-scroll or Shift+wheel over Music's tabs is the tab
             // before or after, as a click on its segment.
@@ -1962,6 +1980,25 @@ impl App {
             _ => return None,
         };
         Some(Message::Key(press))
+    }
+
+    /// What a key press that is no shortcut types into a new search: the
+    /// text of a printable key without Ctrl, Alt or Meta, while the
+    /// library shows its search field with no dialog, popover or menu
+    /// over it. A press a text field took never comes here. Space,
+    /// Enter, Tab and Backspace type nothing here and keep their meaning.
+    fn typed(&self, modifiers: keyboard::Modifiers, text: Option<&str>) -> Option<String> {
+        if modifiers.control() || modifiers.alt() || modifiers.logo() {
+            return None;
+        }
+        let text: String = text?.chars().filter(|c| !c.is_control()).collect();
+        let free = self.screen == Screen::Library
+            && self.dialog.is_none()
+            && self.plan_dialog.is_none()
+            && !self.token_warning
+            && !self.conflict_open
+            && self.library.search_free();
+        (free && !text.trim().is_empty()).then_some(text)
     }
 
     /// The Coming soon page is on screen with nothing open over it, so a
@@ -2291,6 +2328,25 @@ impl App {
                 self.library.update(library::Message::ClearSearch);
                 return operation::focus(library::SEARCH_ID);
             }
+            // Typing in the window: a new search with what the key types,
+            // in place of the text there, and the cursor to the field
+            // after it. The field has the cursor only once iced has run
+            // the task, so a key pressed before that comes here as well
+            // and goes after the first.
+            Message::Library(library::Message::Typed(text)) => {
+                let follows = self
+                    .typed_at
+                    .is_some_and(|at| self.now.saturating_duration_since(at) < TYPED_ON);
+                let query = if follows {
+                    format!("{}{text}", self.library.query)
+                } else {
+                    text
+                };
+                self.typed_at = Some(self.now);
+                self.library.update(library::Message::Typed(query));
+                return operation::focus(library::SEARCH_ID)
+                    .chain(operation::move_cursor_to_end(library::SEARCH_ID));
+            }
             // A text field took Esc and let go of the cursor. With nothing
             // open over the library that field is the search: holding
             // text, it is cleared and keeps the cursor, so the next Esc
@@ -2325,9 +2381,11 @@ impl App {
                 let _ = entry::update(self, entry::Message::Add);
                 return operation::focus(entry::LOOKUP_ID);
             }
+            // The cursor to the search field, its text selected.
             Message::Key(KeyPress::Search) => {
                 if self.screen == Screen::Library {
-                    return operation::focus(library::SEARCH_ID);
+                    return operation::focus(library::SEARCH_ID)
+                        .chain(operation::select_all(library::SEARCH_ID));
                 }
             }
             Message::Modifiers(modifiers) => self.modifiers = modifiers,
@@ -2541,9 +2599,16 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         let keys = keyboard::listen().filter_map(|event| match event {
             keyboard::Event::ModifiersChanged(modifiers) => Some(Message::Modifiers(modifiers)),
-            keyboard::Event::KeyPressed { key, modifiers, .. } => {
-                Some(Message::KeyPressed(key, modifiers))
-            }
+            keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                text,
+                ..
+            } => Some(Message::KeyPressed(
+                key,
+                modifiers,
+                text.map(|text| text.to_string()),
+            )),
             _ => None,
         });
         // The Back and Forward buttons of a mouse; no widget takes them.
@@ -3415,11 +3480,100 @@ mod tests {
     }
 
     #[test]
+    fn typing_in_the_window_starts_a_search() {
+        let start = Instant::now();
+        let later = |ms: u64| start + Duration::from_millis(ms);
+        let key = |app: &mut App, c: &str, modifiers, at: Instant| {
+            let _ = app.update_at(
+                Message::KeyPressed(Key::Character(c.into()), modifiers, Some(c.into())),
+                at,
+            );
+        };
+        let none = keyboard::Modifiers::empty();
+        let mut app = App::new(Screen::Library);
+        app.library
+            .update(library::Message::Select("movies/the-mummy-1999".into()));
+
+        // A plain letter is the search now, and no longer Edit.
+        key(&mut app, "e", none, later(0));
+        assert_eq!(app.library.query, "e");
+        assert!(app.dialog.is_none());
+        // The next key came before the field had the cursor: it goes
+        // after the first. From then on the field takes the keys.
+        key(&mut app, "x", none, later(20));
+        assert_eq!(app.library.query, "ex");
+        let _ = app.update_at(
+            Message::Library(library::Message::Search("exo".into())),
+            later(40),
+        );
+        // Typed with the cursor elsewhere, a key starts over; a composed
+        // letter, a capital and a digit count as well.
+        key(&mut app, "å", none, later(60));
+        assert_eq!(app.library.query, "å");
+        key(&mut app, "D", keyboard::Modifiers::SHIFT, later(2000));
+        assert_eq!(app.library.query, "D");
+        key(&mut app, "1", none, later(4000));
+        assert_eq!(app.library.query, "1");
+        // A dead key's letter comes as the text of the key after it.
+        let _ = app.update_at(
+            Message::KeyPressed(Key::Character("e".into()), none, Some("é".into())),
+            later(6000),
+        );
+        assert_eq!(app.library.query, "é");
+
+        // Space, Enter and a key with Ctrl, Alt or Meta type nothing.
+        let _ = app.update_at(
+            Message::KeyPressed(Key::Named(Named::Space), none, Some(" ".into())),
+            later(8000),
+        );
+        let _ = app.update_at(
+            Message::KeyPressed(Key::Named(Named::Enter), none, Some("\r".into())),
+            later(8000),
+        );
+        key(&mut app, "q", keyboard::Modifiers::ALT, later(8000));
+        key(&mut app, "q", keyboard::Modifiers::LOGO, later(8000));
+        key(&mut app, "\u{11}", keyboard::Modifiers::CTRL, later(8000));
+        assert_eq!(app.library.query, "é");
+
+        // Not under a popover, a menu, a dialog or on a page without
+        // the field, nor on another screen.
+        app.library
+            .update(library::Message::Toggle(library::Popup::Sort));
+        key(&mut app, "a", none, later(10000));
+        app.library.update(library::Message::ClosePopup);
+        let _ = app.update(Message::Library(library::Message::ShowSoon));
+        key(&mut app, "a", none, later(10000));
+        let _ = app.update(Message::Library(library::Message::ShowType(None)));
+        let _ = app.update(Message::Entry(entry::Message::Add));
+        key(&mut app, "a", none, later(10000));
+        app.dialog = None;
+        let _ = app.update(Message::Show(Screen::Plans));
+        key(&mut app, "a", none, later(10000));
+        assert_eq!(app.library.query, "é");
+        let _ = app.update(Message::Show(Screen::Library));
+        key(&mut app, "a", none, later(10000));
+        assert_eq!(app.library.query, "a");
+
+        // Ctrl+E edits the selected title.
+        app.library
+            .update(library::Message::Select("movies/the-mummy-1999".into()));
+        let _ = app.update_at(
+            Message::KeyPressed(Key::Character("e".into()), keyboard::Modifiers::CTRL, None),
+            later(12000),
+        );
+        assert!(matches!(app.dialog, Some(entry::Dialog::Form(_))));
+    }
+
+    #[test]
     fn a_shortcut_changed_in_settings_works_at_once() {
         use crate::keymap::Action;
         use screens::settings::Message as S;
         let press = |app: &mut App, c: &str, modifiers: keyboard::Modifiers| {
-            let _ = app.update(Message::KeyPressed(Key::Character(c.into()), modifiers));
+            let _ = app.update(Message::KeyPressed(
+                Key::Character(c.into()),
+                modifiers,
+                None,
+            ));
         };
         let mut app = App::new(Screen::Settings);
         let _ = app.update(Message::Settings(S::Record(Action::Panel)));
@@ -3439,9 +3593,24 @@ mod tests {
         let _ = app.update(Message::KeyPressed(
             Key::Named(Named::Escape),
             keyboard::Modifiers::empty(),
+            None,
         ));
         assert_eq!(app.settings_page.recording, None);
-        assert_eq!(app.keymap.combo(Action::Edit).to_string(), "E");
+        assert_eq!(app.keymap.combo(Action::Edit).to_string(), "Ctrl+E");
+
+        // A plain letter would start a search: refused, still waiting.
+        let _ = app.update(Message::Settings(S::Record(Action::Edit)));
+        let _ = app.update(Message::KeyPressed(
+            Key::Character("e".into()),
+            keyboard::Modifiers::empty(),
+            Some("e".into()),
+        ));
+        assert_eq!(
+            app.settings_page.key_warning.as_deref(),
+            Some("Plain letters and digits start a search. Add Ctrl or Alt.")
+        );
+        assert_eq!(app.settings_page.recording, Some(Action::Edit));
+        let _ = app.update(Message::Settings(S::Record(Action::Edit)));
 
         // Ctrl+, opens Settings; on the library Ctrl+P now pins and
         // unpins, Ctrl+I does nothing.

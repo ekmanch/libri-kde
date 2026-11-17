@@ -2045,7 +2045,7 @@ mod tests {
     fn the_keys_and_the_wheel_step_the_slices_only_on_the_page() {
         let mut app = on_page();
         let key = |app: &mut App, named: Named, modifiers: Modifiers| {
-            let _ = app.update(AppMessage::KeyPressed(Key::Named(named), modifiers));
+            let _ = app.update(AppMessage::KeyPressed(Key::Named(named), modifiers, None));
         };
         key(&mut app, Named::ArrowRight, Modifiers::SHIFT);
         assert_eq!(app.library.slice, Slice::Discover);
@@ -2452,6 +2452,7 @@ mod tests {
         let _ = app.update(AppMessage::KeyPressed(
             Key::Named(Named::ArrowLeft),
             Modifiers::ALT,
+            None,
         ));
         assert!(!app.library.soon, "Alt+← leaves the page");
     }
@@ -2506,6 +2507,7 @@ mod tests {
         let _ = app.update(AppMessage::KeyPressed(
             Key::Named(Named::ArrowRight),
             Modifiers::SHIFT,
+            None,
         ));
         assert_eq!(app.library.slice, Slice::Library);
     }

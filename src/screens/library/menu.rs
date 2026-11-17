@@ -899,7 +899,7 @@ mod tests {
         send(&mut app, Message::ShowType(Some(MediaType::Movies)));
         let key = iced::keyboard::Key::Named(iced::keyboard::key::Named::ContextMenu);
         let press = |app: &mut App, key: &iced::keyboard::Key, modifiers| {
-            let _ = app.update(AppMessage::KeyPressed(key.clone(), modifiers));
+            let _ = app.update(AppMessage::KeyPressed(key.clone(), modifiers, None));
         };
         press(&mut app, &key, iced::keyboard::Modifiers::empty());
         assert_eq!(app.library.menu, None, "nothing is selected");

@@ -989,6 +989,7 @@ mod tests {
         let _ = app.update(AppMessage::KeyPressed(
             Key::Character("i".into()),
             Modifiers::CTRL,
+            None,
         ));
         assert!(app.library.panels.is_empty());
 
@@ -997,6 +998,7 @@ mod tests {
         let _ = app.update(AppMessage::KeyPressed(
             Key::Character("i".into()),
             Modifiers::CTRL,
+            None,
         ));
         assert_eq!(panel(&app), Panel::Drawer);
         let _ = app.update(msg(Message::ShowType(Some(MediaType::Books))));

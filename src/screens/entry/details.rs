@@ -460,8 +460,9 @@ fn build<'a>(
         None => msg(Message::Delete(id())),
     };
     let actions = row![
-        ui::wide_button(
+        ui::wide_button_keys(
             "Edit",
+            Some(app.keymap.combo(crate::keymap::Action::Edit).to_string()),
             ButtonKind::Neutral,
             tokens,
             Some(msg(Message::Edit(id())))

@@ -1275,6 +1275,7 @@ mod tests {
         let _ = app.update(AppMessage::KeyPressed(
             Key::Character("i".into()),
             Modifiers::CTRL,
+            None,
         ));
         assert!(app.plans.unpinned, "Ctrl+I unpins");
         see(&app, &["2 of 8 done"], &["Add to this plan"]);
@@ -1465,7 +1466,7 @@ mod tests {
         };
         let arrow = |app: &mut App, named: Named, ms: u64| {
             let _ = app.update_at(
-                AppMessage::KeyPressed(Key::Named(named), Modifiers::SHIFT),
+                AppMessage::KeyPressed(Key::Named(named), Modifiers::SHIFT, None),
                 start + Duration::from_millis(ms),
             );
         };

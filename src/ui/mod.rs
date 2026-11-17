@@ -332,29 +332,39 @@ pub fn sized_button<'a, Message: Clone + 'a>(
     .focusable(8.0, &tokens)
 }
 
-/// A labeled button that fills the width, its label centered: Edit in
-/// the details pane.
+/// A labeled button that fills the width, its label centered: the plan
+/// form's footer.
 pub fn wide_button<'a, Message: Clone + 'a>(
     label: impl text::IntoFragment<'a>,
     kind: ButtonKind,
     tokens: Tokens,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    button(
-        text(label)
-            .size(size::BODY)
-            .font(font::SEMIBOLD)
-            .width(Fill)
-            .height(Fill)
-            .align_x(iced::alignment::Horizontal::Center)
-            .align_y(Vertical::Center),
-    )
-    .width(Fill)
-    .height(36)
-    .padding(Padding::from([0, 16]))
-    .on_press_maybe(on_press)
-    .style(move |_, status| button_style(kind, &tokens, status))
-    .focusable(8.0, &tokens)
+    wide_button_keys(label, None, kind, tokens, on_press)
+}
+
+/// A wide button with its shortcut after the label in small mono: Edit
+/// in the details pane.
+pub fn wide_button_keys<'a, Message: Clone + 'a>(
+    label: impl text::IntoFragment<'a>,
+    shortcut: Option<String>,
+    kind: ButtonKind,
+    tokens: Tokens,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let mut words = widget::row![text(label).size(size::BODY).font(font::SEMIBOLD)]
+        .spacing(8)
+        .align_y(Vertical::Center);
+    if let Some(shortcut) = shortcut {
+        words = words.push(mono(shortcut, 11.0, tokens.sub));
+    }
+    button(container(words).center(Fill))
+        .width(Fill)
+        .height(36)
+        .padding(Padding::from([0, 16]))
+        .on_press_maybe(on_press)
+        .style(move |_, status| button_style(kind, &tokens, status))
+        .focusable(8.0, &tokens)
 }
 
 /// The fill, text and border of a `ButtonKind`, for buttons built by hand.

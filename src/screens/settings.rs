@@ -395,12 +395,25 @@ fn setting<'a>(
     control: impl Into<Element<'a, AppMessage>>,
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
-    let words = column![
-        text(name).size(14.5).font(font::SEMIBOLD),
-        text(help).size(13).line_height(1.45).color(tokens.sub),
-    ]
-    .spacing(4)
-    .width(230);
+    setting_notes(name, [help], control, tokens)
+}
+
+/// A setting with several paragraphs of help under its name.
+fn setting_notes<'a>(
+    name: &'a str,
+    help: impl IntoIterator<Item = String>,
+    control: impl Into<Element<'a, AppMessage>>,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let sub = tokens.sub;
+    let words = help
+        .into_iter()
+        .fold(
+            column![text(name).size(14.5).font(font::SEMIBOLD)],
+            |words, help| words.push(text(help).size(13).line_height(1.45).color(sub)),
+        )
+        .spacing(4)
+        .width(230);
     row![words, control.into()]
         .spacing(28)
         .align_y(Vertical::Top)
@@ -1123,6 +1136,20 @@ fn keys<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let page = &app.settings_page;
     let t = *tokens;
     let line = move || ui::rule(t.line);
+    // Typing starts a search: listed first, with nothing to change.
+    let typing: Element<'a, AppMessage> = column![
+        row![
+            text("Start a search").size(14).width(Fill),
+            container(ui::mono("Just type", 12.5, t.sub))
+                .center_y(30)
+                .padding([0, 10])
+        ]
+        .spacing(12)
+        .align_y(Center)
+        .height(42),
+        line()
+    ]
+    .into();
     let shortcuts = Column::with_children(Action::ALL.into_iter().map(|action| {
         let recording = page.recording == Some(action);
         let shown = if recording {
@@ -1209,10 +1236,16 @@ fn keys<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     container(
         column![
             title,
-            setting(
+            setting_notes(
                 "Keyboard",
-                "Click a shortcut, then press the new keys. Esc cancels.".into(),
-                container(shortcuts.width(Fill)).width(Fill),
+                [
+                    "Click a shortcut, then press the new keys. Esc cancels.".into(),
+                    "Typing in the main window starts a search, so a shortcut needs Ctrl or \
+                     Alt. Keys that type nothing (arrows, Esc, F-keys) also work alone or \
+                     with Shift."
+                        .into(),
+                ],
+                container(column![typing, shortcuts.width(Fill)]).width(Fill),
                 tokens,
             ),
             setting(

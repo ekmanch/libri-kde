@@ -3,6 +3,10 @@
 //! the arrow keys). A key press becomes a [`Combo`]; the app looks up the
 //! action bound to it, so a changed shortcut works at once. Only the
 //! changed ones are saved, in `preferences.json` (`keys`).
+//!
+//! Typing in the main window starts a search, so a shortcut needs Ctrl or
+//! Alt, or a key that types nothing (the arrows, Esc, the F-keys, Menu),
+//! alone or with Shift ([`Combo::allowed`]).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -86,7 +90,7 @@ impl Action {
             Action::Search => (true, false, false, "K"),
             Action::Panel => (true, false, false, "I"),
             Action::Add => (true, false, false, "N"),
-            Action::Edit => (false, false, false, "E"),
+            Action::Edit => (true, false, false, "E"),
             Action::Close => (false, false, false, "Esc"),
             Action::Back => (false, true, false, "←"),
             Action::Forward => (false, true, false, "→"),
@@ -105,7 +109,7 @@ impl Action {
     }
 }
 
-/// A key with the modifiers held, as Settings shows it: "Ctrl+I", "E",
+/// A key with the modifiers held, as Settings shows it: "Ctrl+I", "Esc",
 /// "Alt+←".
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Combo {
@@ -178,6 +182,20 @@ impl Combo {
         Some(combo)
     }
 
+    /// Whether the key types nothing: an arrow, Esc, an F-key, Menu and
+    /// the other named keys but Space. A character key is named by the
+    /// one character it types.
+    fn types_nothing(&self) -> bool {
+        let arrow = matches!(self.key.as_str(), "←" | "→" | "↑" | "↓");
+        arrow || (self.key.chars().count() > 1 && self.key != "Space")
+    }
+
+    /// The rule for a shortcut: Ctrl or Alt held, or a key that types
+    /// nothing, since a plain key (Shift or not) starts a search.
+    pub fn allowed(&self) -> bool {
+        self.ctrl || self.alt || self.types_nothing()
+    }
+
     fn plain(key: &str) -> Combo {
         Combo {
             ctrl: false,
@@ -214,6 +232,9 @@ impl fmt::Display for Combo {
         f.write_str(&self.key)
     }
 }
+
+/// What Settings says to a shortcut that would type.
+pub const PLAIN_REFUSED: &str = "Plain letters and digits start a search. Add Ctrl or Alt.";
 
 /// The keys that cannot be given to a shortcut, with what they do.
 fn fixed() -> [(Combo, &'static str); 6] {
@@ -256,9 +277,12 @@ impl Keymap {
         !self.changed.is_empty()
     }
 
-    /// Gives `action` the keys `combo`, or says why not: "Ctrl+K is
-    /// already used by “Search”."
+    /// Gives `action` the keys `combo`, or says why not: a key that
+    /// types ([`PLAIN_REFUSED`]), or "Ctrl+K is already used by “Search”."
     pub fn bind(&mut self, action: Action, combo: Combo) -> Result<(), String> {
+        if !combo.allowed() {
+            return Err(PLAIN_REFUSED.into());
+        }
         let clash = Action::ALL
             .into_iter()
             .filter(|&a| a != action)
@@ -293,8 +317,9 @@ impl Keymap {
             .collect()
     }
 
-    /// From `preferences.json`: an action or keys Libri does not know, or
-    /// keys another shortcut has, are left out.
+    /// From `preferences.json`: an action or keys Libri does not know,
+    /// keys another shortcut has, or keys that would type are left out, so
+    /// that shortcut is its default again.
     pub fn from_prefs(keys: &BTreeMap<String, String>) -> Keymap {
         let mut map = Keymap::default();
         for (action, combo) in keys {
@@ -312,7 +337,14 @@ mod tests {
 
     #[test]
     fn combos_read_back_what_they_write() {
-        for text in ["Ctrl+I", "E", "Alt+←", "Ctrl+,", "Ctrl+Shift+Esc", "Ctrl++"] {
+        for text in [
+            "Ctrl+I",
+            "Ctrl+E",
+            "Alt+←",
+            "Ctrl+,",
+            "Ctrl+Shift+Esc",
+            "Ctrl++",
+        ] {
             assert_eq!(Combo::parse(text).unwrap().to_string(), text);
         }
         assert_eq!(Combo::parse("Ctrl+"), None);
@@ -327,6 +359,67 @@ mod tests {
         assert_eq!(
             Combo::of(&Key::Named(Named::Control), Modifiers::CTRL),
             None
+        );
+    }
+
+    #[test]
+    fn a_shortcut_needs_ctrl_or_alt_or_a_key_that_types_nothing() {
+        for text in [
+            "Ctrl+E",
+            "Alt+1",
+            "Ctrl+Shift+E",
+            "Esc",
+            "Shift+←",
+            "→",
+            "F5",
+            "Shift+F10",
+            "Menu",
+            "Delete",
+        ] {
+            assert!(Combo::parse(text).unwrap().allowed(), "{text}");
+        }
+        for text in [
+            "E",
+            "Shift+E",
+            "1",
+            ",",
+            "Å",
+            "Space",
+            "Shift+Space",
+            "Meta+E",
+        ] {
+            assert!(!Combo::parse(text).unwrap().allowed(), "{text}");
+        }
+        for action in Action::ALL {
+            assert!(action.default_combo().allowed(), "{action:?}");
+        }
+
+        let mut map = Keymap::default();
+        assert_eq!(map.combo(Action::Edit).to_string(), "Ctrl+E");
+        assert_eq!(
+            map.bind(Action::Edit, Combo::parse("E").unwrap()),
+            Err(PLAIN_REFUSED.into())
+        );
+        assert_eq!(
+            map.bind(Action::Panel, Combo::parse("Shift+P").unwrap()),
+            Err(PLAIN_REFUSED.into())
+        );
+        assert!(!map.is_changed());
+
+        // A file from before the rule: the plain key goes back to its
+        // default, the others stay.
+        let saved = BTreeMap::from([
+            ("edit".to_owned(), "E".to_owned()),
+            ("add".to_owned(), "Shift+N".to_owned()),
+            ("panel".to_owned(), "Ctrl+P".to_owned()),
+        ]);
+        let map = Keymap::from_prefs(&saved);
+        assert_eq!(map.combo(Action::Edit).to_string(), "Ctrl+E");
+        assert_eq!(map.combo(Action::Add).to_string(), "Ctrl+N");
+        assert_eq!(map.combo(Action::Panel).to_string(), "Ctrl+P");
+        assert_eq!(
+            map.to_prefs(),
+            BTreeMap::from([("panel".to_owned(), "Ctrl+P".to_owned())])
         );
     }
 
