@@ -30,13 +30,14 @@ pub fn filter_chip<'a, Message: Clone + 'a>(
         30.0,
         Padding::from([0, 11]),
         tokens.text,
-        on,
+        on.then_some(tokens.selection),
         tokens,
         on_press,
     )
 }
 
-/// A status filter under the title: "Want 12". Gray text until picked.
+/// A status filter under the title: "Want 12". Gray text until picked,
+/// then the picked fill (on Light a pale tint of the accent).
 pub fn status_chip<'a, Message: Clone + 'a>(
     label: &'a str,
     count: usize,
@@ -56,7 +57,7 @@ pub fn status_chip<'a, Message: Clone + 'a>(
         28.0,
         Padding::from([0, 12]),
         fg,
-        on,
+        on.then_some(tokens.selection_tint),
         tokens,
         on_press,
     )
@@ -82,7 +83,7 @@ pub fn suggested_chip<'a, Message: Clone + 'a>(
         28.0,
         Padding::from([0, 11]),
         tokens.text,
-        false,
+        None,
         tokens,
         on_press,
     )
@@ -90,7 +91,8 @@ pub fn suggested_chip<'a, Message: Clone + 'a>(
 
 /// An active filter in the chips row, removed by a click: "#horror ×",
 /// with a type's dot in front for a picked type, and a tag's role after
-/// it in the secondary color ("#clint-eastwood · Director").
+/// it in the secondary color ("#clint-eastwood · Director"). Filled as
+/// the picked status chip is.
 pub fn removable_chip<'a, Message: Clone + 'a>(
     label: String,
     detail: Option<String>,
@@ -112,7 +114,7 @@ pub fn removable_chip<'a, Message: Clone + 'a>(
         28.0,
         Padding::new(0.0).left(12).right(8),
         tokens.text,
-        true,
+        Some(tokens.selection_tint),
         tokens,
         on_remove,
     )
@@ -170,7 +172,8 @@ fn chip<'a, Message: Clone + 'a>(
     height: f32,
     padding: Padding,
     fg: Color,
-    on: bool,
+    // The fill of a chip that is on.
+    on: Option<Color>,
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
@@ -184,8 +187,8 @@ fn chip<'a, Message: Clone + 'a>(
     .padding(padding)
     .on_press(on_press)
     .style(move |_, status| {
-        let background = if on {
-            Some(tokens.selection)
+        let background = if on.is_some() {
+            on
         } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
             Some(tokens.hover)
         } else {
@@ -197,7 +200,7 @@ fn chip<'a, Message: Clone + 'a>(
             border: Border::default()
                 .rounded(height / 2.0)
                 .width(1)
-                .color(if on { tokens.selection } else { tokens.line }),
+                .color(on.unwrap_or(tokens.line)),
             ..button::Style::default()
         }
     })

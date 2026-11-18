@@ -1303,7 +1303,7 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
             move |_, status| text_editor::Style {
                 background: Background::Color(tokens.field),
                 border: Border::default().rounded(8).width(1).color(match status {
-                    text_editor::Status::Focused { .. } => tokens.ink,
+                    text_editor::Status::Focused { .. } => tokens.accent,
                     _ => tokens.line,
                 }),
                 placeholder: tokens.sub,
@@ -1771,7 +1771,7 @@ fn hinted_button<'a>(
 ) -> Element<'a, AppMessage> {
     let tokens = *tokens;
     let (fill, fg, border) = match kind {
-        ButtonKind::Primary => (Some(tokens.accent), tokens.on_accent, None),
+        ButtonKind::Primary => (Some(tokens.tint), tokens.on_accent, None),
         _ => (None, tokens.text, Some(tokens.line)),
     };
     let disabled = on_press.is_none();

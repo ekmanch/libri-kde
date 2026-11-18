@@ -850,7 +850,7 @@ fn list<'a>(
                 column![
                     entries::bar_header(
                         &group.name(app.today),
-                        tokens.ink,
+                        tokens.accent,
                         tokens.text,
                         group.rows.len(),
                         tokens
@@ -906,7 +906,7 @@ fn list<'a>(
         overlays.push(entries::pinned_bar(
             entries::bar_header(
                 &group.name(app.today),
-                tokens.ink,
+                tokens.accent,
                 tokens.text,
                 group.rows.len(),
                 tokens,
@@ -1768,7 +1768,7 @@ fn dot_row<'a>(
 pub fn preview<'a>(app: &'a App, found: &'a Found) -> Element<'a, AppMessage> {
     let tokens = app.tokens();
     let t = tokens;
-    let color = tokens.type_color(found.media);
+    let color = tokens.type_text(found.media);
     let kicker = format!("Upcoming · {}", crate::browse::kind_label_of(found.media)).to_uppercase();
     let mut heading = column![
         text(found.title.clone())
@@ -1865,7 +1865,7 @@ pub fn type_popover<'a>(app: &'a App, height: f32) -> Element<'a, AppMessage> {
         .filter(|row| state.types.is_empty() || state.types.contains(&row.entry.media))
         .collect();
     let (label, color) = match state.single() {
-        Some(media) => (media.label().to_owned(), tokens.type_color(media)),
+        Some(media) => (media.label().to_owned(), tokens.type_text(media)),
         None => (state.title(), t.sub),
     };
     let head = row![

@@ -30,15 +30,10 @@ fn msg(message: Message) -> AppMessage {
 pub fn view<'a>(app: &'a App, plan: &'a Plan) -> Element<'a, AppMessage> {
     // Inside a seasonal plan the season's color is the accent.
     let base = app.tokens();
-    let accent = plan_accent(app, plan, &base);
-    let tokens = Tokens {
-        accent,
-        ink: if super::shown_season(app, plan).is_some() {
-            accent
-        } else {
-            base.ink
-        },
-        ..base
+    let tokens = if super::shown_season(app, plan).is_some() {
+        base.with_accent(plan_accent(app, plan, &base))
+    } else {
+        base
     };
     let on_collection = matches!(app.plans.page, Page::Collection(_));
     let season = super::shown_season(app, plan);
@@ -533,7 +528,8 @@ fn two_columns(sections: Vec<Element<'_, AppMessage>>) -> Element<'_, AppMessage
     row![left, right].spacing(28).into()
 }
 
-/// A type's section: its name in its color with the count, then the rows.
+/// A type's section: its name with the count (in the type's color on the
+/// dark themes), then the rows.
 fn section<'a>(
     media: MediaType,
     count: String,
@@ -545,7 +541,7 @@ fn section<'a>(
         text(media.label())
             .size(18)
             .font(font::EXTRABOLD)
-            .color(tokens.type_color(media)),
+            .color(tokens.type_text(media)),
         ui::mono(count, 12.0, tokens.sub),
     ]
     .spacing(8)

@@ -73,7 +73,7 @@ pub fn section_header<'a, Message>(label: &str, tokens: &Tokens) -> Element<'a, 
         .into()
 }
 
-/// A link at the right end of a section header, in the accent ink with a
+/// A link at the right end of a section header, in the ink with a
 /// small chevron: "See all 12 ›", "All 29 ›", "Open ›", "More".
 pub fn header_link<'a, Message: Clone + 'a>(
     label: impl text::IntoFragment<'a>,
@@ -203,11 +203,47 @@ pub fn row_style(
     selected: bool,
     radius: f32,
 ) -> impl Fn(&iced::Theme, button::Status) -> button::Style + use<> {
+    row_fills(
+        tokens,
+        selected.then_some(tokens.selection),
+        tokens.hover,
+        radius,
+    )
+}
+
+/// A row of the sidebar: the picked fill when `selected` (the selection
+/// gray on the dark themes, a pale tint of the accent on Light). Light's
+/// two-tone chrome is the hover gray itself, so the hover there is the
+/// selection gray.
+pub fn sidebar_row_style(
+    tokens: &Tokens,
+    selected: bool,
+    radius: f32,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style + use<> {
+    let hover = if tokens.hover == tokens.chrome {
+        tokens.selection
+    } else {
+        tokens.hover
+    };
+    row_fills(
+        tokens,
+        selected.then_some(tokens.selection_tint),
+        hover,
+        radius,
+    )
+}
+
+fn row_fills(
+    tokens: &Tokens,
+    selected: Option<Color>,
+    hover: Color,
+    radius: f32,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style + use<> {
     let tokens = *tokens;
     move |_, status| {
         let background = match status {
-            _ if selected => Some(tokens.selection),
-            button::Status::Hovered | button::Status::Pressed => Some(tokens.hover),
+            _ if selected.is_some() => selected,
+            button::Status::Hovered | button::Status::Pressed => Some(hover),
             _ => None,
         };
         button::Style {
@@ -370,7 +406,7 @@ pub fn wide_button_keys<'a, Message: Clone + 'a>(
 /// The fill, text and border of a `ButtonKind`, for buttons built by hand.
 pub fn button_style(kind: ButtonKind, tokens: &Tokens, status: button::Status) -> button::Style {
     let (fill, text_color, border) = match kind {
-        ButtonKind::Primary => (Some(tokens.accent), tokens.on_accent, None),
+        ButtonKind::Primary => (Some(tokens.tint), tokens.on_accent, None),
         ButtonKind::Outline => (None, tokens.text, Some(tokens.line)),
         ButtonKind::Neutral => (Some(tokens.raised), tokens.text, None),
         ButtonKind::Destructive => (None, tokens.danger, Some(tokens.line)),
@@ -379,9 +415,11 @@ pub fn button_style(kind: ButtonKind, tokens: &Tokens, status: button::Status) -
         ButtonKind::NeutralDestructive => (Some(tokens.selection), tokens.danger, None),
     };
     let fill = match status {
-        button::Status::Hovered | button::Status::Pressed => {
-            Some(fill.map_or(tokens.hover, |c| c.scale_alpha(0.85)))
-        }
+        button::Status::Hovered | button::Status::Pressed => Some(match fill {
+            Some(_) if kind == ButtonKind::Primary => tokens.tint_hover(),
+            Some(color) => color.scale_alpha(0.85),
+            None => tokens.hover,
+        }),
         _ => fill,
     };
     let disabled = status == button::Status::Disabled;

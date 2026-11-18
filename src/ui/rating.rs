@@ -103,7 +103,7 @@ fn picker<'a, Message: Clone + 'a>(
             .on_press(on_pick(Some(n)))
             .style(move |_, status| {
                 let background = if on {
-                    Some(tokens.accent)
+                    Some(tokens.tint)
                 } else if matches!(status, button::Status::Hovered) {
                     Some(tokens.hover)
                 } else {

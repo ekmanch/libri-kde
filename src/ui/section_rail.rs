@@ -123,7 +123,7 @@ impl<'a, Message: Clone + 'a> SectionRail<'a, Message> {
             }
             let on = self.current == Some(index);
             let color = if on { tokens.on_accent } else { tokens.sub };
-            let (accent, hover) = (tokens.accent, tokens.hover);
+            let (accent, hover) = (tokens.tint, tokens.hover);
             children.push(
                 button(label(item, color))
                     .padding(0)

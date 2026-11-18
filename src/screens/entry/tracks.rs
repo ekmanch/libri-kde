@@ -429,7 +429,7 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
         .style(move |_, status| text_editor::Style {
             background: Background::Color(tokens.field),
             border: Border::default().rounded(8).width(1).color(match status {
-                text_editor::Status::Focused { .. } => tokens.ink,
+                text_editor::Status::Focused { .. } => tokens.accent,
                 _ => tokens.line,
             }),
             placeholder: tokens.sub,

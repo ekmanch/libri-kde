@@ -139,7 +139,7 @@ pub fn entry_card<'a, Message: Clone + 'a>(
             ..button::Style::default()
         }
     });
-    Focusable::new(card, tokens.ink, 8.0)
+    Focusable::new(card, tokens.accent, 8.0)
         .backed(look.menu.then_some(tokens.selection))
         .into()
 }
@@ -309,7 +309,7 @@ fn title_line<'a, Message: 'a>(
     line.into()
 }
 
-/// "New season", a small pill in the accent ink.
+/// "New season", a small pill in the ink.
 pub fn new_season_badge<'a, Message: 'a>(tokens: &Tokens) -> Element<'a, Message> {
     let tokens = *tokens;
     container(

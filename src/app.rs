@@ -3242,7 +3242,11 @@ mod tests {
         let _ = app.update(Message::SetAccent(violet));
         let tokens = app.tokens();
         assert!(tokens.light);
-        assert_eq!((tokens.accent, tokens.ink), (violet.fill, violet.ink));
+        // Light draws its own shade of the accent; the setting is the same.
+        assert_eq!(tokens.accent, violet.light);
+        assert_eq!(app.settings.accent, violet);
+        let _ = app.update(Message::SetTheme(ThemeChoice::Fixed(Theme::Graphite)));
+        assert_eq!(app.tokens().accent, violet.fill);
     }
 
     #[test]

@@ -21,7 +21,7 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
     let state = &app.library;
     let title_color = state
         .single()
-        .map_or(tokens.text, |media| tokens.type_color(media));
+        .map_or(tokens.text, |media| tokens.type_text(media));
     let placeholder = match state.single() {
         Some(media) => search_hint(media),
         None => "Search everything",

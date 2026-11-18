@@ -21,7 +21,7 @@ pub fn text_field<'a, Message: Clone + 'a>(
         .style(move |_, status| text_input::Style {
             background: Background::Color(tokens.field),
             border: Border::default().rounded(8).width(1).color(match status {
-                text_input::Status::Focused { .. } => tokens.ink,
+                text_input::Status::Focused { .. } => tokens.accent,
                 _ => tokens.line,
             }),
             icon: tokens.sub,

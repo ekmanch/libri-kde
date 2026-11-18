@@ -307,11 +307,11 @@ pub(super) fn section_header<'a>(
     .into()
 }
 
-/// A type group's heading: a bar and the type in its color, large, and
-/// the count.
+/// A type group's heading: a bar in the type's color, the type large (in
+/// its color on the dark themes, plain text on Light), and the count.
 fn group_header<'a>(media: MediaType, count: usize, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let color = tokens.type_color(media);
-    bar_header(media.label(), color, color, count, tokens)
+    let (bar, color) = (tokens.type_color(media), tokens.type_text(media));
+    bar_header(media.label(), bar, color, count, tokens)
 }
 
 /// A large group heading: a 4 px bar in `bar`, the label at 24 px

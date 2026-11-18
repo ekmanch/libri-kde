@@ -90,8 +90,30 @@ pub struct Label {
 }
 
 /// The image at `width` by `height`, cropped to fill and rounded by
-/// `radius`; the tinted placeholder with `label` until then.
+/// `radius`; the tinted placeholder with `label` until then. On Light a
+/// hairline lies over its edge (`theme::cover_edge`).
 pub fn cover<'a, Message: 'a>(
+    handle: Option<image::Handle>,
+    tint: Color,
+    width: impl Into<Length>,
+    height: impl Into<Length>,
+    radius: f32,
+    label: Option<Label>,
+) -> Element<'a, Message> {
+    // A layer over the cover, not the cover's own border: iced draws a
+    // container's border under its content, where the image hides it.
+    let edge = container(Space::new())
+        .width(Fill)
+        .height(Fill)
+        .style(move |theme| match crate::theme::cover_edge(theme) {
+            Some(color) => container::Style::default()
+                .border(Border::default().rounded(radius).width(1).color(color)),
+            None => container::Style::default(),
+        });
+    iced::widget::stack![face(handle, tint, width, height, radius, label), edge].into()
+}
+
+fn face<'a, Message: 'a>(
     handle: Option<image::Handle>,
     tint: Color,
     width: impl Into<Length>,

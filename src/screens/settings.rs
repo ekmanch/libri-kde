@@ -488,7 +488,7 @@ fn appearance<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             setting("Type checkboxes", box_help.into(), type_boxes, tokens),
             setting(
                 "Accent color",
-                "Buttons, progress, selection and the pinned-tag marks. Text and icons on the accent are always plain black.".into(),
+                "Buttons, progress, selection and the pinned-tag marks. The light theme uses a stronger shade of each color, and a soft tint of it on buttons and selected items.".into(),
                 accents,
                 tokens,
             ),
@@ -673,7 +673,7 @@ fn accent_group<'a>(
     let swatches = accents.iter().map(|&accent| {
         let tokens = *tokens;
         let on = accent == current;
-        let color = accent.for_theme(theme).fill;
+        let color = accent.shown(theme);
         let disc = container(space()).width(30).height(30).style(move |_| {
             let mut style = container::background(color).border(Border::default().rounded(15));
             if tokens.light {
@@ -1280,13 +1280,13 @@ fn pill<'a>(
     .on_press(msg(Message::Platform(platform.map(str::to_owned))))
     .style(move |_, status| button::Style {
         background: match status {
-            _ if on => Some(Background::Color(tokens.accent)),
+            _ if on => Some(Background::Color(tokens.tint)),
             button::Status::Hovered => Some(Background::Color(tokens.hover)),
             _ => None,
         },
         text_color: if on { tokens.on_accent } else { tokens.sub },
         border: Border::default().rounded(16).width(1).color(if on {
-            tokens.accent
+            tokens.tint
         } else {
             tokens.line
         }),

@@ -61,59 +61,59 @@ impl Theme {
     }
 }
 
-/// An accent color: the fill used on both themes, and the darker ink used
-/// for accent text, icons and outlines on the light theme.
+/// An accent color: the value the dark themes draw, and the stronger
+/// shade the light theme draws in its place. The stored setting is the
+/// accent's name, the same on every theme.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Accent {
     pub name: &'static str,
     pub fill: Color,
-    pub ink: Color,
+    pub light: Color,
 }
 
 impl Accent {
-    /// The accent as `theme` shows it: with Catppuccin Mocha the default
-    /// Peach becomes Catppuccin's own peach.
-    pub fn for_theme(self, theme: Theme) -> Accent {
-        if theme == Theme::Mocha && self == PEACH {
-            Accent {
-                fill: hex(0xFAB387),
-                ink: hex(0xFAB387),
-                ..self
-            }
-        } else {
-            self
+    /// The color `theme` draws for this accent: the light value on Light,
+    /// and with Catppuccin Mocha the default Peach becomes Catppuccin's own
+    /// peach. The accent picker shows this, so its swatches follow the
+    /// theme.
+    pub fn shown(self, theme: Theme) -> Color {
+        match theme {
+            Theme::Light => self.light,
+            Theme::Mocha if self == PEACH => hex(0xFAB387),
+            _ => self.fill,
         }
     }
 }
 
-const fn accent(name: &'static str, fill: u32, ink: u32) -> Accent {
+const fn accent(name: &'static str, fill: u32, light: u32) -> Accent {
     Accent {
         name,
         fill: hex(fill),
-        ink: hex(ink),
+        light: hex(light),
     }
 }
 
 pub const VIVID: [Accent; 6] = [
-    accent("Peach", 0xF8B289, 0xC2521B),
-    accent("Violet", 0xA78BFA, 0x7C5CE0),
-    accent("Hot pink", 0xFF7AB6, 0xD6337F),
-    accent("Amber", 0xF2B544, 0xA36706),
-    accent("Green", 0x5EE08A, 0x15803D),
-    accent("Blue", 0x5AA9FF, 0x1D6FE0),
+    accent("Peach", 0xF8B289, 0xFF8A4C),
+    accent("Violet", 0xA78BFA, 0x8B5CF6),
+    accent("Hot pink", 0xFF7AB6, 0xF74F9E),
+    accent("Amber", 0xF2B544, 0xFFB300),
+    accent("Green", 0x5EE08A, 0x34C759),
+    accent("Blue", 0x5AA9FF, 0x0A84FF),
 ];
 
 pub const CATPPUCCIN: [Accent; 10] = [
-    accent("Beige", 0xF9E2AF, 0xA66706),
-    accent("Rosewater", 0xF5E0DC, 0xAD604F),
-    accent("Flamingo", 0xF2CDCD, 0xB85759),
-    accent("Pink", 0xF5C2E7, 0xBA4A9E),
+    // The light values are Catppuccin Latte's.
+    accent("Beige", 0xF9E2AF, 0xDF8E1D),
+    accent("Rosewater", 0xF5E0DC, 0xDC8A78),
+    accent("Flamingo", 0xF2CDCD, 0xDD7878),
+    accent("Pink", 0xF5C2E7, 0xEA76CB),
     accent("Red", 0xF38BA8, 0xD20F39),
     accent("Mauve", 0xCBA6F7, 0x8839EF),
-    accent("Lavender", 0xB4BEFE, 0x596ADD),
+    accent("Lavender", 0xB4BEFE, 0x7287FD),
     accent("Blue", 0x89B4FA, 0x1E66F5),
-    accent("Sky", 0x89DCEB, 0x017DAF),
-    accent("Green", 0xA6E3A1, 0x238700),
+    accent("Sky", 0x89DCEB, 0x04A5E5),
+    accent("Green", 0xA6E3A1, 0x40A02B),
 ];
 
 /// The default accent.
@@ -209,9 +209,10 @@ pub struct Tokens {
     pub text: Color,
     /// Secondary text and section headers.
     pub sub: Color,
-    /// The selected row or sidebar item. Never the accent.
+    /// The gray of a selection: segmented controls, the view switch, a
+    /// picked status in the details. Never the accent.
     pub selection: Color,
-    /// A hovered row.
+    /// A hovered row, and a selected row of a list.
     pub hover: Color,
     /// Progress and slider tracks.
     pub track: Color,
@@ -241,10 +242,25 @@ pub struct Tokens {
     /// its left.
     pub drawer: Color,
     pub drawer_shadow: Color,
+    /// The accent as this theme draws it. On Light it is for thin fills
+    /// alone: progress bars, toggles and focus outlines.
     pub accent: Color,
-    /// Accent text, icons and outlines.
+    /// Links and icons that stand out from the text ("See all", "Clear
+    /// all", a lone check mark): the accent on the dark themes, a dark gray
+    /// on Light, where no text is colored.
     pub ink: Color,
-    /// Text on an accent fill.
+    /// The "#" of a tag in the sidebar: the accent on the dark themes, a
+    /// mid gray on Light.
+    pub mark: Color,
+    /// The fill of a main button (Add, Save), the Filter button's count,
+    /// the index rail's current label and the picked rating: the accent
+    /// on the dark themes, a pale tint of it on Light.
+    pub tint: Color,
+    /// The fill of what is picked among its like: the status chip, an
+    /// active filter chip, the sidebar's row. The selection gray on the
+    /// dark themes, a pale tint of the accent on Light.
+    pub selection_tint: Color,
+    /// Text on an accent fill or on a tint.
     pub on_accent: Color,
     /// The green of a connected state, and its faint card fill.
     pub success: Color,
@@ -265,7 +281,7 @@ impl Tokens {
     /// The tokens for a theme and accent; `flat` uses one shade for the
     /// chrome and the content (docs/DESIGN.md section 8).
     pub fn styled(theme: Theme, accent: Accent, flat: bool) -> Tokens {
-        let accent = accent.for_theme(theme);
+        let accent = accent.shown(theme);
         let opaque = |colors: [u32; 7]| colors.map(hex);
         let [chrome, content, raised, field, line, text, sub] = match (theme, flat) {
             (Theme::Graphite, false) => opaque([
@@ -307,10 +323,10 @@ impl Tokens {
                 ]
             }
             (Theme::Light, false) => opaque([
-                0xF4F5F7, 0xFFFFFF, 0xE9EBEE, 0xFFFFFF, 0xD5D9DE, 0x17181B, 0x5B616B,
+                0xF4F5F7, 0xFFFFFF, 0xEEF0F2, 0xFFFFFF, 0xE1E4E8, 0x17181B, 0x5B616B,
             ]),
             (Theme::Light, true) => opaque([
-                0xFFFFFF, 0xFFFFFF, 0xE9EBEE, 0xFFFFFF, 0xD5D9DE, 0x17181B, 0x5B616B,
+                0xFFFFFF, 0xFFFFFF, 0xEEF0F2, 0xFFFFFF, 0xE1E4E8, 0x17181B, 0x5B616B,
             ]),
         };
         let light = theme.is_light();
@@ -326,6 +342,7 @@ impl Tokens {
         // Popovers and menus stay solid on Glass, so they read over the
         // glass they open on.
         let popover = pick(hex(0xFFFFFF), if glass { hex(0x26292D) } else { raised });
+        let selection = pick(hex(0xECEEF0), veil(0.13, mix_white(content, 0.14)));
         Tokens {
             theme,
             light,
@@ -336,11 +353,11 @@ impl Tokens {
             line,
             text,
             sub,
-            selection: pick(hex(0xE9EBEE), veil(0.13, mix_white(content, 0.14))),
-            hover: pick(hex(0xF1F2F4), veil(0.07, mix_white(content, 0.07))),
+            selection,
+            hover: pick(hex(0xF4F5F7), veil(0.07, mix_white(content, 0.07))),
             track: pick(hex(0xE3E5E9), veil(0.14, mix_white(content, 0.12))),
             popover,
-            picked: pick(hex(0xF1F2F4), mix_white(popover, 0.06)),
+            picked: pick(hex(0xF4F5F7), mix_white(popover, 0.06)),
             dialog: if glass {
                 hex(if flat { 0x151515 } else { 0x1D1F22 })
             } else {
@@ -384,29 +401,81 @@ impl Tokens {
                 Color::from_rgba8(20, 22, 28, 0.16),
                 Color::from_rgba8(0, 0, 0, 0.55),
             ),
-            accent: accent.fill,
-            ink: pick(accent.ink, accent.fill),
+            accent,
+            ink: accent,
+            mark: accent,
+            tint: accent,
+            selection_tint: selection,
             on_accent: pick(hex(0x17181B), hex(0x131416)),
+        }
+        .with_accent(accent)
+    }
+
+    /// These tokens with another accent: a seasonal plan draws in its
+    /// season's color. On Light the colors are fills and the text is
+    /// neutral (docs/DESIGN.md section 8), so only the fills follow the
+    /// accent there: the links and icons are a dark gray, the "#" marks a
+    /// mid gray, and buttons and picked items take a pale tint of it.
+    pub fn with_accent(self, accent: Color) -> Tokens {
+        let (ink, mark, tint, selection_tint) = if self.light {
+            (
+                hex(0x2F343B),
+                hex(0x9AA0A8),
+                mix_white(accent, 0.78),
+                mix_white(accent, 0.82),
+            )
+        } else {
+            (accent, accent, accent, self.selection)
+        };
+        Tokens {
+            accent,
+            ink,
+            mark,
+            tint,
+            selection_tint,
+            ..self
         }
     }
 
-    /// A type's color, for section headings, dots and labels: the Libri
-    /// set, the Catppuccin set with Catppuccin Mocha, and the light inks
-    /// (4.5:1 on white, except Movies, kept gold on purpose) with Light.
+    /// A main button's fill under the pointer: a little of what is behind
+    /// it on the dark themes, a stronger tint on Light, where a paler one
+    /// would fade into the page.
+    pub fn tint_hover(&self) -> Color {
+        if self.light {
+            mix_white(self.accent, 0.70)
+        } else {
+            self.tint.scale_alpha(0.85)
+        }
+    }
+
+    /// A type's color, for dots, bars and marks: the Libri set, the
+    /// Catppuccin set with Catppuccin Mocha, and a brighter set with
+    /// Light, where it is never the color of text (`type_text`).
     pub fn type_color(&self, media: MediaType) -> Color {
         let (libri, catppuccin, light) = match media {
-            MediaType::Movies => (0xF2B544, 0xF9E2AF, 0xA87C00),
-            MediaType::Shows => (0x7FB7FF, 0x89B4FA, 0x0074DC),
-            MediaType::Books => (0x8FD694, 0xA6E3A1, 0x01872C),
-            MediaType::Games => (0xFF8F7A, 0xFAB387, 0xD63A1F),
-            MediaType::Anime => (0xFF8CC1, 0xF5C2E7, 0xC8157E),
-            MediaType::Music => (0xC4A7FF, 0xCBA6F7, 0x7C3AED),
+            MediaType::Movies => (0xF2B544, 0xF9E2AF, 0xFFC400),
+            MediaType::Shows => (0x7FB7FF, 0x89B4FA, 0x0A84FF),
+            MediaType::Books => (0x8FD694, 0xA6E3A1, 0x34C759),
+            MediaType::Games => (0xFF8F7A, 0xFAB387, 0xFF5A4F),
+            MediaType::Anime => (0xFF8CC1, 0xF5C2E7, 0xF74F9E),
+            MediaType::Music => (0xC4A7FF, 0xCBA6F7, 0xAF52DE),
         };
         hex(match self.theme {
             Theme::Graphite | Theme::Charcoal | Theme::Glass => libri,
             Theme::Mocha => catppuccin,
             Theme::Light => light,
         })
+    }
+
+    /// The color of text that names a type: the page heading, "Movie"
+    /// above a title, a group's heading. The type's color on the dark
+    /// themes, the normal text color on Light.
+    pub fn type_text(&self, media: MediaType) -> Color {
+        if self.light {
+            self.text
+        } else {
+            self.type_color(media)
+        }
     }
 
     /// The iced theme behind the custom styles: the window background and
@@ -432,6 +501,14 @@ impl Tokens {
             },
         )
     }
+}
+
+/// The hairline just inside a cover's edge on Light, so a white cover
+/// does not dissolve into the page; nothing on the dark themes. Asked of
+/// the iced theme (`Tokens::iced_theme`), which every widget is handed as
+/// it is drawn, so a cover needs no tokens to draw it.
+pub fn cover_edge(theme: &iced::Theme) -> Option<Color> {
+    (!theme.extended_palette().is_dark).then_some(Color::from_rgba8(20, 22, 28, 0.10))
 }
 
 /// Mixes `color` toward white by `amount` (0 to 1), as the mockup's
@@ -592,12 +669,14 @@ mod tests {
     }
 
     /// The contrast check of phase 1g (docs/DESIGN.md section 10): body
-    /// and secondary text reach AA (4.5), the accent inks and the type
-    /// colors, used for labels and headings in SemiBold or larger, reach
-    /// 3, on the content and the chrome of every theme, two-tone and flat.
-    /// Glass is see-through, so its surfaces are checked over a mid gray,
-    /// about what a blurred wallpaper averages; over white the body text
-    /// would fall to 3.5 on the chrome, the price of glass.
+    /// and secondary text reach AA (4.5), the inks and the text that names
+    /// a type, used for labels and headings in SemiBold or larger, reach
+    /// 3, on the content and the chrome of every theme, two-tone and flat,
+    /// and the text on a main button and on a picked chip reaches 4.5.
+    /// Light's own type colors and accents are fills, never text, so they
+    /// are not checked. Glass is see-through, so its surfaces are checked
+    /// over a mid gray, about what a blurred wallpaper averages; over white
+    /// the body text would fall to 3.5 on the chrome, the price of glass.
     #[test]
     fn inks_and_type_colors_read_on_every_theme() {
         let mut table = String::new();
@@ -619,7 +698,7 @@ mod tests {
                     check(format!("{name} sub on {surface}"), tokens.sub, bg, 4.5);
                     for media in MediaType::ALL {
                         let what = format!("{name} {} on {surface}", media.label());
-                        check(what, tokens.type_color(media), bg, 3.0);
+                        check(what, tokens.type_text(media), bg, 3.0);
                     }
                     for accent in VIVID.iter().chain(&CATPPUCCIN) {
                         let ink = Tokens::styled(theme, *accent, flat).ink;
@@ -634,9 +713,15 @@ mod tests {
                 for accent in VIVID.iter().chain(&CATPPUCCIN) {
                     let t = Tokens::styled(theme, *accent, flat);
                     check(
-                        format!("{name} text on {} fill", accent.name),
+                        format!("{name} text on {} button", accent.name),
                         t.on_accent,
-                        t.accent,
+                        t.tint,
+                        4.5,
+                    );
+                    check(
+                        format!("{name} text on {} chip", accent.name),
+                        t.text,
+                        over(t.selection_tint, over(t.content, WALLPAPER)),
                         4.5,
                     );
                 }
@@ -670,7 +755,7 @@ mod tests {
         // mixWhite("#1D1F22", 0.14) in the mockup.
         let graphite = Tokens::new(Theme::Graphite, PEACH);
         assert_eq!(graphite.selection.into_rgba8(), [0x3D, 0x3E, 0x41, 0xFF]);
-        assert_eq!(Tokens::new(Theme::Light, PEACH).selection, hex(0xE9EBEE));
+        assert_eq!(Tokens::new(Theme::Light, PEACH).selection, hex(0xECEEF0));
     }
 
     #[test]
@@ -722,10 +807,63 @@ mod tests {
         assert_eq!(mix_white(glass.content, 0.1).a, 0.72);
     }
 
+    /// The dark themes draw everything in the accent itself; they did
+    /// not change with Light's rework.
     #[test]
-    fn the_ink_is_the_fill_on_dark_and_the_darker_ink_on_light() {
-        assert_eq!(Tokens::new(Theme::Graphite, PEACH).ink, PEACH.fill);
-        assert_eq!(Tokens::new(Theme::Light, PEACH).ink, PEACH.ink);
+    fn the_dark_themes_draw_the_accent_itself() {
+        for theme in [Theme::Graphite, Theme::Charcoal, Theme::Glass] {
+            let t = Tokens::new(theme, PEACH);
+            assert_eq!([t.accent, t.ink, t.mark, t.tint], [PEACH.fill; 4]);
+            assert_eq!(t.selection_tint, t.selection);
+            assert_eq!(cover_edge(&t.iced_theme()), None);
+            assert_eq!(t.type_text(MediaType::Books), hex(0x8FD694));
+        }
+    }
+
+    /// Light (2026-11-18): colors are fills and text is neutral. Each
+    /// accent has its own value there, links and icons are a dark gray,
+    /// the "#" marks a mid gray, and buttons and picked items take a pale
+    /// tint of the accent, as the mockup mixes them (`mixWhite` at 0.78
+    /// and 0.82).
+    #[test]
+    fn light_draws_colors_as_fills_and_text_neutral() {
+        let light = Tokens::new(Theme::Light, PEACH);
+        assert_eq!(light.accent, hex(0xFF8A4C));
+        assert_eq!(light.ink, hex(0x2F343B));
+        assert_eq!(light.mark, hex(0x9AA0A8));
+        assert_eq!(light.tint.into_rgba8(), [0xFF, 0xE5, 0xD8, 0xFF]);
+        assert_eq!(light.selection_tint.into_rgba8(), [0xFF, 0xEA, 0xDF, 0xFF]);
+        assert_eq!(light.on_accent, light.text);
+        assert_eq!(
+            [light.line, light.raised, light.selection, light.hover],
+            [hex(0xE1E4E8), hex(0xEEF0F2), hex(0xECEEF0), hex(0xF4F5F7)]
+        );
+        assert_eq!(
+            cover_edge(&light.iced_theme()),
+            Some(Color::from_rgba8(20, 22, 28, 0.10))
+        );
+        for theme in [Theme::Mocha, Theme::Glass] {
+            assert_eq!(cover_edge(&Tokens::new(theme, PEACH).iced_theme()), None);
+        }
+        for media in MediaType::ALL {
+            assert_eq!(light.type_text(media), light.text);
+        }
+        assert_eq!(light.type_color(MediaType::Games), hex(0xFF5A4F));
+        let latte = Tokens::new(Theme::Light, CATPPUCCIN[8]);
+        assert_eq!((latte.accent, latte.ink), (hex(0x04A5E5), hex(0x2F343B)));
+    }
+
+    /// A seasonal plan's color replaces the accent: everything on the
+    /// dark themes, the fills and the tints alone on Light.
+    #[test]
+    fn a_seasons_color_takes_the_accents_place() {
+        let dark = Tokens::new(Theme::Graphite, PEACH).with_accent(HALLOWEEN);
+        assert_eq!([dark.accent, dark.ink, dark.tint], [HALLOWEEN; 3]);
+        let light = Tokens::new(Theme::Light, PEACH).with_accent(HALLOWEEN);
+        assert_eq!(light.accent, HALLOWEEN);
+        assert_eq!(light.ink, hex(0x2F343B));
+        assert_eq!(light.tint, mix_white(HALLOWEEN, 0.78));
+        assert_eq!(light.selection_tint, mix_white(HALLOWEEN, 0.82));
     }
 
     #[test]
@@ -735,13 +873,14 @@ mod tests {
         assert_eq!(movies(Theme::Charcoal), hex(0xF2B544));
         assert_eq!(movies(Theme::Glass), hex(0xF2B544));
         assert_eq!(movies(Theme::Mocha), hex(0xF9E2AF));
-        assert_eq!(movies(Theme::Light), hex(0xA87C00));
+        assert_eq!(movies(Theme::Light), hex(0xFFC400));
     }
 
     #[test]
     fn catppuccin_mocha_turns_the_default_peach_into_catppuccin_peach() {
         let mocha = Tokens::new(Theme::Mocha, PEACH);
         assert_eq!((mocha.accent, mocha.ink), (hex(0xFAB387), hex(0xFAB387)));
+        assert_eq!(PEACH.shown(Theme::Light), hex(0xFF8A4C));
         assert_eq!(Tokens::new(Theme::Graphite, PEACH).accent, PEACH.fill);
         assert_eq!(Tokens::new(Theme::Mocha, VIVID[1]).accent, VIVID[1].fill);
     }

@@ -306,7 +306,7 @@ fn shelf_cover<'a>(
     let marked = app.library.menu_on_entry(&entry.id);
     super::menu::area(
         super::menu::Target::Entry(entry.id.clone()),
-        ui::Focusable::new(cover, tokens.ink, 8.0).backed(marked.then_some(tokens.selection)),
+        ui::Focusable::new(cover, tokens.accent, 8.0).backed(marked.then_some(tokens.selection)),
     )
 }
 
@@ -396,10 +396,15 @@ pub(super) fn overview_row<'a>(
                     4.0,
                 ))
                 .push(
-                    column![title, text(browse::kind_label(entry)).size(12).color(color)]
-                        .spacing(2)
-                        .width(Fill)
-                        .clip(true),
+                    column![
+                        title,
+                        text(browse::kind_label(entry))
+                            .size(12)
+                            .color(tokens.type_text(entry.media))
+                    ]
+                    .spacing(2)
+                    .width(Fill)
+                    .clip(true),
                 )
         }
     };

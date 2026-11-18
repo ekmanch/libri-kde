@@ -234,7 +234,7 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
                 .width(Fill)
                 .padding([7, 10])
                 .on_press(Message::Plans(plans::Message::ShowPlan(plan.id.clone())))
-                .style(ui::row_style(tokens, selected, 8.0))
+                .style(ui::sidebar_row_style(tokens, selected, 8.0))
                 .focusable(8.0, tokens),
         );
     }
@@ -284,7 +284,13 @@ fn tags<'a>(app: &'a App, mut items: Column<'a, Message>, tokens: &Tokens) -> Co
     for (tag, count) in sidebar_tags {
         let selected = on_library && state.filter.tags.iter().any(|t| t == tag);
         let row = row![
-            container(text("#").size(13).font(font::MONO_MEDIUM).color(tokens.ink)).width(9),
+            container(
+                text("#")
+                    .size(13)
+                    .font(font::MONO_MEDIUM)
+                    .color(tokens.mark)
+            )
+            .width(9),
             item_label(tag, selected, tokens),
             ui::mono(count.to_string(), 12.0, tokens.sub),
         ];
@@ -363,7 +369,7 @@ fn item<'a>(
         .height(height)
         .padding([0, 10])
         .on_press(on_press)
-        .style(ui::row_style(tokens, selected, 8.0))
+        .style(ui::sidebar_row_style(tokens, selected, 8.0))
         .focusable(8.0, tokens)
 }
 
@@ -388,7 +394,7 @@ fn more_row<'a>(
         .height(32)
         .padding([0, 10])
         .on_press_maybe(on_press)
-        .style(ui::row_style(tokens, selected, 8.0))
+        .style(ui::sidebar_row_style(tokens, selected, 8.0))
         .focusable(8.0, tokens)
 }
 
@@ -767,7 +773,7 @@ fn sync_row<'a>(app: &App, tokens: &Tokens) -> Element<'a, Message> {
             .height(26)
             .padding(0)
             .on_press(Message::Show(Screen::Settings))
-            .style(ui::row_style(tokens, on_settings, 8.0))
+            .style(ui::sidebar_row_style(tokens, on_settings, 8.0))
             .focusable(8.0, tokens),
     );
     let mut content = column![line];

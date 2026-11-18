@@ -8,7 +8,7 @@ use super::{FocusExt, Icon, icon};
 use crate::theme::{Tokens, font};
 
 /// A 36 px outlined button that opens a popover: an optional icon, the
-/// content, an optional accent badge with a number, and a chevron. The
+/// content, an optional badge with a number in the main buttons' fill, and a chevron. The
 /// selection gray while `active` (open, or filtering).
 pub fn menu_button<'a, Message: Clone + 'a>(
     leading: Option<Icon>,
@@ -36,7 +36,7 @@ pub fn menu_button<'a, Message: Clone + 'a>(
             .padding([0, 5])
             .center_y(18)
             .style(move |_| {
-                container::background(tokens.accent).border(Border::default().rounded(9))
+                container::background(tokens.tint).border(Border::default().rounded(9))
             }),
         );
     }
@@ -102,7 +102,7 @@ pub fn icon_switch<'a, Message: Clone + 'a>(
         .into()
 }
 
-/// The accent "Add" button with a plus.
+/// The "Add" button with a plus, in the main buttons' fill.
 pub fn add_button<'a, Message: Clone + 'a>(
     label: &'a str,
     tokens: &Tokens,
@@ -122,9 +122,9 @@ pub fn add_button<'a, Message: Clone + 'a>(
         .style(move |_, status| button::Style {
             background: Some(Background::Color(
                 if matches!(status, button::Status::Hovered) {
-                    tokens.accent.scale_alpha(0.85)
+                    tokens.tint_hover()
                 } else {
-                    tokens.accent
+                    tokens.tint
                 },
             )),
             text_color: tokens.on_accent,

@@ -126,7 +126,7 @@ pub fn view<'a>(app: &'a App, open: &OpenSeries) -> Option<Element<'a, AppMessag
         ui::mono(
             format!("Series · {}", open.media.label()).to_uppercase(),
             11.0,
-            tokens.type_color(open.media)
+            tokens.type_text(open.media)
         ),
         text(name.clone()).size(24).font(font::EXTRABOLD),
         text(format!("{} {noun}{span}", rows.len()))

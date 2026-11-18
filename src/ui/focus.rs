@@ -1,7 +1,7 @@
 //! Keyboard focus for buttons, chips and rows, which iced 0.14 gives to
 //! text fields alone. `Focusable` wraps a widget: Tab and Shift+Tab reach
 //! it through iced's focus operations, Enter and Space press it, and a
-//! ring in the accent ink shows where focus is once it moved by keyboard.
+//! ring in the accent shows where focus is once it moved by keyboard.
 //! A click moves focus silently, so Tab goes on from the clicked widget
 //! without a ring or a second press on Enter.
 //!
@@ -62,7 +62,7 @@ impl<'a, Message, Theme, Renderer> Focusable<'a, Message, Theme, Renderer> {
 }
 
 /// `.focusable(radius, tokens)` on any widget: wraps it in a `Focusable`
-/// with the ring in the accent ink.
+/// with the ring in the accent.
 pub trait FocusExt<'a, Message> {
     fn focusable(self, radius: f32, tokens: &Tokens) -> Element<'a, Message>;
     /// The ring just inside the bounds, for a widget its parent clips.
@@ -71,11 +71,11 @@ pub trait FocusExt<'a, Message> {
 
 impl<'a, Message: 'a, T: Into<Element<'a, Message>>> FocusExt<'a, Message> for T {
     fn focusable(self, radius: f32, tokens: &Tokens) -> Element<'a, Message> {
-        Focusable::new(self, tokens.ink, radius).into()
+        Focusable::new(self, tokens.accent, radius).into()
     }
 
     fn focusable_inside(self, radius: f32, tokens: &Tokens) -> Element<'a, Message> {
-        Focusable::new(self, tokens.ink, radius).inside().into()
+        Focusable::new(self, tokens.accent, radius).inside().into()
     }
 }
 

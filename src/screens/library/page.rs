@@ -49,7 +49,7 @@ pub fn view<'a>(
             (
                 type_label(),
                 kind_kicker(entry),
-                tokens.type_color(entry.media),
+                tokens.type_text(entry.media),
                 entry.title.clone(),
                 text(format!("{} · {years}", entry.season_count_label()))
                     .size(14)
@@ -101,7 +101,7 @@ pub fn view<'a>(
             (
                 entry.title.clone(),
                 entry.title.clone(),
-                tokens.type_color(entry.media),
+                tokens.type_text(entry.media),
                 season.name(),
                 line,
                 body,

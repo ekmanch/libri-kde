@@ -212,7 +212,7 @@ fn build<'a>(
     let tokens = app.tokens();
     let inner = (width - 2.0 * PAD).max(INNER);
     let id = || entry.id.clone();
-    let color = tokens.type_color(entry.media);
+    let color = tokens.type_text(entry.media);
     let pop = app.library.details_pop.as_ref();
     let today = app.today;
     let mut fixed = 0.0;
@@ -856,7 +856,7 @@ fn note_section<'a>(
             .style(move |_, status| text_editor::Style {
                 background: Background::Color(t.field),
                 border: Border::default().rounded(8).width(1).color(match status {
-                    text_editor::Status::Focused { .. } => t.ink,
+                    text_editor::Status::Focused { .. } => t.accent,
                     _ => t.line,
                 }),
                 placeholder: t.sub,
@@ -1087,7 +1087,7 @@ fn in_plan<'a>(
                 plans::shown_month(app),
                 item.when,
                 app.today,
-                tokens.accent,
+                tokens.tint,
                 tokens.on_accent,
                 |day| AppMessage::Plans(plans::Message::PickDay(day)),
                 |by| AppMessage::Plans(plans::Message::Month(by)),

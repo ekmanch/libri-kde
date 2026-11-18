@@ -248,7 +248,7 @@ pub fn song_card<'a, Message: Clone + 'a>(
             text_color,
             ..button::Style::default()
         });
-    Focusable::new(card, tokens.ink, 8.0)
+    Focusable::new(card, tokens.accent, 8.0)
         .backed(look.menu.then_some(tokens.selection))
         .into()
 }
