@@ -151,21 +151,94 @@ fn face<'a, Message: 'a>(
                     .into(),
                 None => Space::new().into(),
             };
-            let mut placeholder = container(face)
+            // The mockup's placeholder: the title's color with a fade to
+            // dark over its lower half, which keeps the white words
+            // readable, and a highlight from the top left over that.
+            let base = container(Space::new())
                 .width(width)
                 .height(height)
+                .style(move |_| container::Style {
+                    background: Some(fade(tint)),
+                    border: Border::default().rounded(radius),
+                    ..container::Style::default()
+                });
+            let highlight = Image::new(highlight())
+                .width(Fill)
+                .height(Fill)
+                .content_fit(ContentFit::Fill)
+                .border_radius(radius);
+            let mut words = container(face)
+                .width(Fill)
+                .height(Fill)
                 .padding(padding)
                 .align_y(align)
-                .clip(true)
-                .style(move |_| {
-                    container::background(tint).border(Border::default().rounded(radius))
-                });
+                .clip(true);
             if centered {
-                placeholder = placeholder.align_x(iced::alignment::Horizontal::Center);
+                words = words.align_x(iced::alignment::Horizontal::Center);
             }
-            placeholder.into()
+            iced::widget::stack![base, highlight, words].into()
         }
     }
+}
+
+/// How dark a placeholder is at its bottom edge, and where the fade to
+/// it starts: the mockup's `linear-gradient(180deg, rgba(0,0,0,0) 45%,
+/// rgba(0,0,0,0.42) 100%)`.
+const FADE: f32 = 0.42;
+const FADE_FROM: f32 = 0.45;
+
+/// A placeholder's fill: `tint`, darkening over its lower half. The
+/// black is mixed into the tint here, so one gradient is the color and
+/// the fade.
+fn fade(tint: Color) -> iced::Background {
+    let dark = Color {
+        r: tint.r * (1.0 - FADE),
+        g: tint.g * (1.0 - FADE),
+        b: tint.b * (1.0 - FADE),
+        a: tint.a,
+    };
+    iced::gradient::Linear::new(iced::Radians::PI)
+        .add_stop(0.0, tint)
+        .add_stop(FADE_FROM, tint)
+        .add_stop(1.0, dark)
+        .into()
+}
+
+/// The highlight's strength at its center, and how far along the
+/// ellipse's radius it reaches.
+const HIGHLIGHT: f32 = 0.16;
+const HIGHLIGHT_REACH: f32 = 0.6;
+
+/// The highlight's strength at a point of the cover, both coordinates 0
+/// to 1: the mockup's `radial-gradient(130% 70% at 20% 0%,
+/// rgba(255,255,255,0.16), rgba(255,255,255,0) 60%)`, an ellipse 130 %
+/// of the width by 70 % of the height around a point on the top edge, a
+/// fifth of the way in.
+fn highlight_at(x: f32, y: f32) -> f32 {
+    let distance = (((x - 0.2) / 1.3).powi(2) + (y / 0.7).powi(2)).sqrt();
+    HIGHLIGHT * (1.0 - distance / HIGHLIGHT_REACH).max(0.0)
+}
+
+/// The highlight as a picture, stretched over a placeholder of any
+/// shape: iced 0.14 draws linear gradients only, and the highlight is
+/// radial. Its measures are all shares of the cover's own, so one small
+/// picture of white at the strengths of `highlight_at` is the gradient
+/// for every size; made once.
+fn highlight() -> image::Handle {
+    static HANDLE: std::sync::OnceLock<image::Handle> = std::sync::OnceLock::new();
+    const SIDE: u32 = 96;
+    HANDLE
+        .get_or_init(|| {
+            let at = |i: u32| (i as f32 + 0.5) / SIDE as f32;
+            let pixels: Vec<u8> = (0..SIDE * SIDE)
+                .flat_map(|i| {
+                    let alpha = highlight_at(at(i % SIDE), at(i / SIDE));
+                    [255, 255, 255, (alpha * 255.0).round() as u8]
+                })
+                .collect();
+            image::Handle::from_rgba(SIDE, SIDE, pixels)
+        })
+        .clone()
 }
 
 /// A plain tinted box without words, or the image.
@@ -422,4 +495,42 @@ pub fn upload_tile<'a, Message: Clone + 'a>(
         ..button::Style::default()
     })
     .focusable(8.0 + RING, &tokens)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The placeholder's highlight is the mockup's radial gradient: 16 %
+    /// white at the top edge a fifth of the way in, gone at 60 % of an
+    /// ellipse 130 % of the width by 70 % of the height.
+    #[test]
+    fn the_highlight_is_the_mockups_radial_gradient() {
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        assert!(close(highlight_at(0.2, 0.0), 0.16));
+        // Halfway to its end: straight down, 0.3 × 0.7 of the height.
+        assert!(close(highlight_at(0.2, 0.21), 0.08));
+        // Its end: 0.6 × 0.7 down, and 0.6 × 1.3 to the right.
+        assert!(close(highlight_at(0.2, 0.42), 0.0));
+        assert!(close(highlight_at(0.98, 0.0), 0.0));
+        assert_eq!(highlight_at(0.5, 0.9), 0.0);
+        // The top right corner is still inside it, faintly.
+        assert!(highlight_at(1.0, 0.0) == 0.0 && highlight_at(0.9, 0.0) > 0.0);
+    }
+
+    /// The fade keeps the title's color down to 45 % and ends 42 % toward
+    /// black.
+    #[test]
+    fn the_fade_darkens_the_lower_half() {
+        let tint = Color::from_rgb8(0x4B, 0x5F, 0x8A);
+        let iced::Background::Gradient(iced::Gradient::Linear(linear)) = fade(tint) else {
+            panic!("a linear gradient");
+        };
+        let stops: Vec<_> = linear.stops.iter().flatten().collect();
+        assert_eq!(stops.len(), 3);
+        assert_eq!((stops[0].offset, stops[0].color), (0.0, tint));
+        assert_eq!((stops[1].offset, stops[1].color), (0.45, tint));
+        assert_eq!(stops[2].offset, 1.0);
+        assert_eq!(stops[2].color.into_rgba8(), [0x2C, 0x37, 0x50, 0xFF]);
+    }
 }
