@@ -277,6 +277,11 @@ impl Keymap {
         !self.changed.is_empty()
     }
 
+    /// How many shortcuts are not their default.
+    pub fn changed_count(&self) -> usize {
+        self.changed.len()
+    }
+
     /// Gives `action` the keys `combo`, or says why not: a key that
     /// types ([`PLAIN_REFUSED`]), or "Ctrl+K is already used by “Search”."
     pub fn bind(&mut self, action: Action, combo: Combo) -> Result<(), String> {

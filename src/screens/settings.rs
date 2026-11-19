@@ -1,5 +1,6 @@
 //! Settings (docs/DESIGN.md 4.5): Appearance, Library source, Plans,
-//! Games, Keyboard and mouse, and About, with an "On this page" rail. Changes apply right away; they
+//! Games, Keyboard and mouse (a row that opens the shortcuts' window), and
+//! About, with an "On this page" rail. Changes apply right away; they
 //! are app state until phase 2 saves them.
 
 use iced::alignment::Vertical;
@@ -12,7 +13,7 @@ use super::library::SidebarTags;
 use super::setup;
 use super::shell::shell;
 use crate::app::{App, Message as AppMessage};
-use crate::keymap::{Action, Combo};
+use crate::keymap::{Action, Combo, Keymap};
 use crate::model::MediaType;
 use crate::settings::{Missing, PLATFORMS, SyncState, ThemeChoice};
 use crate::theme::{self, Accent, Theme, Tokens, font};
@@ -45,6 +46,8 @@ pub struct State {
     /// pressed for it were refused.
     pub recording: Option<Action>,
     pub key_warning: Option<String>,
+    /// The Keyboard and mouse window, which lists every shortcut.
+    pub keys_open: bool,
     /// Your covers: the check for online covers and the unused files.
     pub covers: super::your_covers::State,
 }
@@ -112,6 +115,11 @@ pub enum Message {
     Timeline(bool),
     Seasonal(bool),
     Platform(Option<String>),
+    /// "Show shortcuts": the Keyboard and mouse window.
+    OpenKeys,
+    /// Its Done or a click beside it; a shortcut waiting for keys stops
+    /// waiting.
+    CloseKeys,
     /// A shortcut's keys clicked: waits for new ones, or stops waiting.
     Record(Action),
     /// The keys pressed while waiting: Esc alone cancels.
@@ -201,6 +209,12 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::Timeline(on) => app.settings.timeline = on,
         Message::Seasonal(on) => app.settings.seasonal = on,
         Message::Platform(platform) => app.settings.platform = platform,
+        Message::OpenKeys => page.keys_open = true,
+        Message::CloseKeys => {
+            page.keys_open = false;
+            page.recording = None;
+            page.key_warning = None;
+        }
         Message::Record(action) => {
             page.recording = (page.recording != Some(action)).then_some(action);
             page.key_warning = None;
@@ -268,7 +282,8 @@ fn reconnect(app: &mut App, step: setup::Step) -> Task<AppMessage> {
 }
 
 /// Esc: closes the licenses or the Disconnect dialog, or stops waiting
-/// for a shortcut's keys. False when none of them was open.
+/// for a shortcut's keys, and closes the Keyboard and mouse window only
+/// when no shortcut was waiting. False when none of them was open.
 pub fn dismiss_top(app: &mut App) -> bool {
     let page = &mut app.settings_page;
     page.key_warning = None;
@@ -276,6 +291,7 @@ pub fn dismiss_top(app: &mut App) -> bool {
         || super::your_covers::dismiss(&mut page.covers)
         || page.disconnect.take().is_some()
         || page.recording.take().is_some()
+        || std::mem::take(&mut page.keys_open)
 }
 
 pub fn view(app: &App) -> Element<'_, AppMessage> {
@@ -326,6 +342,7 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
         None if page.licenses_open => (Some(licenses_dialog(&tokens)), msg(Message::CloseLicenses)),
         None => match super::your_covers::dialog(app, &tokens) {
             Some((dialog, close)) => (Some(dialog), close),
+            None if page.keys_open => (Some(keys_dialog(app, &tokens)), msg(Message::CloseKeys)),
             None => (None, msg(Message::CloseDisconnect)),
         },
     };
@@ -1130,9 +1147,60 @@ const MOUSE: [(&str, &str); 13] = [
     ("Music: switch tab", "Side-scroll or Shift+wheel"),
 ];
 
-/// Keyboard and mouse: every shortcut, changed by clicking its keys and
-/// pressing new ones; the mouse's actions read-only.
+/// "11 keyboard shortcuts, 1 changed · 13 mouse actions": the row's line,
+/// the changed part only when a shortcut is changed.
+pub fn keys_summary(keymap: &Keymap) -> String {
+    let changed = match keymap.changed_count() {
+        0 => String::new(),
+        n => format!(", {n} changed"),
+    };
+    format!(
+        "{} keyboard shortcuts{changed} · {} mouse actions",
+        Action::ALL.len(),
+        MOUSE.len()
+    )
+}
+
+/// Keyboard and mouse: one row with the count of shortcuts and the button
+/// that opens their window.
 fn keys<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let show = ui::sized_button(
+        "Show shortcuts",
+        ButtonKind::Outline,
+        32.0,
+        *tokens,
+        Some(msg(Message::OpenKeys)),
+    );
+    section(
+        "Keyboard and mouse",
+        vec![setting(
+            "Shortcuts",
+            "Typing in the main window starts a search. Everything else is listed in its own \
+             window, where the keyboard shortcuts can be changed."
+                .into(),
+            super::your_covers::group_row(
+                "Keyboard and mouse shortcuts",
+                keys_summary(&app.keymap),
+                Some(show),
+                tokens,
+            ),
+            tokens,
+        )],
+        22.0,
+        0.0,
+        44.0,
+    )
+}
+
+/// The dialog's width, and the most its two lists take before they scroll
+/// (the mockup's 800 px less the title, Done and the padding).
+const KEYS_WIDTH: f32 = 1120.0;
+const KEYS_LISTS_MAX_H: f32 = 658.0;
+
+/// The Keyboard and mouse window: every shortcut on the left, changed by
+/// clicking its keys and pressing new ones; the mouse's actions, read-only,
+/// on the right.
+fn keys_dialog<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let page = &app.settings_page;
     let t = *tokens;
     let line = move || ui::rule(t.line);
@@ -1233,32 +1301,60 @@ fn keys<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
         reset
     ]
     .align_y(Center);
+    let head = |name: &'a str, help: &[&'a str]| {
+        help.iter()
+            .fold(
+                column![text(name).size(14.5).font(font::SEMIBOLD)],
+                |words, help| words.push(text(*help).size(13).line_height(1.45).color(t.sub)),
+            )
+            .spacing(4)
+            .padding(Padding::new(0.0).bottom(10))
+    };
+    let keyboard = column![
+        head(
+            "Keyboard",
+            &[
+                "Click a shortcut, then press the new keys. Esc cancels.",
+                "Typing in the main window starts a search, so a shortcut needs Ctrl or Alt. \
+                 Keys that type nothing (arrows, Esc, F-keys) also work alone or with Shift.",
+            ],
+        ),
+        typing,
+        shortcuts.width(Fill)
+    ]
+    .width(Fill);
+    let mouse = column![
+        head(
+            "Mouse",
+            &["These follow the usual KDE conventions and can’t be changed."],
+        ),
+        mouse.width(Fill)
+    ]
+    .width(Fill);
+    // The right padding keeps the scroller off the key caps.
+    let lists = container(row![keyboard, mouse].spacing(40).align_y(Vertical::Top))
+        .padding(Padding::new(0.0).right(10));
+    let max_height = (app.window.height - 220.0).clamp(200.0, KEYS_LISTS_MAX_H);
+    let footer = row![
+        space::horizontal(),
+        ui::labeled_button(
+            "Done",
+            ButtonKind::Primary,
+            *tokens,
+            Some(msg(Message::CloseKeys))
+        ),
+    ];
     container(
         column![
             title,
-            setting_notes(
-                "Keyboard",
-                [
-                    "Click a shortcut, then press the new keys. Esc cancels.".into(),
-                    "Typing in the main window starts a search, so a shortcut needs Ctrl or \
-                     Alt. Keys that type nothing (arrows, Esc, F-keys) also work alone or \
-                     with Shift."
-                        .into(),
-                ],
-                container(column![typing, shortcuts.width(Fill)]).width(Fill),
-                tokens,
-            ),
-            setting(
-                "Mouse",
-                "These follow the usual KDE conventions and can’t be changed.".into(),
-                container(mouse.width(Fill)).width(Fill),
-                tokens,
-            ),
+            container(ui::scroll(lists)).max_height(max_height),
+            footer
         ]
-        .spacing(18),
+        .spacing(16),
     )
-    .width(Fill)
-    .padding(Padding::new(0.0).bottom(44))
+    .width(KEYS_WIDTH)
+    .padding(24)
+    .style(move |_| ui::panel_style(&t, 14.0))
     .into()
 }
 
@@ -1735,6 +1831,79 @@ mod tests {
         assert!(app.settings_page.licenses_open);
         assert!(dismiss_top(&mut app));
         assert!(!app.settings_page.licenses_open);
+    }
+
+    #[test]
+    fn the_shortcuts_open_in_a_window_and_esc_stops_recording_before_closing_it() {
+        use crate::app::KeyPress;
+        use iced::keyboard::{Key, Modifiers, key::Named};
+
+        let mut app = App::new(Screen::Settings);
+        assert_eq!(
+            keys_summary(&app.keymap),
+            "11 keyboard shortcuts · 13 mouse actions"
+        );
+        let messages: Vec<AppMessage> = {
+            // Tall enough for the row, which is far down the page.
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                iced::Size::new(1600.0, 3200.0),
+                app.view(),
+            );
+            assert!(ui.find("Mouse back button").is_err(), "not on the page");
+            let _ = ui.click("Show shortcuts");
+            ui.into_messages().collect()
+        };
+        for message in messages {
+            let _ = app.update(message);
+        }
+        assert!(app.settings_page.keys_open);
+        {
+            let mut ui = iced_test::simulator(app.view());
+            assert!(ui.find("Mouse back button").is_ok());
+            assert!(ui.find("Just type").is_ok());
+            assert!(ui.find("Reset to defaults").is_err());
+        }
+
+        // A shortcut changes inside the window, warnings included.
+        let press = |app: &mut App, key: Key, modifiers| {
+            let _ = app.update(AppMessage::KeyPressed(key, modifiers, None));
+        };
+        let _ = update(&mut app, Message::Record(Action::Panel));
+        press(&mut app, Key::Character("k".into()), Modifiers::CTRL);
+        assert!(app.settings_page.key_warning.is_some());
+        press(&mut app, Key::Character("p".into()), Modifiers::CTRL);
+        assert_eq!(app.keymap.combo(Action::Panel).to_string(), "Ctrl+P");
+        assert!(app.settings_page.keys_open);
+        assert_eq!(
+            keys_summary(&app.keymap),
+            "11 keyboard shortcuts, 1 changed · 13 mouse actions"
+        );
+        {
+            let mut ui = iced_test::simulator(app.view());
+            assert!(ui.find("Reset to defaults").is_ok());
+        }
+
+        // Esc stops the recording and leaves the window open; the next
+        // Esc closes it.
+        let _ = update(&mut app, Message::Record(Action::Edit));
+        press(&mut app, Key::Named(Named::Escape), Modifiers::empty());
+        assert_eq!(app.settings_page.recording, None);
+        assert!(app.settings_page.keys_open);
+        press(&mut app, Key::Named(Named::Escape), Modifiers::empty());
+        assert!(!app.settings_page.keys_open);
+
+        // Done, or a click beside the window, also ends a recording; and
+        // with Esc given to another action, Close still stops it first.
+        let _ = update(&mut app, Message::OpenKeys);
+        let _ = update(&mut app, Message::Record(Action::Edit));
+        let _ = app.update(AppMessage::Key(KeyPress::Escape));
+        assert_eq!(app.settings_page.recording, None);
+        assert!(app.settings_page.keys_open);
+        let _ = update(&mut app, Message::Record(Action::Edit));
+        let _ = update(&mut app, Message::CloseKeys);
+        assert_eq!(app.settings_page.recording, None);
+        assert!(!app.settings_page.keys_open);
     }
 
     #[test]

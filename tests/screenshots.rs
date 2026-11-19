@@ -600,11 +600,39 @@ fn capture_every_screen() {
                 ));
             }),
         ),
-        // Keyboard and mouse: waiting for a shortcut's new keys, and
-        // keys another shortcut has.
+        // Keyboard and mouse: the shortcuts' window, with one changed
+        // (Reset to defaults), waiting for a shortcut's new keys, and keys
+        // another shortcut has.
+        (
+            Screen::Settings,
+            ("settings-keys", |app| {
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::OpenKeys,
+                ));
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-keys-changed", |app| {
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::OpenKeys,
+                ));
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::Record(libri::keymap::Action::Panel),
+                ));
+                let _ = app.update(Message::KeyPressed(
+                    iced::keyboard::Key::Character("p".into()),
+                    iced::keyboard::Modifiers::CTRL,
+                    None,
+                ));
+            }),
+        ),
         (
             Screen::Settings,
             ("settings-keys-recording", |app| {
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::OpenKeys,
+                ));
                 let _ = app.update(Message::Settings(
                     libri::screens::settings::Message::Record(libri::keymap::Action::Panel),
                 ));
@@ -613,6 +641,9 @@ fn capture_every_screen() {
         (
             Screen::Settings,
             ("settings-keys-clash", |app| {
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::OpenKeys,
+                ));
                 let _ = app.update(Message::Settings(
                     libri::screens::settings::Message::Record(libri::keymap::Action::Panel),
                 ));
@@ -627,6 +658,9 @@ fn capture_every_screen() {
         (
             Screen::Settings,
             ("settings-keys-plain", |app| {
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::OpenKeys,
+                ));
                 let _ = app.update(Message::Settings(
                     libri::screens::settings::Message::Record(libri::keymap::Action::Edit),
                 ));

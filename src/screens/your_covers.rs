@@ -217,7 +217,7 @@ pub fn dismiss(state: &mut State) -> bool {
 }
 
 /// A row of the group: its name and a line under it, and a button.
-fn group_row<'a>(
+pub(super) fn group_row<'a>(
     name: &'a str,
     detail: String,
     action: Option<Element<'a, AppMessage>>,

@@ -2114,6 +2114,7 @@ impl App {
         match message {
             Message::Show(screen) => {
                 if screen != Screen::Settings {
+                    self.settings_page.keys_open = false;
                     self.settings_page.recording = None;
                     self.settings_page.key_warning = None;
                 }
@@ -2259,6 +2260,9 @@ impl App {
                         _ => screens::settings::Message::DisconnectKeep,
                     };
                     return screens::settings::update(self, message);
+                }
+                Screen::Settings if self.settings_page.keys_open => {
+                    return screens::settings::update(self, screens::settings::Message::CloseKeys);
                 }
                 Screen::Settings if self.settings_page.licenses_open => {
                     return screens::settings::update(
