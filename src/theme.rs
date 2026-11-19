@@ -511,6 +511,16 @@ pub fn cover_edge(theme: &iced::Theme) -> Option<Color> {
     (!theme.extended_palette().is_dark).then_some(Color::from_rgba8(20, 22, 28, 0.10))
 }
 
+/// The color of the soft shadow under a cover on Light (canvas "Light
+/// theme", 2026-11-18); `ui::cover` holds its two sizes.
+pub const COVER_SHADOW: Color = Color::from_rgba8(20, 22, 28, 0.13);
+
+/// Whether covers cast that shadow: on Light only. Asked of the iced
+/// theme, as `cover_edge` is.
+pub fn lifts_covers(theme: &iced::Theme) -> bool {
+    !theme.extended_palette().is_dark
+}
+
 /// Mixes `color` toward white by `amount` (0 to 1), as the mockup's
 /// `mixWhite` does. The alpha is kept, so a see-through surface stays one.
 pub fn mix_white(color: Color, amount: f32) -> Color {

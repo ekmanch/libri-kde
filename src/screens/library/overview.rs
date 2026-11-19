@@ -265,7 +265,13 @@ fn shelf_cover<'a>(
     // Among posters an album without its image is a plain 2:3
     // placeholder, as a poster's: a flat color has no shape to keep.
     let poster = !square || (framed && image.is_none());
-    let face = ui::titled_cover(
+    // On a poster frame the frame casts the shadow, not the square.
+    let titled = if framed && !poster {
+        ui::cover::flat_titled_cover
+    } else {
+        ui::titled_cover
+    };
+    let face = titled(
         image.clone(),
         tint,
         &entry.title,
@@ -279,7 +285,7 @@ fn shelf_cover<'a>(
         .and_then(|url| app.artwork.backdrop(url))
         .or(image);
     let face = match backdrop {
-        Some(backdrop) if framed && !poster => ui::cover::poster_frame(face, backdrop, 8.0),
+        Some(backdrop) if framed && !poster => ui::cover::poster_frame(face, backdrop, 8.0, true),
         _ => face,
     };
     let cover = container(face)

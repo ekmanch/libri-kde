@@ -37,7 +37,7 @@ use iced::{Background, Border, Color, Element, Fill, Padding, Shadow, Vector};
 use crate::theme::{Tokens, font, size};
 
 pub use chip::{add_chip, filter_chip, removable_chip, status_chip, suggested_chip, tag_chip};
-pub use cover::{cover, plain_cover, titled_cover};
+pub use cover::{cover, flat_cover, plain_cover, titled_cover};
 pub use dialog::{dialog, modal, panel, pick_option};
 pub use empty::empty_state;
 pub use entry::{

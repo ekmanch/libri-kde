@@ -1310,7 +1310,14 @@ fn tile<'a>(
     } else {
         None
     };
-    let face = ui::cover(image, tint, Fill, Fill, 8.0, None);
+    // A selected tile shows its accent ring instead of Light's shadow,
+    // and on a poster frame the frame casts it, not the square.
+    let lift = !look.selected;
+    let face = if lift && backdrop.is_none() {
+        ui::cover(image, tint, Fill, Fill, 8.0, None)
+    } else {
+        ui::flat_cover(image, tint, Fill, Fill, 8.0, None)
+    };
     let ring = look.selected.then_some(tokens.accent);
     let layers = stack![
         face,
@@ -1330,7 +1337,7 @@ fn tile<'a>(
         })
     };
     let cover = match backdrop {
-        Some(backdrop) => ringed(ui::cover::poster_frame(layers, backdrop, 8.0)).into(),
+        Some(backdrop) => ringed(ui::cover::poster_frame(layers, backdrop, 8.0, lift)).into(),
         None => ui::cover::in_poster_slot(ringed(layers.into()), shaped),
     };
     // "Date not set" and + Add do not fit side by side under a tile of

@@ -1460,21 +1460,23 @@ fn avail_view<'a>(
     let width = 110.0;
     let height = ui::cover::height_for(width, square);
     let mine_cover = iced::widget::stack![
-        ui::plain_cover(
+        ui::flat_cover(
             app.artwork.image(&mine),
             theme::cover_color(&mine),
             width,
             height,
-            8.0
+            8.0,
+            None,
         ),
         container(ui::cover::badge("Yours")).padding(6),
     ];
-    let online_cover = ui::plain_cover(
+    let online_cover = ui::flat_cover(
         app.artwork.image(&avail.url),
         theme::cover_color(&subject.id),
         width,
         height,
         8.0,
+        None,
     );
     let pair = row![
         column![mine_cover, ui::mono(file.to_owned(), 11.0, tokens.sub)]

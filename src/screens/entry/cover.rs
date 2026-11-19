@@ -142,7 +142,7 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
     } else {
         (side, side / ratio)
     };
-    let face = ui::cover(
+    let face = ui::flat_cover(
         url.and_then(|url| app.artwork.image(url)),
         theme::cover_color(&entry.id),
         width,

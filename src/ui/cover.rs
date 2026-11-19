@@ -6,10 +6,53 @@
 
 use iced::widget::image::{self, Image};
 use iced::widget::{Space, column, container, text};
-use iced::{Border, Color, ContentFit, Element, Fill, FillPortion, Length};
+use iced::{Border, Color, ContentFit, Element, Fill, FillPortion, Length, Shadow, Vector};
 
 use crate::model::MediaType;
 use crate::theme::font;
+
+/// The soft shadow under a cover or an artist's photo on Light (canvas
+/// "Light theme", 2026-11-18): the grid, the shelves, Coming soon, the
+/// details panel and the edit sheet. The blur and the color are the
+/// canvas's, the offset the phone's (its `docs/DESIGN.md`, 6 where the
+/// canvas draws 4). The dark themes draw none.
+pub const SHADOW: Shadow = Shadow {
+    color: crate::theme::COVER_SHADOW,
+    offset: Vector::new(0.0, 6.0),
+    blur_radius: 14.0,
+};
+
+/// The shadow under a small cover in a list or a table row, one up to
+/// `THUMB_WIDTH` wide.
+pub const THUMB_SHADOW: Shadow = Shadow {
+    color: crate::theme::COVER_SHADOW,
+    offset: Vector::new(0.0, 2.0),
+    blur_radius: 6.0,
+};
+
+/// The widest cover that still takes the small shadow.
+const THUMB_WIDTH: f32 = 56.0;
+
+/// The shadow for a cover `width` wide; a cover that fills its slot is a
+/// tile, never a thumbnail.
+fn shadow_for(width: Length) -> Shadow {
+    match width {
+        Length::Fixed(width) if width <= THUMB_WIDTH => THUMB_SHADOW,
+        _ => SHADOW,
+    }
+}
+
+/// A box that draws `shadow` around `radius` corners on Light and nothing
+/// else: iced draws a quad's shadow outside its shape only, so the box
+/// can stay empty and nothing shows through or beside the cover on it.
+fn lifted(shadow: Option<Shadow>, radius: f32) -> impl Fn(&iced::Theme) -> container::Style {
+    move |theme| match shadow {
+        Some(shadow) if crate::theme::lifts_covers(theme) => container::Style::default()
+            .border(Border::default().rounded(radius))
+            .shadow(shadow),
+        _ => container::Style::default(),
+    }
+}
 
 /// Whether the type's covers are square: music's albums (and the songs,
 /// which show their album's), as on the phone. Artists are discs.
@@ -50,11 +93,14 @@ const BACKDROP_BRIGHTNESS: f32 = 0.55;
 /// blurred copy (`blur`), darkened and filling the tile, rounded by
 /// `radius`; until the copy is made, the image itself. The tile fills
 /// the 2:3 slot it is given, `square` its middle two thirds. An album
-/// without its image is a plain 2:3 placeholder there instead.
+/// without its image is a plain 2:3 placeholder there instead. The tile
+/// is the cover here: with `lift` it casts the covers' shadow on Light,
+/// and the square on it is a `flat_cover`.
 pub fn poster_frame<'a, Message: 'a>(
     square: impl Into<Element<'a, Message>>,
     backdrop: image::Handle,
     radius: f32,
+    lift: bool,
 ) -> Element<'a, Message> {
     let dark = Color::BLACK;
     let base = container(
@@ -68,7 +114,16 @@ pub fn poster_frame<'a, Message: 'a>(
     .width(Fill)
     .height(Fill)
     .clip(true)
-    .style(move |_| container::background(dark).border(Border::default().rounded(radius)));
+    .style(move |theme| {
+        let shadow = if lift && crate::theme::lifts_covers(theme) {
+            SHADOW
+        } else {
+            Shadow::default()
+        };
+        container::background(dark)
+            .border(Border::default().rounded(radius))
+            .shadow(shadow)
+    });
     // The square is the tile's width, two thirds of its height, with a
     // sixth above and below.
     let centered = column![
@@ -91,7 +146,8 @@ pub struct Label {
 
 /// The image at `width` by `height`, cropped to fill and rounded by
 /// `radius`; the tinted placeholder with `label` until then. On Light a
-/// hairline lies over its edge (`theme::cover_edge`).
+/// hairline lies over its edge (`theme::cover_edge`) and a soft shadow
+/// under it: `THUMB_SHADOW` for a small cover in a row, else `SHADOW`.
 pub fn cover<'a, Message: 'a>(
     handle: Option<image::Handle>,
     tint: Color,
@@ -99,6 +155,49 @@ pub fn cover<'a, Message: 'a>(
     height: impl Into<Length>,
     radius: f32,
     label: Option<Label>,
+) -> Element<'a, Message> {
+    let width = width.into();
+    build(
+        handle,
+        tint,
+        width,
+        height.into(),
+        radius,
+        label,
+        Some(shadow_for(width)),
+    )
+}
+
+/// A cover without the shadow: the cover viewer's, a choice in a cover
+/// picker, a selected tile under its accent ring, the square on a poster
+/// frame.
+pub fn flat_cover<'a, Message: 'a>(
+    handle: Option<image::Handle>,
+    tint: Color,
+    width: impl Into<Length>,
+    height: impl Into<Length>,
+    radius: f32,
+    label: Option<Label>,
+) -> Element<'a, Message> {
+    build(
+        handle,
+        tint,
+        width.into(),
+        height.into(),
+        radius,
+        label,
+        None,
+    )
+}
+
+fn build<'a, Message: 'a>(
+    handle: Option<image::Handle>,
+    tint: Color,
+    width: Length,
+    height: Length,
+    radius: f32,
+    label: Option<Label>,
+    shadow: Option<Shadow>,
 ) -> Element<'a, Message> {
     // A layer over the cover, not the cover's own border: iced draws a
     // container's border under its content, where the image hides it.
@@ -110,18 +209,22 @@ pub fn cover<'a, Message: 'a>(
                 .border(Border::default().rounded(radius).width(1).color(color)),
             None => container::Style::default(),
         });
-    iced::widget::stack![face(handle, tint, width, height, radius, label), edge].into()
+    iced::widget::stack![
+        face(handle, tint, width, height, radius, label, shadow),
+        edge
+    ]
+    .into()
 }
 
 fn face<'a, Message: 'a>(
     handle: Option<image::Handle>,
     tint: Color,
-    width: impl Into<Length>,
-    height: impl Into<Length>,
+    width: Length,
+    height: Length,
     radius: f32,
     label: Option<Label>,
+    shadow: Option<Shadow>,
 ) -> Element<'a, Message> {
-    let (width, height) = (width.into(), height.into());
     match handle {
         Some(handle) => container(
             Image::new(handle)
@@ -134,8 +237,10 @@ fn face<'a, Message: 'a>(
         .height(height)
         // Nothing behind the image: a tinted box under it showed as a
         // hairline of the type's color at the edge wherever the image
-        // landed a fraction of a pixel off it (after a slide, say).
+        // landed a fraction of a pixel off it (after a slide, say). The
+        // shadow is drawn around the box, never inside it.
         .clip(true)
+        .style(lifted(shadow, radius))
         .into(),
         None => {
             let (padding, align, centered) = match &label {
@@ -176,7 +281,13 @@ fn face<'a, Message: 'a>(
             if centered {
                 words = words.align_x(iced::alignment::Horizontal::Center);
             }
-            iced::widget::stack![base, highlight, words].into()
+            // The shadow from a box of its own around the placeholder:
+            // iced draws none for a quad filled with a gradient.
+            container(iced::widget::stack![base, highlight, words])
+                .width(width)
+                .height(height)
+                .style(lifted(shadow, radius))
+                .into()
         }
     }
 }
@@ -287,13 +398,36 @@ pub fn titled_cover<'a, Message: 'a>(
         width,
         height,
         8.0,
-        Some(Label {
-            words: title.to_owned(),
-            size,
-            padding: if width >= 150.0 { 14.0 } else { 10.0 },
-            centered: false,
-        }),
+        Some(title_label(title, width, size)),
     )
+}
+
+/// A titled cover without the shadow (`flat_cover`).
+pub fn flat_titled_cover<'a, Message: 'a>(
+    handle: Option<image::Handle>,
+    tint: Color,
+    title: &str,
+    width: f32,
+    height: f32,
+    size: f32,
+) -> Element<'a, Message> {
+    flat_cover(
+        handle,
+        tint,
+        width,
+        height,
+        8.0,
+        Some(title_label(title, width, size)),
+    )
+}
+
+fn title_label(title: &str, width: f32, size: f32) -> Label {
+    Label {
+        words: title.to_owned(),
+        size,
+        padding: if width >= 150.0 { 14.0 } else { 10.0 },
+        centered: false,
+    }
 }
 
 /// One choice in Pick a cover: the cover ringed in the accent when it is
@@ -332,7 +466,7 @@ pub fn choice_tile<'a, Message: Clone + 'a>(
     // The ring sits around the cover, 3 px in the accent on the one in
     // use; the cover would draw over a border of its own container.
     let inner = width - 2.0 * RING;
-    let cover = titled_cover(
+    let cover = flat_titled_cover(
         choice.handle,
         choice.tint,
         choice.title,
@@ -532,5 +666,45 @@ mod tests {
         assert_eq!((stops[1].offset, stops[1].color), (0.45, tint));
         assert_eq!(stops[2].offset, 1.0);
         assert_eq!(stops[2].color.into_rgba8(), [0x2C, 0x37, 0x50, 0xFF]);
+    }
+
+    /// Light's two shadows (canvas `.cv` and `.cvs`, the tile's offset
+    /// from the phone): the small one for a cover up to 56 px wide, the
+    /// other for every wider cover and for a tile that fills its slot.
+    #[test]
+    fn a_cover_takes_the_shadow_of_its_width() {
+        let color = Color::from_rgba8(20, 22, 28, 0.13);
+        assert_eq!(
+            (SHADOW.color, SHADOW.offset, SHADOW.blur_radius),
+            (color, Vector::new(0.0, 6.0), 14.0)
+        );
+        assert_eq!(
+            (
+                THUMB_SHADOW.color,
+                THUMB_SHADOW.offset,
+                THUMB_SHADOW.blur_radius
+            ),
+            (color, Vector::new(0.0, 2.0), 6.0)
+        );
+        for width in [26.0, 44.0, 56.0] {
+            assert_eq!(shadow_for(Length::Fixed(width)), THUMB_SHADOW);
+        }
+        for width in [Length::Fixed(57.0), Length::Fixed(150.0), Fill] {
+            assert_eq!(shadow_for(width), SHADOW);
+        }
+    }
+
+    /// Only Light lifts its covers, and a flat cover casts nothing there
+    /// either.
+    #[test]
+    fn only_light_draws_the_shadow() {
+        use crate::theme::{PEACH, Theme, Tokens};
+        let light = Tokens::new(Theme::Light, PEACH).iced_theme();
+        assert_eq!(lifted(Some(SHADOW), 8.0)(&light).shadow, SHADOW);
+        assert_eq!(lifted(None, 8.0)(&light).shadow, Shadow::default());
+        for theme in [Theme::Graphite, Theme::Charcoal, Theme::Mocha, Theme::Glass] {
+            let dark = Tokens::new(theme, PEACH).iced_theme();
+            assert_eq!(lifted(Some(SHADOW), 8.0)(&dark).shadow, Shadow::default());
+        }
     }
 }

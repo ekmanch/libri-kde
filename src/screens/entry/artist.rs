@@ -434,7 +434,7 @@ fn face<'a>(app: &'a App, name: &str, side: f32) -> Element<'a, AppMessage> {
         ArtistShows::Cover(entry) => app.artwork.cover(entry),
         ArtistShows::Initials => None,
     };
-    ui::cover(
+    ui::flat_cover(
         handle,
         theme::cover_color(name),
         side,
