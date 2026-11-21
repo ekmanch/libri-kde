@@ -1174,7 +1174,7 @@ fn discover<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     )];
     if on {
         let check = &app.discover;
-        let (raised, track, accent) = (tokens.raised, tokens.track, tokens.accent);
+        let (track, accent) = (tokens.track, tokens.accent);
         let run = if check.running {
             AppMessage::Discover(crate::discover::Message::Stop)
         } else {
@@ -1187,21 +1187,12 @@ fn discover<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             *tokens,
             Some(run),
         );
-        let line = row![
-            column![
-                text("Last checked").size(14).font(font::SEMIBOLD),
-                text(check.last_checked(crate::clock::Timestamp::now()))
-                    .size(12.5)
-                    .line_height(1.45)
-                    .color(tokens.sub),
-            ]
-            .spacing(1)
-            .width(Fill),
-            button,
-        ]
-        .spacing(12)
-        .align_y(Center);
-        let mut last = Column::new().spacing(10).push(line);
+        let mut last = ui::setting_row(
+            "Last checked",
+            check.last_checked(crate::clock::Timestamp::now()),
+            Some(button),
+            tokens,
+        );
         if check.running {
             last = last.push(
                 iced::widget::progress_bar(0.0..=1.0, check.fraction())
@@ -1213,9 +1204,6 @@ fn discover<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     }),
             );
         }
-        let last = container(last)
-            .padding([12, 14])
-            .style(move |_| container::background(raised).border(Border::default().rounded(10)));
         let manage = ui::sized_button(
             "Manage…",
             ButtonKind::Outline,
@@ -1223,7 +1211,7 @@ fn discover<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             *tokens,
             Some(AppMessage::Following(super::following::Message::Open(None))),
         );
-        let following = super::your_covers::group_row(
+        let following = ui::setting_row(
             "Following",
             format!(
                 "{} creators, shows and series, taken from your library",
@@ -1236,7 +1224,7 @@ fn discover<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             "What Libri looks for",
             "New seasons, next parts, and new work by the people and studios in your library."
                 .into(),
-            column![last, following].spacing(8),
+            ui::setting_rows([last.into(), following.into()], tokens),
             tokens,
         ));
     }
@@ -1292,10 +1280,14 @@ fn keys<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             "Typing in the main window starts a search. Everything else is listed in its own \
              window, where the keyboard shortcuts can be changed."
                 .into(),
-            super::your_covers::group_row(
-                "Keyboard and mouse shortcuts",
-                keys_summary(&app.keymap),
-                Some(show),
+            ui::setting_rows(
+                [ui::setting_row(
+                    "Keyboard and mouse shortcuts",
+                    keys_summary(&app.keymap),
+                    Some(show),
+                    tokens,
+                )
+                .into()],
                 tokens,
             ),
             tokens,

@@ -206,6 +206,10 @@ pub struct Tokens {
     /// Text fields.
     pub field: Color,
     pub line: Color,
+    /// The frame of a group of setting rows and the lines between them
+    /// (`ui::setting_rows`): the divider on Light, and on the dark themes a
+    /// step closer to the background, since lines read heavier on dark.
+    pub group_line: Color,
     pub text: Color,
     /// Secondary text and section headers.
     pub sub: Color,
@@ -351,6 +355,7 @@ impl Tokens {
             raised,
             field,
             line,
+            group_line: pick(line, veil(0.08, mix_white(content, 0.07))),
             text,
             sub,
             selection,
@@ -797,6 +802,7 @@ mod tests {
         assert_eq!(glass.raised, white(0.08));
         assert_eq!(glass.selection, white(0.13));
         assert_eq!(glass.hover, white(0.07));
+        assert_eq!(glass.group_line, white(0.08));
         assert_eq!(card_background(&glass), white(0.04));
         assert_eq!(glass.popover, hex(0x26292D));
         assert_eq!(glass.pinned, base(0.94));

@@ -10,7 +10,7 @@
 //! title, Delete or Keep per file. The third row only says what an
 //! upload does.
 
-use iced::widget::{Column, Row, column, container, row, space, text};
+use iced::widget::{Column, column, container, row, space, text};
 use iced::{Border, Center, Element, Fill, Task};
 
 use super::entry::pick::{self, OnlineChoice};
@@ -216,32 +216,7 @@ pub fn dismiss(state: &mut State) -> bool {
     state.found.take().is_some() || state.unused.take().is_some()
 }
 
-/// A row of the group: its name and a line under it, and a button.
-pub(super) fn group_row<'a>(
-    name: &'a str,
-    detail: String,
-    action: Option<Element<'a, AppMessage>>,
-    tokens: &Tokens,
-) -> Element<'a, AppMessage> {
-    let raised = tokens.raised;
-    let mut line = Row::new().spacing(12).align_y(Center).push(
-        column![
-            text(name).size(14).font(font::SEMIBOLD),
-            text(detail).size(12.5).line_height(1.45).color(tokens.sub),
-        ]
-        .spacing(1)
-        .width(Fill),
-    );
-    if let Some(action) = action {
-        line = line.push(action);
-    }
-    container(line)
-        .padding([12, 14])
-        .style(move |_| container::background(raised).border(Border::default().rounded(10)))
-        .into()
-}
-
-/// The three rows under Library source.
+/// The rows under Library source, one group.
 pub fn group<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let page = &app.settings_page.covers;
     let library = app.repo.library();
@@ -286,21 +261,23 @@ pub fn group<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
         *tokens,
         (!unused.is_empty()).then(|| msg(Message::Review)),
     );
-    column![
-        group_row("Check for online covers", check_detail, Some(check), tokens),
-        group_row("Unused covers", unused_detail, Some(review), tokens),
-        photos_row(app, tokens),
-        group_row(
-            "Uploads",
-            "Scaled down to 2000 px on the long side when larger (artist photos to 1200 px), \
-             never enlarged, and saved as JPEG; files you commit yourself are left as they are."
-                .to_owned(),
-            None,
-            tokens,
-        ),
-    ]
-    .spacing(8)
-    .into()
+    ui::setting_rows(
+        [
+            ui::setting_row("Check for online covers", check_detail, Some(check), tokens).into(),
+            ui::setting_row("Unused covers", unused_detail, Some(review), tokens).into(),
+            photos_row(app, tokens),
+            ui::setting_row(
+                "Uploads",
+                "Scaled down to 2000 px on the long side when larger (artist photos to 1200 px), \
+                 never enlarged, and saved as JPEG; files you commit yourself are left as they are."
+                    .to_owned(),
+                None,
+                tokens,
+            )
+            .into(),
+        ],
+        tokens,
+    )
 }
 
 /// Artist photos: the fetch's progress with Pause or Resume and a bar,
@@ -308,7 +285,7 @@ pub fn group<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
 /// with Check again (`covers::backfill::Row`).
 fn photos_row<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let state = app.photos_row();
-    let (raised, track, accent) = (tokens.raised, tokens.track, tokens.accent);
+    let (track, accent) = (tokens.track, tokens.accent);
     // The totals of a run that fetches nothing (not connected) have
     // nothing to check again.
     let can = app.photos_active() || app.photos.look.is_some();
@@ -319,21 +296,7 @@ fn photos_row<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
         *tokens,
         can.then(|| msg(Message::Photos)),
     );
-    let line = row![
-        column![
-            text("Artist photos").size(14).font(font::SEMIBOLD),
-            text(state.detail())
-                .size(12.5)
-                .line_height(1.45)
-                .color(tokens.sub),
-        ]
-        .spacing(1)
-        .width(Fill),
-        action,
-    ]
-    .spacing(12)
-    .align_y(Center);
-    let mut content = Column::new().spacing(10).push(line);
+    let mut content = ui::setting_row("Artist photos", state.detail(), Some(action), tokens);
     // The photos the sharper run left alone because this computer and
     // the commit history said different things about them.
     if !app.photos.disagreed.is_empty() && app.photos.look.is_none() {
@@ -358,10 +321,7 @@ fn photos_row<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                 }),
         );
     }
-    container(content)
-        .padding([12, 14])
-        .style(move |_| container::background(raised).border(Border::default().rounded(10)))
-        .into()
+    content.into()
 }
 
 /// "12 titles use your own covers", "1 title uses your own cover".
