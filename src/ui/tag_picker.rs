@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use iced::widget::{Column, Row, button, column, container, mouse_area, row, space, text};
-use iced::{Background, Border, Center, Element, Fill, Padding};
+use iced::{Center, Element, Fill, Padding};
 
 use super::{FocusExt, Icon, Popover, icon, panel_style, row_style, section_header};
 use crate::model::{TagCategory, sort_tags, tag_display_name, tag_sort_key};
@@ -499,21 +499,7 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
         ]
         .spacing(1)
         .width(Fill);
-        let tokens_copy = *tokens;
-        let mark: Element<'a, M> = if on {
-            icon(Icon::Check, 12.0, tokens.on_accent)
-        } else {
-            space().into()
-        };
-        let check = container(mark).center(20).style(move |_| container::Style {
-            background: on.then_some(Background::Color(tokens_copy.accent)),
-            border: Border::default().rounded(10).width(1.5).color(if on {
-                tokens_copy.accent
-            } else {
-                tokens_copy.sub
-            }),
-            ..container::Style::default()
-        });
+        let check = super::tick_box(on, 20.0, 10.0, 12.0, tokens);
         button(row![words, check].spacing(10).align_y(Center).height(Fill))
             .width(Fill)
             .height(ROW_HEIGHT)

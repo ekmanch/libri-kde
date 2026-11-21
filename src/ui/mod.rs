@@ -235,6 +235,54 @@ pub fn sidebar_row_style(
     )
 }
 
+/// A row of a list of pages inside a dialog (the Following window's
+/// kinds): selected as the sidebar's row is, with the plain hover, since
+/// a dialog is never the chrome.
+pub fn nav_row_style(
+    tokens: &Tokens,
+    selected: bool,
+    radius: f32,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style + use<> {
+    row_fills(
+        tokens,
+        selected.then_some(tokens.selection_tint),
+        tokens.hover,
+        radius,
+    )
+}
+
+/// A check box that shows whether its row is ticked; the row takes the
+/// click. `size` square with `radius` corners and a `mark` px check.
+/// Ticked, it is a main button's fill with the dark check: the accent on
+/// the dark themes, and on Light the pale tint with a stronger tint as
+/// its edge.
+pub fn tick_box<'a, Message: 'a>(
+    on: bool,
+    size: f32,
+    radius: f32,
+    mark: f32,
+    tokens: &Tokens,
+) -> Element<'a, Message> {
+    let (fill, line) = if on {
+        (Some(tokens.tint), tokens.tick_line())
+    } else {
+        (None, tokens.sub)
+    };
+    let check: Element<'a, Message> = if on {
+        icon(Icon::Check, mark, tokens.on_accent)
+    } else {
+        widget::space().into()
+    };
+    container(check)
+        .center(size)
+        .style(move |_| container::Style {
+            background: fill.map(Background::Color),
+            border: Border::default().rounded(radius).width(1.5).color(line),
+            ..container::Style::default()
+        })
+        .into()
+}
+
 fn row_fills(
     tokens: &Tokens,
     selected: Option<Color>,

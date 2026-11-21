@@ -1,14 +1,14 @@
 //! The small dialogs: the delete confirmation and Add to plan. The wording
 //! is the phone's (A9, A7).
 
-use iced::widget::{Column, button, column, container, row, space, text};
-use iced::{Background, Border, Center, Element, Fill};
+use iced::widget::{Column, button, column, row, space, text};
+use iced::{Center, Element, Fill};
 
 use super::Message;
 use crate::app::{App, Message as AppMessage};
 use crate::model::Plan;
 use crate::theme::Tokens;
-use crate::ui::{self, ButtonKind, Icon};
+use crate::ui::{self, ButtonKind};
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Entry(message)
@@ -239,24 +239,7 @@ pub fn season_dropped<'a>(app: &'a App, id: &str, season: u32) -> Element<'a, Ap
 
 /// An 18 px check box in the accent.
 fn check<'a>(on: bool, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let tokens = *tokens;
-    let mark: Element<'a, AppMessage> = if on {
-        ui::icon(Icon::Check, 12.0, tokens.on_accent)
-    } else {
-        space().into()
-    };
-    container(mark)
-        .center(18)
-        .style(move |_| container::Style {
-            background: on.then_some(Background::Color(tokens.accent)),
-            border: Border::default().rounded(5).width(1.5).color(if on {
-                tokens.accent
-            } else {
-                tokens.sub
-            }),
-            ..container::Style::default()
-        })
-        .into()
+    ui::tick_box(on, 18.0, 5.0, 12.0, tokens)
 }
 
 #[cfg(test)]

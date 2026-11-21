@@ -260,13 +260,15 @@ pub struct Tokens {
     /// the index rail's current label and the picked rating: the accent
     /// on the dark themes, a pale tint of it on Light.
     pub tint: Color,
-    /// The fill of what is picked among its like: the status chip, an
-    /// active filter chip, the sidebar's row. The selection gray on the
-    /// dark themes, a pale tint of the accent on Light.
+    /// The fill of what is picked among its like: the sidebar's row, the
+    /// Following window's kind, an active filter chip. The selection gray
+    /// on the dark themes, a pale tint of the accent on Light. The picked
+    /// status chip is `status_fill`.
     pub selection_tint: Color,
     /// Text on an accent fill or on a tint.
     pub on_accent: Color,
-    /// The green of a connected state, and its faint card fill.
+    /// The green of a connected state, and its faint card fill (Light
+    /// alone fills the Connected row; see `connected_frame`).
     pub success: Color,
     pub success_fill: Color,
     /// The amber of a warning (the token expiry dialog), and its disc.
@@ -451,6 +453,46 @@ impl Tokens {
         } else {
             self.tint.scale_alpha(0.85)
         }
+    }
+
+    /// The picked status chip's fill (All, Want, Done): Light's pale tint
+    /// of the accent, and on the dark themes the solid accent, as the Add
+    /// button. Never a low-opacity tint there: it turns an orange accent
+    /// brown on dark (canvas, 2026-11-21).
+    pub fn status_fill(&self) -> Color {
+        if self.light {
+            self.selection_tint
+        } else {
+            self.tint
+        }
+    }
+
+    /// The text on the picked status chip.
+    pub fn on_status(&self) -> Color {
+        if self.light {
+            self.text
+        } else {
+            self.on_accent
+        }
+    }
+
+    /// The edge of a ticked check box, whose fill is `tint` with the
+    /// `on_accent` check: the accent on the dark themes, and on Light a
+    /// stronger tint than the fill (45 % of the accent), so the box
+    /// matches a main button and still has an edge on white.
+    pub fn tick_line(&self) -> Color {
+        if self.light {
+            mix_white(self.accent, 0.55)
+        } else {
+            self.accent
+        }
+    }
+
+    /// The frame of Settings' Connected row on the dark themes, where it
+    /// has no fill and its title is in the green: the green at 70 %.
+    /// None on Light, which keeps the pale green fill.
+    pub fn connected_frame(&self) -> Option<Color> {
+        (!self.light).then(|| self.success.scale_alpha(0.7))
     }
 
     /// A type's color, for dots, bars and marks: the Libri set, the
@@ -687,7 +729,8 @@ mod tests {
     /// and secondary text reach AA (4.5), the inks and the text that names
     /// a type, used for labels and headings in SemiBold or larger, reach
     /// 3, on the content and the chrome of every theme, two-tone and flat,
-    /// and the text on a main button and on a picked chip reaches 4.5.
+    /// and the text on a main button, on a picked chip and on a selected
+    /// sidebar row, and the check in a ticked box, reach 4.5.
     /// Light's own type colors and accents are fills, never text, so they
     /// are not checked. Glass is see-through, so its surfaces are checked
     /// over a mid gray, about what a blurred wallpaper averages; over white
@@ -735,8 +778,20 @@ mod tests {
                     );
                     check(
                         format!("{name} text on {} chip", accent.name),
+                        t.on_status(),
+                        over(t.status_fill(), over(t.content, WALLPAPER)),
+                        4.5,
+                    );
+                    check(
+                        format!("{name} text on {} sidebar row", accent.name),
                         t.text,
-                        over(t.selection_tint, over(t.content, WALLPAPER)),
+                        over(t.selection_tint, over(t.chrome, WALLPAPER)),
+                        4.5,
+                    );
+                    check(
+                        format!("{name} check in {} box", accent.name),
+                        t.on_accent,
+                        t.tint,
                         4.5,
                     );
                 }
@@ -831,6 +886,16 @@ mod tests {
             let t = Tokens::new(theme, PEACH);
             assert_eq!([t.accent, t.ink, t.mark, t.tint], [PEACH.fill; 4]);
             assert_eq!(t.selection_tint, t.selection);
+            // The picked status chip is the Add button's colors, and a
+            // ticked box is the accent with its own edge (2026-11-21).
+            assert_eq!([t.status_fill(), t.tick_line()], [PEACH.fill; 2]);
+            assert_eq!(t.on_status(), t.on_accent);
+            assert_eq!(t.status_fill().a, 1.0);
+            // Connected: a green frame at 70 %, no fill.
+            assert_eq!(
+                t.connected_frame(),
+                Some(Color::from_rgba8(0xA6, 0xE3, 0xA1, 0.7))
+            );
             assert_eq!(cover_edge(&t.iced_theme()), None);
             assert_eq!(t.type_text(MediaType::Books), hex(0x8FD694));
         }
@@ -850,6 +915,13 @@ mod tests {
         assert_eq!(light.tint.into_rgba8(), [0xFF, 0xE5, 0xD8, 0xFF]);
         assert_eq!(light.selection_tint.into_rgba8(), [0xFF, 0xEA, 0xDF, 0xFF]);
         assert_eq!(light.on_accent, light.text);
+        // The picked status chip keeps the tint; a ticked box is the main
+        // button's tint with a stronger one as its edge (`mixWhite` at
+        // 0.55); Connected keeps its fill.
+        assert_eq!(light.status_fill(), light.selection_tint);
+        assert_eq!(light.on_status(), light.text);
+        assert_eq!(light.tick_line(), mix_white(hex(0xFF8A4C), 0.55));
+        assert_eq!(light.connected_frame(), None);
         assert_eq!(
             [light.line, light.raised, light.selection, light.hover],
             [hex(0xE1E4E8), hex(0xEEF0F2), hex(0xECEEF0), hex(0xF4F5F7)]

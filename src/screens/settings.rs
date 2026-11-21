@@ -769,9 +769,9 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let library = app.repo.library();
     let control: Element<'a, AppMessage> = match &app.source {
         Some(source) => {
-            let (fill, dot, title, detail, action) = match &app.sync {
+            let ((fill, frame, title_color), dot, title, detail, action) = match &app.sync {
                 SyncState::TokenExpired => (
-                    tokens.danger_fill,
+                    (tokens.danger_fill, None, tokens.text),
                     tokens.danger,
                     "Token expired",
                     "Libri can't sync until you add a new token.".to_owned(),
@@ -784,7 +784,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     ),
                 ),
                 SyncState::Conflict { .. } => (
-                    tokens.danger_fill,
+                    (tokens.danger_fill, None, tokens.text),
                     tokens.danger,
                     "Changed here and on GitHub",
                     "Pick which copy to keep".to_owned(),
@@ -797,7 +797,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     ),
                 ),
                 SyncState::Unreadable { reason, .. } => (
-                    tokens.danger_fill,
+                    (tokens.danger_fill, None, tokens.text),
                     tokens.danger,
                     "GitHub's copy can't be read",
                     format!("{reason}. Fix the file on GitHub, or keep this computer's copy."),
@@ -810,7 +810,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     ),
                 ),
                 SyncState::NotFound(missing) => (
-                    tokens.danger_fill,
+                    (tokens.danger_fill, None, tokens.text),
                     tokens.danger,
                     "Library not found on GitHub",
                     format!(
@@ -835,7 +835,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     ),
                 ),
                 SyncState::Failed { kept } => (
-                    tokens.danger_fill,
+                    (tokens.danger_fill, None, tokens.text),
                     tokens.danger,
                     "Could not save",
                     format!(
@@ -855,7 +855,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                     ),
                 ),
                 SyncState::Offline { kept } => (
-                    tokens.raised,
+                    (tokens.raised, None, tokens.text),
                     tokens.sub,
                     "Offline",
                     format!(
@@ -874,8 +874,13 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                         Some(msg(Message::SyncNow)),
                     ),
                 ),
+                // Connected: Light's pale green fill; on the dark themes no
+                // fill, a green frame and the title in that green.
                 sync => (
-                    tokens.success_fill,
+                    match tokens.connected_frame() {
+                        Some(frame) => (Color::TRANSPARENT, Some(frame), tokens.success),
+                        None => (tokens.success_fill, None, tokens.text),
+                    },
                     tokens.success,
                     "Connected",
                     format!(
@@ -902,7 +907,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                 row![
                     ui::dot(dot, 9.0, 4.5),
                     column![
-                        text(title).size(14).font(font::SEMIBOLD),
+                        text(title).size(14).font(font::SEMIBOLD).color(title_color),
                         text(detail).size(12.5).color(tokens.sub)
                     ]
                     .spacing(1)
@@ -913,7 +918,13 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
                 .align_y(Center),
             )
             .padding([12, 14])
-            .style(move |_| container::background(fill).border(Border::default().rounded(10)));
+            .style(move |_| {
+                let border = Border::default().rounded(10);
+                container::background(fill).border(match frame {
+                    Some(color) => border.width(1.5).color(color),
+                    None => border,
+                })
+            });
 
             // The connection's values come from `connection.json` and
             // change through the setup (Change repository or file…, Pick

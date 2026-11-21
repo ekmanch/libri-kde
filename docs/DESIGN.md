@@ -168,10 +168,24 @@ Flat style uses one shade for chrome and content (Graphite flat: #151515 everywh
 - **Type colors** are bright and only ever a dot, a bar or a mark (table below). Text that names a type is in the normal text color: the page heading ("Movies"), the type above a title ("Movie"), a group's heading; the group keeps its colored bar and the sidebar its dots (`Tokens::type_text` for the text, `type_color` for the fills).
 - **The accent** has a light value of its own (table below); the stored setting is the same, and the accent picker shows the values of the theme in use. The accent itself is only a thin fill: progress bars and focus outlines (the focus ring, a focused field's line). Until 2026-11-21 a switch that is on was solid too; it takes the tint now, below.
 - **Links and icons** that take the accent on the dark themes ("See all", "Clear all", "Another", a lone check mark) are dark gray #2F343B (`ink`). The "#" marks in the sidebar are #9AA0A8 (`mark`).
-- **A pale tint of the accent** with the normal dark text, mixed toward white as the canvas does: 22 % of the accent (`tint`) for main buttons (Add, Save and the like), the Filter button's count, the index rail's current label, the picked number in the rating picker and the track of a switch that is on, with the dark knob (2026-11-21, every switch, in `ui::switch::track`; off stays a gray track); 18 % (`selection_tint`) for the selected status chip, active filter chips and the selected sidebar row. Other selections (segmented controls, selected rows, the view switch) stay gray. Inside a seasonal plan the tints are mixed from the season's color.
+- **A pale tint of the accent** with the normal dark text, mixed toward white as the canvas does: 22 % of the accent (`tint`) for main buttons (Add, Save and the like), the Filter button's count, the index rail's current label, the picked number in the rating picker and the track of a switch that is on, with the dark knob (2026-11-21, every switch, in `ui::switch::track`; off stays a gray track); 18 % (`selection_tint`) for the selected status chip, active filter chips and the selected sidebar row (every row of it, and the Settings gear while Settings is open). Other selections (segmented controls, selected rows, the view switch) stay gray. Inside a seasonal plan the tints are mixed from the season's color.
+- **Ticked check boxes** (2026-11-21) match the Done button: the 22 % tint as the fill, the dark check, and a stronger tint (45 % of the accent) as the 1.5 px edge, so the box still has an edge on white.
 - **Covers** get a hairline edge, rgba(20,22,28,0.10), drawn over the cover just inside it, so a white cover does not dissolve into the page. Under it they cast a soft shadow (2026-11-19), rgba(20,22,28,0.13): blur 14 px at 0 / 6 px for covers and artist photos (the grid, Home's shelves, Coming soon, the details panel, the edit sheet), blur 6 px at 0 / 2 px for the thumbnails in list and table rows, up to 56 px wide. The dark themes draw none.
 
 **Selection gray:** the content color mixed 14% toward white in dark themes; #ECEEF0 in light.
+
+**Selection and status colors per theme** (2026-11-21, canvas Library notes "The selected sidebar row"):
+
+| | Light | Dark themes |
+|---|---|---|
+| Selected sidebar row (Home, a type, Coming soon, a plan, a tag, All plans, All tags) and the Settings gear while Settings is open | the 18 % accent tint | the selection gray: the sidebar should not be loud, and a bright bar around a type dot of another color looks odd on dark |
+| The selected kind in the Following window | as the sidebar's row | as the sidebar's row |
+| Picked status chip (All, Want, Done and so on) | the 18 % accent tint, normal text | the solid accent with the dark text, the Add button's colors. Never a low-opacity tint: it turns an orange accent brown on dark |
+| Active filter chip | the 18 % accent tint | the selection gray |
+| Ticked check box (the Following window, Add to plan, the tag picker) | the 22 % tint, dark check, the 45 % tint as its edge | the solid accent, dark check |
+| Settings › Library source, "Connected" | pale green fill (#40A02B at 8 %), green dot | no fill; a 1.5 px frame in #A6E3A1 at 70 %, the green dot, "Connected" in #A6E3A1. The line under it and Sync now are unchanged |
+
+The other states of the Connected row (conflict, not found, offline and so on) keep their fills on every theme. In `theme`: `selection_tint` (rows, filter chips), `Tokens::status_fill` and `on_status` (the status chip), `tint` and `Tokens::tick_line` (a ticked box, drawn by `ui::tick_box`), `Tokens::connected_frame`; the Following window's kinds use `ui::nav_row_style`.
 
 **Type colors** (order Movies, Shows, Books, Games, Anime, Music as listed in the mockup). There is no separate type-color setting: the Libri set is used with Graphite, Charcoal and Glass, the Catppuccin set with Catppuccin Mocha, and the light set with Light.
 

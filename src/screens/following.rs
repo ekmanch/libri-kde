@@ -11,16 +11,14 @@
 //! (`App::change_shared`), so the right-click menus' Follow and Unfollow
 //! come through here too.
 
-use iced::widget::{
-    Column, Space, button, column, container, operation, row, text, text::Wrapping,
-};
+use iced::widget::{Column, button, column, container, operation, row, text, text::Wrapping};
 use iced::{Background, Border, Center, Element, Fill, Padding, Task};
 
 use crate::app::{App, Message as AppMessage};
 use crate::follows::{Follow, Kind};
 use crate::shared::{self, Edit};
 use crate::theme::{Tokens, font};
-use crate::ui::{self, ButtonKind, FocusExt, Icon};
+use crate::ui::{self, ButtonKind, FocusExt};
 
 /// The search field, focused when the window opens.
 pub const SEARCH_ID: &str = "following-search";
@@ -183,7 +181,7 @@ fn view<'a>(app: &'a App, state: &'a State, tokens: &Tokens) -> Element<'a, AppM
             .height(48)
             .padding([0, 12])
             .on_press(msg(Message::Pick(kind)))
-            .style(ui::row_style(tokens, on, 9.0))
+            .style(ui::nav_row_style(tokens, on, 9.0))
             .focusable(9.0, tokens)
     }))
     .spacing(2)
@@ -305,24 +303,7 @@ fn group_head<'a>(label: &str, tokens: &Tokens) -> Element<'a, AppMessage> {
 fn tick_row<'a>(follow: &Follow, tokens: &Tokens) -> Element<'a, AppMessage> {
     let t = *tokens;
     let on = follow.followed;
-    let mark: Element<'a, AppMessage> = if on {
-        ui::icon(Icon::Check, 11.0, t.on_accent)
-    } else {
-        Space::new().into()
-    };
-    let tick = container(mark).center(18).style(move |_| {
-        container::Style::default()
-            .background(if on {
-                Background::Color(t.accent)
-            } else {
-                Background::Color(iced::Color::TRANSPARENT)
-            })
-            .border(Border::default().rounded(5).width(1.5).color(if on {
-                t.accent
-            } else {
-                t.sub
-            }))
-    });
+    let tick = ui::tick_box(on, 18.0, 5.0, 11.0, tokens);
     // One no longer active is gray until it is ticked.
     let name_color = if follow.is_active() || on {
         t.text

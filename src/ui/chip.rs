@@ -37,7 +37,8 @@ pub fn filter_chip<'a, Message: Clone + 'a>(
 }
 
 /// A status filter under the title: "Want 12". Gray text until picked,
-/// then the picked fill (on Light a pale tint of the accent).
+/// then accent-colored: the solid accent with dark text on the dark
+/// themes, a pale tint of it on Light (`Tokens::status_fill`).
 pub fn status_chip<'a, Message: Clone + 'a>(
     label: &'a str,
     count: usize,
@@ -45,7 +46,7 @@ pub fn status_chip<'a, Message: Clone + 'a>(
     tokens: &Tokens,
     on_press: Message,
 ) -> Element<'a, Message> {
-    let fg = if on { tokens.text } else { tokens.sub };
+    let fg = if on { tokens.on_status() } else { tokens.sub };
     let content = row![
         text(label).size(13).font(font::MEDIUM),
         mono(count.to_string(), 11.5, fg.scale_alpha(0.75)),
@@ -57,7 +58,7 @@ pub fn status_chip<'a, Message: Clone + 'a>(
         28.0,
         Padding::from([0, 12]),
         fg,
-        on.then_some(tokens.selection_tint),
+        on.then_some(tokens.status_fill()),
         tokens,
         on_press,
     )
@@ -92,7 +93,8 @@ pub fn suggested_chip<'a, Message: Clone + 'a>(
 /// An active filter in the chips row, removed by a click: "#horror ×",
 /// with a type's dot in front for a picked type, and a tag's role after
 /// it in the secondary color ("#clint-eastwood · Director"). Filled as
-/// the picked status chip is.
+/// the sidebar's selected row is: gray on the dark themes, the accent's
+/// tint on Light.
 pub fn removable_chip<'a, Message: Clone + 'a>(
     label: String,
     detail: Option<String>,
