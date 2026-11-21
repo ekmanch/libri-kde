@@ -2295,7 +2295,8 @@ impl App {
     /// subscription tracks. On a title in the library (a row, a card, a
     /// shelf's cover, a part of a series) Ctrl+click opens its cover in
     /// the viewer and Ctrl+Shift+click its Edit dialog, both without
-    /// selecting it. On a series' row in a list Ctrl+click opens the cover
+    /// selecting it. On a title Discover found, on Coming soon, Ctrl+click
+    /// opens its cover too. On a series' row in a list Ctrl+click opens the cover
     /// the row shows (the part that stands for the series), where the
     /// viewer steps through the other parts' covers. On a sidebar type
     /// Ctrl+click adds or removes it. On a plan's row Ctrl+click ticks it
@@ -2330,6 +2331,11 @@ impl App {
             }
             Message::Library(L::Select(id) | L::OpenSeriesPart(id)) => {
                 Message::Entry(entry::Message::ViewCover(id))
+            }
+            // A title Discover found, on Coming soon's lists and in its
+            // panel: the cover, large, and nothing selected.
+            Message::Library(L::SelectFound(key) | L::OpenFound(key)) if !shift => {
+                Message::Entry(entry::Message::ViewFoundCover(key))
             }
             // An artist's row or card, in every view: the photo, large.
             Message::Library(L::OpenArtist(name)) if !shift => {

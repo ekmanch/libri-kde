@@ -67,6 +67,9 @@ pub enum Dialog {
     Cover(Box<CoverView>),
     /// An artist's photo, large, with Pick a cover for it (`artist`).
     Artist(Box<artist::ArtistView>),
+    /// The cover of a title Discover found, by its key: large, and no
+    /// more, since the title is not in the library.
+    FoundCover(String),
     /// An album's own track list, made by hand (`tracks`).
     Tracks(Box<tracks::Form>),
 }
@@ -603,6 +606,8 @@ pub enum Message {
     /// viewer is fetched already.
     WarmCover(String),
     ViewCover(String),
+    /// The same on a title Discover found, by its key: the cover alone.
+    ViewFoundCover(String),
     /// The same on a series: the cover of the part that stands for it.
     ViewSeriesCover {
         id: String,
@@ -2243,6 +2248,11 @@ fn handle(app: &mut App, message: Message) -> Task<AppMessage> {
                 ..CoverView::default()
             })));
         }
+        Message::ViewFoundCover(key) => {
+            if app.discover.item(&key).is_some() {
+                app.dialog = Some(Dialog::FoundCover(key));
+            }
+        }
         Message::ViewSeriesCover { id, media, name } => {
             app.library.details_rating_open = false;
             app.dialog = Some(Dialog::Cover(Box::new(CoverView {
@@ -2566,6 +2576,10 @@ pub fn wanted(app: &App, wants: &mut Wants) {
     }
     if let Some(Dialog::Artist(view)) = &app.dialog {
         artist::wanted(app, view, wants);
+        return;
+    }
+    if let Some(Dialog::FoundCover(key)) = &app.dialog {
+        cover::found_wanted(app, key, wants);
         return;
     }
     let Some(Dialog::Form(form)) = &app.dialog else {
@@ -3369,6 +3383,7 @@ pub fn overlay<'a>(app: &'a App, base: Element<'a, AppMessage>) -> Element<'a, A
         Dialog::SeasonDropped { id, season } => dialogs::season_dropped(app, id, *season),
         Dialog::Cover(view) => cover::view(app, view),
         Dialog::Artist(view) => artist::view(app, view),
+        Dialog::FoundCover(key) => cover::found_view(app, key),
         Dialog::Tracks(form) => tracks::view(app, form),
     });
     ui::modal(base, dialog, AppMessage::Entry(on_dismiss), &tokens)

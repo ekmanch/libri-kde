@@ -19,6 +19,10 @@
 //! on a series' row opens on the cover the row shows. The covers and the
 //! sharper copies of the parts on either side are fetched ahead.
 //!
+//! A title Discover found opens the same way from Coming soon (Ctrl+click,
+//! or its menu's View cover): its cover, its title and "Upcoming · Movie ·
+//! 2027", and no Change cover…, since it is not in the library.
+//!
 //! Pick a cover itself is `pick`: the owner's own covers with Upload, the
 //! online matches and the folder's other files. A song shows its album's
 //! cover, so on a song the picker works on the album.
@@ -34,6 +38,7 @@ use crate::browse;
 use crate::covers;
 use crate::lookup::{self, Match};
 use crate::model::{Entry, Series};
+use crate::screens::library::soon;
 use crate::series;
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, FocusExt, Icon};
@@ -126,48 +131,16 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
         return iced::widget::space().into();
     };
 
-    // The image's own shape, 2:3 or square for music until it is
-    // measured, its longer side as long as the window allows.
     let url = shown_url(app, view, entry);
-    let square = ui::cover::is_square(entry.media);
-    let max_side = if square { MAX_ALBUM_SIDE } else { MAX_SIDE };
-    let side = (app.window.height - MARGIN).clamp(240.0, max_side);
-    let ratio = url
-        .and_then(|url| app.artwork.image_size(url))
-        .map(|(w, h)| w as f32 / h as f32)
-        .unwrap_or(if square { 1.0 } else { 2.0 / 3.0 })
-        .clamp(NARROWEST, WIDEST);
-    let (width, height) = if ratio <= 1.0 {
-        (side * ratio, side)
-    } else {
-        (side, side / ratio)
-    };
-    let face = ui::flat_cover(
-        url.and_then(|url| app.artwork.image(url)),
+    let (width, height) = frame(app, url, ui::cover::is_square(entry.media));
+    let face = face(
+        app,
+        url,
         theme::cover_color(&entry.id),
+        entry.title.clone(),
         width,
         height,
-        RADIUS,
-        Some(ui::cover::Label {
-            words: entry.title.clone(),
-            size: 36.0,
-            padding: 28.0,
-            centered: false,
-        }),
     );
-    // The sharper copy over it, which draws nothing until it is decoded.
-    let face: Element<'_, AppMessage> = match url.and_then(|url| large_handle(app, url)) {
-        Some(large) => stack![
-            face,
-            Image::new(large)
-                .width(width)
-                .height(height)
-                .content_fit(ContentFit::Cover)
-                .border_radius(RADIUS),
-        ]
-        .into(),
-        None => face,
-    };
 
     // A song shows its album's cover.
     let owner = pick::cover_owner(app, entry);
@@ -281,7 +254,117 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
         )));
     }
 
-    let close = round_button(Icon::Close, 40.0, 18.0, Message::Close, &tokens);
+    backdrop(content.into(), &tokens)
+}
+
+/// The viewer on a title Discover found: the cover the page shows (a
+/// season's is its show's) with the sharper copy over it, the title and
+/// "Upcoming · Movie · 2027", the year left out without a date.
+pub fn found_view<'a>(app: &'a App, key: &str) -> Element<'a, AppMessage> {
+    let tokens = app.tokens();
+    let Some(found) = app.discover.item(key) else {
+        return iced::widget::space().into();
+    };
+    let url = soon::found_cover_url(app, found);
+    let (width, height) = frame(app, url, ui::cover::is_square(found.media));
+    let face = face(
+        app,
+        url,
+        soon::found_tint(found),
+        found.full_title(),
+        width,
+        height,
+    );
+    let mut kind = format!("Upcoming · {}", browse::kind_label_of(found.media));
+    if let Some(released) = found.released {
+        kind = format!("{kind} · {}", released.year);
+    }
+    let words = column![
+        text(found.full_title())
+            .size(16)
+            .font(font::SEMIBOLD)
+            .color(theme::VIEWER_TEXT),
+        text(kind).size(13).color(theme::VIEWER_SUB),
+    ]
+    .spacing(3)
+    .align_x(Center);
+    let cover = column![face, words].spacing(14).align_x(Center);
+    backdrop(opaque(cover), &tokens)
+}
+
+/// What the viewer shows of a found title: its cover, the image's shape
+/// and the sharper copy.
+pub fn found_wanted(app: &App, key: &str, wants: &mut Wants) {
+    let Some(found) = app.discover.item(key) else {
+        return;
+    };
+    soon::want_found(found, wants);
+    if let Some(url) = soon::found_cover_url(app, found) {
+        wants.sizes.push(url.to_owned());
+        want_large(app, url, wants);
+    }
+}
+
+/// The frame of the cover at `url`: the image's own shape, 2:3 or square
+/// for music until it is measured, its longer side as long as the window
+/// allows.
+fn frame(app: &App, url: Option<&str>, square: bool) -> (f32, f32) {
+    let max_side = if square { MAX_ALBUM_SIDE } else { MAX_SIDE };
+    let side = (app.window.height - MARGIN).clamp(240.0, max_side);
+    let ratio = url
+        .and_then(|url| app.artwork.image_size(url))
+        .map(|(w, h)| w as f32 / h as f32)
+        .unwrap_or(if square { 1.0 } else { 2.0 / 3.0 })
+        .clamp(NARROWEST, WIDEST);
+    if ratio <= 1.0 {
+        (side * ratio, side)
+    } else {
+        (side, side / ratio)
+    }
+}
+
+/// The cover at `url` as the cache keeps it (the title on `tint` without
+/// one), and its sharper copy over it, which draws nothing until it is
+/// decoded.
+fn face<'a>(
+    app: &App,
+    url: Option<&str>,
+    tint: iced::Color,
+    title: String,
+    width: f32,
+    height: f32,
+) -> Element<'a, AppMessage> {
+    let face = ui::flat_cover(
+        url.and_then(|url| app.artwork.image(url)),
+        tint,
+        width,
+        height,
+        RADIUS,
+        Some(ui::cover::Label {
+            words: title,
+            size: 36.0,
+            padding: 28.0,
+            centered: false,
+        }),
+    );
+    match url.and_then(|url| large_handle(app, url)) {
+        Some(large) => stack![
+            face,
+            Image::new(large)
+                .width(width)
+                .height(height)
+                .content_fit(ContentFit::Cover)
+                .border_radius(RADIUS),
+        ]
+        .into(),
+        None => face,
+    }
+}
+
+/// `content` in the middle of the dark backdrop, with × at the top right;
+/// a click on the backdrop closes the viewer.
+fn backdrop<'a>(content: Element<'a, AppMessage>, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let close = round_button(Icon::Close, 40.0, 18.0, Message::Close, tokens);
     let scrim = theme::viewer_scrim(tokens.scrim);
     mouse_area(
         container(stack![

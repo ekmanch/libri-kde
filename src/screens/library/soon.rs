@@ -478,21 +478,27 @@ fn frames_albums(state: &State) -> bool {
 fn image_url<'a>(app: &'a App, row: &SoonRow<'a>) -> Option<&'a str> {
     match row {
         SoonRow::Library(upcoming) => app.artwork.cover_url(upcoming.entry),
-        SoonRow::Found(found) => match (&found.cover_url, &found.kind) {
-            (Some(url), _) => Some(url.as_str()),
-            (None, Kind::Season { show, .. }) => app
-                .repo
-                .library()
-                .entry(show)
-                .and_then(|entry| app.artwork.cover_url(entry)),
-            _ => None,
-        },
+        SoonRow::Found(found) => found_cover_url(app, found),
+    }
+}
+
+/// The URL of a Discover item's picture, once known: its own, or for a
+/// season its show's cover.
+pub fn found_cover_url<'a>(app: &'a App, found: &'a Found) -> Option<&'a str> {
+    match (&found.cover_url, &found.kind) {
+        (Some(url), _) => Some(url.as_str()),
+        (None, Kind::Season { show, .. }) => app
+            .repo
+            .library()
+            .entry(show)
+            .and_then(|entry| app.artwork.cover_url(entry)),
+        _ => None,
     }
 }
 
 /// A Discover item's picture: its cover URL, or for a season its show's
 /// cover.
-fn want_found(found: &Found, wants: &mut Wants) {
+pub fn want_found(found: &Found, wants: &mut Wants) {
     match (&found.cover_url, &found.kind) {
         (Some(url), _) => wants.images.push(url.clone()),
         (None, Kind::Season { show, .. }) => wants.covers.push(show.clone()),
@@ -526,7 +532,7 @@ fn found_image(app: &App, found: &Found) -> Option<iced::widget::image::Handle> 
 
 /// The placeholder tint of a Discover item: its show's for a season, else
 /// one picked from its key.
-fn found_tint(found: &Found) -> Color {
+pub fn found_tint(found: &Found) -> Color {
     match &found.kind {
         Kind::Season { show, .. } => theme::cover_color(show),
         _ => theme::cover_color(&found.key),

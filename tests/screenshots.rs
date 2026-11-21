@@ -1312,6 +1312,16 @@ fn capture_every_screen() {
                 )));
             }),
         ),
+        // Ctrl+click on a found title: its cover, and no Change cover….
+        (
+            Screen::Library,
+            ("cover-viewer-discover", |app| {
+                soon(app, library::Slice::Discover);
+                let _ = app.update(Message::Entry(entry::Message::ViewFoundCover(
+                    "fake:game:fromsoftware-next".into(),
+                )));
+            }),
+        ),
         (
             Screen::Library,
             ("coming-soon-games", |app| {

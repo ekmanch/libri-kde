@@ -7,7 +7,7 @@
 //!
 //! On Coming soon a title of the library has the same menu, and one that
 //! Discover found has its own (canvas revision of 2026-11-19): Preview,
-//! Add to library, Unfollow and Not interested. Unfollow names the follow
+//! Add to library, View cover, Unfollow and Not interested. Unfollow names the follow
 //! the title was found for, or opens a submenu when there are several,
 //! and writes the same setting as the Following window.
 
@@ -284,6 +284,8 @@ pub fn items(app: &App, target: &Target) -> Option<(String, Vec<Item>)> {
                 row("Preview", "Click", Action::Open),
                 row(add, "", Action::AddFound),
                 Item::Separator,
+                row("View cover", "Ctrl+click", Action::ViewCover),
+                Item::Separator,
             ];
             match app.discover.live_reasons(settings, found).as_slice() {
                 [] => {}
@@ -485,6 +487,7 @@ fn run_on_found(app: &mut App, key: String, action: Action) -> Task<AppMessage> 
         Action::Open if app.library.found.as_deref() == Some(key.as_str()) => Task::none(),
         Action::Open => app.act(msg(Message::SelectFound(key))),
         Action::AddFound => app.act(msg(Message::AddFound(key))),
+        Action::ViewCover => app.act(AppMessage::Entry(entry::Message::ViewFoundCover(key))),
         Action::Unfollow(kind, id) => {
             following::set(app, kind, &id, false);
             Task::none()
@@ -1129,6 +1132,8 @@ mod tests {
                 "Preview",
                 "Add to library…",
                 "-",
+                "View cover",
+                "-",
                 unfollow.as_str(),
                 "Not interested",
                 "-",
@@ -1200,6 +1205,8 @@ mod tests {
                 "Preview",
                 "Add to library…",
                 "-",
+                "View cover",
+                "-",
                 "Unfollow",
                 "Not interested",
                 "-",
@@ -1248,7 +1255,7 @@ mod tests {
             );
         }
         assert!(!listed(&app, &found.key));
-        assert_eq!(items(&app, &target).map(|(_, items)| items.len()), Some(6));
+        assert_eq!(items(&app, &target).map(|(_, items)| items.len()), Some(8));
     }
 
     #[test]
@@ -1283,6 +1290,46 @@ mod tests {
         let mut ui = simulator(view);
         assert!(ui.find("Not interested").is_ok());
         assert!(ui.find("Open details").is_err());
+    }
+
+    #[test]
+    fn a_found_titles_cover_opens_large_without_change_cover() {
+        use iced::keyboard::Modifiers;
+        use iced_test::simulator;
+        let mut app = with_discover();
+        let target = Target::Found(KING.into());
+        assert_eq!(hint(&app, &target, "View cover"), "Ctrl+click");
+        run_item(&mut app, target, Action::ViewCover);
+        assert!(matches!(&app.dialog, Some(entry::Dialog::FoundCover(key)) if key == KING));
+        assert_eq!(app.library.found, None, "nothing is previewed");
+        {
+            let view = app.view();
+            let mut ui = simulator(view);
+            assert!(ui.find("Upcoming · Book · 2027").is_ok());
+            assert!(ui.find("Change cover…").is_err());
+            assert!(ui.find("Add a cover…").is_err());
+        }
+        let _ = app.update(AppMessage::Key(crate::app::KeyPress::Escape));
+        assert!(app.dialog.is_none());
+
+        // Ctrl+click on its row, and on its row in the panel, without
+        // previewing it or leaving the slice; a title with no date has
+        // no year.
+        const UNDATED: &str = "fake:book:doors-of-stone";
+        let _ = app.update(AppMessage::Modifiers(Modifiers::CTRL));
+        for click in [
+            Message::SelectFound(UNDATED.into()),
+            Message::OpenFound(UNDATED.into()),
+        ] {
+            let _ = app.update(msg(click));
+            assert!(matches!(&app.dialog, Some(entry::Dialog::FoundCover(key)) if key == UNDATED));
+            assert_eq!(app.library.found, None);
+            let _ = app.update(AppMessage::Entry(entry::Message::Close));
+        }
+        let _ = app.update(msg(Message::SelectFound(UNDATED.into())));
+        let view = app.view();
+        let mut ui = simulator(view);
+        assert!(ui.find("Upcoming · Book").is_ok());
     }
 
     fn send_app(app: &mut App, message: following::Message) {
