@@ -27,13 +27,13 @@ use iced::mouse::ScrollDelta;
 use iced::widget::{Column, Row, Stack, button, column, container, grid, row, space, stack, text};
 use iced::{Background, Border, Center, Color, Element, Fill, FillPortion, Padding, Vector};
 
-use super::{Message, State, View, entries, panel, rail};
+use super::{Message, State, View, entries, menu, panel, rail};
 use crate::animation::Spring;
 use crate::app::{App, Message as AppMessage};
 use crate::artwork::Wants;
 use crate::discover::{Found, Kind};
 use crate::model::{Date, Entry, Library, MediaType, Released};
-use crate::screens::entry;
+use crate::screens::{entry, following};
 use crate::theme::{self, Tokens, font};
 use crate::ui::{self, ButtonKind, FocusExt, Icon};
 use crate::upcoming::{self, GroupKey, SortKey, Upcoming};
@@ -264,6 +264,15 @@ impl<'a> SoonRow<'a> {
     }
 
     /// The key a click and the arrow keys go by.
+    /// What a right-click on the row opens the menu for: the title's own
+    /// menu for one of the library, Discover's for one it found.
+    fn menu_target(&self) -> menu::Target {
+        match self {
+            SoonRow::Library(upcoming) => menu::Target::Entry(upcoming.entry.id.clone()),
+            SoonRow::Found(found) => menu::Target::Found(found.key.clone()),
+        }
+    }
+
     pub fn key(&self) -> String {
         match self {
             SoonRow::Library(row) => row.key(),
@@ -313,7 +322,7 @@ pub struct Lists<'a> {
 impl<'a> Lists<'a> {
     pub fn of(app: &'a App) -> Lists<'a> {
         let library = app.repo.library();
-        let (discover, hidden) = app.discover.lists(library);
+        let (discover, hidden) = app.discover.lists(library, &app.shared.settings);
         Lists {
             library: upcoming::library_upcoming(library, app.today),
             discover,
@@ -524,8 +533,14 @@ fn found_tint(found: &Found) -> Color {
     }
 }
 
+/// What the page says of the check while Settings › Discover has it off.
+const CHECK_OFF: &str = "The check for new releases is switched off.";
+
 /// The footer's line: when the check ran and whom it asked.
 pub fn check_line(app: &App) -> String {
+    if !app.shared.settings.enabled {
+        return CHECK_OFF.into();
+    }
     app.discover
         .check_line(crate::clock::Timestamp::now())
         .unwrap_or_else(|| "Libri checks for new releases and dates once a day.".into())
@@ -545,7 +560,8 @@ pub fn view<'a>(app: &'a App) -> (Element<'a, AppMessage>, Element<'a, AppMessag
 }
 
 /// The header row: the title with the slice's count, the segmented
-/// control, the view switch and the panel button. No Add, search or sort.
+/// control, the Following button, the view switch and the panel button.
+/// No Add, search or sort.
 fn header<'a>(
     app: &'a App,
     lists: &Lists<'a>,
@@ -575,11 +591,17 @@ fn header<'a>(
         ui::mono(count.to_string(), 13.0, tokens.sub),
         container(segments).padding(Padding::new(0.0).left(4)),
         space::horizontal(),
-        views,
-        row(panel::toggle(app)),
     ]
     .spacing(10)
     .align_y(Center);
+    // Following: what Discover checks, on every slice; not with the check
+    // switched off, when nothing is followed.
+    let bar = if app.shared.settings.enabled {
+        bar.push(following::button_for(app, tokens))
+    } else {
+        bar
+    };
+    let bar = bar.push(views).push(row(panel::toggle(app)));
     container(bar)
         .height(64)
         .padding(Padding::new(0.0).left(24).right(20))
@@ -942,7 +964,7 @@ fn block<'a>(
         } else {
             text_row(row, look, tokens)
         };
-        container(element).id(id).into()
+        menu::area(row.menu_target(), container(element).id(id))
     });
     if covers {
         Column::with_children(rows)
@@ -966,9 +988,8 @@ fn tiles<'a>(
     let cards = groups.iter().flat_map(|group| {
         group.rows.iter().map(move |row| {
             let look = Look::of(app, row, slice, group.hidden, tokens);
-            container(tile(app, row, look, tokens))
-                .id(row_key(&row.key()))
-                .into()
+            let card = container(tile(app, row, look, tokens)).id(row_key(&row.key()));
+            menu::area(row.menu_target(), card)
         })
     });
     container(
@@ -1028,7 +1049,8 @@ impl Look {
         let state = &app.library;
         let (selected, mark, on_press) = match row {
             SoonRow::Library(upcoming) => (
-                state.selected.as_deref() == Some(upcoming.entry.id.as_str()),
+                state.selected.as_deref() == Some(upcoming.entry.id.as_str())
+                    || state.menu_on_entry(&upcoming.entry.id),
                 if slice == Slice::All {
                     Mark::Want
                 } else {
@@ -1037,7 +1059,8 @@ impl Look {
                 msg(Message::Select(upcoming.entry.id.clone())),
             ),
             SoonRow::Found(found) => (
-                state.found.as_deref() == Some(found.key.as_str()),
+                state.found.as_deref() == Some(found.key.as_str())
+                    || state.menu_on_found(&found.key),
                 if hidden { Mark::Restore } else { Mark::Add },
                 msg(Message::SelectFound(found.key.clone())),
             ),
@@ -1388,7 +1411,19 @@ fn empty<'a>(
     tokens: &Tokens,
 ) -> Element<'a, AppMessage> {
     let nothing_at_all = lists.library.is_empty() && lists.discover.is_empty();
-    let (title, body) = if nothing_at_all {
+    let on = app.shared.settings.enabled;
+    let (title, body) = if !on && slice == Slice::Discover {
+        (
+            "Discover is switched off".to_owned(),
+            "Nothing is followed and nothing is fetched. Turn on Check for new releases in Settings › Discover to see new seasons, next parts and new work by creators in your library here.".to_owned(),
+        )
+    } else if nothing_at_all && !on {
+        (
+            "Nothing coming up yet".to_owned(),
+            "Add titles you’re waiting for as Want with a release date and they show up here."
+                .to_owned(),
+        )
+    } else if nothing_at_all {
         (
             "Nothing coming up yet".to_owned(),
             "Add titles you’re waiting for as Want with a release date and they show up here. Libri also checks once a day for next seasons, next parts and new work by creators in your library, and lists what it finds under Discover.".to_owned(),
@@ -1409,7 +1444,6 @@ fn empty<'a>(
         };
         (title, body.to_owned())
     };
-    let _ = app;
     ui::empty_state(Icon::Clock, title, body, None, tokens)
 }
 
@@ -1623,7 +1657,8 @@ pub fn glance<'a>(app: &'a App, height: f32) -> Element<'a, AppMessage> {
             .spacing(6),
         );
     }
-    let last = match app.discover.record.checked {
+    let last = match app.discover.record().checked {
+        _ if !app.shared.settings.enabled => CHECK_OFF.into(),
         Some(checked) => format!(
             "Libri checks for new releases and dates once a day. Last check: {}.",
             checked.day_and_time(crate::clock::Timestamp::now())
@@ -2126,13 +2161,21 @@ mod tests {
     #[test]
     fn adding_a_found_season_puts_it_on_the_show_and_a_title_opens_the_add_form() {
         let mut app = on_page();
-        let visible = app.discover.visible(app.repo.library()).len();
+        let visible = app
+            .discover
+            .visible(app.repo.library(), &app.shared.settings)
+            .len();
         let _ = app.update(lib(Message::AddFound("shows/severance-2022#3".into())));
         let show = app.repo.library().entry("shows/severance-2022").unwrap();
         let third = show.season_list().iter().find(|s| s.season == 3).unwrap();
         assert_eq!(third.status, Some(EntryStatus::Want));
         assert_eq!(third.released, Released::parse("2027"));
-        assert_eq!(app.discover.visible(app.repo.library()).len(), visible - 1);
+        assert_eq!(
+            app.discover
+                .visible(app.repo.library(), &app.shared.settings)
+                .len(),
+            visible - 1
+        );
         assert!(app.dialog.is_none());
         // It is in the Library slice now.
         let rows = Lists::of(&app);
@@ -2159,18 +2202,41 @@ mod tests {
     fn not_interested_hides_an_item_and_restore_brings_it_back() {
         let mut app = on_page();
         let _ = app.update(lib(Message::SoonSlice(Slice::Discover)));
-        let visible = app.discover.visible(app.repo.library()).len();
+        let visible = app
+            .discover
+            .visible(app.repo.library(), &app.shared.settings)
+            .len();
         let _ = app.update(lib(Message::SelectFound("fake:book:king-2027".into())));
         let _ = app.update(lib(Message::HideFound("fake:book:king-2027".into())));
         assert_eq!(app.library.found, None);
-        assert!(app.discover.hidden.contains("fake:book:king-2027"));
-        assert_eq!(app.discover.visible(app.repo.library()).len(), visible - 1);
-        assert_eq!(app.discover.hidden_items(app.repo.library()).len(), 1);
+        assert!(
+            app.shared
+                .settings
+                .not_interested
+                .contains("fake:book:king-2027")
+        );
+        assert_eq!(
+            app.discover
+                .visible(app.repo.library(), &app.shared.settings)
+                .len(),
+            visible - 1
+        );
+        assert_eq!(
+            app.discover
+                .hidden_items(app.repo.library(), &app.shared.settings)
+                .len(),
+            1
+        );
         let _ = app.update(lib(Message::ShowHidden));
         assert!(app.library.show_hidden);
         let _ = app.update(lib(Message::RestoreFound("fake:book:king-2027".into())));
-        assert_eq!(app.discover.visible(app.repo.library()).len(), visible);
-        assert!(app.discover.hidden.is_empty());
+        assert_eq!(
+            app.discover
+                .visible(app.repo.library(), &app.shared.settings)
+                .len(),
+            visible
+        );
+        assert!(app.shared.settings.not_interested.is_empty());
     }
 
     #[test]

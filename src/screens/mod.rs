@@ -2,6 +2,7 @@
 //! the theme tokens; shared pieces come from `ui`.
 
 pub mod entry;
+pub mod following;
 pub mod library;
 pub mod plans;
 pub mod settings;
@@ -105,6 +106,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         Screen::Settings => settings::view(app),
     };
     // The conflict dialog and the token warning sit over every dialog.
+    let screen = following::overlay(app, screen);
     let screen = entry::overlay(app, plans::overlay(app, screen));
     token::overlay(app, shell::conflict_overlay(app, screen))
 }

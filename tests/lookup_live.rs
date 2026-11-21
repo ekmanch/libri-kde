@@ -204,18 +204,18 @@ fn a_cover_is_resolved_and_its_image_fetched() {
 #[test]
 #[ignore = "asks the real providers; run with --ignored"]
 fn the_daily_check_runs_on_the_real_library() {
-    use libri::discover::{self, Settings};
+    use libri::discover;
     use libri::model::{Date, codec};
 
     let dir = std::path::PathBuf::from(std::env::var("LIBRI_LIVE_DIR").expect("LIBRI_LIVE_DIR"));
     let settings = std::env::var("LIBRI_LIVE_SETTINGS").expect("LIBRI_LIVE_SETTINGS");
-    let settings = Settings::parse(&std::fs::read_to_string(settings).unwrap());
+    let settings = libri::shared::decode(&std::fs::read_to_string(settings).unwrap()).unwrap();
     let path = libri::storage::data_dir().unwrap().join("library.json");
     let library = codec::decode(&std::fs::read_to_string(path).unwrap()).unwrap();
     let service = Service::real(&Keys::load(), Some(&dir));
     let file = dir.join("discover.json");
     // Goes on from what an earlier run in that folder left, as a retry does.
-    let previous = discover::State::at(Some(&dir), None).record;
+    let previous = discover::State::at(Some(&dir)).record().clone();
     let start = std::time::Instant::now();
     let outcome = discover::run(
         &service,

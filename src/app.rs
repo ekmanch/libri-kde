@@ -16,6 +16,7 @@ use crate::connection::{Connection, ConnectionFile, Target};
 use crate::covers::{self, Covers};
 use crate::decoration::Decoration;
 use crate::discover;
+use crate::follows::Follows;
 use crate::github;
 use crate::history::{Direction, History, Place};
 use crate::keymap::{Action, Combo, Keymap};
@@ -24,8 +25,9 @@ use crate::model::{Date, codec};
 use crate::preferences::{Preferences, PreferencesFile};
 use crate::repo::Operation;
 use crate::repo::{FixtureLibraryRepository, LibraryRepository, LocalLibraryRepository};
-use crate::screens::{self, Screen, entry, library, plans, setup, token};
+use crate::screens::{self, Screen, entry, following, library, plans, setup, token};
 use crate::settings::{Settings, Source, SyncState, ThemeChoice};
+use crate::shared;
 use crate::storage;
 use crate::sync::{self, Answer, Base, Engine, Kind, Outcome, Phase, Request};
 use crate::tags::{self, PickerState};
@@ -226,6 +228,16 @@ pub struct App {
     /// Discover: what the daily check found for the Coming soon page, and
     /// the items marked Not interested.
     pub discover: discover::State,
+    /// `settings.json` beside the library: the settings the phone shares,
+    /// and what Discover follows.
+    pub shared: shared::Store,
+    /// What Discover follows, derived from the library, the settings and
+    /// the check's creator records; made again when one of them changes
+    /// (`refresh_follows`), since the Coming soon header counts it on
+    /// every frame.
+    pub follows: Follows,
+    /// The Following window, over Settings or Coming soon.
+    pub following: Option<following::State>,
     /// `preferences.json` on this computer; kept nowhere in the tests.
     pub preferences: PreferencesFile,
     /// `connection.json` on this computer and what it holds: the repo,
@@ -297,6 +309,10 @@ pub enum Message {
     Lookup(artwork::Message),
     /// The daily check behind Coming soon's Discover.
     Discover(discover::Message),
+    /// GitHub's `settings.json` came, for the connection and the state of
+    /// the settings it was asked in.
+    SharedFetched(Box<github::Reply<Option<github::RawFile>>>, u64, u64),
+    Following(following::Message),
     /// The owner's own covers: GitHub's list of them, and a file fetched.
     Covers(CoversMessage),
     /// Apple's answer about an artist's photo (`photos_next`).
@@ -514,6 +530,7 @@ impl App {
             "LIBRI_FIRST_RUN",
             "LIBRI_LOCAL",
             "LIBRI_SOON",
+            "LIBRI_DISCOVER",
         ]
         .iter()
         .any(|name| var(name).is_some());
@@ -538,7 +555,25 @@ impl App {
                 );
             }
             app.lookups = Arc::new(Service::real(&keys, cache.as_deref()));
-            app.discover = discover::State::at(cache.as_deref(), storage::data_dir().as_deref());
+            app.discover = discover::State::at(cache.as_deref());
+            if let Some(dir) = storage::data_dir() {
+                app.shared = shared::Store::at(&dir);
+            }
+            if app.shared.on_disk() {
+                app.shared_changed();
+            } else {
+                // No `settings.json` yet: the three settings that used to
+                // be in the preferences start it. GitHub's copy replaces
+                // them when it comes; a library kept on this computer has
+                // only this file.
+                let settings = &mut app.shared.settings;
+                settings.timeline = app.settings.timeline;
+                settings.seasonal = app.settings.seasonal;
+                settings.platform = app.settings.platform.clone();
+                if app.kept_locally {
+                    app.shared.save();
+                }
+            }
             app.covers = Covers::at(
                 storage::data_dir().map(|dir| dir.join(covers::FOLDER)),
                 cache.as_deref(),
@@ -609,7 +644,17 @@ impl App {
         if app.mock {
             // The fake answers at once, so the mock screens have Discover
             // rows to look at.
-            let _ = app.check_discover();
+            let _ = app.check_discover(false);
+        }
+        // `LIBRI_DISCOVER=checking|off`: Settings' Discover section while
+        // a check runs (the canvas's numbers), or switched off.
+        match var("LIBRI_DISCOVER").as_deref() {
+            Some("checking") => app.discover.look_checking(184, 423),
+            Some("off") => {
+                app.shared.settings.enabled = false;
+                app.shared_changed();
+            }
+            _ => {}
         }
         app.photos.look =
             var("LIBRI_PHOTOS").and_then(|value| covers::backfill::Look::from_env(&value));
@@ -702,7 +747,7 @@ impl App {
     pub fn new(screen: Screen) -> App {
         let repo = FixtureLibraryRepository::load().expect("the bundled fixture decodes");
         let source = Source::fixture();
-        App {
+        let mut app = App {
             screen,
             settings: Settings::default(),
             plasma_dark: true,
@@ -740,6 +785,9 @@ impl App {
             apple: Arc::default(),
             photos_due: Instant::now(),
             discover: discover::State::default(),
+            shared: shared::Store::default(),
+            follows: Follows::default(),
+            following: None,
             preferences: PreferencesFile::default(),
             connection_file: ConnectionFile::default(),
             connection: None,
@@ -752,7 +800,9 @@ impl App {
             loading: false,
             mock: true,
             now: std::time::Instant::now(),
-        }
+        };
+        app.refresh_follows();
+        app
     }
 
     /// Applies one change to the library. A change that cannot apply (an entry gone meanwhile) or
@@ -777,10 +827,149 @@ impl App {
             eprintln!("libri: change not applied ({summary}): {error}");
         }
         self.artwork.library_changed();
+        self.refresh_follows();
         if self.engine.is_some() {
             self.save_due = Some(Instant::now() + sync::DEBOUNCE);
             self.refresh_sync_state();
         }
+    }
+
+    // `settings.json` beside the library (`shared`): what the phone and
+    // the desktop agree on, and what Discover follows.
+
+    /// What Discover follows, made again from the library, the settings
+    /// and the check's record of who is no longer active.
+    pub fn refresh_follows(&mut self) {
+        self.follows = Follows::derive(
+            self.repo.library(),
+            &self.shared.settings,
+            &self.discover.record().creators,
+            self.lookups.is_instant(),
+        );
+    }
+
+    /// The settings changed: Settings' own three follow them, and the
+    /// follows are counted again.
+    fn shared_changed(&mut self) {
+        let shared = &self.shared.settings;
+        self.settings.timeline = shared.timeline;
+        self.settings.seasonal = shared.seasonal;
+        self.settings.platform = shared.platform.clone();
+        self.refresh_follows();
+        // A previewed title that an unfollow took off the page closes.
+        if let Some(key) = &self.library.found {
+            let (visible, hidden) = self
+                .discover
+                .lists(self.repo.library(), &self.shared.settings);
+            if !visible.iter().chain(&hidden).any(|item| item.key == *key) {
+                self.library.found = None;
+            }
+        }
+    }
+
+    /// Makes a change to `settings.json`: on this computer at once, on
+    /// GitHub with the next commit, where it is merged into the file as
+    /// it is then. `summary` names a commit it makes on its own.
+    pub fn change_shared(&mut self, edit: shared::Edit, summary: String) {
+        if !self.shared.apply(&edit) {
+            return;
+        }
+        self.shared_changed();
+        if let Some(engine) = &mut self.engine {
+            engine.queue_file(covers::Change::Settings(edit), Some(summary));
+            self.save_due = Some(Instant::now() + sync::DEBOUNCE);
+            self.refresh_sync_state();
+        }
+    }
+
+    /// The changes to `settings.json` still waiting for their commit.
+    fn queued_shared_edits(&self) -> Vec<shared::Edit> {
+        let Some(engine) = &self.engine else {
+            return Vec::new();
+        };
+        let changes = engine.pending().changes();
+        changes
+            .into_iter()
+            .filter_map(|change| match change {
+                covers::Change::Settings(edit) => Some(edit),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Asks GitHub for `settings.json`, conditionally, unless it is being
+    /// asked: at the start and after every round of the sync, so a change
+    /// made on the phone shows here as soon as one to the library would.
+    fn fetch_shared(&mut self) -> Task<Message> {
+        let (Some(client), Some(engine)) = (&self.github, &self.engine) else {
+            return Task::none();
+        };
+        if self.shared.fetching {
+            return Task::none();
+        }
+        self.shared.fetching = true;
+        let (client, target) = (client.clone(), engine.target().clone());
+        let (generation, epoch) = (self.engine_generation, self.shared.epoch);
+        let etag = self.shared.etag.clone();
+        Task::perform(
+            blocking(move || {
+                let path = shared::path_beside(&target.file);
+                Ok(client.file_raw(&path, &target.branch, etag.as_deref()))
+            }),
+            move |result| {
+                let reply = result.unwrap_or_else(|error| {
+                    Err(github::Failure::new(github::FailureKind::Other, error))
+                });
+                Message::SharedFetched(Box::new(reply), generation, epoch)
+            },
+        )
+    }
+
+    /// GitHub's `settings.json` came: the settings are that copy with the
+    /// changes still queued on top. No file there is the defaults; one of
+    /// another version, or an answer that failed, leaves them as they are.
+    fn shared_fetched(
+        &mut self,
+        reply: github::Reply<Option<github::RawFile>>,
+        epoch: u64,
+    ) -> Task<Message> {
+        self.shared.fetching = false;
+        // A change was made here or a commit landed while it was out: the
+        // answer may be the file from before, so it is asked again.
+        if epoch != self.shared.epoch {
+            return self.fetch_shared();
+        }
+        let known = self.shared.known;
+        let queued = self.queued_shared_edits();
+        let taken = match reply {
+            Ok(None) => {
+                self.shared.known = true;
+                Ok(false)
+            }
+            Ok(Some(raw)) => {
+                let text = raw.text().unwrap_or("not UTF-8");
+                let taken = self.shared.take_remote(Some(text), &queued);
+                if taken.is_ok() {
+                    self.shared.etag = raw.etag.clone();
+                }
+                taken
+            }
+            Err(failure) if failure.kind == github::FailureKind::NotFound => {
+                self.shared.etag = None;
+                self.shared.take_remote(None, &queued)
+            }
+            Err(failure) => Err(failure.describe()),
+        };
+        match taken {
+            Ok(true) => self.shared_changed(),
+            Ok(false) => {}
+            Err(error) => eprintln!("libri: settings.json on GitHub was not read: {error}"),
+        }
+        // The daily check waited for what to follow.
+        if !known && self.shared.known {
+            return self.check_discover(false);
+        }
+        Task::none()
     }
 
     // GitHub sync (phase 3): the engine decides, the app runs each call
@@ -840,7 +1029,9 @@ impl App {
             Screen::Library
         };
         let covers = self.list_covers();
-        Task::batch([store, self.sync_now(), covers])
+        self.shared.forget_remote();
+        let shared = self.fetch_shared();
+        Task::batch([store, self.sync_now(), covers, shared])
     }
 
     /// The token from KDE Wallet at the start: the client and the engine
@@ -867,7 +1058,9 @@ impl App {
             self.screen = Screen::Splash;
         }
         let covers = self.list_covers();
-        Task::batch([self.sync_now(), covers])
+        self.shared.forget_remote();
+        let shared = self.fetch_shared();
+        Task::batch([self.sync_now(), covers, shared])
     }
 
     /// A new token for the same connection ("Replace token"): to the
@@ -913,6 +1106,9 @@ impl App {
         }
         self.github = None;
         self.token = None;
+        self.shared.forget_remote();
+        // Kept on this computer, the settings here are all there is.
+        self.shared.known = true;
         self.save_due = None;
         self.loading = false;
         self.sync = SyncState::Synced;
@@ -943,6 +1139,7 @@ impl App {
             if let Err(error) = self.repo.delete() {
                 eprintln!("libri: could not delete the library: {error}");
             }
+            self.refresh_follows();
             self.connection = None;
             self.connection_file.clear();
         }
@@ -983,6 +1180,7 @@ impl App {
         if let Some(library) = outcome.library {
             self.repo.replace(library);
             self.artwork.library_changed();
+            self.refresh_follows();
             // GitHub's copy came: its covers may have changed with it.
             listing = self.list_covers();
         }
@@ -1502,7 +1700,8 @@ impl App {
                 }
                 covers::Change::Upload { .. }
                 | covers::Change::Put { .. }
-                | covers::Change::Missing(_) => {}
+                | covers::Change::Missing(_)
+                | covers::Change::Settings(_) => {}
             }
             self.covers.apply(&change, !queued);
             if let Some(engine) = &mut self.engine {
@@ -2206,21 +2405,36 @@ impl App {
                 let Some(engine) = &mut self.engine else {
                     return Task::none();
                 };
-                let files_before = engine.pending().files().len();
+                let is_cover =
+                    |change: &covers::Change| !matches!(change, covers::Change::Settings(_));
+                let changes_before = engine.pending().changes();
+                let files_before = changes_before.len();
+                let covers_before = changes_before.iter().any(is_cover);
                 let outcome = engine.answer(*answer, self.repo.library());
                 let files_landed = engine.pending().files().len() < files_before;
+                let round_over = !engine.running();
                 self.refresh_sync_state();
                 self.covers_dropped(dropped);
                 let next = self.run(outcome);
                 // Cover files went up: GitHub's list is asked for again,
                 // which also brings `_missing.json` as it was merged and
                 // the file GitHub kept over one dropped here.
-                let listing = if files_landed {
+                let listing = if files_landed && covers_before {
                     self.list_covers()
                 } else {
                     Task::none()
                 };
-                return Task::batch([next, listing]);
+                // `settings.json` may have gone up with them: a download
+                // asked for before that is the file from before.
+                if files_landed {
+                    self.shared.epoch += 1;
+                }
+                let shared = if round_over {
+                    self.fetch_shared()
+                } else {
+                    Task::none()
+                };
+                return Task::batch([next, listing, shared]);
             }
             Message::Key(KeyPress::Backspace) => {
                 if let Some(picker) = self.picker_mut() {
@@ -2237,6 +2451,7 @@ impl App {
                 Screen::Setup => self.setup.which = None,
                 _ => {
                     if !entry::dismiss_top(self)
+                        && !following::dismiss(self)
                         && !plans::dismiss_top(self)
                         && !screens::settings::dismiss_top(self)
                         && !self.library.dismiss_top()
@@ -2492,11 +2707,23 @@ impl App {
             }
             Message::Library(library::Message::AddFound(key)) => return self.add_found(&key),
             Message::Library(library::Message::HideFound(key)) => {
-                self.discover.hide(&key);
+                let title = self.discover.item(&key).map(discover::Found::full_title);
+                let edit = shared::Edit::Hide(key.clone());
+                let summary = shared::summary(&edit, title.as_deref());
+                self.change_shared(edit, summary);
                 self.library.update(library::Message::HideFound(key));
             }
-            Message::Library(library::Message::RestoreFound(key)) => self.discover.restore(&key),
-            Message::Discover(discover::Message::Check) => return self.check_discover(),
+            Message::Library(library::Message::RestoreFound(key)) => {
+                let title = self.discover.item(&key).map(discover::Found::full_title);
+                let edit = shared::Edit::Restore(key);
+                let summary = shared::summary(&edit, title.as_deref());
+                self.change_shared(edit, summary);
+            }
+            Message::Discover(discover::Message::Check) => return self.check_discover(false),
+            Message::Discover(discover::Message::Now) => return self.check_discover(true),
+            Message::Discover(discover::Message::Stop) => self.discover.stop(),
+            // Only there so the row is drawn again as the run counts on.
+            Message::Discover(discover::Message::Tick) => {}
             Message::Discover(discover::Message::Done(outcome)) => {
                 if let Some(why) = &outcome.stopped {
                     eprintln!(
@@ -2505,7 +2732,14 @@ impl App {
                     );
                 }
                 self.discover.finish(*outcome, Timestamp::now());
+                // Who is no longer active may have been learned.
+                self.refresh_follows();
             }
+            Message::SharedFetched(_, generation, _) if generation != self.engine_generation => {
+                self.shared.fetching = false;
+            }
+            Message::SharedFetched(reply, _, epoch) => return self.shared_fetched(*reply, epoch),
+            Message::Following(message) => return following::update(self, message),
             Message::Library(message) => {
                 if message.shows_library() {
                     self.screen = Screen::Library;
@@ -2539,7 +2773,7 @@ impl App {
                 // them too, hidden ones included.
                 let covers: Vec<String> = self
                     .discover
-                    .record
+                    .record()
                     .items
                     .iter()
                     .filter_map(|item| item.cover_url.clone())
@@ -2719,6 +2953,13 @@ impl App {
                 time::every(DISCOVER_INTERVAL).map(|_| Message::Discover(discover::Message::Check)),
             );
         }
+        // While the check runs, Settings' row counts what it has asked.
+        if self.discover.running && self.screen == Screen::Settings {
+            subscriptions.push(
+                time::every(Duration::from_millis(250))
+                    .map(|_| Message::Discover(discover::Message::Tick)),
+            );
+        }
         if self.engine.is_some() {
             let interval = if self.focused {
                 sync::FOCUSED_CHECK_INTERVAL
@@ -2853,43 +3094,46 @@ impl App {
 
     /// Runs the daily check behind Discover, unless it ran today or is
     /// running: at once on the fake, else on the blocking pool.
-    fn check_discover(&mut self) -> Task<Message> {
+    /// Runs the daily check when it is due, or at once with `force`
+    /// (Check now): never with the check switched off, and not before
+    /// GitHub's `settings.json` is known, since the defaults would follow
+    /// everything the owner unticked.
+    fn check_discover(&mut self, force: bool) -> Task<Message> {
         let now = Timestamp::now();
-        if !self.discover.is_due(now) {
+        let settings = self.shared.settings.clone();
+        if !settings.enabled || self.discover.running {
             return Task::none();
         }
-        self.discover.start();
+        if !force && !self.discover.is_due(now) {
+            return Task::none();
+        }
+        if self.github.is_some() && !self.shared.known {
+            return Task::none();
+        }
+        let options = self.discover.start(force);
         let service = self.lookups.clone();
         let library = self.repo.library().clone();
         let today = self.today;
-        let previous = self.discover.record.clone();
+        let previous = self.discover.record().clone();
         if service.is_instant() {
-            let mut settings = discover::Settings::default();
-            settings.platform = self.settings.platform.clone();
-            let outcome = discover::run(&service, &library, today, &settings, &previous, None);
+            let outcome = discover::run_with(
+                &service, &library, today, &settings, &previous, None, &options,
+            );
             self.discover.finish(outcome, now);
+            self.refresh_follows();
             return Task::none();
         }
-        let github = self.github.clone();
-        let platform = self.settings.platform.clone();
-        let target = self.engine.as_ref().map(|engine| engine.target().clone());
         let file = self.discover.file().map(std::path::Path::to_path_buf);
-        let settings_file = self
-            .discover
-            .settings_file()
-            .map(std::path::Path::to_path_buf);
         Task::perform(
             blocking(move || {
-                let remote = github.as_deref().zip(target.as_ref());
-                let mut settings = discover::read_settings(remote, settings_file.as_deref())?;
-                settings.platform = platform;
-                Ok(discover::run(
+                Ok(discover::run_with(
                     &service,
                     &library,
                     today,
                     &settings,
                     &previous,
                     file.as_deref(),
+                    &options,
                 ))
             }),
             move |result| {
@@ -3067,9 +3311,9 @@ mod tests {
     fn regaining_focus_never_starts_the_daily_check() {
         let mut app = App::new(Screen::Library);
         let _ = app.update(Message::Window(window::Event::Focused));
-        assert_eq!(app.discover.record.checked, None, "not on focus");
+        assert_eq!(app.discover.record().checked, None, "not on focus");
         let _ = app.update(Message::Discover(discover::Message::Check));
-        assert!(app.discover.record.checked.is_some(), "when asked");
+        assert!(app.discover.record().checked.is_some(), "when asked");
     }
 
     #[test]
@@ -3919,6 +4163,145 @@ mod tests {
         let _ = app.update(Message::Sync(SyncMessage::Tick));
         assert!(app.save_due.is_none());
         assert!(app.engine.as_ref().unwrap().running());
+    }
+
+    fn queued_settings(app: &App) -> Vec<shared::Edit> {
+        app.queued_shared_edits()
+    }
+
+    fn fetched(app: &mut App, text: Option<&str>) {
+        let reply = match text {
+            Some(text) => Ok(Some(github::RawFile::new(
+                text.as_bytes().to_vec(),
+                Some("\"etag\"".into()),
+            ))),
+            None => Err(github::Failure::new(github::FailureKind::NotFound, "gone")),
+        };
+        let (generation, epoch) = (app.engine_generation, app.shared.epoch);
+        let _ = app.update(Message::SharedFetched(Box::new(reply), generation, epoch));
+    }
+
+    #[test]
+    fn a_settings_change_applies_at_once_and_is_queued_with_its_summary() {
+        let mut app = App::new(Screen::Settings);
+        connected(&mut app);
+        let _ = app.update(Message::Settings(screens::settings::Message::Timeline(
+            true,
+        )));
+        assert!(app.settings.timeline && app.shared.settings.timeline);
+        assert_eq!(queued_settings(&app), [shared::Edit::Timeline(true)]);
+        assert!(app.save_due.is_some());
+        let files = app.engine.as_ref().unwrap().pending().files().to_vec();
+        assert_eq!(
+            files[0].summary.as_deref(),
+            Some("Start new plans as a timeline")
+        );
+        // The same again changes nothing and is not queued.
+        let _ = app.update(Message::Settings(screens::settings::Message::Timeline(
+            true,
+        )));
+        assert_eq!(queued_settings(&app).len(), 1);
+        // Not interested goes the same way, so it reaches the phone.
+        let _ = app.update(Message::Discover(discover::Message::Check));
+        let key = "fake:book:king-2027".to_owned();
+        let _ = app.update(Message::Library(library::Message::HideFound(key.clone())));
+        assert_eq!(queued_settings(&app)[1], shared::Edit::Hide(key.clone()));
+        let _ = app.update(Message::Library(library::Message::RestoreFound(
+            key.clone(),
+        )));
+        assert_eq!(queued_settings(&app)[2], shared::Edit::Restore(key));
+        // Kept on this computer nothing is queued, and it still applies.
+        let mut local = App::new(Screen::Settings);
+        let none = screens::settings::Message::Platform(None);
+        let _ = local.update(Message::Settings(none));
+        assert_eq!(local.settings.platform, None);
+        assert_eq!(local.shared.settings.platform, None);
+        assert!(local.save_due.is_none());
+    }
+
+    #[test]
+    fn githubs_settings_are_taken_with_the_queued_changes_on_top() {
+        let mut app = App::new(Screen::Settings);
+        connected(&mut app);
+        let _ = app.update(Message::Settings(screens::settings::Message::Seasonal(
+            false,
+        )));
+        // The phone picked another platform and unfollowed an artist.
+        let theirs = "{\"version\": 1, \"games\": {\"default_platform\": \"Steam Deck\"},
+            \"upcoming\": {\"unfollowed\": {\"artists\": [\"metallica\"]}}}";
+        // The check has run, so who is no longer active is known already.
+        let _ = app.update(Message::Discover(discover::Message::Check));
+        let total = app.follows.total();
+        fetched(&mut app, Some(theirs));
+        assert!(app.shared.known);
+        assert_eq!(app.settings.platform.as_deref(), Some("Steam Deck"));
+        assert!(!app.settings.seasonal, "the change queued here stays");
+        assert_eq!(
+            app.follows.total(),
+            total - 1,
+            "the follows are counted again"
+        );
+        assert_eq!(app.shared.etag.as_deref(), Some("\"etag\""));
+        // Another version's file is left alone, and so are the settings.
+        fetched(&mut app, Some("{\"version\": 2}"));
+        assert_eq!(app.settings.platform.as_deref(), Some("Steam Deck"));
+        // No file there: the defaults, with what is queued.
+        fetched(&mut app, None);
+        assert_eq!(app.settings.platform.as_deref(), Some("PC"));
+        assert!(!app.settings.seasonal);
+        assert_eq!(app.follows.total(), total);
+        // An answer asked for before a change made here is out of date.
+        let (generation, stale) = (app.engine_generation, app.shared.epoch);
+        let _ = app.update(Message::Settings(screens::settings::Message::Timeline(
+            true,
+        )));
+        let old = github::RawFile::new(b"{\"version\": 1}".to_vec(), None);
+        let reply = Box::new(Ok(Some(old)));
+        let _ = app.update(Message::SharedFetched(reply, generation, stale));
+        assert!(app.settings.timeline && !app.settings.seasonal);
+    }
+
+    #[test]
+    fn the_daily_check_waits_for_githubs_settings_and_never_runs_switched_off() {
+        let mut app = App::new(Screen::Library);
+        connected(&mut app);
+        app.github = Some(client());
+        let _ = app.update(Message::Discover(discover::Message::Check));
+        assert_eq!(
+            app.discover.record().checked,
+            None,
+            "what to follow is not known"
+        );
+        // The answer starts it.
+        fetched(&mut app, Some("{\"version\": 1}"));
+        assert!(app.discover.record().checked.is_some());
+        // Switched off, not even Check now runs, and nothing is listed.
+        let mut app = App::new(Screen::Settings);
+        let _ = app.update(Message::Settings(screens::settings::Message::Discover(
+            false,
+        )));
+        let _ = app.update(Message::Discover(discover::Message::Now));
+        assert_eq!(app.discover.record().checked, None);
+        // Switched on again, the check runs at once.
+        let _ = app.update(Message::Settings(screens::settings::Message::Discover(
+            true,
+        )));
+        assert!(app.discover.record().checked.is_some());
+        let library = app.repo.library();
+        assert!(
+            !app.discover
+                .visible(library, &app.shared.settings)
+                .is_empty()
+        );
+        let _ = app.update(Message::Settings(screens::settings::Message::Discover(
+            false,
+        )));
+        let library = app.repo.library();
+        assert!(
+            app.discover
+                .visible(library, &app.shared.settings)
+                .is_empty()
+        );
     }
 
     #[test]

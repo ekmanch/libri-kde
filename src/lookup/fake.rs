@@ -753,13 +753,61 @@ const CREATOR_RELEASES: &[(MediaType, &str, &str, &str, &str, &str)] = &[
         "The band has confirmed a new record is in the works. No date yet.",
         "fake:album:alice-in-chains",
     ),
+    // The phone's fake has these three too. Clint Eastwood is tagged as a
+    // director and as an actor, so with the actor ticked his movie is
+    // found for two follows.
+    (
+        MediaType::Movies,
+        "Clint Eastwood",
+        "The Last Round",
+        "2027-03",
+        "An aging trainer takes on one more fighter. Announced for spring 2027.",
+        "fake:movie:the-last-round",
+    ),
+    (
+        MediaType::Movies,
+        "Studio Ghibli",
+        "Studio Ghibli: new film",
+        "2027",
+        "The studio's next feature. No title yet.",
+        "fake:movie:ghibli-2027",
+    ),
+    (
+        MediaType::Games,
+        "FromSoftware",
+        "FromSoftware: new game",
+        "",
+        "The studio has a new project in development. No date yet.",
+        "fake:game:fromsoftware-next",
+    ),
 ];
 
+/// The fixture library's creators who are no longer active, as Wikidata
+/// would say it: by name in lower case.
+const INACTIVE: &[(&str, &str)] = &[
+    ("miles davis", "Died 1991"),
+    ("kentaro miura", "Died 2021"),
+    ("bram stoker", "Died 1912"),
+    ("charles dickens", "Died 1870"),
+];
+
+/// Why each of `names` is no longer active, for those who are not.
+pub fn inactive(names: &[String]) -> std::collections::HashMap<String, String> {
+    names
+        .iter()
+        .filter_map(|name| {
+            let key = name.trim().to_lowercase();
+            let (_, why) = INACTIVE.iter().find(|(who, _)| *who == key)?;
+            Some((name.clone(), (*why).to_owned()))
+        })
+        .collect()
+}
+
 /// The coming releases of the creator called `name` among `media`.
-pub fn creator_releases(name: &str, media: MediaType) -> Vec<Match> {
+pub fn creator_releases(name: &str, media: &[MediaType]) -> Vec<Match> {
     CREATOR_RELEASES
         .iter()
-        .filter(|(m, creator, ..)| *m == media && creator.eq_ignore_ascii_case(name.trim()))
+        .filter(|(m, creator, ..)| media.contains(m) && creator.eq_ignore_ascii_case(name.trim()))
         .map(
             |(media, creator, title, released, description, source)| Match {
                 released: Released::parse(released),
@@ -1151,7 +1199,15 @@ impl Source for Fake {
     }
 
     fn creator_kinds(&self) -> &'static [FollowKind] {
-        &[FollowKind::Authors, FollowKind::Artists]
+        &FollowKind::ALL
+    }
+
+    fn inactive_of(
+        &self,
+        _kind: FollowKind,
+        names: &[String],
+    ) -> Reply<Option<std::collections::HashMap<String, String>>> {
+        Ok(Some(inactive(names)))
     }
 
     fn find_creator(&self, kind: FollowKind, name: &str) -> Reply<Option<CreatorMatch>> {
@@ -1168,10 +1224,11 @@ impl Source for Fake {
         _today: crate::model::Date,
     ) -> Reply<Vec<Match>> {
         let name = provider_id.rsplit(':').next().unwrap_or_default();
-        let media = if kind == FollowKind::Artists {
-            MediaType::Music
-        } else {
-            MediaType::Books
+        let media: &[MediaType] = match kind {
+            FollowKind::Authors => &[MediaType::Books],
+            FollowKind::Artists => &[MediaType::Music],
+            FollowKind::Directors | FollowKind::Actors => &[MediaType::Movies, MediaType::Shows],
+            FollowKind::Studios => &[MediaType::Movies, MediaType::Games],
         };
         Ok(creator_releases(name, media))
     }

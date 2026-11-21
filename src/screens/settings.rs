@@ -1,7 +1,10 @@
 //! Settings (docs/DESIGN.md 4.5): Appearance, Library source, Plans,
-//! Games, Keyboard and mouse (a row that opens the shortcuts' window), and
-//! About, with an "On this page" rail. Changes apply right away; they
-//! are app state until phase 2 saves them.
+//! Games, Discover (the daily check's switch, Last checked with Check
+//! now, and Following with the button that opens its window), Keyboard
+//! and mouse (a row that opens the shortcuts' window), and About, with an
+//! "On this page" rail. Changes apply right away: the look goes to
+//! `preferences.json`; Plans, Games and Discover go to `settings.json`
+//! beside the library (`shared`), which the phone reads too.
 
 use iced::alignment::Vertical;
 use iced::widget::{
@@ -16,16 +19,18 @@ use crate::app::{App, Message as AppMessage};
 use crate::keymap::{Action, Combo, Keymap};
 use crate::model::MediaType;
 use crate::settings::{Missing, PLATFORMS, SyncState, ThemeChoice};
+use crate::shared::Edit;
 use crate::theme::{self, Accent, Theme, Tokens, font};
 use crate::ui::{self, ButtonKind, FocusExt, Icon};
 
 /// The settings' scroll area, for the rail's jumps.
 pub const SCROLL_ID: &str = "settings-scroll";
-pub const SECTIONS: [&str; 6] = [
+pub const SECTIONS: [&str; 7] = [
     "Appearance",
     "Library source",
     "Plans",
     "Games",
+    "Discover",
     "Keyboard and mouse",
     "About",
 ];
@@ -115,6 +120,8 @@ pub enum Message {
     Timeline(bool),
     Seasonal(bool),
     Platform(Option<String>),
+    /// Discover's master switch, "Check for new releases".
+    Discover(bool),
     /// "Show shortcuts": the Keyboard and mouse window.
     OpenKeys,
     /// Its Done or a click beside it; a shortcut waiting for keys stops
@@ -131,6 +138,12 @@ pub enum Message {
 
 fn msg(message: Message) -> AppMessage {
     AppMessage::Settings(message)
+}
+
+/// A change to `settings.json`, named for its commit.
+fn change(app: &mut App, edit: Edit) {
+    let summary = crate::shared::summary(&edit, None);
+    app.change_shared(edit, summary);
 }
 
 pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
@@ -206,9 +219,20 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         Message::OpenLicenses => page.licenses_open = true,
         Message::CloseLicenses => page.licenses_open = false,
         Message::OpenSource(url) => crate::app::open_url(url),
-        Message::Timeline(on) => app.settings.timeline = on,
-        Message::Seasonal(on) => app.settings.seasonal = on,
-        Message::Platform(platform) => app.settings.platform = platform,
+        // These four live in `settings.json` beside the library, so the
+        // phone has them too.
+        Message::Timeline(on) => change(app, Edit::Timeline(on)),
+        Message::Seasonal(on) => change(app, Edit::Seasonal(on)),
+        Message::Platform(platform) => change(app, Edit::Platform(platform)),
+        Message::Discover(on) => {
+            if !on {
+                app.discover.stop();
+            }
+            change(app, Edit::Enabled(on));
+            if on {
+                return app.update(AppMessage::Discover(crate::discover::Message::Check));
+            }
+        }
         Message::OpenKeys => page.keys_open = true,
         Message::CloseKeys => {
             page.keys_open = false;
@@ -313,6 +337,7 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
             source(app, &tokens),
             plans(app, &tokens),
             games(app, &tokens),
+            discover(app, &tokens),
             keys(app, &tokens),
             about(app, &tokens),
         ],
@@ -1127,6 +1152,95 @@ fn games<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
         0.0,
         44.0,
     )
+}
+
+/// Discover: the daily check's switch, when it last ran with Check now
+/// (Stop and a bar while it runs), and what it follows with Manage…. With
+/// the switch off the rest is hidden.
+fn discover<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let on = app.shared.settings.enabled;
+    let help = if on {
+        "Once a day while Libri is open. What it finds shows under Coming soon › Discover, and \
+         nothing is added to your library until you add it."
+    } else {
+        "Nothing is followed and nothing is fetched. Coming soon only shows what you add yourself."
+    };
+    let mut rows = vec![switch_row(
+        "Check for new releases",
+        help,
+        on,
+        tokens,
+        msg(Message::Discover(!on)),
+    )];
+    if on {
+        let check = &app.discover;
+        let (raised, track, accent) = (tokens.raised, tokens.track, tokens.accent);
+        let run = if check.running {
+            AppMessage::Discover(crate::discover::Message::Stop)
+        } else {
+            AppMessage::Discover(crate::discover::Message::Now)
+        };
+        let button = ui::sized_button(
+            if check.running { "Stop" } else { "Check now" },
+            ButtonKind::Outline,
+            32.0,
+            *tokens,
+            Some(run),
+        );
+        let line = row![
+            column![
+                text("Last checked").size(14).font(font::SEMIBOLD),
+                text(check.last_checked(crate::clock::Timestamp::now()))
+                    .size(12.5)
+                    .line_height(1.45)
+                    .color(tokens.sub),
+            ]
+            .spacing(1)
+            .width(Fill),
+            button,
+        ]
+        .spacing(12)
+        .align_y(Center);
+        let mut last = Column::new().spacing(10).push(line);
+        if check.running {
+            last = last.push(
+                iced::widget::progress_bar(0.0..=1.0, check.fraction())
+                    .girth(6.0)
+                    .style(move |_| iced::widget::progress_bar::Style {
+                        background: Background::Color(track),
+                        bar: Background::Color(accent),
+                        border: Border::default().rounded(3),
+                    }),
+            );
+        }
+        let last = container(last)
+            .padding([12, 14])
+            .style(move |_| container::background(raised).border(Border::default().rounded(10)));
+        let manage = ui::sized_button(
+            "Manage…",
+            ButtonKind::Outline,
+            32.0,
+            *tokens,
+            Some(AppMessage::Following(super::following::Message::Open(None))),
+        );
+        let following = super::your_covers::group_row(
+            "Following",
+            format!(
+                "{} creators, shows and series, taken from your library",
+                thousands(app.follows.total())
+            ),
+            Some(manage),
+            tokens,
+        );
+        rows.push(setting(
+            "What Libri looks for",
+            "New seasons, next parts, and new work by the people and studios in your library."
+                .into(),
+            column![last, following].spacing(8),
+            tokens,
+        ));
+    }
+    section("Discover", rows, 22.0, 0.0, 44.0)
 }
 
 /// The mouse's actions, which follow KDE's conventions and stay as they

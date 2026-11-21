@@ -1,53 +1,57 @@
 //! Discover: titles not in the library that the daily check finds for
 //! things that are (decided 2026-11-07; the phone's DESIGN.md 10c has the
 //! checks it follows): the next season of a show, the next part of a
-//! followed series (a part Done or In progress), a new book by an author
-//! in the library and a new album by an album artist. Each item carries
-//! its type, title, an optional sub ("Season 3"), the creator, its release
-//! as precise as the provider has it, a "why" line, a description, the
-//! provider and the lookup id.
+//! followed series (a part Done or In progress), and new work by the
+//! creators in the library. Each item carries its type, title, an
+//! optional sub ("Season 3"), the creator, its release as precise as the
+//! provider has it, a "why" line, a description, the provider, the lookup
+//! id and the follow it was found for.
+//!
+//! What is followed is `follows` over `settings.json` (`shared`): the
+//! follows come from the library, and the file holds the master switch
+//! and what is unticked or ticked. One title found for several follows is
+//! kept once per follow and drawn as one row with every reason
+//! (`Found::reasons`); it shows while one of them is still followed, so
+//! an unfollow takes its rows away at once and the next run drops them.
 //!
 //! The check runs as the phone's scheduler does (its DESIGN.md 10c,
-//! `upcoming_scheduler.dart`), over what `settings.json` follows: a little
-//! after the start, then on the hour's timer until it has finished that
-//! day. What the owner is waiting on is asked daily; everything else takes
-//! its turn in one of seven weekly shares, by a stable hash of its id, and
-//! a first run asks all seven. A creator's provider id is kept for ninety
-//! days and a series' parts for a week, so most of a run asks nothing
-//! twice. What was found stays until its owner is asked again, and each
-//! item asked is written as it is done, so a close or a provider that
-//! refuses loses nothing and the next run takes up where this one stopped.
-//! A provider offline or refusing is left alone for the rest of the run;
-//! the others go on. All of it is kept in `discover.json` under the cache
-//! folder, with the time of the check and the providers asked, so the page
-//! shows at once and the footer can say "Checked today 09:12 · TMDB, IGDB, Open Library,
+//! `upcoming_scheduler.dart`): a little after the start, then on the
+//! hour's timer until it has finished that day. What the owner is waiting
+//! on is asked daily; everything else takes its turn in one of seven
+//! weekly shares, by a stable hash of its id, and a first run asks all
+//! seven. Check now asks all seven whatever was asked today. A creator's
+//! provider id is kept for ninety days and a series' parts for a week, so
+//! most of a run asks nothing twice. What was found stays until its
+//! follow is asked again, and each item asked is written as it is done,
+//! so a close, a Stop or a provider that refuses loses nothing and the
+//! next run takes up where this one stopped. A provider offline or
+//! refusing is left alone for the rest of the run; the others go on. All
+//! of it is kept in `discover.json` under the cache folder, with the time
+//! of the check and the providers asked, so the page shows at once and
+//! the footer can say "Checked today 09:12 · TMDB, IGDB, Open Library,
 //! Deezer".
 //! Items already in the library (the same lookup id, a season the show
 //! now has, or the same title) are left out when the page is drawn, so
 //! an entry added on the phone drops its item on the next sync.
 //!
-//! "Not interested" hides an item by its key (the phone's
-//! `upcoming.not_interested` of `settings.json`: a lookup id, or
-//! `<show id>#<season>` for a season). The keys are kept in
-//! `settings.json` beside `library.json`, in the phone's shape, so the
-//! `settings.json` sync of TODO.md phase 4 syncs them with the phone;
-//! until then the file is this computer's.
+//! "Not interested" hides an item by its key (`upcoming.not_interested`
+//! of `settings.json`: a lookup id, or `<show id>#<season>` for a
+//! season), which syncs with the phone like the rest of that file.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::clock::Timestamp;
-use crate::connection::Target;
-use crate::github;
+use crate::follows::{self, Creator, Kind as Follow};
 use crate::lookup::store::Stores;
 use crate::lookup::{self, FailureKind, FollowKind, Match, Reply, SeriesParts, Service, Source};
-use crate::model::{
-    Date, Entry, EntryStatus, Library, MediaType, Released, Series, tag_display_name,
-};
+use crate::model::{Date, Entry, Library, MediaType, Released, Series, tag_display_name};
+use crate::shared::Settings;
 use crate::storage;
 
 /// Where an item came from.
@@ -60,6 +64,14 @@ pub enum Kind {
     Part { series: String },
     /// New work by a creator in the library.
     Creator,
+}
+
+/// A follow that found a title: "Stephen King · Author".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reason {
+    pub kind: Follow,
+    pub id: String,
+    pub name: String,
 }
 
 /// One title on its way that is not in the library.
@@ -89,12 +101,20 @@ pub struct Found {
     pub cover_url: Option<String>,
     /// The day the check first listed it.
     pub found: Date,
-    /// The follow it came from ("shows/severance-2022", "authors/stephen-king",
-    /// "movies/halo" under series): it stays until that one is asked again.
+    /// The follow it came from ("shows/shows/severance-2022",
+    /// "authors/stephen-king", "series/movies/halo"): it stays until that
+    /// one is asked again.
     #[serde(default)]
     pub owner: String,
+    /// That follow's name, for the menu's "Unfollow Stephen King".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub owner_name: String,
     #[serde(flatten)]
     pub kind: Kind,
+    /// Every follow the title was found for, on the row the page draws:
+    /// the record keeps one item per follow, and the rows merge them.
+    #[serde(skip)]
+    pub reasons: Vec<Reason>,
 }
 
 impl Found {
@@ -127,6 +147,48 @@ impl Found {
             }
         }
     }
+
+    /// The follow this item was found for, with the name the record kept
+    /// or, for an item from before it kept one, the best the item says.
+    fn reason(&self) -> Option<Reason> {
+        let (kind, id) = follows::parse_key(&self.owner)?;
+        let name = if !self.owner_name.is_empty() {
+            self.owner_name.clone()
+        } else {
+            match (&self.kind, kind) {
+                (Kind::Season { .. }, _) => self.title.clone(),
+                (Kind::Part { series }, _) => series.clone(),
+                (Kind::Creator, Follow::Artists) => {
+                    self.creator.clone().unwrap_or_else(|| id.to_owned())
+                }
+                (Kind::Creator, _) => tag_display_name(id),
+            }
+        };
+        Some(Reason {
+            kind,
+            id: id.to_owned(),
+            name,
+        })
+    }
+}
+
+/// The record's items as rows: one per key, in the order first found,
+/// with every follow that found it.
+fn rows_of(items: &[Found]) -> Vec<Found> {
+    let mut rows: Vec<Found> = Vec::new();
+    let mut at: BTreeMap<&str, usize> = BTreeMap::new();
+    for item in items {
+        let index = *at.entry(item.key.as_str()).or_insert_with(|| {
+            rows.push(item.clone());
+            rows.len() - 1
+        });
+        if let Some(reason) = item.reason()
+            && !rows[index].reasons.contains(&reason)
+        {
+            rows[index].reasons.push(reason);
+        }
+    }
+    rows
 }
 
 /// The library's lookup ids and titles (as `lookup::text::same_title`
@@ -163,8 +225,9 @@ pub struct Outcome {
     pub items: Vec<Found>,
     /// The providers asked, in order, by name.
     pub sources: Vec<String>,
-    /// False when a provider was offline, busy or down, or the window
-    /// closed, so the day is not recorded and a later run goes on.
+    /// False when a provider was offline, busy or down, the check was
+    /// stopped or the window closed, so the day is not recorded and a
+    /// later run goes on.
     pub complete: bool,
     /// Why an incomplete run stopped, printed to stderr: "Open Library:
     /// Offline: …", or "the window closed".
@@ -183,168 +246,6 @@ impl Outcome {
             stopped: Some(why.into()),
             record: None,
         }
-    }
-}
-
-/// What `settings.json` says about what to follow (the phone's
-/// `AppSettings`; only the keys Discover reads).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Settings {
-    pub enabled: bool,
-    pub languages: Vec<String>,
-    /// The default platform of Settings, which dates a game; set by the
-    /// app from the preferences, where the desktop keeps it for now.
-    pub platform: Option<String>,
-    unfollowed: BTreeMap<String, BTreeSet<String>>,
-    followed: BTreeMap<String, BTreeSet<String>>,
-}
-
-impl Default for Settings {
-    fn default() -> Settings {
-        Settings {
-            enabled: true,
-            languages: vec!["en".to_owned()],
-            platform: None,
-            unfollowed: BTreeMap::new(),
-            followed: BTreeMap::new(),
-        }
-    }
-}
-
-impl Settings {
-    /// The file's text; another version or a broken file is the defaults.
-    pub fn parse(text: &str) -> Settings {
-        let mut settings = Settings::default();
-        let Ok(json) = serde_json::from_str::<Value>(text) else {
-            return settings;
-        };
-        if json.get("version").and_then(Value::as_u64) != Some(1) {
-            return settings;
-        }
-        let ids = |value: Option<&Value>| -> BTreeMap<String, BTreeSet<String>> {
-            value
-                .and_then(Value::as_object)
-                .map(|kinds| {
-                    kinds
-                        .iter()
-                        .map(|(kind, list)| {
-                            let list = list.as_array().into_iter().flatten();
-                            let list = list.filter_map(Value::as_str).map(str::to_owned);
-                            (kind.clone(), list.collect())
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
-        let upcoming = json.get("upcoming");
-        if let Some(enabled) = upcoming
-            .and_then(|u| u.get("enabled"))
-            .and_then(Value::as_bool)
-        {
-            settings.enabled = enabled;
-        }
-        settings.unfollowed = ids(upcoming.and_then(|u| u.get("unfollowed")));
-        settings.followed = ids(upcoming.and_then(|u| u.get("followed")));
-        if let Some(languages) = json["books"]["languages"].as_array() {
-            settings.languages = languages
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_lowercase)
-                .collect();
-        }
-        settings
-    }
-
-    fn listed(map: &BTreeMap<String, BTreeSet<String>>, kind: &str, id: &str) -> bool {
-        map.get(kind).is_some_and(|ids| ids.contains(id))
-    }
-
-    /// On by default unless unfollowed; off by default unless followed.
-    pub fn is_followed(&self, kind: &str, id: &str, default_on: bool) -> bool {
-        if default_on {
-            !Settings::listed(&self.unfollowed, kind, id)
-        } else {
-            Settings::listed(&self.followed, kind, id)
-        }
-    }
-
-    /// Ticked although it is off by default.
-    pub fn is_ticked(&self, kind: &str, id: &str) -> bool {
-        Settings::listed(&self.followed, kind, id)
-    }
-}
-
-/// `settings.json` in the folder of the library file: "settings.json" for
-/// "library.json", "data/settings.json" for "data/library.json".
-fn settings_path(library_path: &str) -> String {
-    match library_path.rsplit_once('/') {
-        Some((folder, _)) => format!("{folder}/settings.json"),
-        None => "settings.json".to_owned(),
-    }
-}
-
-/// `text`, with the Not interested keys of the copy on this computer added:
-/// Hide on the desktop has nowhere to go but that copy until `settings.json`
-/// syncs both ways.
-fn with_local_hidden(text: &str, local: &str) -> Option<String> {
-    let mut json: Value = serde_json::from_str(text).ok()?;
-    let keys = |json: &Value| -> Vec<String> {
-        json["upcoming"]["not_interested"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect()
-    };
-    let local: Value = serde_json::from_str(local).unwrap_or(Value::Null);
-    let mut merged: BTreeSet<String> = keys(&json).into_iter().collect();
-    merged.extend(keys(&local));
-    if !merged.is_empty() {
-        let upcoming = json
-            .as_object_mut()?
-            .entry("upcoming")
-            .or_insert_with(|| json!({}));
-        upcoming
-            .as_object_mut()?
-            .insert("not_interested".into(), json!(merged));
-    }
-    let mut text = serde_json::to_string_pretty(&json).ok()?;
-    text.push('\n');
-    Some(text)
-}
-
-/// What to follow: GitHub's `settings.json` while connected, kept in `file`
-/// for offline and for Not interested; else that copy. A file missing on
-/// GitHub is the defaults. An error with no copy at all stops the run,
-/// since the defaults would follow everything the owner unticked.
-pub fn read_settings(
-    remote: Option<(&github::Client, &Target)>,
-    file: Option<&Path>,
-) -> Result<Settings, String> {
-    let local = file.and_then(|path| std::fs::read_to_string(path).ok());
-    let Some((client, target)) = remote else {
-        return Ok(local.as_deref().map(Settings::parse).unwrap_or_default());
-    };
-    match client.file_raw(&settings_path(&target.file), &target.branch, None) {
-        Ok(Some(raw)) => {
-            let text = raw.text().map_err(|error| error.to_string())?.to_owned();
-            if let Some(path) = file
-                && let Some(merged) = with_local_hidden(&text, local.as_deref().unwrap_or("null"))
-                && let Err(error) = storage::write_atomically(path, &merged)
-            {
-                eprintln!("libri: {} could not be written: {error}", path.display());
-            }
-            Ok(Settings::parse(&text))
-        }
-        Ok(None) => Ok(local.as_deref().map(Settings::parse).unwrap_or_default()),
-        Err(failure) if failure.kind == github::FailureKind::NotFound => {
-            Ok(local.as_deref().map(Settings::parse).unwrap_or_default())
-        }
-        Err(failure) => match local {
-            Some(text) => Ok(Settings::parse(&text)),
-            None => Err(format!("settings.json: {}", failure.describe())),
-        },
     }
 }
 
@@ -398,8 +299,51 @@ pub fn cancel() {
     CANCELLED.store(true, Ordering::Relaxed);
 }
 
-fn cancelled() -> bool {
-    CANCELLED.load(Ordering::Relaxed)
+/// How far a run is, shared between the app and the task that makes it:
+/// "Checking 184 of 423…", and Stop.
+#[derive(Debug, Default)]
+pub struct Progress {
+    done: AtomicUsize,
+    total: AtomicUsize,
+    stop: AtomicBool,
+}
+
+impl Progress {
+    /// A run this far along, for a look at the row.
+    pub fn at(done: usize, total: usize) -> Progress {
+        Progress {
+            done: AtomicUsize::new(done),
+            total: AtomicUsize::new(total),
+            stop: AtomicBool::new(false),
+        }
+    }
+
+    /// How many follows have been asked, of how many this run asks.
+    pub fn counts(&self) -> (usize, usize) {
+        let total = self.total.load(Ordering::Relaxed);
+        (self.done.load(Ordering::Relaxed).min(total), total)
+    }
+
+    /// Stop: the run ends before its next request.
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+
+    fn stopped(&self) -> bool {
+        self.stop.load(Ordering::Relaxed)
+    }
+
+    fn tick(&self) {
+        self.done.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// How a run is made.
+#[derive(Debug, Clone, Default)]
+pub struct Options {
+    /// Check now: every share, and what was asked today again.
+    pub force: bool,
+    pub progress: Arc<Progress>,
 }
 
 /// The messages of the check.
@@ -407,6 +351,12 @@ fn cancelled() -> bool {
 pub enum Message {
     /// Runs the check, unless it ran today or is running.
     Check,
+    /// Check now: the whole set at once, whatever the day.
+    Now,
+    /// Stop: the run under way ends where it is.
+    Stop,
+    /// While a run is out: the row counts on.
+    Tick,
     /// The check came back.
     Done(Box<Outcome>),
 }
@@ -428,6 +378,10 @@ pub struct Record {
     pub asked_on: Option<Date>,
     /// What each creator is to their provider, by follow key.
     pub creators: BTreeMap<String, CreatorStatus>,
+    /// How many titles the runs of `new_on` found that were not recorded
+    /// before: the "3 new" of Last checked.
+    pub new: usize,
+    pub new_on: Option<Date>,
 }
 
 /// A creator's provider id and whether they are still active.
@@ -461,6 +415,7 @@ impl Record {
                     .collect()
             })
             .unwrap_or_default();
+        let day = |key: &str| json.get(key).and_then(Value::as_str).and_then(Date::parse);
         Some(Record {
             checked: json
                 .get("checked")
@@ -477,16 +432,10 @@ impl Record {
                 })
                 .unwrap_or_default(),
             items,
-            last_run: json
-                .get("last_run")
-                .and_then(Value::as_str)
-                .and_then(Date::parse),
+            last_run: day("last_run"),
             done: serde_json::from_value(json["done"].clone()).unwrap_or_default(),
             asked: serde_json::from_value(json["asked"].clone()).unwrap_or_default(),
-            asked_on: json
-                .get("asked_on")
-                .and_then(Value::as_str)
-                .and_then(Date::parse),
+            asked_on: day("asked_on"),
             creators: {
                 let mut creators: BTreeMap<String, CreatorStatus> =
                     serde_json::from_value(json["creators"].clone()).unwrap_or_default();
@@ -500,6 +449,8 @@ impl Record {
                 }
                 creators
             },
+            new: json["new"].as_u64().unwrap_or(0) as usize,
+            new_on: day("new_on"),
         })
     }
 
@@ -514,114 +465,44 @@ impl Record {
             "asked": self.asked,
             "asked_on": self.asked_on.map(|d| d.to_string()),
             "creators": self.creators,
+            "new": self.new,
+            "new_on": self.new_on.map(|d| d.to_string()),
         })
     }
 }
 
-/// The keys of the items marked Not interested, and the file they live in.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Hidden {
-    keys: BTreeSet<String>,
-    path: Option<PathBuf>,
-}
-
-impl Hidden {
-    /// Reads `upcoming.not_interested` from the phone's `settings.json`
-    /// at `path`.
-    fn at(path: PathBuf) -> Hidden {
-        let keys = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .and_then(|json| {
-                json.get("upcoming")?
-                    .get("not_interested")?
-                    .as_array()
-                    .map(|keys| {
-                        keys.iter()
-                            .filter_map(Value::as_str)
-                            .map(str::to_owned)
-                            .collect()
-                    })
-            })
-            .unwrap_or_default();
-        Hidden {
-            keys,
-            path: Some(path),
-        }
-    }
-
-    pub fn contains(&self, key: &str) -> bool {
-        self.keys.contains(key)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.keys.is_empty()
-    }
-
-    /// Writes the keys into `settings.json`, keeping whatever else the file
-    /// holds: the key is written only while the list has something, as
-    /// the phone writes it, and a file with nothing else is `{"version": 1}`.
-    fn save(&self) {
-        let Some(path) = &self.path else {
-            return;
-        };
-        let mut json = std::fs::read_to_string(path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .filter(Value::is_object)
-            .unwrap_or_else(|| json!({"version": 1}));
-        let upcoming = json
-            .as_object_mut()
-            .expect("an object")
-            .entry("upcoming")
-            .or_insert_with(|| json!({}));
-        if !upcoming.is_object() {
-            *upcoming = json!({});
-        }
-        let map = upcoming.as_object_mut().expect("an object");
-        if self.keys.is_empty() {
-            map.remove("not_interested");
-        } else {
-            map.insert("not_interested".into(), json!(self.keys));
-        }
-        if map.is_empty() {
-            json.as_object_mut().expect("an object").remove("upcoming");
-        }
-        let mut text = serde_json::to_string_pretty(&json).expect("settings encode");
-        text.push('\n');
-        if let Err(error) = storage::write_atomically(path, &text) {
-            eprintln!("libri: {} could not be written: {error}", path.display());
-        }
-    }
-}
-
-/// The check's state on the app: the record, the hidden keys, whether a
-/// run is out, and when the last run started.
+/// The check's state on the app: the record, its items as the rows the
+/// page draws, and the run that is out.
 #[derive(Debug, Clone, Default)]
 pub struct State {
-    pub record: Record,
-    pub hidden: Hidden,
+    record: Record,
+    rows: Vec<Found>,
     file: Option<PathBuf>,
     pub running: bool,
+    /// The run under way, or the last one.
+    pub progress: Arc<Progress>,
 }
 
 impl State {
-    /// The record under `cache` and the hidden keys beside the library
-    /// under `data`; nothing kept when either is `None` (the tests).
-    pub fn at(cache: Option<&Path>, data: Option<&Path>) -> State {
+    /// The record under `cache`; nothing kept with `None` (the tests).
+    pub fn at(cache: Option<&Path>) -> State {
         let file = cache.map(|dir| dir.join("discover.json"));
-        let record = file
+        let record: Record = file
             .as_ref()
             .and_then(|path| std::fs::read_to_string(path).ok())
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())
             .and_then(|json| Record::from_json(&json))
             .unwrap_or_default();
         State {
+            rows: rows_of(&record.items),
             record,
-            hidden: data.map_or_else(Hidden::default, |dir| Hidden::at(dir.join("settings.json"))),
             file,
-            running: false,
+            ..State::default()
         }
+    }
+
+    pub fn record(&self) -> &Record {
+        &self.record
     }
 
     /// Whether the check ran on today's date (this computer's clock).
@@ -636,64 +517,100 @@ impl State {
         !self.running && !self.checked_today(now)
     }
 
-    /// A run starts now.
-    pub fn start(&mut self) {
+    /// A run starts now; `force` is Check now.
+    pub fn start(&mut self, force: bool) -> Options {
         self.running = true;
+        self.progress = Arc::new(Progress::default());
+        Options {
+            force,
+            progress: self.progress.clone(),
+        }
+    }
+
+    /// A run this far along that nothing is making, for a look at the
+    /// row (`LIBRI_DISCOVER=checking`, the captures).
+    pub fn look_checking(&mut self, done: usize, total: usize) {
+        self.running = true;
+        self.progress = Arc::new(Progress::at(done, total));
+    }
+
+    /// Stop: the run under way ends before its next request.
+    pub fn stop(&self) {
+        self.progress.stop();
+    }
+
+    /// Whether the follow behind `reason` is on: the settings, and a
+    /// creator the check found to be no longer active only when ticked.
+    pub fn is_followed(&self, settings: &Settings, reason: &Reason) -> bool {
+        let key = follows::key_of(reason.kind, &reason.id);
+        let inactive = self
+            .record
+            .creators
+            .get(&key)
+            .is_some_and(|status| status.inactive.is_some());
+        settings.is_followed(
+            reason.kind,
+            &reason.id,
+            reason.kind.default_on() && !inactive,
+        )
+    }
+
+    /// The reasons of `found` that are still followed: what its menu
+    /// offers to unfollow.
+    pub fn live_reasons<'a>(&self, settings: &Settings, found: &'a Found) -> Vec<&'a Reason> {
+        found
+            .reasons
+            .iter()
+            .filter(|reason| self.is_followed(settings, reason))
+            .collect()
     }
 
     /// The items Discover lists: not in the library, not hidden.
-    pub fn visible(&self, library: &Library) -> Vec<&Found> {
-        self.lists(library).0
+    pub fn visible(&self, library: &Library, settings: &Settings) -> Vec<&Found> {
+        self.lists(library, settings).0
     }
 
     /// The hidden items still worth restoring: not in the library.
-    pub fn hidden_items(&self, library: &Library) -> Vec<&Found> {
-        self.lists(library).1
+    pub fn hidden_items(&self, library: &Library, settings: &Settings) -> Vec<&Found> {
+        self.lists(library, settings).1
     }
 
     /// Both at once, the library gathered once: what `visible` and
-    /// `hidden_items` return.
-    pub fn lists(&self, library: &Library) -> (Vec<&Found>, Vec<&Found>) {
+    /// `hidden_items` return. Nothing with the check switched off, and no
+    /// title whose every reason has been unfollowed.
+    pub fn lists(&self, library: &Library, settings: &Settings) -> (Vec<&Found>, Vec<&Found>) {
+        if !settings.enabled {
+            return (Vec::new(), Vec::new());
+        }
         let owned = Owned::of(library);
-        self.record
-            .items
+        self.rows
             .iter()
             .filter(|item| !item.in_owned(&owned))
-            .partition(|item| !self.hidden.contains(&item.key))
+            .filter(|item| {
+                item.reasons.is_empty()
+                    || item
+                        .reasons
+                        .iter()
+                        .any(|reason| self.is_followed(settings, reason))
+            })
+            .partition(|item| !settings.not_interested.contains(&item.key))
     }
 
     pub fn item(&self, key: &str) -> Option<&Found> {
-        self.record.items.iter().find(|item| item.key == key)
-    }
-
-    /// Not interested: the key goes on the hidden list, which is saved.
-    pub fn hide(&mut self, key: &str) {
-        if self.hidden.keys.insert(key.to_owned()) {
-            self.hidden.save();
-        }
-    }
-
-    /// Restore: the key leaves the hidden list.
-    pub fn restore(&mut self, key: &str) {
-        if self.hidden.keys.remove(key) {
-            self.hidden.save();
-        }
+        self.rows.iter().find(|item| item.key == key)
     }
 
     /// The check came back: the record as it left it, stamped when the run
-    /// was complete. `settings.json` may have come with it, with its Not
-    /// interested keys.
+    /// was complete.
     pub fn finish(&mut self, outcome: Outcome, now: Timestamp) {
         self.running = false;
-        if let Some(path) = self.hidden.path.clone() {
-            self.hidden = Hidden::at(path);
-        }
         let Some(mut record) = outcome.record else {
             return;
         };
         if outcome.complete {
             record.checked = Some(now);
         }
+        self.rows = rows_of(&record.items);
         self.record = record;
         write_record(&self.record, self.file.as_deref());
     }
@@ -701,11 +618,6 @@ impl State {
     /// Where the record is kept, for the run to write as it goes.
     pub fn file(&self) -> Option<&Path> {
         self.file.as_deref()
-    }
-
-    /// The copy of `settings.json` on this computer.
-    pub fn settings_file(&self) -> Option<&Path> {
-        self.hidden.path.as_deref()
     }
 
     /// "Checked today 09:12 · TMDB, IGDB, Open Library, Deezer", or
@@ -720,6 +632,46 @@ impl State {
             "Checked {when} · {}",
             self.record.sources.join(", ")
         ))
+    }
+
+    /// The Last checked row of Settings: "Today 20:07 · 3 new",
+    /// "Yesterday 22:40", "Oct 12", "Never"; while a run is out,
+    /// "Checking 184 of 423…".
+    pub fn last_checked(&self, now: Timestamp) -> String {
+        if self.running {
+            let (done, total) = self.progress.counts();
+            return match total {
+                0 => "Checking…".to_owned(),
+                _ => format!("Checking {done} of {total}…"),
+            };
+        }
+        let Some(checked) = self.record.checked else {
+            return "Never".to_owned();
+        };
+        let when = checked.day_and_time(now);
+        let mut line = match checked.days_from(now) {
+            0 | -1 => {
+                let mut letters = when.chars();
+                match letters.next() {
+                    Some(first) => first.to_uppercase().chain(letters).collect(),
+                    None => when,
+                }
+            }
+            // "Nov 3, 09:12": the day alone.
+            _ => when.split(',').next().unwrap_or_default().to_owned(),
+        };
+        if self.record.new > 0 && self.record.new_on == Some(checked.local_date()) {
+            line.push_str(&format!(" · {} new", self.record.new));
+        }
+        line
+    }
+
+    /// How far the run under way is, 0 to 1.
+    pub fn fraction(&self) -> f32 {
+        match self.progress.counts() {
+            (_, 0) => 0.0,
+            (done, total) => done as f32 / total as f32,
+        }
     }
 }
 
@@ -748,6 +700,21 @@ pub fn run(
     previous: &Record,
     file: Option<&Path>,
 ) -> Outcome {
+    let options = Options::default();
+    run_with(service, library, today, settings, previous, file, &options)
+}
+
+/// `run`, as `options` say: Check now asks every share and what was asked
+/// today again, and the run counts what it asks and can be stopped.
+pub fn run_with(
+    service: &Service,
+    library: &Library,
+    today: Date,
+    settings: &Settings,
+    previous: &Record,
+    file: Option<&Path>,
+    options: &Options,
+) -> Outcome {
     if !settings.enabled {
         return Outcome {
             items: previous.items.clone(),
@@ -758,17 +725,24 @@ pub fn run(
         };
     }
     let mut record = previous.clone();
-    if record.asked_on != Some(today) {
+    if record.asked_on != Some(today) || options.force {
         record.asked.clear();
         record.asked_on = Some(today);
     }
+    let shares = if options.force {
+        record.done.clear();
+        (0..7).collect()
+    } else {
+        due_shares(previous.last_run, today)
+    };
     let mut check = Check {
         service,
         library,
         today,
         settings,
+        languages: settings.reading_languages(),
         previous,
-        shares: due_shares(previous.last_run, today),
+        shares,
         record,
         file,
         stores: Stores::at(file.and_then(Path::parent).map(Path::to_path_buf)),
@@ -776,7 +750,10 @@ pub fn run(
         down: BTreeMap::new(),
         complete: true,
         all_complete: true,
+        progress: &options.progress,
     };
+    let total = check.count_due();
+    options.progress.total.store(total, Ordering::Relaxed);
     let stopped = check.stage("seasons", Check::seasons);
     let stopped = stopped.and_then(|()| check.stage("series", Check::series));
     let stopped = stopped.and_then(|()| check.stage("creators", Check::creators));
@@ -793,17 +770,30 @@ pub fn run(
         .record
         .items
         .retain(|item| !item.released.is_some_and(|r| r.is_released_on(today)));
+    // One item per follow and title: the rows merge the follows.
     let mut seen = BTreeSet::new();
     check
         .record
         .items
-        .retain(|item| seen.insert(item.key.clone()));
+        .retain(|item| seen.insert((item.owner.clone(), item.key.clone())));
+    // "3 new": the titles not recorded before, added up over a day's runs.
+    let before: BTreeSet<&str> = previous.items.iter().map(|i| i.key.as_str()).collect();
+    let now: BTreeSet<&str> = check.record.items.iter().map(|i| i.key.as_str()).collect();
+    let fresh = now.difference(&before).count();
+    if check.record.new_on == Some(today) && !options.force {
+        check.record.new += fresh;
+    } else {
+        check.record.new = fresh;
+        check.record.new_on = Some(today);
+    }
     let complete = !cancelled && check.all_complete;
     if complete {
         check.record.last_run = Some(today);
     }
     check.save();
-    let why = if cancelled {
+    let why = if cancelled && options.progress.stopped() {
+        Some("stopped".to_owned())
+    } else if cancelled {
         Some("the window closed".to_owned())
     } else if complete {
         None
@@ -832,6 +822,8 @@ struct Check<'a> {
     library: &'a Library,
     today: Date,
     settings: &'a Settings,
+    /// The languages a found book must have an edition in.
+    languages: Vec<String>,
     previous: &'a Record,
     shares: BTreeSet<u32>,
     record: Record,
@@ -845,6 +837,7 @@ struct Check<'a> {
     /// Whether the check under way has had every answer.
     complete: bool,
     all_complete: bool,
+    progress: &'a Progress,
 }
 
 /// The window closed: the run stops.
@@ -887,23 +880,100 @@ impl<'a> Classification<'a> {
     }
 }
 
-/// A creator followed for new work.
-struct Creator {
-    kind: FollowKind,
-    id: String,
-    name: String,
-    count: usize,
-}
-
-impl Creator {
-    fn key(&self) -> String {
-        format!("{}/{}", self.kind.key(), self.id)
-    }
-}
-
-impl Check<'_> {
+impl<'a> Check<'a> {
     fn save(&self) {
         write_record(&self.record, self.file);
+    }
+
+    /// The window closed, or Stop was pressed.
+    fn stopped(&self) -> bool {
+        CANCELLED.load(Ordering::Relaxed) || self.progress.stopped()
+    }
+
+    /// Whether the check `name` still asks today.
+    fn asks(&self, name: &str) -> bool {
+        self.record.done.get(name) != Some(&self.today)
+    }
+
+    /// The shows followed for new seasons.
+    fn shows(&self) -> Vec<&'a Entry> {
+        follows::shows(self.library, self.service.is_instant())
+            .into_iter()
+            .filter(|show| self.settings.is_followed(Follow::Shows, &show.id, true))
+            .collect()
+    }
+
+    /// Whether a show is asked in this run: daily with a season still to
+    /// come, else in its share.
+    fn show_due(&self, show: &Entry) -> bool {
+        let coming = show
+            .season_list()
+            .iter()
+            .any(|s| s.released.is_some_and(|r| !r.is_released_on(self.today)));
+        (coming || self.in_share(&show.id)) && self.fresh(&follows::key_of(Follow::Shows, &show.id))
+    }
+
+    /// The series followed for next parts.
+    fn series_followed(&self) -> Vec<follows::SeriesGroup<'a>> {
+        follows::series(self.library)
+            .into_iter()
+            .filter(|group| self.settings.is_followed(Follow::Series, &group.key, true))
+            .collect()
+    }
+
+    /// Whether a series is asked in this run: daily with a dated part
+    /// recorded, else in its share.
+    fn series_due(&self, key: &str) -> bool {
+        let owner = follows::key_of(Follow::Series, key);
+        let dated = self.record.items.iter().any(|item| {
+            item.owner == owner
+                && item
+                    .released
+                    .is_some_and(|r| r.day.is_some() || r.month.is_some())
+        });
+        (dated || self.in_share(key)) && self.fresh(&owner)
+    }
+
+    /// The creators of every kind: those followed, and the rest.
+    fn creators_split(&self) -> (Vec<Creator<'a>>, Vec<Creator<'a>>) {
+        let instant = self.service.is_instant();
+        FollowKind::ALL
+            .into_iter()
+            .flat_map(|kind| follows::creators(self.library, kind, instant))
+            .partition(|creator| self.is_on(creator))
+    }
+
+    /// Whether a followed creator is asked in this run: in its share.
+    fn creator_due(&self, creator: &Creator) -> bool {
+        let key = creator.key();
+        self.in_share(&key) && self.fresh(&key)
+    }
+
+    /// Whether a creator who is not followed is asked who they are to
+    /// their provider, so the Following window can say when they are no
+    /// longer active: in its share, when that is not known or is old.
+    fn status_due(&self, creator: &Creator) -> bool {
+        let key = creator.key();
+        self.in_share(&key) && self.status_wanted(&key) && self.fresh(&status_key(&key))
+    }
+
+    /// How many follows this run asks about: the "423" of "Checking 184
+    /// of 423…".
+    fn count_due(&self) -> usize {
+        let mut total = 0;
+        if self.asks("seasons") {
+            total += self.shows().iter().filter(|s| self.show_due(s)).count();
+        }
+        if self.asks("series") {
+            let groups = self.series_followed();
+            total += groups.iter().filter(|g| self.series_due(&g.key)).count();
+        }
+        if self.asks("creators") {
+            let (followed, others) = self.creators_split();
+            total += followed.iter().filter(|c| self.creator_due(c)).count();
+            total += others.iter().filter(|c| self.status_due(c)).count();
+        }
+        total
     }
 
     /// Runs one of the three checks. It registers its follows even on a
@@ -913,7 +983,7 @@ impl Check<'_> {
         name: &str,
         check: fn(&mut Self, bool) -> Result<(), Stopped>,
     ) -> Result<(), Stopped> {
-        let ask = self.record.done.get(name) != Some(&self.today);
+        let ask = self.asks(name);
         self.complete = true;
         check(self, ask)?;
         if !ask {
@@ -953,7 +1023,7 @@ impl Check<'_> {
         source: &dyn Source,
         reply: impl FnOnce() -> Reply<T>,
     ) -> Result<Asked<T>, Stopped> {
-        if cancelled() {
+        if self.stopped() {
             return Err(Stopped);
         }
         let name = source.name().to_owned();
@@ -1029,30 +1099,13 @@ impl Check<'_> {
     /// The next season of every show and anime series followed, and linked
     /// to a lookup: daily with a season still to come, else in its share.
     fn seasons(&mut self, ask: bool) -> Result<(), Stopped> {
-        let shows: Vec<&Entry> = self
-            .library
-            .entries
-            .iter()
-            .filter(|e| {
-                // The fixture's shows carry no ids, and the fake knows them.
-                let linked = self.service.is_instant()
-                    || e.source
-                        .as_deref()
-                        .is_some_and(|s| s.starts_with("tmdb:tv:") || s.starts_with("anilist:"));
-                e.uses_seasons() && linked && e.status != EntryStatus::Dnf && !e.seasonal_only
-            })
-            .filter(|e| self.settings.is_followed("shows", &e.id, true))
-            .collect();
-        for show in shows {
-            let owner = format!("shows/{}", show.id);
+        for show in self.shows() {
+            let owner = follows::key_of(Follow::Shows, &show.id);
             self.owners.insert(owner.clone());
-            let coming = show
-                .season_list()
-                .iter()
-                .any(|s| s.released.is_some_and(|r| !r.is_released_on(self.today)));
-            if !ask || !(coming || self.in_share(&show.id)) || !self.fresh(&owner) {
+            if !ask || !self.show_due(show) {
                 continue;
             }
+            self.progress.tick();
             let Some((_, id)) = self.source_for(show)? else {
                 continue;
             };
@@ -1092,6 +1145,7 @@ impl Check<'_> {
                     description: show.description.clone(),
                     found: self.first_found(&key),
                     owner: owner.clone(),
+                    owner_name: show.title.clone(),
                     key,
                     source: id.clone(),
                     provider: source.name().to_owned(),
@@ -1100,6 +1154,7 @@ impl Check<'_> {
                         show: show.id.clone(),
                         number: season.season,
                     },
+                    reasons: Vec::new(),
                 });
             }
             self.answered(&owner, items);
@@ -1154,7 +1209,7 @@ impl Check<'_> {
         let Some(source) = self.service.source_of(source_id) else {
             return Ok(None);
         };
-        let languages = self.settings.languages.clone();
+        let languages = self.languages.clone();
         match self.ask(source, || source.edition_release(source_id, &languages))? {
             Asked::Got(edition) => Ok(edition),
             _ => Ok(None),
@@ -1165,45 +1220,19 @@ impl Check<'_> {
     /// progress (Want alone is not following, as on the phone) and not
     /// unticked; daily with a dated part recorded, else in its share.
     fn series(&mut self, ask: bool) -> Result<(), Stopped> {
-        let mut groups: Vec<(MediaType, String, Vec<&Entry>)> = Vec::new();
-        for entry in &self.library.entries {
-            let Some(series) = &entry.series else {
-                continue;
-            };
-            if !entry.can_have_series() || entry.seasonal_only {
-                continue;
-            }
-            match groups
-                .iter_mut()
-                .find(|(media, name, _)| *media == entry.media && Series::same(name, &series.name))
-            {
-                Some((_, _, parts)) => parts.push(entry),
-                None => groups.push((entry.media, series.name.clone(), vec![entry])),
-            }
-        }
-        for (media, name, parts) in groups {
-            let key = format!(
-                "{}/{}",
-                media.key(),
-                lookup::text::title_key(&name).replace(' ', "")
-            );
-            let followed = parts
-                .iter()
-                .any(|p| matches!(p.status, EntryStatus::Done | EntryStatus::InProgress));
-            if !followed || !self.settings.is_followed("series", &key, true) {
-                continue;
-            }
-            let owner = format!("series/{key}");
+        for group in self.series_followed() {
+            let follows::SeriesGroup {
+                media,
+                name,
+                key,
+                parts,
+            } = group;
+            let owner = follows::key_of(Follow::Series, &key);
             self.owners.insert(owner.clone());
-            let dated = self.record.items.iter().any(|item| {
-                item.owner == owner
-                    && item
-                        .released
-                        .is_some_and(|r| r.day.is_some() || r.month.is_some())
-            });
-            if !ask || !(dated || self.in_share(&key)) || !self.fresh(&owner) {
+            if !ask || !self.series_due(&key) {
                 continue;
             }
+            self.progress.tick();
             let lead = parts
                 .iter()
                 .copied()
@@ -1232,7 +1261,7 @@ impl Check<'_> {
                 // A book out within the last year may still be to come in
                 // the languages read.
                 let asks_edition = media == MediaType::Books
-                    && !self.settings.languages.is_empty()
+                    && !self.languages.is_empty()
                     && part.source.is_some()
                     && (!out
                         || lookup::is_recent_or_ahead(Some(released), self.today, EDITION_WINDOW));
@@ -1303,6 +1332,7 @@ impl Check<'_> {
                     description,
                     found: self.first_found(&key),
                     owner: owner.clone(),
+                    owner_name: display.clone(),
                     source: key.clone(),
                     key,
                     provider: provider.to_owned(),
@@ -1310,6 +1340,7 @@ impl Check<'_> {
                     kind: Kind::Part {
                         series: display.clone(),
                     },
+                    reasons: Vec::new(),
                 });
             }
             self.answered(&owner, items);
@@ -1317,85 +1348,17 @@ impl Check<'_> {
         Ok(())
     }
 
-    /// The creators of `kind` in the library, as the phone derives them:
-    /// the tags of its category with an entry not dropped; artists from
-    /// the creator field of albums and songs.
-    fn creators_of(&self, kind: FollowKind) -> Vec<Creator> {
-        let library = self.library;
-        // The fixture has no author tags; a mock run still shows their rows.
-        let by_field = kind == FollowKind::Authors && self.service.is_instant();
-        if let Some(category) = kind.category().filter(|_| !by_field) {
-            return library
-                .tags
-                .get(&category)
-                .into_iter()
-                .flatten()
-                .filter_map(|tag| {
-                    let entries: Vec<&Entry> = library
-                        .entries
-                        .iter()
-                        .filter(|e| e.has_tag_as(tag, category))
-                        .collect();
-                    if entries.iter().all(|e| e.status == EntryStatus::Dnf) {
-                        return None;
-                    }
-                    Some(Creator {
-                        kind,
-                        id: tag.clone(),
-                        name: creator_name(tag, &entries),
-                        count: entries.len(),
-                    })
-                })
-                .collect();
-        }
-        let media = if by_field {
-            MediaType::Books
-        } else {
-            MediaType::Music
-        };
-        let mut named: BTreeMap<String, Creator> = BTreeMap::new();
-        for entry in library.entries_of(media) {
-            let field = entry.creator.as_deref().unwrap_or_default().trim();
-            let names = if by_field {
-                lookup::text::split_creators(field)
-            } else {
-                vec![field.to_owned()]
-            };
-            for name in names {
-                let id = if by_field {
-                    crate::model::text::slugify(&name)
-                } else {
-                    name.to_lowercase()
-                };
-                if id.is_empty() || lookup::NO_PHOTO.contains(&id.as_str()) {
-                    continue;
-                }
-                named
-                    .entry(id.clone())
-                    .or_insert_with(|| Creator {
-                        kind,
-                        id,
-                        name,
-                        count: 0,
-                    })
-                    .count += 1;
-            }
-        }
-        named.into_values().collect()
-    }
-
     /// Whether the creator is on: the settings, and a creator no longer
     /// active only when ticked anyway.
     fn is_on(&self, creator: &Creator) -> bool {
-        let kind = creator.kind.key();
+        let kind = Follow::from(creator.kind);
         let inactive = self
             .record
             .creators
             .get(&creator.key())
             .is_some_and(|status| status.inactive.is_some());
-        let default_on = creator.kind.default_on() && !inactive;
-        self.settings.is_followed(kind, &creator.id, default_on)
-            && (!inactive || self.settings.is_ticked(kind, &creator.id))
+        self.settings
+            .is_followed(kind, &creator.id, kind.default_on() && !inactive)
     }
 
     fn status_wanted(&self, key: &str) -> bool {
@@ -1429,7 +1392,7 @@ impl Check<'_> {
                 .collect();
             for batch in of_kind.chunks(INACTIVE_BATCH) {
                 let names: Vec<String> = batch.iter().map(|c| c.name.clone()).collect();
-                if cancelled() {
+                if self.stopped() {
                     return Err(Stopped);
                 }
                 // Wikidata's answer through the source that has it. A
@@ -1473,44 +1436,104 @@ impl Check<'_> {
     /// books, an artist's albums, a director's or an actor's movies and
     /// shows, a studio's movies or games.
     fn creators(&mut self, ask: bool) -> Result<(), Stopped> {
-        let mut followed = Vec::new();
-        for kind in FollowKind::ALL {
-            for creator in self.creators_of(kind) {
-                if self.is_on(&creator) {
-                    self.owners.insert(creator.key());
-                    followed.push(creator);
-                }
-            }
+        let (followed, others) = self.creators_split();
+        for creator in &followed {
+            self.owners.insert(creator.key());
         }
         if !ask {
             return Ok(());
         }
-        let due: Vec<&Creator> = followed
-            .iter()
-            .filter(|c| self.in_share(&c.key()) && self.fresh(&c.key()))
-            .collect();
-        let classified = self.inactive(&due)?;
-        for creator in due {
-            let key = creator.key();
-            let inactive = if classified.unknown.contains(&key) {
+        let due: Vec<&Creator> = followed.iter().filter(|c| self.creator_due(c)).collect();
+        // Who is not followed is still asked who they are, so the
+        // Following window can list them under No longer active.
+        let unfollowed: Vec<&Creator> = others.iter().filter(|c| self.status_due(c)).collect();
+        let asked: Vec<&Creator> = due.iter().chain(&unfollowed).copied().collect();
+        let classified = self.inactive(&asked)?;
+        let said = |key: &str| {
+            if classified.unknown.contains(key) {
                 Classification::Unknown
             } else {
-                Classification::Known(classified.found.get(&key))
-            };
-            self.creator(creator, inactive)?;
+                Classification::Known(classified.found.get(key))
+            }
+        };
+        for creator in due {
+            self.progress.tick();
+            self.creator(creator, said(&creator.key()))?;
         }
+        for creator in unfollowed {
+            self.progress.tick();
+            self.status_only(creator, said(&creator.key()))?;
+        }
+        Ok(())
+    }
+
+    /// The creator's kinds' sources that are set up.
+    fn creator_sources(&self, kind: FollowKind) -> Vec<&'a dyn Source> {
+        self.service
+            .sources()
+            .iter()
+            .map(|s| s.as_ref())
+            .filter(|s| s.is_configured() && s.creator_kinds().contains(&kind))
+            .collect()
+    }
+
+    /// What is known of a creator now: the provider's id and why they are
+    /// no longer active, from what was just asked and what was known.
+    fn status_of(
+        &self,
+        known: Option<CreatorStatus>,
+        found: Option<lookup::CreatorMatch>,
+        inactive: Classification,
+    ) -> CreatorStatus {
+        CreatorStatus {
+            provider_id: found
+                .as_ref()
+                .map(|hit| hit.provider_id.clone())
+                .or_else(|| known.as_ref().and_then(|k| k.provider_id.clone())),
+            inactive: inactive
+                .found()
+                .cloned()
+                .or_else(|| found.and_then(|hit| hit.inactive))
+                .or_else(|| known.and_then(|k| k.inactive)),
+            // Not asked of Wikidata: already due again, so the next
+            // run asks rather than taking them as alive for 90 days.
+            checked_on: match inactive {
+                Classification::Unknown => self.today.add_days(-STATUS_DAYS),
+                Classification::Known(_) => self.today,
+            },
+        }
+    }
+
+    /// A creator who is not followed: only whether they are still active.
+    /// Wikidata has said it for an author, an artist or a studio; TMDB
+    /// says it with a director's or an actor's own record.
+    fn status_only(&mut self, creator: &Creator, inactive: Classification) -> Result<(), Stopped> {
+        let key = creator.key();
+        let known = self.record.creators.get(&key).cloned();
+        let mut found = None;
+        if matches!(creator.kind, FollowKind::Directors | FollowKind::Actors) {
+            for source in self.creator_sources(creator.kind) {
+                let reply = || source.find_creator(creator.kind, &creator.name);
+                match self.ask(source, reply)? {
+                    Asked::Got(Some(hit)) => {
+                        found = Some(hit);
+                        break;
+                    }
+                    Asked::NoAnswer => return Ok(()),
+                    _ => {}
+                }
+            }
+        }
+        let status = self.status_of(known, found, inactive);
+        self.record.creators.insert(key.clone(), status);
+        self.record.asked.insert(status_key(&key));
+        self.save();
         Ok(())
     }
 
     fn creator(&mut self, creator: &Creator, inactive: Classification) -> Result<(), Stopped> {
         let key = creator.key();
-        let sources: Vec<&dyn Source> = self
-            .service
-            .sources()
-            .iter()
-            .map(|s| s.as_ref())
-            .filter(|s| s.is_configured() && s.creator_kinds().contains(&creator.kind))
-            .collect();
+        let sources = self.creator_sources(creator.kind);
         if sources.is_empty() {
             return Ok(());
         }
@@ -1528,23 +1551,7 @@ impl Check<'_> {
                     _ => {}
                 }
             }
-            let status = CreatorStatus {
-                provider_id: found
-                    .as_ref()
-                    .map(|hit| hit.provider_id.clone())
-                    .or_else(|| known.as_ref().and_then(|k| k.provider_id.clone())),
-                inactive: inactive
-                    .found()
-                    .cloned()
-                    .or_else(|| found.and_then(|hit| hit.inactive))
-                    .or_else(|| known.and_then(|k| k.inactive)),
-                // Not asked of Wikidata: already due again, so the next
-                // run asks rather than taking them as alive for 90 days.
-                checked_on: match inactive {
-                    Classification::Unknown => self.today.add_days(-STATUS_DAYS),
-                    Classification::Known(_) => self.today,
-                },
-            };
+            let status = self.status_of(known, found, inactive);
             self.record.creators.insert(key.clone(), status);
         }
         // Just learned to be no longer active: off too, unless ticked.
@@ -1582,7 +1589,7 @@ impl Check<'_> {
             if !seen.insert(hit.source.clone()) {
                 continue;
             }
-            if hit.media == MediaType::Books && !self.settings.languages.is_empty() {
+            if hit.media == MediaType::Books && !self.languages.is_empty() {
                 if let Some(edition) = self.edition(&hit.source)? {
                     if !edition.in_languages {
                         continue;
@@ -1616,7 +1623,7 @@ impl Check<'_> {
                 continue;
             }
             let found_key = hit.source.clone();
-            let count = creator.count;
+            let count = creator.entries.len();
             let noun = match (hit.media, count) {
                 (MediaType::Books, 1) => "1 book".to_owned(),
                 (MediaType::Books, n) => format!("{n} books"),
@@ -1633,11 +1640,13 @@ impl Check<'_> {
                 description: hit.description.clone(),
                 found: self.first_found(&found_key),
                 owner: key.clone(),
+                owner_name: creator.name.clone(),
                 source: found_key.clone(),
                 key: found_key,
                 provider: source.name().to_owned(),
                 cover_url: hit.cover_url.clone(),
                 kind: Kind::Creator,
+                reasons: Vec::new(),
             });
         }
         self.answered(&key, items);
@@ -1645,16 +1654,11 @@ impl Check<'_> {
     }
 }
 
-/// A creator tag as the name it stands for: the name in a creator field of
-/// one of its entries ("J. K. Rowling" for #j-k-rowling), else the tag in
-/// words.
-fn creator_name(tag: &str, entries: &[&Entry]) -> String {
-    entries
-        .iter()
-        .filter_map(|entry| entry.creator.as_deref())
-        .flat_map(lookup::text::split_creators)
-        .find(|name| crate::model::text::slugify(name) == tag)
-        .unwrap_or_else(|| tag_display_name(tag))
+/// What a status-only ask of the creator `key` is recorded under for the
+/// day, apart from the follow's own key: a creator ticked later the same
+/// day is still asked for new work.
+fn status_key(key: &str) -> String {
+    format!("status/{key}")
 }
 
 /// Whether one text is in Latin letters and the other is not: a work's
@@ -1673,8 +1677,18 @@ mod tests {
     use super::*;
     use crate::fixtures;
     use crate::lookup::fake::Fake;
-    use crate::model::codec;
-    use std::sync::{Arc, Mutex};
+    use crate::model::{EntryStatus, codec};
+    use crate::shared::{self, Edit};
+    use std::sync::Mutex;
+
+    fn unfollow(settings: &mut Settings, kind: Follow, id: &str) {
+        settings.apply(&Edit::Follow {
+            kind,
+            ids: vec![id.to_owned()],
+            on: false,
+            default_on: kind.default_on(),
+        });
+    }
 
     fn fake_run(library: &Library) -> Outcome {
         run(
@@ -1765,14 +1779,20 @@ mod tests {
         let outcome = fake_run(&library);
         let mut state = State::default();
         state.finish(outcome, Timestamp::parse("2026-10-19T09:12:00Z").unwrap());
-        let visible = state.visible(&library).len();
+        let mut settings = Settings::default();
+        let visible = state.visible(&library, &settings).len();
         assert!(visible >= 5);
         // Not interested hides one; Restore brings it back.
-        state.hide("fake:movie:hunt-for-gollum");
-        assert_eq!(state.visible(&library).len(), visible - 1);
-        assert_eq!(state.hidden_items(&library).len(), 1);
-        state.restore("fake:movie:hunt-for-gollum");
-        assert_eq!(state.visible(&library).len(), visible);
+        settings.apply(&Edit::Hide("fake:movie:hunt-for-gollum".into()));
+        assert_eq!(state.visible(&library, &settings).len(), visible - 1);
+        assert_eq!(state.hidden_items(&library, &settings).len(), 1);
+        settings.apply(&Edit::Restore("fake:movie:hunt-for-gollum".into()));
+        assert_eq!(state.visible(&library, &settings).len(), visible);
+        // With the check switched off nothing is listed.
+        settings.apply(&Edit::Enabled(false));
+        assert!(state.visible(&library, &settings).is_empty());
+        assert!(state.hidden_items(&library, &settings).is_empty());
+        settings.apply(&Edit::Enabled(true));
         // The season added to the show drops its item.
         let show = library
             .entries
@@ -1786,50 +1806,184 @@ mod tests {
             fresh: None,
             manual: None,
         });
-        assert_eq!(state.visible(&library).len(), visible - 1);
+        assert_eq!(state.visible(&library, &settings).len(), visible - 1);
         // A title added by hand drops its item too.
         let mut gollum = library.entries[0].clone();
         gollum.id = "movies/the-lord-of-the-rings-the-hunt-for-gollum-2027".into();
         gollum.title = "The Lord of the Rings: The Hunt for Gollum".into();
         gollum.source = None;
         library.entries.push(gollum);
-        assert_eq!(state.visible(&library).len(), visible - 2);
+        assert_eq!(state.visible(&library, &settings).len(), visible - 2);
         assert!(state.checked_today(Timestamp::parse("2026-10-19T20:00:00Z").unwrap()));
         assert!(!state.checked_today(Timestamp::parse("2026-10-20T20:00:00Z").unwrap()));
     }
 
     #[test]
-    fn the_record_and_the_hidden_keys_read_back_from_their_files() {
+    fn the_record_reads_back_from_its_file() {
         let dir = storage::TempDir::new("discover");
         let path = dir.0.as_path();
         let outcome = fake_run(&library());
         let now = Timestamp::parse("2026-10-19T09:12:00Z").unwrap();
         {
-            let mut state = State::at(Some(path), Some(path));
+            let mut state = State::at(Some(path));
             state.finish(outcome.clone(), now);
-            state.hide("fake:book:king-2027");
         }
-        let state = State::at(Some(path), Some(path));
+        let mut state = State::at(Some(path));
         assert_eq!(state.record.checked, Some(now));
         assert_eq!(state.record.items, outcome.items);
-        assert!(state.hidden.contains("fake:book:king-2027"));
-        let settings = std::fs::read_to_string(path.join("settings.json")).unwrap();
-        assert!(settings.contains("\"not_interested\""));
-        assert!(settings.contains("\"version\": 1"));
+        assert_eq!(state.record.new, outcome.items.len(), "all of them new");
         let line = state.check_line(now).unwrap();
         assert!(
             line.starts_with("Checked today ") && line.ends_with(" · Fake"),
             "{line}"
         );
-        // Restoring the last key takes the list out of the file.
-        let mut state = state;
-        state.restore("fake:book:king-2027");
-        let settings = std::fs::read_to_string(path.join("settings.json")).unwrap();
-        assert!(!settings.contains("not_interested"));
         // An incomplete run changes nothing.
         let before = state.record.clone();
         state.finish(Outcome::failed("Fake: Offline"), now);
         assert_eq!(state.record, before);
+    }
+
+    #[test]
+    fn last_checked_reads_as_the_settings_row_does() {
+        let mut state = State::default();
+        // Noon, so the day is the same in any time zone this runs in.
+        let now = Timestamp::parse("2026-10-19T12:00:00Z").unwrap();
+        assert_eq!(state.last_checked(now), "Never");
+        state.record.checked = Some(Timestamp(now.0 - 600));
+        let line = state.last_checked(now);
+        assert!(
+            line.starts_with("Today ") && !line.contains("new"),
+            "{line}"
+        );
+        state.record.new = 3;
+        state.record.new_on = Some(now.local_date());
+        let line = state.last_checked(now);
+        assert!(
+            line.starts_with("Today ") && line.ends_with(" · 3 new"),
+            "{line}"
+        );
+        let line = state.last_checked(Timestamp(now.0 + 86_400));
+        assert!(line.starts_with("Yesterday "), "{line}");
+        // Further back it is the day alone.
+        let line = state.last_checked(Timestamp(now.0 + 7 * 86_400));
+        assert_eq!(line, "Oct 19 · 3 new");
+        // While a run is out the row counts.
+        state.look_checking(184, 423);
+        assert_eq!(state.last_checked(now), "Checking 184 of 423…");
+        assert!((state.fraction() - 184.0 / 423.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_title_found_for_several_follows_is_one_row_with_every_reason() {
+        let library = library();
+        let outcome = fake_run(&library);
+        let mut record = outcome.record.unwrap();
+        // The series' next part was found for its director too.
+        let part = record
+            .items
+            .iter()
+            .find(|i| i.key == "fake:movie:hunt-for-gollum")
+            .cloned()
+            .expect("the fake's next part");
+        assert_eq!(part.owner_name, "The Lord of the Rings");
+        let mut again = part.clone();
+        again.owner = "directors/andy-serkis".into();
+        again.owner_name = "Andy Serkis".into();
+        record.items.push(again);
+        let mut state = State::default();
+        let complete = Outcome {
+            items: record.items.clone(),
+            sources: Vec::new(),
+            complete: true,
+            stopped: None,
+            record: Some(record),
+        };
+        state.finish(complete, Timestamp::parse("2026-10-19T09:12:00Z").unwrap());
+        let mut settings = Settings::default();
+        let rows = state.visible(&library, &settings);
+        let row = rows
+            .iter()
+            .find(|i| i.key == part.key)
+            .expect("listed once");
+        assert_eq!(rows.iter().filter(|i| i.key == part.key).count(), 1);
+        let reasons: Vec<(Follow, &str)> = row
+            .reasons
+            .iter()
+            .map(|r| (r.kind, r.name.as_str()))
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                (Follow::Series, "The Lord of the Rings"),
+                (Follow::Directors, "Andy Serkis")
+            ]
+        );
+        // One reason unfollowed: the title stays for the other.
+        let series = row.reasons[0].id.clone();
+        unfollow(&mut settings, Follow::Series, &series);
+        let row = state.item(&part.key).unwrap();
+        assert_eq!(state.live_reasons(&settings, row).len(), 1);
+        assert!(
+            state
+                .visible(&library, &settings)
+                .iter()
+                .any(|i| i.key == part.key)
+        );
+        // The last one too: it leaves at once, with no run in between,
+        // and is not kept under Hidden either.
+        unfollow(&mut settings, Follow::Directors, "andy-serkis");
+        assert!(
+            !state
+                .visible(&library, &settings)
+                .iter()
+                .any(|i| i.key == part.key)
+        );
+        assert!(state.hidden_items(&library, &settings).is_empty());
+        // Followed again it is back, as the record still has it.
+        assert!(
+            state
+                .visible(&library, &Settings::default())
+                .iter()
+                .any(|i| i.key == part.key)
+        );
+    }
+
+    #[test]
+    fn a_run_keeps_one_item_for_each_follow_that_found_a_title() {
+        let library = library();
+        let mut record = fake_run(&library).record.unwrap();
+        let part = record
+            .items
+            .iter()
+            .find(|i| i.key == "fake:movie:hunt-for-gollum")
+            .cloned()
+            .unwrap();
+        // A second follow's copy, as an earlier run of its share left it.
+        let author = record
+            .items
+            .iter()
+            .find(|i| i.owner.starts_with("authors/"))
+            .map(|i| i.owner.clone())
+            .expect("the fake finds an author's book");
+        let mut copy = part.clone();
+        copy.owner = author.clone();
+        record.items.push(copy);
+        let outcome = run(
+            &Service::fake(),
+            &library,
+            today(),
+            &Settings::default(),
+            &record,
+            None,
+        );
+        let owners: Vec<&str> = outcome
+            .items
+            .iter()
+            .filter(|i| i.key == part.key)
+            .map(|i| i.owner.as_str())
+            .collect();
+        assert_eq!(owners.len(), 2, "{owners:?}");
+        assert!(owners.contains(&author.as_str()));
     }
 
     #[test]
@@ -1838,13 +1992,13 @@ mod tests {
         // this runs in, and a day on does not.
         let now = Timestamp::parse("2026-10-19T12:00:00Z").unwrap();
         let hour_on = Timestamp(now.0 + 3_600);
-        let mut state = State::at(None, None);
+        let mut state = State::at(None);
         assert!(state.is_due(now));
-        state.start();
+        let _ = state.start(false);
         assert!(!state.is_due(now), "running");
         state.finish(Outcome::failed("Fake: Offline"), now);
         assert!(state.is_due(hour_on), "not finished");
-        state.start();
+        let _ = state.start(false);
         let outcome = fake_run(&library());
         state.finish(outcome, hour_on);
         assert!(!state.is_due(hour_on), "finished today");
@@ -1967,24 +2121,10 @@ mod tests {
         }}"#;
 
     #[test]
-    fn settings_say_what_is_followed() {
-        let settings = Settings::parse(SETTINGS);
-        assert_eq!(settings.languages, ["en", "sv"]);
-        assert!(!settings.is_followed("shows", "shows/severance-2022", true));
-        assert!(settings.is_followed("shows", "shows/other", true));
-        assert!(settings.is_followed("actors", "tom-cruise", false));
-        assert!(!settings.is_followed("actors", "brad-pitt", false));
-        assert_eq!(settings_path("library.json"), "settings.json");
-        assert_eq!(settings_path("data/library.json"), "data/settings.json");
-        assert_eq!(Settings::parse(r#"{"version": 2}"#), Settings::default());
-        assert!(!Settings::parse(r#"{"version": 1, "upcoming": {"enabled": false}}"#).enabled);
-    }
-
-    #[test]
     fn what_is_unfollowed_is_never_asked_and_its_rows_go() {
         let (counting, service) = counting();
         let library = library();
-        let settings = Settings::parse(SETTINGS);
+        let settings = shared::decode(SETTINGS).unwrap();
         let outcome = run(
             &service,
             &library,
@@ -2175,13 +2315,130 @@ mod tests {
             &Record::default(),
             Some(&file),
         );
-        let state = State::at(Some(dir.0.as_path()), None);
+        let state = State::at(Some(dir.0.as_path()));
         assert!(!state.record.items.is_empty());
         assert!(!state.record.creators.is_empty());
-        let merged = with_local_hidden(SETTINGS, r#"{"upcoming": {"not_interested": ["y"]}}"#);
-        let merged: Value = serde_json::from_str(&merged.unwrap()).unwrap();
-        assert_eq!(merged["upcoming"]["not_interested"], json!(["x", "y"]));
-        assert_eq!(merged["books"]["languages"], json!(["en", "sv"]));
+    }
+
+    #[test]
+    fn check_now_asks_every_share_again_and_counts_what_it_asks() {
+        let (counting, service) = counting();
+        let library = library();
+        let settings = Settings::default();
+        let first = run(
+            &service,
+            &library,
+            today(),
+            &settings,
+            &Record::default(),
+            None,
+        );
+        assert!(first.complete, "{:?}", first.stopped);
+        let record = first.record.unwrap();
+        let asked = counting.asked.lock().unwrap().len();
+        assert!(asked > 0);
+        // The same day again: everything is done, nothing is asked.
+        let options = Options::default();
+        let again = run_with(
+            &service,
+            &library,
+            today(),
+            &settings,
+            &record,
+            None,
+            &options,
+        );
+        assert!(again.complete);
+        assert_eq!(counting.asked.lock().unwrap().len(), asked);
+        assert_eq!(options.progress.counts(), (0, 0));
+        // Check now: the whole set, whatever was asked today.
+        let options = Options {
+            force: true,
+            ..Options::default()
+        };
+        let forced = run_with(
+            &service,
+            &library,
+            today(),
+            &settings,
+            &record,
+            None,
+            &options,
+        );
+        assert!(forced.complete, "{:?}", forced.stopped);
+        assert!(counting.asked.lock().unwrap().len() > asked);
+        let (done, total) = options.progress.counts();
+        assert!(total > 0 && done == total, "{done} of {total}");
+        assert_eq!(forced.record.unwrap().new, 0, "nothing it had not found");
+    }
+
+    #[test]
+    fn stop_ends_the_run_and_records_no_day() {
+        let (counting, service) = counting();
+        let library = library();
+        let options = Options::default();
+        options.progress.stop();
+        let outcome = run_with(
+            &service,
+            &library,
+            today(),
+            &Settings::default(),
+            &Record::default(),
+            None,
+            &options,
+        );
+        assert!(!outcome.complete);
+        assert_eq!(outcome.stopped.as_deref(), Some("stopped"));
+        assert!(counting.asked.lock().unwrap().is_empty(), "nothing asked");
+        let record = outcome.record.unwrap();
+        assert_eq!(record.last_run, None);
+        assert!(record.done.is_empty());
+    }
+
+    #[test]
+    fn someone_unfollowed_is_still_asked_whether_they_are_active() {
+        let (counting, service) = counting();
+        let library = library();
+        let mut settings = Settings::default();
+        unfollow(&mut settings, Follow::Artists, "miles davis");
+        let outcome = run(
+            &service,
+            &library,
+            today(),
+            &settings,
+            &Record::default(),
+            None,
+        );
+        assert!(outcome.complete, "{:?}", outcome.stopped);
+        let record = outcome.record.unwrap();
+        // Wikidata was asked about him with the others, and nothing else
+        // was: no search for him, no albums.
+        let status = record
+            .creators
+            .get("artists/miles davis")
+            .expect("his status is recorded");
+        assert_eq!(status.inactive.as_deref(), Some("Died 1991"));
+        assert_eq!(counting.count("find Miles Davis"), 0);
+        assert!(
+            !record
+                .items
+                .iter()
+                .any(|i| i.owner == "artists/miles davis")
+        );
+        // The Following window lists him under No longer active.
+        let follows = follows::Follows::derive(&library, &settings, &record.creators, true);
+        let miles = follows.find(Follow::Artists, "miles davis").unwrap();
+        assert!(!miles.followed);
+        assert_eq!(miles.second_line(), "Died 1991 · Not checked");
+        // And he is not asked again the same day, or for ninety days.
+        let asked = counting.asked.lock().unwrap().len();
+        let tomorrow = today().add_days(7);
+        let _ = run(&service, &library, tomorrow, &settings, &record, None);
+        let later: Vec<String> = counting.asked.lock().unwrap()[asked..].to_vec();
+        assert!(
+            !later.iter().any(|ask| ask.contains("Miles Davis")),
+            "{later:?}"
+        );
     }
 
     #[test]
@@ -2198,27 +2455,8 @@ mod tests {
         let book = book.unwrap();
         book.creator = Some("J. K. Rowling".to_owned());
         book.tags.push(tag.to_owned());
-        let settings = Settings::default();
-        let previous = Record::default();
-        let (_, service) = counting();
         // A real service: the fake's tagless fallback is off.
-        let service = Service::with(service.sources().to_vec(), false);
-        let check = Check {
-            service: &service,
-            library: &library,
-            today: today(),
-            settings: &settings,
-            previous: &previous,
-            shares: BTreeSet::new(),
-            record: Record::default(),
-            file: None,
-            stores: Stores::at(None),
-            owners: BTreeSet::new(),
-            down: BTreeMap::new(),
-            complete: true,
-            all_complete: true,
-        };
-        let authors = check.creators_of(FollowKind::Authors);
+        let authors = follows::creators(&library, FollowKind::Authors, false);
         assert_eq!(authors.len(), 1);
         assert_eq!(authors[0].name, "J. K. Rowling");
         assert_eq!(authors[0].key(), "authors/j-k-rowling");

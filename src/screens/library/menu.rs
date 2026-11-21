@@ -4,15 +4,22 @@
 //! and every item runs an action the app already has: the menu is one
 //! more way to reach them. The Menu key or Shift+F10 opens it for the
 //! selected title.
+//!
+//! On Coming soon a title of the library has the same menu, and one that
+//! Discover found has its own (canvas revision of 2026-11-19): Preview,
+//! Add to library, Unfollow and Not interested. Unfollow names the follow
+//! the title was found for, or opens a submenu when there are several,
+//! and writes the same setting as the Following window.
 
 use iced::{Element, Point, Task};
 
 use super::{Message, MusicTab, OpenSeries};
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
+use crate::follows::{self, Kind};
 use crate::model::{Entry, EntryStatus, MediaType, Series};
 use crate::music;
-use crate::screens::{entry, plans};
+use crate::screens::{entry, following, plans};
 use crate::ui::context::{self, Layer, RowLook};
 
 fn msg(message: Message) -> AppMessage {
@@ -23,8 +30,13 @@ fn msg(message: Message) -> AppMessage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
     Entry(String),
-    Series { media: MediaType, name: String },
+    Series {
+        media: MediaType,
+        name: String,
+    },
     Artist(String),
+    /// A title Discover found, by its key.
+    Found(String),
 }
 
 /// The rows that open a submenu.
@@ -32,6 +44,16 @@ pub enum Target {
 pub enum Sub {
     Status,
     Plan,
+    /// The follows a found title can be unfollowed by.
+    Unfollow,
+}
+
+impl Sub {
+    /// Whether the pointer over its row opens the submenu, without a
+    /// click (the canvas's Unfollow).
+    pub fn opens_on_hover(self) -> bool {
+        self == Sub::Unfollow
+    }
 }
 
 /// The open menu: what it is for, where the pointer was (in the window)
@@ -70,6 +92,15 @@ pub enum Action {
     /// "Copy title" or "Copy name".
     Copy,
     Delete,
+    /// An artist's "Follow" or "Unfollow".
+    Follow(bool),
+    /// A found title's "Add to library".
+    AddFound,
+    /// A found title's "Unfollow …", for one of its reasons.
+    Unfollow(Kind, String),
+    NotInterested,
+    /// A hidden title's "Restore".
+    Restore,
 }
 
 /// A row of the menu, or the line between two groups.
@@ -218,10 +249,62 @@ pub fn items(app: &App, target: &Target) -> Option<(String, Vec<Item>)> {
                 Item::Separator,
                 row("View cover", "Ctrl+click", Action::ViewCover),
                 row("Change cover…", "", Action::ChangeCover),
-                Item::Separator,
-                row("Copy name", "", Action::Copy),
             ]);
+            // Follow or Unfollow, for an artist Discover can follow, while
+            // the check is on.
+            let follow = app.follows.find(Kind::Artists, &follows::artist_id(name));
+            if let Some(follow) = follow.filter(|_| app.shared.settings.enabled) {
+                let label = if follow.followed {
+                    "Unfollow"
+                } else {
+                    "Follow"
+                };
+                items.push(Item::Separator);
+                items.push(row(
+                    label,
+                    "New albums in Discover",
+                    Action::Follow(!follow.followed),
+                ));
+            }
+            items.extend([Item::Separator, row("Copy name", "", Action::Copy)]);
             Some((name.clone(), items))
+        }
+        Target::Found(key) => {
+            let settings = &app.shared.settings;
+            let found = app.discover.item(key)?;
+            if found.in_library(library) {
+                return None;
+            }
+            let add = match found.kind {
+                // A season goes onto its show at once.
+                crate::discover::Kind::Season { .. } => "Add to library",
+                _ => "Add to library…",
+            };
+            let mut items = vec![
+                row("Preview", "Click", Action::Open),
+                row(add, "", Action::AddFound),
+                Item::Separator,
+            ];
+            match app.discover.live_reasons(settings, found).as_slice() {
+                [] => {}
+                [only] => items.push(row(
+                    &format!("Unfollow {}", only.name),
+                    only.kind.role(),
+                    Action::Unfollow(only.kind, only.id.clone()),
+                )),
+                several => items.push(opens(
+                    "Unfollow",
+                    format!("{} follows", several.len()),
+                    Sub::Unfollow,
+                )),
+            }
+            items.push(if settings.not_interested.contains(key) {
+                row("Restore", "", Action::Restore)
+            } else {
+                row("Not interested", "Hides this title", Action::NotInterested)
+            });
+            items.extend([Item::Separator, row("Copy title", "", Action::Copy)]);
+            Some((found.full_title(), items))
         }
     }
 }
@@ -242,6 +325,22 @@ fn saved_by(app: &App, name: &str) -> (usize, usize) {
 /// then "New plan…".
 pub fn sub_items(app: &App, target: &Target, sub: Sub) -> Vec<SubItem> {
     let library = app.repo.library();
+    if let Target::Found(key) = target {
+        // One row per reason still followed: "Andy Serkis · Director".
+        let Some(found) = app.discover.item(key) else {
+            return Vec::new();
+        };
+        return app
+            .discover
+            .live_reasons(&app.shared.settings, found)
+            .into_iter()
+            .map(|reason| SubItem::Row {
+                label: format!("{} · {}", reason.name, reason.kind.role()),
+                on: false,
+                action: Action::Unfollow(reason.kind, reason.id.clone()),
+            })
+            .collect();
+    }
     let Target::Entry(id) = target else {
         return Vec::new();
     };
@@ -277,6 +376,7 @@ pub fn sub_items(app: &App, target: &Target, sub: Sub) -> Vec<SubItem> {
             });
             rows
         }
+        Sub::Unfollow => Vec::new(),
     }
 }
 
@@ -317,6 +417,7 @@ pub fn layer<'a>(app: &'a App) -> Element<'a, AppMessage> {
                 context::separator(&tokens)
             }
             Item::Row { mut look, does } => {
+                let mut does_hover = None;
                 let message = match does {
                     Does::Run(action) => Message::Menu(action),
                     Does::Opens(sub) => {
@@ -324,11 +425,24 @@ pub fn layer<'a>(app: &'a App) -> Element<'a, AppMessage> {
                             look.active = true;
                             sub_row = Some(top);
                         }
-                        Message::MenuSub(sub)
+                        // Open under the pointer already: a click leaves
+                        // it open.
+                        if sub.opens_on_hover() {
+                            does_hover = Some(sub);
+                            Message::MenuHover(sub)
+                        } else {
+                            Message::MenuSub(sub)
+                        }
                     }
                 };
                 top += context::ROW;
-                context::menu_row(look, &tokens, msg(message))
+                let line = context::menu_row(look, &tokens, msg(message));
+                match does_hover {
+                    Some(sub) => iced::widget::mouse_area(line)
+                        .on_enter(msg(Message::MenuHover(sub)))
+                        .into(),
+                    None => line,
+                }
             }
         })
         .collect();
@@ -359,6 +473,29 @@ pub fn run(app: &mut App, action: Action) -> Task<AppMessage> {
         Target::Entry(id) => run_on_entry(app, id, action),
         Target::Series { media, name } => run_on_series(app, media, name, action),
         Target::Artist(name) => run_on_artist(app, name, action),
+        Target::Found(key) => run_on_found(app, key, action),
+    }
+}
+
+/// A found title's items: what a click, + Add or the preview's buttons
+/// send, and Unfollow as the Following window ticks it off.
+fn run_on_found(app: &mut App, key: String, action: Action) -> Task<AppMessage> {
+    match action {
+        // A click on the previewed title would close its preview.
+        Action::Open if app.library.found.as_deref() == Some(key.as_str()) => Task::none(),
+        Action::Open => app.act(msg(Message::SelectFound(key))),
+        Action::AddFound => app.act(msg(Message::AddFound(key))),
+        Action::Unfollow(kind, id) => {
+            following::set(app, kind, &id, false);
+            Task::none()
+        }
+        Action::NotInterested => app.act(msg(Message::HideFound(key))),
+        Action::Restore => app.act(msg(Message::RestoreFound(key))),
+        Action::Copy => match app.discover.item(&key) {
+            Some(found) => iced::clipboard::write(found.title.clone()),
+            None => Task::none(),
+        },
+        _ => Task::none(),
     }
 }
 
@@ -448,7 +585,7 @@ fn run_on_entry(app: &mut App, id: String, action: Action) -> Task<AppMessage> {
         }
         Action::Copy => iced::clipboard::write(entry.title.clone()),
         Action::Delete => app.act(message(entry::Message::Delete(id))),
-        Action::Status(_) | Action::ShowSongs => Task::none(),
+        _ => Task::none(),
     }
 }
 
@@ -504,6 +641,10 @@ fn run_on_artist(app: &mut App, name: String, action: Action) -> Task<AppMessage
             Task::batch([view, change])
         }
         Action::Copy => iced::clipboard::write(name),
+        Action::Follow(on) => {
+            following::set(app, Kind::Artists, &follows::artist_id(&name), on);
+            Task::none()
+        }
         _ => Task::none(),
     }
 }
@@ -651,6 +792,8 @@ mod tests {
                 "-",
                 "View cover",
                 "Change cover…",
+                "-",
+                "Unfollow",
                 "-",
                 "Copy name"
             ]
@@ -913,5 +1056,232 @@ mod tests {
         // The arrow keys leave the selection alone under the menu.
         let _ = app.update(AppMessage::Key(crate::app::KeyPress::Down));
         assert_eq!(app.library.selected.as_deref(), Some(MOVIE));
+    }
+
+    const KING: &str = "fake:book:king-2027";
+
+    /// The app on Coming soon › Discover, with the fake's check run.
+    fn with_discover() -> App {
+        let mut app = app();
+        let _ = app.update(AppMessage::Discover(crate::discover::Message::Check));
+        send(&mut app, Message::ShowSoon);
+        send(
+            &mut app,
+            Message::SoonSlice(crate::screens::library::Slice::Discover),
+        );
+        app
+    }
+
+    fn listed(app: &App, key: &str) -> bool {
+        app.discover
+            .visible(app.repo.library(), &app.shared.settings)
+            .iter()
+            .any(|item| item.key == key)
+    }
+
+    fn run_item(app: &mut App, target: Target, action: Action) {
+        send(app, Message::OpenMenu(target));
+        send(app, Message::Menu(action));
+        assert_eq!(app.library.menu, None, "an item closes the menu");
+    }
+
+    #[test]
+    fn an_artist_is_followed_or_unfollowed_from_the_menu() {
+        let mut app = app();
+        let target = Target::Artist("Metallica".into());
+        assert_eq!(hint(&app, &target, "Unfollow"), "New albums in Discover");
+        let total = app.follows.total();
+        run_item(&mut app, target.clone(), Action::Follow(false));
+        assert_eq!(app.follows.total(), total - 1);
+        assert!(
+            !app.shared
+                .settings
+                .is_followed(Kind::Artists, "metallica", true)
+        );
+        assert!(labels(&app, &target).contains(&"Follow".to_owned()));
+        run_item(&mut app, target.clone(), Action::Follow(true));
+        assert_eq!(app.follows.total(), total);
+        // Nobody to follow under Various Artists, and no item with the
+        // check switched off.
+        let various = labels(&app, &Target::Artist(music::VARIOUS_ARTISTS.into()));
+        assert!(!various.iter().any(|l| l == "Follow" || l == "Unfollow"));
+        app.change_shared(crate::shared::Edit::Enabled(false), String::new());
+        assert!(!labels(&app, &target).contains(&"Unfollow".to_owned()));
+    }
+
+    #[test]
+    fn a_found_title_with_one_reason_names_who_to_unfollow() {
+        let mut app = with_discover();
+        let target = Target::Found(KING.into());
+        let found = app.discover.item(KING).expect("the fake's book").clone();
+        let [reason] = found.reasons.as_slice() else {
+            panic!("one reason: {:?}", found.reasons);
+        };
+        assert_eq!(reason.kind, Kind::Authors);
+        let unfollow = format!("Unfollow {}", reason.name);
+        assert_eq!(
+            labels(&app, &target),
+            [
+                "Preview",
+                "Add to library…",
+                "-",
+                unfollow.as_str(),
+                "Not interested",
+                "-",
+                "Copy title"
+            ]
+        );
+        assert_eq!(hint(&app, &target, "Preview"), "Click");
+        assert_eq!(hint(&app, &target, &unfollow), "Author");
+        assert_eq!(hint(&app, &target, "Not interested"), "Hides this title");
+        // Preview is what a click does.
+        run_item(&mut app, target.clone(), Action::Open);
+        assert_eq!(app.library.found.as_deref(), Some(KING));
+        // Unfollowing writes the Following window's setting, and the
+        // title leaves the page at once, its preview with it.
+        let action = Action::Unfollow(reason.kind, reason.id.clone());
+        run_item(&mut app, target.clone(), action);
+        assert!(
+            !app.shared
+                .settings
+                .is_followed(Kind::Authors, &reason.id, true)
+        );
+        assert!(
+            !app.follows
+                .find(Kind::Authors, &reason.id)
+                .unwrap()
+                .followed
+        );
+        assert!(!listed(&app, KING));
+        assert_eq!(app.library.found, None);
+        assert!(app.shared.settings.not_interested.is_empty(), "not hidden");
+    }
+
+    #[test]
+    fn not_interested_hides_only_the_title_and_keeps_the_follow() {
+        let mut app = with_discover();
+        let target = Target::Found(KING.into());
+        let follows = app.follows.clone();
+        run_item(&mut app, target.clone(), Action::NotInterested);
+        assert!(app.shared.settings.not_interested.contains(KING));
+        assert!(!listed(&app, KING));
+        assert_eq!(app.follows, follows, "nobody is unfollowed");
+        // Under Hidden its menu offers Restore.
+        let hidden = labels(&app, &target);
+        assert!(hidden.contains(&"Restore".to_owned()), "{hidden:?}");
+        run_item(&mut app, target, Action::Restore);
+        assert!(listed(&app, KING));
+    }
+
+    #[test]
+    fn a_found_title_with_several_reasons_lists_them_in_a_submenu() {
+        let mut app = with_discover();
+        // Every actor ticked and a full check: a movie is then found for
+        // its director and for an actor in it.
+        send_app(&mut app, following::Message::Open(Some(Kind::Actors)));
+        send_app(&mut app, following::Message::All);
+        let _ = app.update(AppMessage::Discover(crate::discover::Message::Now));
+        let found = app
+            .discover
+            .visible(app.repo.library(), &app.shared.settings)
+            .into_iter()
+            .find(|item| item.reasons.len() > 1)
+            .expect("a title found for two follows")
+            .clone();
+        let target = Target::Found(found.key.clone());
+        let n = found.reasons.len();
+        assert_eq!(
+            labels(&app, &target),
+            [
+                "Preview",
+                "Add to library…",
+                "-",
+                "Unfollow",
+                "Not interested",
+                "-",
+                "Copy title"
+            ]
+        );
+        assert_eq!(hint(&app, &target, "Unfollow"), format!("{n} follows"));
+        let rows: Vec<String> = sub_items(&app, &target, Sub::Unfollow)
+            .into_iter()
+            .map(|item| match item {
+                SubItem::Row { label, .. } => label,
+                SubItem::Separator => "-".into(),
+            })
+            .collect();
+        let expected: Vec<String> = found
+            .reasons
+            .iter()
+            .map(|r| format!("{} · {}", r.name, r.kind.role()))
+            .collect();
+        assert_eq!(rows, expected);
+        // The pointer over the row opens the submenu, and a click on the
+        // row leaves it open.
+        send(&mut app, Message::OpenMenu(target.clone()));
+        send(&mut app, Message::MenuHover(Sub::Unfollow));
+        send(&mut app, Message::MenuHover(Sub::Unfollow));
+        assert_eq!(app.library.menu.as_ref().unwrap().sub, Some(Sub::Unfollow));
+        // One unfollowed: the title stays for the others, and names the
+        // one that is left.
+        let first = &found.reasons[0];
+        send(
+            &mut app,
+            Message::Menu(Action::Unfollow(first.kind, first.id.clone())),
+        );
+        assert!(listed(&app, &found.key));
+        if n == 2 {
+            let left = &found.reasons[1];
+            let label = format!("Unfollow {}", left.name);
+            assert_eq!(hint(&app, &target, &label), left.kind.role());
+        }
+        // The rest too: it leaves Discover.
+        for reason in &found.reasons[1..] {
+            run_item(
+                &mut app,
+                target.clone(),
+                Action::Unfollow(reason.kind, reason.id.clone()),
+            );
+        }
+        assert!(!listed(&app, &found.key));
+        assert_eq!(items(&app, &target).map(|(_, items)| items.len()), Some(6));
+    }
+
+    #[test]
+    fn a_title_of_the_library_keeps_its_own_menu_on_coming_soon() {
+        use iced_test::simulator;
+        let mut app = with_discover();
+        send(
+            &mut app,
+            Message::SoonSlice(crate::screens::library::Slice::All),
+        );
+        let lists = crate::screens::library::soon::Lists::of(&app);
+        let rows = lists.pool(crate::screens::library::Slice::All);
+        let mine = rows
+            .iter()
+            .find_map(|row| match row {
+                crate::screens::library::soon::SoonRow::Library(upcoming) => {
+                    Some(upcoming.entry.id.clone())
+                }
+                _ => None,
+            })
+            .expect("a title of the library on its way");
+        drop(rows);
+        drop(lists);
+        send(&mut app, Message::OpenMenu(Target::Entry(mine)));
+        let view = app.view();
+        let mut ui = simulator(view);
+        assert!(ui.find("Open details").is_ok());
+        assert!(ui.find("Not interested").is_err());
+        drop(ui);
+        send(&mut app, Message::OpenMenu(Target::Found(KING.into())));
+        let view = app.view();
+        let mut ui = simulator(view);
+        assert!(ui.find("Not interested").is_ok());
+        assert!(ui.find("Open details").is_err());
+    }
+
+    fn send_app(app: &mut App, message: following::Message) {
+        let _ = app.update(AppMessage::Following(message));
     }
 }

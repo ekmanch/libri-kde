@@ -487,6 +487,8 @@ pub enum Message {
     OpenMenuAt(menu::Target, Option<Point>),
     /// A row with a submenu: opens it, or closes it when it is open.
     MenuSub(menu::Sub),
+    /// The pointer came over a row whose submenu opens without a click.
+    MenuHover(menu::Sub),
     /// Esc or a click outside the menu.
     CloseMenu,
     /// An item of the menu.
@@ -733,6 +735,7 @@ impl State {
                 | Message::OpenMenu(_)
                 | Message::OpenMenuAt(..)
                 | Message::MenuSub(_)
+                | Message::MenuHover(_)
                 | Message::Scrolled(_)
                 | Message::HomeScrolled(_)
                 | Message::GroupsMeasured(_)
@@ -910,6 +913,11 @@ impl State {
                     } else {
                         Some(sub)
                     };
+                }
+            }
+            Message::MenuHover(sub) => {
+                if let Some(menu) = &mut self.menu {
+                    menu.sub = Some(sub);
                 }
             }
             Message::SetView(view) => {
@@ -1103,6 +1111,11 @@ impl State {
             at,
             sub: None,
         });
+    }
+
+    /// Whether the right-click menu is open on the found title `key`.
+    pub fn menu_on_found(&self, key: &str) -> bool {
+        matches!(&self.menu, Some(menu::Menu { target: menu::Target::Found(on), .. }) if on == key)
     }
 
     /// Whether the right-click menu is open on the entry `id`, which is

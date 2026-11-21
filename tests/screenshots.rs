@@ -15,12 +15,13 @@ use std::path::PathBuf;
 
 use libri::app::{self, App, Message};
 use libri::browse::Sort;
+use libri::follows::Kind;
 use libri::lookup::LookupState;
 use libri::model::{Date, EntryKind, EntryStatus, MediaType, Released, Season, TagCategory};
 use libri::repo::Operation;
 use libri::screens::library::{self, DetailsPop, Page, SeasonMenu, View};
 use libri::screens::setup::{self, Step, Which};
-use libri::screens::{Screen, entry, plans};
+use libri::screens::{Screen, entry, following, plans};
 use libri::settings::{Missing, SyncState, ThemeChoice};
 use libri::tags::PickerMessage;
 use libri::theme::Theme;
@@ -355,6 +356,18 @@ fn soon(app: &mut App, slice: library::Slice) {
     measure(app);
 }
 
+fn following(app: &mut App, message: following::Message) {
+    let _ = app.update(Message::Following(message));
+}
+
+/// The right-click menu on the found title `key`, at `at`.
+fn found_menu(app: &mut App, key: &str, at: iced::Point) {
+    let _ = app.update(Message::Library(library::Message::Pointer(at)));
+    let _ = app.update(Message::Library(library::Message::OpenMenu(
+        library::menu::Target::Found(key.into()),
+    )));
+}
+
 fn hide(app: &mut App, key: &str) {
     let _ = app.update(Message::Library(library::Message::HideFound(key.into())));
 }
@@ -598,6 +611,88 @@ fn capture_every_screen() {
                 let _ = app.update(Message::Settings(
                     libri::screens::settings::Message::ConfirmDisconnect,
                 ));
+            }),
+        ),
+        // Discover: while a check runs (the canvas's numbers) and switched
+        // off; the Following window on Authors (with those no longer
+        // active), on Actors (off until ticked) and searching artists.
+        (
+            Screen::Settings,
+            ("settings-discover-checking", |app| {
+                check(app);
+                app.discover.look_checking(184, 423);
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-discover-off", |app| {
+                let _ = app.update(Message::Settings(
+                    libri::screens::settings::Message::Discover(false),
+                ));
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("following-authors", |app| {
+                check(app);
+                following(app, following::Message::Open(None));
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("following-actors", |app| {
+                check(app);
+                following(app, following::Message::Open(Some(Kind::Actors)));
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("following-search", |app| {
+                check(app);
+                following(app, following::Message::Open(Some(Kind::Artists)));
+                following(app, following::Message::Search("al".into()));
+            }),
+        ),
+        // The same window from the Following button on Coming soon, and
+        // the right-click menu on a title Discover found: for one follow,
+        // and for two with the submenu open.
+        (
+            Screen::Library,
+            ("coming-soon-following", |app| {
+                soon(app, library::Slice::Discover);
+                following(app, following::Message::Open(None));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("coming-soon-menu-one-follow", |app| {
+                soon(app, library::Slice::Discover);
+                found_menu(app, "fake:book:king-2027", iced::Point::new(640.0, 418.0));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("coming-soon-menu-several-follows", |app| {
+                soon(app, library::Slice::Discover);
+                // Clint Eastwood followed as an actor too: his movie is
+                // then found for the director and for the actor.
+                following(
+                    app,
+                    following::Message::Set {
+                        kind: Kind::Actors,
+                        id: "clint-eastwood".into(),
+                        on: true,
+                    },
+                );
+                let _ = app.update(Message::Discover(libri::discover::Message::Now));
+                found_menu(
+                    app,
+                    "fake:movie:the-last-round",
+                    iced::Point::new(640.0, 300.0),
+                );
+                let _ = app.update(Message::Library(library::Message::MenuHover(
+                    library::menu::Sub::Unfollow,
+                )));
             }),
         ),
         // Keyboard and mouse: the shortcuts' window, with one changed

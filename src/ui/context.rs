@@ -34,7 +34,7 @@ pub const ROW: f32 = 32.0;
 pub const SEPARATOR: f32 = 9.0;
 /// How wide a menu and a submenu are.
 pub const WIDTH: f32 = 256.0;
-pub const SUB_WIDTH: f32 = 220.0;
+pub const SUB_WIDTH: f32 = 268.0;
 
 pub struct Layer<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     menu: Element<'a, Message, Theme, Renderer>,
