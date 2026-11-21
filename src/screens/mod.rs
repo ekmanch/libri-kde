@@ -13,6 +13,7 @@ pub mod token;
 pub mod your_covers;
 
 use iced::Element;
+use iced::widget::image::Handle;
 
 use crate::app::{App, Message};
 use crate::artwork::Wants;
@@ -74,6 +75,36 @@ pub fn wanted(app: &App) -> Wants {
         _ => {}
     }
     wants
+}
+
+/// The pictures to keep decoded while this screen is on show (`keep`):
+/// the library's list around where it is scrolled, and with `beside` the
+/// lists a side-scroll leads to. Without `beside` those are `known`, as
+/// last worked out: they do not change while the list only scrolls.
+pub fn kept(app: &App, beside: bool, known: &[Handle]) -> (Vec<Handle>, Vec<Handle>) {
+    if app.screen != Screen::Library {
+        return (Vec::new(), Vec::new());
+    }
+    let handles = |wants: &Wants| -> Vec<Handle> {
+        let library = app.repo.library();
+        let covers = wants
+            .covers
+            .iter()
+            .filter_map(|id| library.entry(id))
+            .filter_map(|entry| app.artwork.cover(entry));
+        let images = wants.images.iter().filter_map(|url| app.artwork.image(url));
+        covers.chain(images).collect()
+    };
+    let mut on_show = Wants::default();
+    library::kept(app, &mut on_show);
+    let beside = if beside {
+        let mut wants = Wants::default();
+        library::kept_beside(app, &mut wants);
+        handles(&wants)
+    } else {
+        known.to_vec()
+    };
+    (handles(&on_show), beside)
 }
 
 /// The inspector's wants for the entry it shows: its cover, its series'

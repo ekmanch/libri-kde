@@ -467,6 +467,39 @@ pub fn wanted(app: &App, wants: &mut Wants) {
     }
 }
 
+/// The pictures of `slice`'s rows scrolled as `scroll` says, the ones on
+/// screen first, at most `limit`: the page's own slice, or one beside it
+/// (`super::kept_beside`), under the chips picked there.
+pub(super) fn slice_covers(
+    app: &App,
+    lists: &Lists<'_>,
+    slice: Slice,
+    scroll: super::Scroll,
+    limit: usize,
+    wants: &mut Wants,
+) {
+    let state = &app.library;
+    let shown = State {
+        slice,
+        slice_types: state.slice_types.clone(),
+        show_hidden: state.show_hidden && slice == state.slice,
+        ..State::default()
+    };
+    let rows: Vec<SoonRow<'_>> = page_groups(&shown, lists)
+        .into_iter()
+        .flat_map(|group| group.rows)
+        .collect();
+    for i in super::covers_on_screen(rows.len(), scroll)
+        .into_iter()
+        .take(limit)
+    {
+        match &rows[i] {
+            SoonRow::Library(row) => wants.covers.push(row.entry.id.clone()),
+            SoonRow::Found(found) => want_found(found, wants),
+        }
+    }
+}
+
 /// Whether the grid sets its albums in poster frames: with every type,
 /// or a pick of types that is not Music alone, so posters can share the
 /// rows.

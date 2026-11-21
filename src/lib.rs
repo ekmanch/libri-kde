@@ -15,6 +15,7 @@ pub mod fixtures;
 pub mod follows;
 pub mod github;
 pub mod history;
+pub mod keep;
 pub mod keymap;
 pub mod lookup;
 pub mod model;

@@ -4,7 +4,7 @@
 //! for movies, shows, books, anime and games, squares for albums and
 //! songs, discs for artists; an image of another shape is cropped to fit.
 
-use iced::widget::image::{self, Image};
+use iced::widget::image;
 use iced::widget::{Space, column, container, text};
 use iced::{Border, Color, ContentFit, Element, Fill, FillPortion, Length, Shadow, Vector};
 
@@ -104,10 +104,7 @@ pub fn poster_frame<'a, Message: 'a>(
 ) -> Element<'a, Message> {
     let dark = Color::BLACK;
     let base = container(
-        Image::new(backdrop)
-            .width(Fill)
-            .height(Fill)
-            .content_fit(ContentFit::Cover)
+        super::picture(backdrop)
             .border_radius(radius)
             .opacity(BACKDROP_BRIGHTNESS),
     )
@@ -226,22 +223,16 @@ fn face<'a, Message: 'a>(
     shadow: Option<Shadow>,
 ) -> Element<'a, Message> {
     match handle {
-        Some(handle) => container(
-            Image::new(handle)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .content_fit(ContentFit::Cover)
-                .border_radius(radius),
-        )
-        .width(width)
-        .height(height)
-        // Nothing behind the image: a tinted box under it showed as a
-        // hairline of the type's color at the edge wherever the image
-        // landed a fraction of a pixel off it (after a slide, say). The
-        // shadow is drawn around the box, never inside it.
-        .clip(true)
-        .style(lifted(shadow, radius))
-        .into(),
+        Some(handle) => container(super::picture(handle).border_radius(radius))
+            .width(width)
+            .height(height)
+            // Nothing behind the image: a tinted box under it showed as a
+            // hairline of the type's color at the edge wherever the image
+            // landed a fraction of a pixel off it (after a slide, say). The
+            // shadow is drawn around the box, never inside it.
+            .clip(true)
+            .style(lifted(shadow, radius))
+            .into(),
         None => {
             let (padding, align, centered) = match &label {
                 Some(label) if label.centered => (0.0, iced::alignment::Vertical::Center, true),
@@ -267,9 +258,7 @@ fn face<'a, Message: 'a>(
                     border: Border::default().rounded(radius),
                     ..container::Style::default()
                 });
-            let highlight = Image::new(highlight())
-                .width(Fill)
-                .height(Fill)
+            let highlight = super::picture(highlight())
                 .content_fit(ContentFit::Fill)
                 .border_radius(radius);
             let mut words = container(face)

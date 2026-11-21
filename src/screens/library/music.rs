@@ -79,6 +79,16 @@ fn tab_list<'a>(
         spacing: CELL_SPACING,
         ratio: CELL_WIDTH / height,
     };
+    // While the tabs slide, a grid is only its rows in view: the live
+    // list where it is scrolled, a still copy where it was left.
+    let window = (state.tab_slide.is_some() && view == View::Grid).then(|| {
+        let viewport = if state.scroll.viewport > 0.0 {
+            state.scroll.viewport
+        } else {
+            app.window.height
+        };
+        (still.unwrap_or(state.scroll.offset), viewport)
+    });
     // Every tab is in the sections of its sort, with the section rail
     // once the list is long.
     let (children, on_rail, room) = match tab {
@@ -92,6 +102,7 @@ fn tab_list<'a>(
                 sections: artist_sections(&artists, sort, fits),
                 alphabet: sort == Sort::TitleAz,
                 cell: cell(ARTIST_HEIGHT),
+                window,
             }
             .view(app, view, tokens, <[_]>::len, |artists| {
                 artist_block(app, artists.to_vec(), view, tokens)
@@ -111,6 +122,7 @@ fn tab_list<'a>(
                 sections: browse::entry_sections(sort, &albums, fits),
                 alphabet: by_letter(sort),
                 cell: super::entries::card_cell(MediaType::Music),
+                window,
             }
             .view(app, view, tokens, <[_]>::len, |albums| {
                 super::entries::block_entries(app, albums, view, tokens)
@@ -131,6 +143,7 @@ fn tab_list<'a>(
                 sections,
                 alphabet: by_letter(sort),
                 cell: cell(CELL_WIDTH + SONG_CAPTION),
+                window,
             }
             .view(app, view, tokens, <[_]>::len, |songs| {
                 song_block(app, songs, view, false, tokens)

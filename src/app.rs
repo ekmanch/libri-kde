@@ -19,6 +19,7 @@ use crate::discover;
 use crate::follows::Follows;
 use crate::github;
 use crate::history::{Direction, History, Place};
+use crate::keep;
 use crate::keymap::{Action, Combo, Keymap};
 use crate::lookup::{self, Service};
 use crate::model::{Date, codec};
@@ -211,6 +212,9 @@ pub struct App {
     /// Covers, artist photos, episodes, series parts and track lists as
     /// fetched for the screens, with the cache under `~/.cache/libri/`.
     pub artwork: Artwork,
+    /// The pictures kept decoded for the list on show and the lists
+    /// beside it (`keep`).
+    pub kept: keep::Kept,
     /// The owner's own covers in the library repo: the files GitHub
     /// lists under `covers/`, and the copies on this computer.
     pub covers: Covers,
@@ -293,6 +297,8 @@ pub enum Message {
     Tick,
     /// A frame while the details drawer slides.
     Frame(Instant),
+    /// The renderer's allocations of pictures asked to stay decoded.
+    Kept(keep::Batch),
     Resized(Size),
     /// The window's events: focus and the close request.
     Window(window::Event),
@@ -791,6 +797,7 @@ impl App {
             lookup: lookup::LookupState::Results,
             lookups: Arc::new(Service::fake()),
             artwork: Artwork::default(),
+            kept: keep::Kept::default(),
             covers: Covers::default(),
             photos_dropped: Vec::new(),
             photos: covers::backfill::State::default(),
@@ -2084,6 +2091,14 @@ impl App {
 
     /// `update` at a given time: the drawer's slide is timed from `now`.
     pub fn update_at(&mut self, message: Message, now: Instant) -> Task<Message> {
+        // Nothing the screens show changes with it.
+        let message = match message {
+            Message::Kept(batch) => {
+                self.kept.arrived(batch);
+                return Task::none();
+            }
+            message => message,
+        };
         self.now = now;
         self.library.motion.settle(now);
         self.plans.motion.settle(now);
@@ -2215,6 +2230,19 @@ impl App {
         let plan_drawer = plans::drawer_state(self);
         let plan_closes = plans::closes_drawer(&message);
         let plan_page = (self.screen == Screen::Plans).then(|| self.plans.page.clone());
+        // A frame of a slide changes nothing the lookups or the kept
+        // pictures go by, and a list that only scrolls leaves the lists
+        // beside it as they were.
+        let frame = matches!(message, Message::Frame(_));
+        let scrolls = matches!(
+            message,
+            Message::Library(
+                library::Message::Scrolled(_)
+                    | library::Message::Wheel(_)
+                    | library::Message::GroupsMeasured(_)
+                    | library::Message::Pointer(_)
+            )
+        );
         let task = self.handle(message);
         let task = Task::batch([task, plans::page_turned(self, plan_page, now)]);
         if self.library.selected != selected {
@@ -2249,7 +2277,11 @@ impl App {
             self.preferences.save_if_changed(now);
         }
         self.keep_matches();
-        let lookups = self.refresh_lookups();
+        let lookups = if frame {
+            Task::none()
+        } else {
+            Task::batch([self.refresh_lookups(), self.keep_pictures(!scrolls)])
+        };
         // The photo work gives way to a lookup in the Add dialog.
         self.apple.hold(self.lookup_running());
         let photos = if now >= self.photos_due {
@@ -2289,6 +2321,19 @@ impl App {
             .refresh(&wants, self.repo.library(), &self.lookups)
             .map(Message::Lookup);
         Task::batch([lookups, self.fetch_covers()])
+    }
+
+    /// Holds the pictures the screens want kept decoded (`screens::kept`)
+    /// and asks the renderer for the ones not held yet; with `beside` the
+    /// lists beside the one on show are worked out anew.
+    fn keep_pictures(&mut self, beside: bool) -> Task<Message> {
+        let known = std::mem::take(&mut self.kept.beside);
+        let (on_show, beside) = screens::kept(self, beside, &known);
+        let ask = self
+            .kept
+            .set(on_show.into_iter().chain(beside.iter().cloned()));
+        self.kept.beside = beside;
+        keep::allocate(ask).map(Message::Kept)
     }
 
     /// What a click does with Ctrl held, from the modifiers the keyboard
@@ -2583,6 +2628,8 @@ impl App {
             Message::Tick => self.splash_phase = (self.splash_phase + 0.016 / 1.4) % 1.0,
             // The slide is timed in `update_at`; the frame only redraws.
             Message::Frame(_) => {}
+            // Taken in `update_at`, before anything else.
+            Message::Kept(batch) => self.kept.arrived(batch),
             Message::Resized(size) => self.window = size,
             Message::Window(event) => return self.window_event(event),
             Message::ScaleFactor(scale) => {

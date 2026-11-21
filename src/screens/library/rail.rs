@@ -53,6 +53,23 @@ impl GridRows {
         (rows * self.pitch - (self.pitch - self.cell)).max(0.0)
     }
 
+    /// The cards of the rows in view (and a row either side) with the
+    /// grid's top scrolled `offset` px out of a view `viewport` px tall,
+    /// of `count` cards: the first card, one past the last, and the
+    /// heights of the rows left out above and below, so the rows kept
+    /// stand where they stood in the whole grid.
+    pub fn window(&self, count: usize, offset: f32, viewport: f32) -> (usize, usize, f32, f32) {
+        let row = |y: f32| (y / self.pitch).floor().max(0.0) as usize;
+        let first_row = row(offset).saturating_sub(1);
+        let last_row = row(offset + viewport.max(0.0)) + 1;
+        let first = (first_row * self.columns).min(count);
+        let last = ((last_row + 1) * self.columns).min(count);
+        let whole = self.height(count);
+        let above = (first_row as f32 * self.pitch).min(whole);
+        let below = (whole - above - self.height(last - first)).max(0.0);
+        (first, last, above, below)
+    }
+
     /// The first card of the first row still in view with the list
     /// scrolled to `offset`: a row is gone once its cards have left.
     pub fn first_shown(&self, offset: f32) -> usize {
@@ -309,6 +326,25 @@ mod tests {
         assert_eq!(rows.height(0), 0.0);
         // Not measured yet: one column, never none.
         assert_eq!(GridRows::new(0.0, 190.0, 20.0, 0.5).columns, 1);
+
+        // The rows in view with one either side, the rest as heights: 5
+        // columns, 388 px a row, 23 cards in 5 rows.
+        let rows = GridRows::new(1000.0, 190.0, 20.0, 0.5);
+        assert_eq!((rows.columns, rows.pitch), (5, 388.0));
+        let whole = rows.height(23);
+        // At the top of a 790 px view: rows 0 to 2 in view, row 3 beside.
+        assert_eq!(rows.window(23, 0.0, 790.0), (0, 20, 0.0, 388.0));
+        // Scrolled two rows and a bit down: row 1 beside, rows 2 to 4.
+        let (first, last, above, below) = rows.window(23, 850.0, 790.0);
+        assert_eq!((first, last, above, below), (5, 23, 388.0, 0.0));
+        assert_eq!(above + rows.height(last - first) + below, whole);
+        // In the middle the three parts make the whole height too.
+        let (first, last, above, below) = rows.window(23, 450.0, 300.0);
+        assert_eq!((first, last), (0, 15));
+        assert_eq!(above + rows.height(last - first) + below, whole);
+        // Past the end, and with nothing: no cards, the height kept.
+        assert_eq!(rows.window(23, 9000.0, 790.0), (23, 23, whole, 0.0));
+        assert_eq!(rows.window(0, 0.0, 790.0), (0, 0, 0.0, 0.0));
     }
 
     #[test]

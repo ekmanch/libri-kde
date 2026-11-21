@@ -83,6 +83,7 @@ fn sectioned<'a>(
         // The long-list rule and the count lines count entries, not rows.
         entries: listing.shown.len(),
         cell: card_cell(media),
+        window: None,
     };
     let entries = |rows: &[Row<'a>]| {
         rows.iter()
@@ -132,6 +133,12 @@ pub(super) struct Sectioned<T> {
     pub entries: usize,
     /// The grid's cells, to find the rows its sections start in.
     pub cell: Cell,
+    /// In the grid, only the rows in view are built: the list is scrolled
+    /// to this offset in a view this tall. For a list while it slides
+    /// (Music's tabs): building and laying out a whole grid of hundreds
+    /// of cards took longer than a frame, as the slide started. At rest a
+    /// list is whole, so every row can be found (`reveal`).
+    pub window: Option<(f32, f32)>,
 }
 
 impl<T: Clone> Sectioned<T> {
@@ -158,6 +165,7 @@ impl<T: Clone> Sectioned<T> {
             alphabet,
             entries,
             cell,
+            window,
         } = self;
         let names = sections.iter().map(|s| s.label.clone()).collect();
         let on_rail = rail::Sections::fitted(names, alphabet, state.rail_fits());
@@ -178,6 +186,19 @@ impl<T: Clone> Sectioned<T> {
                 on_rail.in_grid(state, &counts, rows).view(state, tokens)
             });
             let room = if long { room } else { SIDE };
+            if view == View::Grid
+                && state.list_width > 0.0
+                && let Some((offset, viewport)) = window
+            {
+                let rows = grid_rows(state.list_width, room, cell);
+                let (first, last, above, below) = rows.window(items.len(), offset - TOP, viewport);
+                let shown = column![
+                    space().height(above),
+                    block(&items[first..last]),
+                    space().height(below)
+                ];
+                return (vec![shown.into()], on_rail, room);
+            }
             return (vec![block(&items)], on_rail, room);
         }
         let children = sections

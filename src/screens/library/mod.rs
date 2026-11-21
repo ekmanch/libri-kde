@@ -327,6 +327,12 @@ pub struct State {
     pub tab_step: bool,
     /// Where each of Music's tabs was left scrolled.
     pub tab_scroll: HashMap<MusicTab, f32>,
+    /// How each of Music's tabs and each slice of Coming soon last said
+    /// it was scrolled (offset, viewport and content), to tell which of
+    /// its covers are on screen while another one is on show
+    /// (`kept`). A list never scrolled is at the top.
+    pub tab_seen: HashMap<MusicTab, Scroll>,
+    pub slice_seen: HashMap<Slice, Scroll>,
     /// The type panel's Coming soon popover is open.
     pub type_pop: bool,
     /// The right-click menu, open on a title, a series or an artist.
@@ -595,23 +601,97 @@ pub fn wanted(app: &App, wants: &mut Wants) {
         let listing = state.listing(library, app.today);
         wants.covers.extend(panel::glance_covers(app, &listing));
     }
+    list_covers(app, state, state.scroll, COVERS_AT_A_TIME, wants);
+}
+
+/// The covers or photos of the list `state` shows, scrolled as `scroll`
+/// says: the ones on screen first, at most `limit`. `state` is the
+/// library's own, or a copy on another of Music's tabs.
+fn list_covers(app: &App, state: &State, scroll: Scroll, limit: usize, wants: &mut Wants) {
+    let library = app.repo.library();
     if state.single() == Some(MediaType::Music)
         && state.artist.is_none()
         && state.music_tab == MusicTab::Artists
     {
         let listing = state.listing(library, app.today);
         let artists = crate::music::artists(&listing.shown, state.current_sort());
-        for i in covers_on_screen(artists.len(), state.scroll) {
+        for i in covers_on_screen(artists.len(), scroll)
+            .into_iter()
+            .take(limit)
+        {
             music::want_artist(app, artists[i].name, wants);
         }
         return;
     }
     let order = state.cover_order(library, app.today, &app.artwork);
     wants.covers.extend(
-        covers_on_screen(order.len(), state.scroll)
+        covers_on_screen(order.len(), scroll)
             .into_iter()
+            .take(limit)
             .map(|i| order[i].clone()),
     );
+}
+
+/// The pictures to keep decoded for the list on show (`keep`), as covers
+/// and images: what is on screen with a screen either side, so scrolling
+/// finds them ready. A text view, a page and Home keep nothing.
+pub fn kept(app: &App, wants: &mut Wants) {
+    let state = &app.library;
+    if state.page.is_some() || state.is_overview() || state.view_mode() == View::Text {
+        return;
+    }
+    // A list just come on show has not said its size yet: until it does
+    // it is as it was last seen, so the same covers are kept on show as
+    // were beside it, and a switch has nothing to load.
+    let scroll = |seen: Option<&Scroll>| match seen {
+        Some(seen) if state.scroll.content <= 0.0 => Scroll {
+            offset: state.scroll.offset,
+            ..*seen
+        },
+        _ => state.scroll,
+    };
+    if state.soon {
+        let lists = soon::Lists::of(app);
+        let scroll = scroll(state.slice_seen.get(&state.slice));
+        soon::slice_covers(app, &lists, state.slice, scroll, COVERS_AT_A_TIME, wants);
+    } else if music_tabs_shown(state) {
+        let scroll = scroll(state.tab_seen.get(&state.music_tab));
+        list_covers(app, state, scroll, COVERS_AT_A_TIME, wants);
+    } else {
+        list_covers(app, state, state.scroll, COVERS_AT_A_TIME, wants);
+    }
+}
+
+/// The pictures of the lists beside the one on show, to keep decoded too:
+/// Music's other tabs and Coming soon's other slices, each where it was
+/// left, so a side-scroll to one finds its covers ready. They are asked
+/// for when the page opens, before the first switch, and as many as for
+/// the list on show, so a list that comes back has nothing to load.
+pub fn kept_beside(app: &App, wants: &mut Wants) {
+    let state = &app.library;
+    if state.page.is_some() || state.view_mode() == View::Text {
+        return;
+    }
+    if state.soon {
+        let lists = soon::Lists::of(app);
+        for slice in Slice::ALL.into_iter().filter(|s| *s != state.slice) {
+            let seen = Scroll {
+                offset: state.slice_scroll.get(&slice).copied().unwrap_or(0.0),
+                ..state.slice_seen.get(&slice).copied().unwrap_or_default()
+            };
+            soon::slice_covers(app, &lists, slice, seen, COVERS_AT_A_TIME, wants);
+        }
+    } else if music_tabs_shown(state) {
+        for tab in MusicTab::ALL.into_iter().filter(|t| *t != state.music_tab) {
+            let mut beside = state.clone();
+            beside.music_tab = tab;
+            let seen = Scroll {
+                offset: state.tab_scroll.get(&tab).copied().unwrap_or(0.0),
+                ..state.tab_seen.get(&tab).copied().unwrap_or_default()
+            };
+            list_covers(app, &beside, seen, COVERS_AT_A_TIME, wants);
+        }
+    }
 }
 
 /// How many track lists a Songs search waits for at a time.
@@ -1075,7 +1155,14 @@ impl State {
             Message::SeasonMenu(menu) => self.season_menu = menu,
             Message::OpenSeriesCover(media, name) => self.cover_dialog = Some((media, name)),
             Message::CloseSeriesCover => self.cover_dialog = None,
-            Message::Scrolled(scroll) => self.scroll = scroll,
+            Message::Scrolled(scroll) => {
+                self.scroll = scroll;
+                if self.soon {
+                    self.slice_seen.insert(self.slice, scroll);
+                } else if music_tabs_shown(self) {
+                    self.tab_seen.insert(self.music_tab, scroll);
+                }
+            }
             Message::MusicTab(tab) => {
                 self.leave_soon();
                 // Each tab keeps its own place, as Coming soon's slices do.
@@ -2331,6 +2418,162 @@ mod tests {
         assert!(wants.covers.contains(&last));
         assert!(!wants.covers.contains(&order[0]));
         assert_eq!(wants.covers.len(), 4);
+    }
+
+    #[test]
+    fn the_covers_on_show_and_of_the_tabs_beside_are_kept() {
+        use crate::artwork::Wants;
+        let mut app = App::new(crate::screens::Screen::Library);
+        let kept = |app: &App| {
+            let (mut on_show, mut beside) = (Wants::default(), Wants::default());
+            kept(app, &mut on_show);
+            kept_beside(app, &mut beside);
+            (on_show, beside)
+        };
+        // Home keeps nothing.
+        let (on_show, beside) = kept(&app);
+        assert_eq!((on_show, beside), (Wants::default(), Wants::default()));
+
+        // A type's grid: its covers, and no list beside it.
+        app.library
+            .update(Message::ShowType(Some(MediaType::Movies)));
+        let (on_show, beside) = kept(&app);
+        assert_eq!(on_show.covers.len(), 13, "the fixture's movies");
+        assert_eq!(beside, Wants::default());
+
+        // Music on Albums: the albums, and beside them the artists (the
+        // covers that stand for them) and the songs.
+        app.library
+            .update(Message::ShowType(Some(MediaType::Music)));
+        app.library.update(Message::MusicTab(MusicTab::Albums));
+        let (on_show, beside) = kept(&app);
+        let albums = app
+            .library
+            .cover_order(app.repo.library(), app.today, &app.artwork);
+        assert!(albums.len() >= 10, "the fixture's albums");
+        assert_eq!(on_show.covers, albums);
+        let mut on_songs = app.library.clone();
+        on_songs.update(Message::MusicTab(MusicTab::Songs));
+        let songs = on_songs.cover_order(app.repo.library(), app.today, &app.artwork);
+        assert!(!songs.is_empty(), "the fixture's songs");
+        assert!(songs.iter().all(|id| beside.covers.contains(id)));
+        assert!(
+            beside.covers.len() > songs.len(),
+            "the artists' covers too: {beside:?}"
+        );
+
+        // A tab beside the one on show is kept where it was left: Albums
+        // scrolled to its end, seen from Songs.
+        app.library.update(Message::Scrolled(Scroll {
+            offset: 900.0,
+            viewport: 100.0,
+            content: 1000.0,
+        }));
+        let order = app
+            .library
+            .cover_order(app.repo.library(), app.today, &app.artwork);
+        app.library.update(Message::MusicTab(MusicTab::Songs));
+        let (_, beside) = kept(&app);
+        assert!(beside.covers.contains(order.last().unwrap()));
+        assert_eq!(
+            app.library
+                .tab_seen
+                .get(&MusicTab::Albums)
+                .map(|s| s.offset),
+            Some(900.0)
+        );
+
+        // An artist's page has no tabs beside it, and a text view draws
+        // no covers.
+        app.library.update(Message::SetView(View::Text));
+        assert_eq!(kept(&app), (Wants::default(), Wants::default()));
+    }
+
+    /// While Music's tabs slide, a grid is built from the rows in view
+    /// alone, each where it stood in the whole grid.
+    #[test]
+    fn a_sliding_grid_is_its_rows_in_view_where_they_stood() {
+        use crate::app::Message as AppMessage;
+        use std::time::{Duration, Instant};
+
+        let size = iced::Size::new(900.0, 600.0);
+        let mut app = App::new(crate::screens::Screen::Library);
+        app.window = size;
+        let lib = |message| AppMessage::Library(message);
+        // Unpinned, so the glance shows no titles of its own.
+        let _ = app.update(lib(Message::TogglePanel));
+        let _ = app.update(lib(Message::ShowType(Some(MediaType::Music))));
+        let _ = app.update(lib(Message::MusicTab(MusicTab::Albums)));
+        // The list says how wide it is on its first redraw.
+        let messages: Vec<AppMessage> = {
+            let mut ui = iced_test::Simulator::with_size(crate::app::settings(), size, app.view());
+            let redraw = iced::window::Event::RedrawRequested(Instant::now());
+            let _ = ui.simulate([iced::Event::Window(redraw)]);
+            ui.into_messages().collect()
+        };
+        for message in messages {
+            let _ = app.update(message);
+        }
+        assert!(app.library.list_width > 0.0);
+
+        let titles: Vec<String> = app
+            .library
+            .cover_order(app.repo.library(), app.today, &app.artwork)
+            .iter()
+            .filter_map(|id| app.repo.library().entry(id))
+            .map(|entry| entry.title.clone())
+            .collect();
+        let found = |app: &App| -> Vec<(String, iced::Rectangle)> {
+            let mut ui = iced_test::Simulator::with_size(crate::app::settings(), size, app.view());
+            titles
+                .iter()
+                .filter_map(|title| {
+                    let bounds = ui.find(title.as_str()).ok()?.bounds();
+                    Some((title.clone(), bounds))
+                })
+                .collect()
+        };
+        // At rest the grid is whole.
+        let whole = found(&app);
+        let mut tops: Vec<f32> = whole.iter().map(|(_, b)| b.y).collect();
+        tops.sort_by(f32::total_cmp);
+        // A title stands on its placeholder cover, higher the more lines
+        // it takes: a row's tops lie within a cover of each other.
+        tops.dedup_by(|a, b| (*a - *b).abs() < 100.0);
+        assert!(tops.len() >= 3, "rows to scroll past: {tops:?}");
+        let pitch = tops[1] - tops[0];
+
+        // Scrolled past the first two rows, in a view one row tall, then
+        // on to Songs with a slide: Albums passes as a still copy.
+        let _ = app.update(lib(Message::Scrolled(Scroll {
+            offset: 2.0 * pitch + 30.0,
+            viewport: pitch,
+            content: 20.0 * pitch,
+        })));
+        app.speed = crate::animation::Speed::factor(0.5);
+        let at = Instant::now() + Duration::from_secs(5);
+        let wheel = iced::mouse::ScrollDelta::Lines { x: -1.0, y: 0.0 };
+        let _ = app.update_at(lib(Message::Wheel(wheel)), at);
+        assert_eq!(app.library.music_tab, MusicTab::Songs);
+        assert!(app.library.tab_slide.is_some());
+        let sliding = found(&app);
+        // The row above the view is built too, the first row is not, and
+        // every card built stands where it stood.
+        assert!(!sliding.is_empty() && sliding.len() < whole.len());
+        let row = |y: f32| ((y - tops[0]) / pitch).round() as usize;
+        let rows: BTreeSet<usize> = sliding.iter().map(|(_, b)| row(b.y)).collect();
+        assert_eq!(rows.first(), Some(&1), "{rows:?}");
+        assert!(rows.contains(&2), "{rows:?}");
+        for (title, bounds) in &sliding {
+            let (_, was) = whole.iter().find(|(t, _)| t == title).unwrap();
+            assert_eq!(bounds, was, "{title}");
+        }
+
+        // Settled, and back on Albums: whole again.
+        let _ = app.update_at(AppMessage::Frame(at), at + Duration::from_secs(8));
+        assert_eq!(app.library.tab_slide, None);
+        let _ = app.update(lib(Message::MusicTab(MusicTab::Albums)));
+        assert_eq!(found(&app).len(), whole.len());
     }
 
     #[test]
