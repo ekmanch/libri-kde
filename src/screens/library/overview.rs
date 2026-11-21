@@ -1,6 +1,7 @@
 //! Home: all with nothing narrowing it, a "now and next" overview. In
 //! the text and list views two columns of short lists; in the grid,
-//! cover shelves with a side column holding the plan and Recently added.
+//! cover shelves with a side column holding the plan and Recently added
+//! (rows with covers, as the list view's).
 //! Every list has a "See all" that opens the full, filtered list.
 //!
 //! Home has no details panel of its own: a selected title's details take
@@ -29,6 +30,9 @@ fn msg(message: Message) -> AppMessage {
 /// shows at most.
 const SHELVES: [Section; 3] = [Section::ComingSoon, Section::TopRated, Section::InProgress];
 const SHELF_COVERS: usize = 7;
+/// The rows of Recently added beside the shelves: the list view's rows
+/// with covers, so eight where twelve text rows stood.
+const SIDE_ROWS: usize = 8;
 /// A shelf cover's width and the gap between covers; the cover is 150 tall.
 const COVER_WIDTH: f32 = 100.0;
 const COVER_GAP: f32 = 14.0;
@@ -46,8 +50,9 @@ fn shelf_covers(app: &App) -> usize {
     (((width + COVER_GAP) / (COVER_WIDTH + COVER_GAP)).floor() as usize).clamp(1, SHELF_COVERS)
 }
 
-/// The covers the overview shows: the shelves' first seven in the grid,
-/// the lists' rows in the list view, nothing in the text view.
+/// The covers the overview shows: the shelves' first seven and Recently
+/// added's rows in the grid, the lists' rows in the list view, nothing in
+/// the text view.
 pub fn wanted(app: &App, view: View, wants: &mut crate::artwork::Wants) {
     let overview = Overview::of(app.repo.library(), app.today);
     match view {
@@ -67,6 +72,13 @@ pub fn wanted(app: &App, view: View, wants: &mut crate::artwork::Wants) {
                     );
                 }
             }
+            wants.covers.extend(
+                overview
+                    .list(Section::RecentlyAdded)
+                    .iter()
+                    .take(SIDE_ROWS)
+                    .map(|e| e.id.clone()),
+            );
         }
         View::List => {
             for section in [
@@ -180,7 +192,8 @@ fn shelves<'a>(app: &'a App, overview: &Overview<'a>, tokens: &Tokens) -> Elemen
         .into()
 }
 
-/// The grid's side column: the plan and Recently added.
+/// The grid's side column: the plan and Recently added, in the list
+/// view's rows with covers.
 fn side<'a>(app: &'a App, overview: &Overview<'a>, tokens: &Tokens) -> Element<'a, AppMessage> {
     let mut side = Column::new()
         .spacing(28)
@@ -193,8 +206,8 @@ fn side<'a>(app: &'a App, overview: &Overview<'a>, tokens: &Tokens) -> Element<'
         app,
         overview,
         Section::RecentlyAdded,
-        12,
-        RowStyle::Dot,
+        SIDE_ROWS,
+        RowStyle::Cover,
         tokens,
     ))
     .into()
@@ -317,7 +330,8 @@ fn shelf_cover<'a>(
 }
 
 /// How an overview row starts: a type dot (text view) or a small cover
-/// with the type under the title (list view).
+/// with the type under the title (list view, and Recently added beside
+/// the grid's shelves).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum RowStyle {
     Dot,
@@ -601,5 +615,19 @@ mod shelf_tests {
         // 1280 - 232 - 48 - 40 - 352 leaves 608 px: five covers.
         app.window = iced::Size::new(1280.0, 720.0);
         assert_eq!(shelf_covers(&app), 5);
+    }
+
+    #[test]
+    fn the_grid_asks_for_recently_added_covers() {
+        let mut app = App::new(Screen::Library);
+        app.today = Date::parse("2026-10-19").unwrap();
+        let overview = Overview::of(app.repo.library(), app.today);
+        let recent = overview.list(Section::RecentlyAdded);
+        assert!(!recent.is_empty());
+        let mut wants = crate::artwork::Wants::default();
+        wanted(&app, View::Grid, &mut wants);
+        for entry in recent.iter().take(SIDE_ROWS) {
+            assert!(wants.covers.contains(&entry.id), "{}", entry.id);
+        }
     }
 }
