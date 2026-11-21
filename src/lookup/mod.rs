@@ -1185,9 +1185,157 @@ pub fn viewer_urls(url: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// How wide, in pixels, the largest version of the cover at `url` is
+/// that the app would show (the viewer's sharper copy, else `url`
+/// itself), read from the address alone: nothing is downloaded. `None`
+/// when the address says nothing (one of the owner's own files, a server
+/// that is not known).
+///
+/// Exact where the size is in the address: a TMDB poster's width, a
+/// Deezer cover's side, and Apple's box (a book's width taken as two
+/// thirds of the box, its shape being unknown). A typical size where the
+/// source names a size without a width: IGDB's `t_1080p` as 810 (a 3:4
+/// cover), AniList's large cover as 460, Open Library's `-L` as 500 and
+/// Google Books' medium as 575. The phone has the same rule
+/// (`largestCoverWidth`), with its own larger copies.
+pub fn largest_cover_width(url: &str, square: bool) -> Option<u32> {
+    let larger = viewer_urls(url);
+    let url = larger.first().map_or(url, String::as_str);
+    let (host, path) = url.split_once("://")?.1.split_once('/')?;
+    let segments: Vec<&str> = path.split('/').collect();
+    let last = segments.last().copied().unwrap_or_default();
+    // "780" of "w780", "1000" of "1000x1000-000000-80-0-0.jpg".
+    let leading = |text: &str| -> Option<u32> {
+        let digits = text
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(text.len());
+        text[..digits].parse().ok()
+    };
+    if host == "image.tmdb.org" {
+        return segments.iter().find_map(|s| leading(s.strip_prefix('w')?));
+    }
+    if host == "images.igdb.com" {
+        return segments.iter().find_map(|size| match *size {
+            "t_cover_small" => Some(90),
+            "t_cover_small_2x" => Some(180),
+            "t_cover_big" => Some(264),
+            "t_cover_big_2x" => Some(528),
+            "t_720p" => Some(540),
+            "t_1080p" => Some(810),
+            _ => None,
+        });
+    }
+    if host.ends_with("dzcdn.net") {
+        return leading(last).filter(|_| last.contains('x'));
+    }
+    if host.ends_with("mzstatic.com") {
+        let side = leading(last).filter(|_| last.contains('x'))?;
+        return Some(if square { side } else { side * 2 / 3 });
+    }
+    if host.ends_with("anilist.co") {
+        return segments.iter().find_map(|size| match *size {
+            "small" => Some(100),
+            "medium" => Some(230),
+            "large" => Some(460),
+            _ => None,
+        });
+    }
+    if host == "covers.openlibrary.org" {
+        let size = last.strip_suffix(".jpg")?;
+        return [("-S", 40), ("-M", 180), ("-L", 500)]
+            .into_iter()
+            .find_map(|(end, width)| size.ends_with(end).then_some(width));
+    }
+    if host.starts_with("books.google.") {
+        return (url.contains("?zoom=3") || url.contains("&zoom=3")).then_some(575);
+    }
+    None
+}
+
+/// How much wider the widest cover must be than another on offer to be
+/// called the sharpest: a quarter.
+const SHARPEST_MARGIN: f32 = 1.25;
+
+/// Which of the choices with these `widths` (none: unknown) Pick a cover
+/// captions "Sharpest": the widest, when it is at least a quarter wider
+/// than another choice on offer, and every one of them when several are
+/// equally wide. None when all are about the same, or fewer than two
+/// widths are known.
+pub fn sharpest(widths: &[Option<u32>]) -> Vec<bool> {
+    let known = || widths.iter().flatten().copied();
+    let (Some(widest), Some(narrowest)) = (known().max(), known().min()) else {
+        return vec![false; widths.len()];
+    };
+    let clear = known().count() >= 2 && widest as f32 >= narrowest as f32 * SHARPEST_MARGIN;
+    widths
+        .iter()
+        .map(|width| clear && *width == Some(widest))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sharpest_choice_is_clearly_the_widest() {
+        let width = |url: &str| largest_cover_width(url, false);
+        // The viewer's larger copy counts, not the list's image.
+        assert_eq!(width("https://image.tmdb.org/t/p/w342/abc.jpg"), Some(780));
+        assert_eq!(width("https://image.tmdb.org/t/p/original/abc.jpg"), None);
+        assert_eq!(
+            width("https://images.igdb.com/igdb/image/upload/t_cover_big/co1.jpg"),
+            Some(810)
+        );
+        let deezer = "https://cdn-images.dzcdn.net/images/cover/h/500x500-000000-80-0-0.jpg";
+        assert_eq!(largest_cover_width(deezer, true), Some(1000));
+        // Apple's box: an album fills it, a book is taken as 2:3 in it.
+        let apple = "https://is1-ssl.mzstatic.com/image/thumb/x/600x600bb.jpg";
+        assert_eq!(largest_cover_width(apple, true), Some(1200));
+        assert_eq!(width(apple), Some(800));
+        assert_eq!(
+            width("https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx1.jpg"),
+            Some(460)
+        );
+        assert_eq!(
+            width("https://covers.openlibrary.org/b/id/1-L.jpg"),
+            Some(500)
+        );
+        assert_eq!(
+            width("https://covers.openlibrary.org/b/id/1-M.jpg"),
+            Some(180)
+        );
+        assert_eq!(
+            width("https://books.google.com/books/content?id=x&printsec=frontcover&zoom=3"),
+            Some(575)
+        );
+        assert_eq!(
+            width("https://books.google.com/books/content?id=x&zoom=1"),
+            None
+        );
+        assert_eq!(width("repo:movies/the-mummy-1999.jpg"), None);
+        assert_eq!(width("https://example.com/800x800.jpg"), None);
+
+        // At least a quarter wider than another choice on offer.
+        assert_eq!(sharpest(&[Some(500), Some(800)]), [false, true]);
+        assert_eq!(sharpest(&[Some(800), Some(640)]), [true, false]);
+        // A tie for the widest gives it to each.
+        assert_eq!(
+            sharpest(&[Some(800), Some(500), Some(800)]),
+            [true, false, true]
+        );
+        // All about the same: none.
+        assert_eq!(sharpest(&[Some(780), Some(800)]), [false, false]);
+        assert_eq!(sharpest(&[Some(800), Some(800)]), [false, false]);
+        // An unknown width is left out, and one known width is no
+        // comparison.
+        assert_eq!(
+            sharpest(&[Some(800), None, Some(500)]),
+            [true, false, false]
+        );
+        assert_eq!(sharpest(&[Some(800), None]), [false, false]);
+        assert!(sharpest(&[]).is_empty());
+    }
 
     #[test]
     fn the_viewer_asks_for_each_providers_larger_copy() {

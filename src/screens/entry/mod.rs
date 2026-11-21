@@ -75,6 +75,9 @@ pub enum Dialog {
 #[derive(Debug, Default)]
 pub struct CoverView {
     pub id: String,
+    /// The series the viewer was opened on (Ctrl+click on a series, or
+    /// its View cover): the button then chooses the series' cover.
+    pub series: Option<(MediaType, String)>,
     /// Pick a cover is open beside the cover.
     pub changing: bool,
     /// The other matches for the title, once asked for.
@@ -600,6 +603,15 @@ pub enum Message {
     /// viewer is fetched already.
     WarmCover(String),
     ViewCover(String),
+    /// The same on a series: the cover of the part that stands for it.
+    ViewSeriesCover {
+        id: String,
+        media: MediaType,
+        name: String,
+    },
+    /// Choose series cover…: the Series cover dialog, in the viewer's
+    /// place.
+    ChooseSeriesCover,
     /// ‹ or › beside the cover, or the Left and Right keys: the cover of
     /// the part before or after in the series.
     StepCover(isize),
@@ -852,6 +864,12 @@ impl Form {
             .filter(|m| m.cache_cover_url().is_none() || m.cache_cover_url() != own_url.as_deref())
             .cloned();
         own.into_iter().chain(others).collect()
+    }
+
+    /// Whether an edited anime keeps its TMDB show through Save: still an
+    /// anime, and not marked a movie (`entry`).
+    pub fn keeps_tmdb(&self) -> bool {
+        self.media == MediaType::Anime && self.anime_kind != Some(EntryKind::Movie)
     }
 
     /// The image the cover spot shows: a picked cover's, else the match's
@@ -1989,6 +2007,12 @@ impl Form {
             || base.is_some_and(|b| b.media != self.media)
             || self.anime_kind == Some(EntryKind::Movie)
         {
+            // The show's poster goes with its link: a `cover_from` equal
+            // to it is removed, and nothing else (a picked AniList cover
+            // and another match's stay).
+            if entry.tmdb.is_some() && entry.cover_from == entry.tmdb {
+                entry.cover_from = None;
+            }
             entry.tmdb = None;
         }
         entry.pages = (is(MediaType::Books))
@@ -2035,6 +2059,13 @@ impl Form {
 /// Opens the dialog for `message` or changes the open one. Returns any
 /// task to run (none for now).
 pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
+    let task = handle(app, message);
+    // Pick a cover on an anime asks for its TMDB show's poster once.
+    let poster = pick::check_poster(app);
+    Task::batch([task, poster])
+}
+
+fn handle(app: &mut App, message: Message) -> Task<AppMessage> {
     if let Message::Picker(PickerMessage::Jump(offset)) = &message {
         return tags::jump(*offset);
     }
@@ -2212,13 +2243,33 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                 ..CoverView::default()
             })));
         }
+        Message::ViewSeriesCover { id, media, name } => {
+            app.library.details_rating_open = false;
+            app.dialog = Some(Dialog::Cover(Box::new(CoverView {
+                id,
+                series: Some((media, name)),
+                ..CoverView::default()
+            })));
+        }
+        Message::ChooseSeriesCover => {
+            if let Some(Dialog::Cover(view)) = &app.dialog
+                && let Some((media, name)) = view.series.clone()
+            {
+                app.dialog = None;
+                return app.act(AppMessage::Library(
+                    crate::screens::library::Message::OpenSeriesCover(media, name),
+                ));
+            }
+        }
         Message::StepCover(step) => {
             if let Some(Dialog::Cover(view)) = &app.dialog
                 && !view.changing
                 && let Some(id) = cover::neighbor(app, &view.id, step)
             {
+                let series = view.series.clone();
                 app.dialog = Some(Dialog::Cover(Box::new(CoverView {
                     id,
+                    series,
                     ..CoverView::default()
                 })));
             }
@@ -4279,6 +4330,51 @@ mod tests {
         assert_eq!(saved.kind, Some(EntryKind::Movie));
         assert!(saved.seasons.is_none());
         assert_eq!(saved.series.as_ref().unwrap().name, "Ghibli");
+    }
+
+    #[test]
+    fn marking_an_anime_a_movie_removes_its_tmdb_show_and_that_poster() {
+        let frieren = "anime/frieren-beyond-journeys-end-2023";
+        let (anilist, tmdb) = ("anilist:154587", "tmdb:tv:209867");
+        let linked = |app: &mut App, cover_from: &str| {
+            let entry = Entry {
+                source: Some(anilist.into()),
+                tmdb: Some(tmdb.into()),
+                cover_from: Some(cover_from.into()),
+                kind: Some(EntryKind::Series),
+                ..app.repo.library().entry(frieren).unwrap().clone()
+            };
+            app.apply(Operation::UpdateEntry(entry));
+        };
+        // The phone's default: the show's poster. An edit keeps both.
+        let mut app = app();
+        linked(&mut app, tmdb);
+        send(&mut app, Message::Edit(frieren.into()));
+        send(&mut app, Message::Save);
+        let saved = app.repo.library().entry(frieren).unwrap();
+        assert_eq!(saved.tmdb.as_deref(), Some(tmdb));
+        assert_eq!(saved.cover_from.as_deref(), Some(tmdb), "not undone");
+        // A movie has no show: the link goes, and the poster with it.
+        send(&mut app, Message::Edit(frieren.into()));
+        send(&mut app, Message::AnimeKind(EntryKind::Movie));
+        send(&mut app, Message::Save);
+        let saved = app.repo.library().entry(frieren).unwrap();
+        assert_eq!(
+            (saved.tmdb.as_deref(), saved.cover_from.as_deref()),
+            (None, None)
+        );
+
+        // A picked AniList cover and another match's are never touched.
+        for kept in [anilist, "anilist:999"] {
+            let mut app = self::app();
+            linked(&mut app, kept);
+            send(&mut app, Message::Edit(frieren.into()));
+            send(&mut app, Message::AnimeKind(EntryKind::Movie));
+            send(&mut app, Message::Save);
+            let saved = app.repo.library().entry(frieren).unwrap();
+            assert_eq!(saved.tmdb, None);
+            assert_eq!(saved.cover_from.as_deref(), Some(kept));
+        }
     }
 
     #[test]

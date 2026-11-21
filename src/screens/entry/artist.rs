@@ -5,7 +5,7 @@
 //! cover viewer's place, with a line that says how it came to be but
 //! never where from: "Picked by you", "Uploaded by you", nothing for the
 //! suggested photo, and without a file that a cover from the library is
-//! shown. Change cover… opens Pick a cover beside it, the titles' dialog
+//! shown. Change photo… opens Pick a cover beside it, the titles' dialog
 //! with one list and no headers: Upload, the owner's own picture, the
 //! matched Apple artist's photo marked "Suggested", the photos of the
 //! other artists of the name once they are asked for, Deezer's as
@@ -14,12 +14,13 @@
 //! A pick saves that picture as the artist's file, `covers/artists/
 //! <slug>.jpg` (`App::set_artist_photo`): the file is the choice, and
 //! nothing is stored on entries. Apple's photo is stored as it was
-//! served; any other picture is scaled and saved as JPEG like an upload.
+//! served; any other picture is saved as JPEG like an upload, scaled
+//! down to 1200 px on its longer side when it is larger.
 //! Upload, Ctrl+V and Adjust are the titles' (`pick`), on the artist's
 //! file. Use automatic deletes the file, so the automatic order applies
 //! again and the fetch looks for the suggested photo anew.
 //!
-//! Apple is asked only when Change cover… opens (the match, kept in the
+//! Apple is asked only when Change photo… opens (the match, kept in the
 //! cache), and the other artists' pages only on "Not the right artist?
 //! Show others named …", at most ten, at the fetch's pace
 //! (`lookup::apple_artists`). A mock run asks nobody and shows stand-ins.
@@ -249,7 +250,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
     Task::none()
 }
 
-/// Change cover…: Pick a cover opens, and Apple and Deezer are asked
+/// Change photo…: Pick a cover opens, and Apple and Deezer are asked
 /// what they have, once per viewer.
 fn change(app: &mut App) -> Task<AppMessage> {
     let listing = app.list_covers_if_stale();
@@ -401,11 +402,12 @@ fn pick_source(app: &mut App, source: Source) -> Task<AppMessage> {
         crate::app::blocking(move || {
             let bytes = std::fs::read(&path)
                 .map_err(|e| format!("The picture could not be read ({e})."))?;
-            // Apple's 640 × 640 JPEG is stored exactly as it was served.
+            // Apple's square JPEG is stored exactly as it was served.
             if as_served && bytes.starts_with(&[0xFF, 0xD8]) {
                 return Ok(bytes);
             }
-            picture::prepare(&bytes).map(|prepared| prepared.bytes)
+            // Any other picture is capped at an artist photo's side.
+            picture::prepare(&bytes, picture::ARTIST_SIDE).map(|prepared| prepared.bytes)
         }),
         move |result| {
             msg(Message::Made {
@@ -484,6 +486,7 @@ pub fn view<'a>(app: &'a App, view: &'a ArtistView) -> Element<'a, AppMessage> {
     // A name with no letters or digits never gets a file.
     if !view.changing && artists::slug(&view.name).is_some() {
         photo = photo.push(cover::change_button(
+            "Change photo…",
             EntryMessage::Artist(Message::Change),
             &tokens,
         ));
@@ -797,7 +800,7 @@ mod tests {
         open(app).expect("the artist's viewer is open")
     }
 
-    /// Ctrl+click on the artist, then Change cover….
+    /// Ctrl+click on the artist, then Change photo….
     fn open_picker(app: &mut App) {
         let _ = app.update(AppMessage::Modifiers(keyboard::Modifiers::CTRL));
         let _ = app.update(AppMessage::Library(LibraryMessage::OpenArtist(NAME.into())));
@@ -890,7 +893,7 @@ mod tests {
                 image::ImageFormat::Png,
             )
             .unwrap();
-        let prepared = picture::prepare(&bytes).unwrap();
+        let prepared = picture::prepare(&bytes, picture::ARTIST_SIDE).unwrap();
         let upload = pick::Upload {
             prepared: std::sync::Arc::new(prepared),
             original: std::sync::Arc::new(bytes),

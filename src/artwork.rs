@@ -1341,24 +1341,28 @@ impl Artwork {
 
 /// The cover URL and, for an entry matched on this computer, the id it was
 /// matched to (the album's, for a song). A cover picked from another match
-/// (`cover_from`) is asked of that match's provider; an entry without a
-/// source is still matched for its id, which its track list and series go
-/// by.
+/// (`cover_from`) is asked of that match's provider, and one that finds
+/// no image there falls back to the match's own cover (an anime's TMDB
+/// show without a poster shows AniList's); an entry without a source is
+/// still matched for its id, which its track list and series go by.
 pub fn resolve_cover(service: &Service, entry: &Entry) -> Reply<(Option<String>, Option<String>)> {
     if let Some(cover_from) = &entry.cover_from {
         let url = match service.source_of(cover_from) {
             Some(provider) => provider.picked_cover_url(cover_from, entry.media)?,
             None => None,
         };
-        if entry.source.is_some() {
+        // One of the owner's files is never looked up, and never
+        // replaced by a lookup's cover.
+        let falls_back = url.is_none() && covers::repo_path(cover_from).is_none();
+        if entry.source.is_some() && !falls_back {
             return Ok((url, None));
         }
         let plain = Entry {
             cover_from: None,
             ..entry.clone()
         };
-        let (_, matched) = resolve_cover(service, &plain)?;
-        return Ok((url, matched));
+        let (own, matched) = resolve_cover(service, &plain)?;
+        return Ok((url.or(own.filter(|_| falls_back)), matched));
     }
     if let Some(source) = &entry.source {
         return match service.source_of(source) {
@@ -1779,6 +1783,80 @@ mod tests {
         assert!(artwork.downloading.contains(large));
         assert_eq!(artwork.downloading.len(), DOWNLOADS + 1);
         assert_eq!(artwork.image_queue, [cover(4), cover(5)], "the rest wait");
+    }
+
+    /// A lookup that knows one cover, or none.
+    struct OneCover(&'static str, Option<&'static str>);
+
+    impl crate::lookup::Source for OneCover {
+        fn id(&self) -> &'static str {
+            self.0
+        }
+
+        fn name(&self) -> &'static str {
+            self.0
+        }
+
+        fn types(&self) -> &'static [MediaType] {
+            &MediaType::ALL
+        }
+
+        fn search(&self, _: &str, _: MediaType, _: usize) -> Reply<crate::lookup::Hits> {
+            Ok(crate::lookup::Hits::of(Vec::new()))
+        }
+
+        fn cover_url(&self, _: &str, _: MediaType) -> Reply<Option<String>> {
+            Ok(self.1.map(str::to_owned))
+        }
+
+        fn match_title(
+            &self,
+            _: &str,
+            _: MediaType,
+            _: Option<u16>,
+            _: Option<&str>,
+        ) -> Reply<Option<crate::lookup::Match>> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn an_animes_cover_from_shows_its_tmdb_poster_and_falls_back_to_the_matchs() {
+        let (poster, own) = (
+            "https://image.tmdb.org/t/p/w342/frieren.jpg",
+            "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587.jpg",
+        );
+        let service = |poster: Option<&'static str>| {
+            Service::with(
+                vec![
+                    std::sync::Arc::new(OneCover("tmdb", poster)),
+                    std::sync::Arc::new(OneCover("anilist", Some(own))),
+                ],
+                true,
+            )
+        };
+        // Frieren as the phone's standing check leaves it.
+        let mut frieren = entry(
+            "anime/frieren-beyond-journeys-end-2023",
+            "Frieren: Beyond Journey's End",
+            Some("anilist:154587"),
+        );
+        frieren.media = MediaType::Anime;
+        frieren.tmdb = Some("tmdb:tv:209867".into());
+        frieren.cover_from = frieren.tmdb.clone();
+        let url = |service: &Service, entry: &Entry| resolve_cover(service, entry).unwrap().0;
+        assert_eq!(
+            url(&service(Some(poster)), &frieren).as_deref(),
+            Some(poster)
+        );
+        // A show without a poster: the match's own cover.
+        assert_eq!(url(&service(None), &frieren).as_deref(), Some(own));
+        // AniList's cover picked, stored under the entry's own id.
+        frieren.cover_from = frieren.source.clone();
+        assert_eq!(url(&service(Some(poster)), &frieren).as_deref(), Some(own));
+        // One of the owner's files is never looked up.
+        frieren.cover_from = Some("repo:anime/frieren-beyond-journeys-end-2023.jpg".into());
+        assert_eq!(url(&service(Some(poster)), &frieren), None);
     }
 
     #[test]

@@ -247,8 +247,8 @@ pub fn items(app: &App, target: &Target) -> Option<(String, Vec<Item>)> {
             }
             items.extend([
                 Item::Separator,
-                row("View cover", "Ctrl+click", Action::ViewCover),
-                row("Change cover…", "", Action::ChangeCover),
+                row("View photo", "Ctrl+click", Action::ViewCover),
+                row("Change photo…", "", Action::ChangeCover),
             ]);
             // Follow or Unfollow, for an artist Discover can follow, while
             // the check is on.
@@ -614,7 +614,11 @@ fn run_on_series(
         Action::ViewCover => {
             let parts = crate::series::entries_in(app.repo.library(), media, &name);
             match crate::series::cover_entry(&parts).map(|cover| cover.id.clone()) {
-                Some(id) => app.act(AppMessage::Entry(entry::Message::ViewCover(id))),
+                Some(id) => app.act(AppMessage::Entry(entry::Message::ViewSeriesCover {
+                    id,
+                    media,
+                    name,
+                })),
                 None => Task::none(),
             }
         }
@@ -790,8 +794,8 @@ mod tests {
             [
                 "Show albums",
                 "-",
-                "View cover",
-                "Change cover…",
+                "View photo",
+                "Change photo…",
                 "-",
                 "Unfollow",
                 "-",

@@ -194,6 +194,39 @@ fn a_cover_is_resolved_and_its_image_fetched() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Frieren as the phone's standing check leaves it: an anime whose
+/// `cover_from` is its TMDB show. The desktop shows that poster, the
+/// AniList cover once it is picked under the entry's own id, and offers
+/// a larger copy of each in the viewer.
+#[test]
+#[ignore = "asks the real providers; run with --ignored"]
+fn an_animes_tmdb_cover_from_is_shown() {
+    use libri::model::MediaType;
+    let service = Service::real(&Keys::load(), None);
+    let library = libri::model::codec::decode(libri::fixtures::LIBRARY_JSON).unwrap();
+    let mut frieren = library
+        .entry("anime/frieren-beyond-journeys-end-2023")
+        .expect("the fixture's Frieren")
+        .clone();
+    frieren.source = Some("anilist:154587".into());
+    frieren.tmdb = Some("tmdb:tv:209867".into());
+    frieren.cover_from = frieren.tmdb.clone();
+    let (poster, _) = libri::artwork::resolve_cover(&service, &frieren).unwrap();
+    println!("Frieren, cover_from its TMDB show: {poster:?}");
+    let poster = poster.expect("TMDB's poster");
+    assert!(poster.starts_with("https://image.tmdb.org/"), "{poster}");
+    frieren.cover_from = frieren.source.clone();
+    let (own, _) = libri::artwork::resolve_cover(&service, &frieren).unwrap();
+    println!("Frieren, cover_from its own AniList id: {own:?}");
+    let own = own.expect("AniList's cover");
+    assert!(own.contains("anilist"), "{own}");
+    for url in [&poster, &own] {
+        let width = libri::lookup::largest_cover_width(url, false);
+        println!("  largest width of {url}: {width:?}");
+    }
+    assert_eq!(frieren.media, MediaType::Anime);
+}
+
 /// The whole daily check on the real library and the real `settings.json`,
 /// writing only to `LIBRI_LIVE_DIR`:
 ///

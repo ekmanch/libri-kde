@@ -1038,7 +1038,12 @@ fn form_cover(app: &App, form: &Form) -> (Option<iced::widget::image::Handle>, C
     };
     let library = app.repo.library();
     let edited = form.editing.as_deref().and_then(|id| library.entry(id));
-    let (handle, has_cover) = match form.cover_url() {
+    // An anime's TMDB poster, picked in the dialog: the tile's image.
+    let poster = form.pick.poster.as_ref().and_then(|(id, url)| {
+        url.clone()
+            .filter(|_| form.cover_from.as_deref() == Some(id.as_str()))
+    });
+    let (handle, has_cover) = match poster.or_else(|| form.cover_url()) {
         Some(url) => (app.artwork.image(&url), true),
         None => (
             edited.and_then(|entry| app.artwork.cover(entry)),
@@ -1080,8 +1085,22 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         .focusable(8.0, tokens);
     // "No cover yet" only when there is none: an entry saved without a
     // match can still have a cover, found by its title.
+    // An anime with a TMDB show has two covers of its own, the show's
+    // poster and its match's: neither is another match's, and there is
+    // no way back from the default.
+    let edited = form.editing.as_deref().and_then(|id| library.entry(id));
+    let own_cover = form.cover_from.as_deref().is_some_and(|cover_from| {
+        form.keeps_tmdb()
+            && edited.is_some_and(|entry| {
+                super::pick::anime_poster(entry).is_some_and(|tmdb| {
+                    cover_from == tmdb || form.source.as_deref() == Some(cover_from)
+                })
+            })
+    });
     let note = if own_file {
         Some("Your cover")
+    } else if own_cover {
+        Some("From the match · click to change")
     } else if form.cover_from.is_some() {
         Some("From another match")
     } else if !blank {
@@ -1097,7 +1116,7 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
     if let Some(note) = note {
         cover = cover.push(container(text(note).size(12).color(tokens.sub)).center_x(150));
     }
-    if form.cover_from.is_some() {
+    if form.cover_from.is_some() && !own_cover {
         cover = cover.push(
             container(ui::labeled_button(
                 "Use the match's cover",

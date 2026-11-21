@@ -181,6 +181,9 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
     // match's own: one of the owner's files, or another match's.
     let from = match (owner.cover_from.as_deref(), picked) {
         (None, _) => None,
+        // An anime's two own covers: its TMDB show's poster, and its
+        // match's cover stored under the entry's own id.
+        (Some(cover_from), _) if pick::is_own_cover(owner, cover_from) => None,
         (Some(cover_from), _) if covers::repo_path(cover_from).is_some() => Some(format!(
             "Your cover: {}",
             covers::name_of(covers::repo_path(cover_from).unwrap_or_default())
@@ -251,8 +254,16 @@ pub fn view<'a>(app: &'a App, view: &'a CoverView) -> Element<'a, AppMessage> {
         words = words.push(text(place).size(13).color(theme::VIEWER_SUB));
     }
     let mut cover = column![face, words].spacing(14).align_x(Center);
+    // The button is named after what it does: a series' chooses which
+    // part stands for it, and a title without a cover gets one added.
     if !view.changing {
-        cover = cover.push(change_button(Message::ChangeCover, &tokens));
+        cover = cover.push(if view.series.is_some() {
+            change_button("Choose series cover…", Message::ChooseSeriesCover, &tokens)
+        } else if shown_url(app, view, entry).is_none() {
+            change_button("Add a cover…", Message::ChangeCover, &tokens)
+        } else {
+            change_button("Change cover…", Message::ChangeCover, &tokens)
+        });
     }
 
     // Pick a cover beside the cover; alone where the window has no room
@@ -316,12 +327,17 @@ pub(super) fn round_button<'a>(
         .focusable(size / 2.0, tokens)
 }
 
-/// Change cover…, an opaque dark button with a lighter outline, so it
-/// reads over whatever the backdrop lets through.
-pub(super) fn change_button<'a>(message: Message, tokens: &Tokens) -> Element<'a, AppMessage> {
+/// Change cover… (or what the viewer's button does there: Add a cover…,
+/// Choose series cover…, Change photo…), an opaque dark button with a
+/// lighter outline, so it reads over whatever the backdrop lets through.
+pub(super) fn change_button<'a>(
+    label: &'static str,
+    message: Message,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
     button(
         container(
-            text("Change cover…")
+            text(label)
                 .size(13.5)
                 .font(font::SEMIBOLD)
                 .color(theme::VIEWER_TEXT),

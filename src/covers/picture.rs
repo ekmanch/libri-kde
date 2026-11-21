@@ -1,6 +1,7 @@
 //! The image work behind an upload: the picked picture is decoded (with
-//! its EXIF turn applied), scaled so its longer side is at most 1000 px
-//! and saved as JPEG. Fit your cover makes a cover of the type's shape
+//! its EXIF turn applied), scaled down so its longer side is at most
+//! 2000 px (an artist's photo 1200 px), never enlarged, and saved as
+//! JPEG. Fit your cover makes a cover of the type's shape
 //! (2:3, or square for music) from a picture of another shape: Crop
 //! keeps the largest frame of that shape, placed along the picture's
 //! long side, and Whole image puts all of it on a blurred copy of itself.
@@ -14,8 +15,14 @@ use image::{DynamicImage, ImageDecoder, ImageReader, RgbImage, imageops};
 
 use crate::github::blob_sha;
 
-/// The longer side of an upload, at most.
-pub const LONG_SIDE: u32 = 1000;
+/// The longer side of an upload, at most (the phone's rule too, since
+/// 2026-11-21; 1000 px before, and the files from then stay as they
+/// are). A larger picture is scaled down to it; one at or under it keeps
+/// its size.
+pub const LONG_SIDE: u32 = 2000;
+/// The same for an artist's photo, picked or uploaded: the side Apple's
+/// photos are fetched at.
+pub const ARTIST_SIDE: u32 = super::artists::SHARP_SIDE;
 /// The JPEG quality of an upload.
 const QUALITY: u8 = 88;
 /// How far a picture's shape may be from the type's before its tile
@@ -77,26 +84,37 @@ pub fn crop_frame(width: u32, height: u32, square: bool, at: f32) -> (u32, u32, 
     }
 }
 
-/// The size Fit your cover saves a picture of `width` × `height` at.
-pub fn fitted_size(width: u32, height: u32, square: bool, fit: Fit) -> (u32, u32) {
-    let (max_w, max_h) = if square {
-        (LONG_SIDE, LONG_SIDE)
-    } else {
-        (LONG_SIDE, LONG_SIDE * 3 / 2)
+/// The size Fit your cover saves a picture of `width` × `height` at:
+/// the type's shape with its longer side at most `long_side`, so 1333 ×
+/// 2000 for a cover and 2000 × 2000 for an album.
+pub fn fitted_size(width: u32, height: u32, square: bool, fit: Fit, long_side: u32) -> (u32, u32) {
+    // A frame of the shape, scaled down so its longer side is
+    // `long_side`, never up: 1333 × 2000, or 2000 × 2000 when square.
+    let capped = |w: f32, h: f32| {
+        if w.max(h) > long_side as f32 {
+            let short = if square {
+                long_side
+            } else {
+                (long_side * 2 + 1) / 3
+            };
+            (short, long_side)
+        } else {
+            ((w.round() as u32).max(1), (h.round() as u32).max(1))
+        }
     };
     match fit {
         Fit::Crop => {
             let (_, _, w, h) = crop_frame(width, height, square, 0.5);
-            within(w, h, max_w, max_h)
+            capped(w as f32, h as f32)
         }
         Fit::Whole => {
-            let (w, h) = within(width, height, max_w, max_h);
             // The smallest frame of the shape that holds all of it.
             let target = shape(square);
-            if w as f32 / h.max(1) as f32 > target {
-                (w, ((w as f32 / target).round() as u32).max(1))
+            let (w, h) = (width as f32, height.max(1) as f32);
+            if w / h > target {
+                capped(w, w / target)
             } else {
-                (((h as f32 * target).round() as u32).max(1), h)
+                capped(h * target, h)
             }
         }
     }
@@ -152,12 +170,13 @@ pub fn size_of(bytes: &[u8]) -> Option<(u32, u32)> {
     decode(bytes).ok().map(|p| (p.width(), p.height()))
 }
 
-/// An upload: the picture scaled so its longer side is at most
-/// `LONG_SIDE`, as JPEG. A see-through picture is put on white.
-pub fn prepare(bytes: &[u8]) -> Result<Prepared, String> {
+/// An upload: the picture scaled down so its longer side is at most
+/// `long_side` (`LONG_SIDE`, or `ARTIST_SIDE` for an artist's photo), as
+/// JPEG. A see-through picture is put on white.
+pub fn prepare(bytes: &[u8], long_side: u32) -> Result<Prepared, String> {
     let picture = decode(bytes)?;
-    let picture = if picture.width().max(picture.height()) > LONG_SIDE {
-        picture.resize(LONG_SIDE, LONG_SIDE, FilterType::Lanczos3)
+    let picture = if picture.width().max(picture.height()) > long_side {
+        picture.resize(long_side, long_side, FilterType::Lanczos3)
     } else {
         picture
     };
@@ -166,11 +185,17 @@ pub fn prepare(bytes: &[u8]) -> Result<Prepared, String> {
 
 /// Fit your cover: the picture in `bytes` in the type's shape, cropped
 /// with the frame `at` along its long side, or whole on a blurred copy
-/// of itself.
-pub fn fit(bytes: &[u8], mode: Fit, at: f32, square: bool) -> Result<Prepared, String> {
+/// of itself, its longer side at most `long_side`.
+pub fn fit(
+    bytes: &[u8],
+    mode: Fit,
+    at: f32,
+    square: bool,
+    long_side: u32,
+) -> Result<Prepared, String> {
     let picture = decode(bytes)?;
     let (width, height) = (picture.width(), picture.height());
-    let (out_w, out_h) = fitted_size(width, height, square, mode);
+    let (out_w, out_h) = fitted_size(width, height, square, mode, long_side);
     match mode {
         Fit::Crop => {
             let (x, y, w, h) = crop_frame(width, height, square, at);
@@ -252,15 +277,22 @@ mod tests {
     }
 
     #[test]
-    fn an_upload_is_scaled_to_1000_px_and_saved_as_jpeg() {
-        let prepared = prepare(&png(3000, 2000)).unwrap();
-        assert_eq!((prepared.width, prepared.height), (1000, 667));
+    fn an_upload_is_scaled_down_to_2000_px_and_saved_as_jpeg() {
+        let prepared = prepare(&png(3000, 2000), LONG_SIDE).unwrap();
+        assert_eq!((prepared.width, prepared.height), (2000, 1333));
         assert!(prepared.bytes.starts_with(&[0xFF, 0xD8, 0xFF]), "a JPEG");
         assert_eq!(prepared.sha, blob_sha(&prepared.bytes));
-        // A small picture is never grown.
-        let small = prepare(&png(300, 450)).unwrap();
+        // At or under the limit a picture keeps its size: never grown.
+        let small = prepare(&png(300, 450), LONG_SIDE).unwrap();
         assert_eq!((small.width, small.height), (300, 450));
-        assert!(prepare(b"not an image").is_err());
+        let exact = prepare(&png(1500, 2000), LONG_SIDE).unwrap();
+        assert_eq!((exact.width, exact.height), (1500, 2000));
+        assert!(prepare(b"not an image", LONG_SIDE).is_err());
+        // An artist's photo is capped at 1200 px instead.
+        let photo = prepare(&png(3000, 2000), ARTIST_SIDE).unwrap();
+        assert_eq!((photo.width, photo.height), (1200, 800));
+        let photo = prepare(&png(900, 900), ARTIST_SIDE).unwrap();
+        assert_eq!((photo.width, photo.height), (900, 900));
     }
 
     #[test]
@@ -288,26 +320,46 @@ mod tests {
     #[test]
     fn a_fitted_cover_has_the_types_shape() {
         let wide = png(3840, 2160);
-        let cropped = fit(&wide, Fit::Crop, 0.0, false).unwrap();
-        assert_eq!((cropped.width, cropped.height), (1000, 1500));
+        let cropped = fit(&wide, Fit::Crop, 0.0, false, LONG_SIDE).unwrap();
+        assert_eq!((cropped.width, cropped.height), (1333, 2000));
         // The left end of the picture is red.
         let decoded = decode(&cropped.bytes).unwrap().to_rgb8();
-        let pixel = decoded.get_pixel(500, 750).0;
+        let pixel = decoded.get_pixel(660, 1000).0;
         assert!(pixel[0] > 150 && pixel[2] < 100, "{pixel:?}");
 
-        let whole = fit(&wide, Fit::Whole, 0.5, false).unwrap();
-        assert_eq!((whole.width, whole.height), (1000, 1500));
+        let whole = fit(&wide, Fit::Whole, 0.5, false, LONG_SIDE).unwrap();
+        assert_eq!((whole.width, whole.height), (1333, 2000));
         // All of the picture is there, across the middle: red on the
         // left, blue on the right, and the darkened backdrop above.
         let decoded = decode(&whole.bytes).unwrap().to_rgb8();
-        assert!(decoded.get_pixel(100, 750).0[0] > 150);
-        assert!(decoded.get_pixel(900, 750).0[2] > 150);
-        assert!(decoded.get_pixel(100, 100).0[0] < 150);
+        assert!(decoded.get_pixel(130, 1000).0[0] > 150);
+        assert!(decoded.get_pixel(1200, 1000).0[2] > 150);
+        assert!(decoded.get_pixel(130, 130).0[0] < 150);
 
         // Square for music, and a small picture is not grown.
-        let square = fit(&png(600, 400), Fit::Crop, 0.5, true).unwrap();
+        let square = fit(&png(600, 400), Fit::Crop, 0.5, true, LONG_SIDE).unwrap();
         assert_eq!((square.width, square.height), (400, 400));
-        assert_eq!(fitted_size(600, 400, true, Fit::Whole), (600, 600));
-        assert_eq!(fitted_size(1920, 1080, false, Fit::Crop), (720, 1080));
+        assert_eq!(
+            fitted_size(600, 400, true, Fit::Whole, LONG_SIDE),
+            (600, 600)
+        );
+        assert_eq!(
+            fitted_size(1920, 1080, false, Fit::Crop, LONG_SIDE),
+            (720, 1080)
+        );
+        // The limits: 1333 × 2000, 2000 × 2000 for an album, and 1200 ×
+        // 1200 for an artist's photo.
+        assert_eq!(
+            fitted_size(6000, 4000, false, Fit::Crop, LONG_SIDE),
+            (1333, 2000)
+        );
+        assert_eq!(
+            fitted_size(6000, 4000, true, Fit::Crop, LONG_SIDE),
+            (2000, 2000)
+        );
+        assert_eq!(
+            fitted_size(6000, 4000, true, Fit::Crop, ARTIST_SIDE),
+            (1200, 1200)
+        );
     }
 }

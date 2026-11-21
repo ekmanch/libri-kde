@@ -149,7 +149,8 @@ fn own_covers(app: &mut App) {
         if path.ends_with(".png") {
             app.add_cover_file(path, &png);
         } else {
-            let prepared = libri::covers::picture::prepare(&png).unwrap();
+            let prepared =
+                libri::covers::picture::prepare(&png, libri::covers::picture::LONG_SIDE).unwrap();
             app.add_cover_file(path, &prepared.bytes);
         }
     }
@@ -187,7 +188,8 @@ fn pick_a_cover(app: &mut App) {
 fn upload_wide(app: &mut App) -> String {
     pick_a_cover(app);
     let original = std::sync::Arc::new(picture(1920, 1080, [200, 120, 40], [30, 40, 90]));
-    let prepared = libri::covers::picture::prepare(&original).unwrap();
+    let prepared =
+        libri::covers::picture::prepare(&original, libri::covers::picture::LONG_SIDE).unwrap();
     pick(
         app,
         entry::pick::Message::Prepared(Ok(Some(entry::pick::Upload {
@@ -1089,12 +1091,10 @@ fn capture_every_screen() {
                     ..app.repo.library().entry(song).unwrap().clone()
                 };
                 app.apply(Operation::AddEntry(album));
-                let cover = libri::covers::picture::prepare(&picture(
-                    700,
-                    700,
-                    [60, 110, 60],
-                    [20, 40, 30],
-                ))
+                let cover = libri::covers::picture::prepare(
+                    &picture(700, 700, [60, 110, 60], [20, 40, 30]),
+                    libri::covers::picture::LONG_SIDE,
+                )
                 .unwrap();
                 let path = "music/green-river-creedence-clearwater-revival.vinyl.jpg";
                 app.add_cover_file(path, &cover.bytes);

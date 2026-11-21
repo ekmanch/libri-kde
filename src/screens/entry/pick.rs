@@ -9,8 +9,9 @@
 //! to show up here, with Copy name.
 //!
 //! Upload opens Plasma's file dialog, and Ctrl+V takes an image (or a
-//! copied file) from the clipboard. The picture is scaled to 1000 px on
-//! its longer side, saved as JPEG under `<slug>.<short sha>.jpg`, stored
+//! copied file) from the clipboard. The picture is scaled down to 2000 px
+//! on its longer side when it is larger (an artist's photo to 1200 px),
+//! never enlarged, saved as JPEG under `<slug>.<short sha>.jpg`, stored
 //! and picked at once; the file is pushed in the background with the
 //! change that picks it. There is no fit step by default: a picture
 //! within a tenth of the type's shape is center-cropped where it shows,
@@ -82,6 +83,9 @@ pub struct PickState {
     pub avail: Option<Avail>,
     /// The lookup was asked once whether it has a cover by now.
     pub checked: bool,
+    /// An anime's TMDB show (its `tmdb` link) and the show's poster, once
+    /// the lookup was asked for it: the first online tile.
+    pub poster: Option<(String, Option<String>)>,
 }
 
 /// Fit your cover, open on one of the owner's files.
@@ -185,6 +189,11 @@ pub enum Message {
         id: String,
         url: Option<String>,
     },
+    /// The poster of an anime's TMDB show, for its tile.
+    Poster {
+        id: String,
+        url: Option<String>,
+    },
     AvailChoice(OnlineChoice),
     AvailLater,
     AvailApply,
@@ -233,6 +242,15 @@ impl Subject {
 
     fn square(&self) -> bool {
         ui::cover::is_square(self.media)
+    }
+
+    /// The longer side an upload for the subject keeps, at most: a
+    /// cover's, or an artist's photo's.
+    fn long_side(&self) -> u32 {
+        match self.artist {
+            Some(_) => picture::ARTIST_SIDE,
+            None => picture::LONG_SIDE,
+        }
     }
 
     /// The path under `covers/` the subject shows, when it shows one of
@@ -342,9 +360,32 @@ pub fn dismiss_inner(state: &mut PickState) -> bool {
     state.fit.take().is_some() || state.avail.take().is_some()
 }
 
+/// The TMDB show whose poster is an anime's default cover: its `tmdb`
+/// link. The phone's standing check stores it as the entry's
+/// `cover_from`; the desktop only shows it and offers it.
+pub fn anime_poster(entry: &Entry) -> Option<&str> {
+    entry
+        .tmdb
+        .as_deref()
+        .filter(|_| entry.media == MediaType::Anime)
+}
+
+/// Whether `cover_from` names one of the entry's own covers and not
+/// another match's: for an anime with a TMDB show, the show's poster
+/// (the default) and its AniList match's cover, which is stored under
+/// the entry's own id when it is picked, so the phone's check does not
+/// put the poster back.
+pub fn is_own_cover(entry: &Entry, cover_from: &str) -> bool {
+    anime_poster(entry)
+        .is_some_and(|tmdb| cover_from == tmdb || entry.source.as_deref() == Some(cover_from))
+}
+
 /// One online choice: the lookup id to store as `cover_from` (`None` for
-/// the match's own cover), its words and its image.
+/// the match's own cover, except an anime's with a TMDB show, which is
+/// stored under the entry's own id), its words and its image.
 pub struct Online {
+    /// The match's own cover.
+    pub own: bool,
     pub cover_from: Option<String>,
     pub title: String,
     pub sub: String,
@@ -355,8 +396,18 @@ pub struct Online {
 /// The online choices for an entry of the library: the match's own cover
 /// first (from the matches, or the cover the library shows while none is
 /// picked), then the other matches for the title, one per image.
-pub fn online_for_entry(app: &App, results: Option<&SearchResult>, entry: &Entry) -> Vec<Online> {
+pub fn online_for_entry(
+    app: &App,
+    results: Option<&SearchResult>,
+    entry: &Entry,
+    poster: Option<&str>,
+) -> Vec<Online> {
     let own_source = app.artwork.source_of(entry);
+    let tmdb = anime_poster(entry);
+    // The library shows the match's cover while nothing is picked, and
+    // while an anime's own is picked under its id.
+    let shows_own =
+        entry.cover_from.is_none() || (tmdb.is_some() && entry.cover_from == entry.source);
     let matches: Vec<&Match> = results.iter().flat_map(|r| r.matches.iter()).collect();
     let own_match = matches
         .iter()
@@ -364,19 +415,36 @@ pub fn online_for_entry(app: &App, results: Option<&SearchResult>, entry: &Entry
         .find(|m| Some(m.source.as_str()) == own_source.as_deref());
     let own_url = match own_match {
         Some(found) => found.cache_cover_url().map(str::to_owned),
-        None if entry.cover_from.is_none() => app.artwork.own_cover_url(entry).map(str::to_owned),
+        None if shows_own => app.artwork.own_cover_url(entry).map(str::to_owned),
         None => None,
     };
     let year = entry.year().map(|y| y.to_string()).unwrap_or_default();
-    let mut list = vec![Online {
-        cover_from: None,
+    let mut list = Vec::new();
+    // An anime's TMDB show: its poster first, with no words of its own.
+    if let Some(tmdb) = tmdb {
+        let shown = (entry.cover_from.as_deref() == Some(tmdb))
+            .then(|| app.artwork.own_cover_url(entry))
+            .flatten();
+        list.push(Online {
+            own: false,
+            cover_from: Some(tmdb.to_owned()),
+            title: entry.title.clone(),
+            sub: year.clone(),
+            tint: theme::cover_color(tmdb),
+            url: shown.or(poster).map(str::to_owned),
+        });
+    }
+    list.push(Online {
+        own: true,
+        cover_from: tmdb.and(entry.source.clone()),
         title: own_match.map_or_else(|| entry.title.clone(), |m| m.title.clone()),
         sub: own_match.map_or(year, Match::year_and_edition),
         tint: theme::cover_color(&entry.id),
         url: own_url.clone(),
-    }];
+    });
     for found in matches {
-        if Some(found.source.as_str()) == own_source.as_deref() {
+        if Some(found.source.as_str()) == own_source.as_deref() || Some(found.cover_from()) == tmdb
+        {
             continue;
         }
         let url = found.cache_cover_url().map(str::to_owned);
@@ -384,6 +452,7 @@ pub fn online_for_entry(app: &App, results: Option<&SearchResult>, entry: &Entry
             continue;
         }
         list.push(Online {
+            own: false,
             cover_from: Some(found.cover_from().to_owned()),
             title: found.title.clone(),
             sub: found.year_and_edition(),
@@ -395,15 +464,46 @@ pub fn online_for_entry(app: &App, results: Option<&SearchResult>, entry: &Entry
 }
 
 /// The online choices in the form: its match's own cover first, then the
-/// other matches for the title.
-fn online_for_form(form: &Form) -> Vec<Online> {
+/// other matches for the title. An anime edited with its TMDB show still
+/// linked (`edited`) has the show's poster before them.
+fn online_for_form(
+    app: &App,
+    form: &Form,
+    edited: Option<&Entry>,
+    poster: Option<&str>,
+) -> Vec<Online> {
     let own = form.source.as_deref();
-    form.cover_choices()
+    let edited = edited.filter(|_| form.keeps_tmdb());
+    let tmdb = edited.and_then(anime_poster);
+    let tile = tmdb.zip(edited).map(|(tmdb, entry)| {
+        let shown = (entry.cover_from.as_deref() == Some(tmdb))
+            .then(|| app.artwork.own_cover_url(entry))
+            .flatten();
+        Online {
+            own: false,
+            cover_from: Some(tmdb.to_owned()),
+            title: form.title.trim().to_owned(),
+            sub: form
+                .released()
+                .map(|released| released.year.to_string())
+                .unwrap_or_default(),
+            tint: theme::cover_color(tmdb),
+            url: shown.or(poster).map(str::to_owned),
+        }
+    });
+    let matches = form
+        .cover_choices()
         .into_iter()
+        .filter(|found| Some(found.cover_from()) != tmdb)
         .map(|found| {
             let is_own = Some(found.source.as_str()) == own;
             Online {
-                cover_from: (!is_own).then(|| found.cover_from().to_owned()),
+                own: is_own,
+                cover_from: match (is_own, tmdb) {
+                    (true, Some(_)) => Some(found.source.clone()),
+                    (true, None) => None,
+                    (false, _) => Some(found.cover_from().to_owned()),
+                },
                 sub: found.year_and_edition(),
                 tint: theme::cover_color(&found.source),
                 url: found
@@ -412,8 +512,8 @@ fn online_for_form(form: &Form) -> Vec<Online> {
                     .map(str::to_owned),
                 title: found.title,
             }
-        })
-        .collect()
+        });
+    tile.into_iter().chain(matches).collect()
 }
 
 /// The open picker's online choices, and whether they are still on their
@@ -425,9 +525,12 @@ fn online(app: &App, subject: &Subject) -> (Vec<Online>, bool, bool) {
         _ => (None, false, None),
     };
     let failed = results.is_some_and(|c| c.partly_failed() || c.all_failed().is_some());
+    let poster = state(app)
+        .and_then(|state| state.poster.as_ref())
+        .and_then(|(_, url)| url.as_deref());
     let list = match (form, app.repo.library().entry(&subject.id)) {
-        (Some(form), _) if !subject.stored => online_for_form(form),
-        (_, Some(entry)) => online_for_entry(app, results, entry),
+        (Some(form), edited) if !subject.stored => online_for_form(app, form, edited, poster),
+        (_, Some(entry)) => online_for_entry(app, results, entry, poster),
         _ => Vec::new(),
     };
     (list, loading, failed)
@@ -443,8 +546,8 @@ fn online_known(app: &App, subject: &Subject) -> bool {
             subject.keep_mine
                 || online(app, subject)
                     .0
-                    .first()
-                    .is_some_and(|own| own.cover_from.is_none() && own.url.is_some())
+                    .iter()
+                    .any(|choice| choice.own && choice.url.is_some())
         }
     }
 }
@@ -465,28 +568,31 @@ pub(super) fn shape_of(app: &App, state: &PickState, path: &str) -> Option<(u32,
 pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
     match message {
         Message::Upload => {
-            if !begin_reading(app) {
+            let Some(side) = begin_reading(app) else {
                 return Task::none();
-            }
+            };
             return Task::perform(
-                crate::app::blocking(|| {
+                crate::app::blocking(move || {
                     let Some(path) = covers::source::browse()? else {
                         return Ok(None);
                     };
                     let bytes = std::fs::read(&path)
                         .map_err(|e| format!("{} could not be read ({e}).", path.display()))?;
-                    make(bytes).map(Some)
+                    make(bytes, side).map(Some)
                 }),
                 |result| msg(Message::Prepared(result)),
             );
         }
         Message::Paste => {
-            if !takes_paste(app) || !begin_reading(app) {
+            let Some(side) = Some(())
+                .filter(|()| takes_paste(app))
+                .and_then(|()| begin_reading(app))
+            else {
                 return Task::none();
-            }
+            };
             return Task::perform(
-                crate::app::blocking(|| match covers::source::clipboard()? {
-                    Some(bytes) => make(bytes).map(Some),
+                crate::app::blocking(move || match covers::source::clipboard()? {
+                    Some(bytes) => make(bytes, side).map(Some),
                     None => Err("The clipboard holds no image.".to_owned()),
                 }),
                 |result| msg(Message::Prepared(result)),
@@ -603,6 +709,13 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
                 });
             }
         }
+        Message::Poster { id, url } => {
+            if let Some((asked, poster)) = state_mut(app).and_then(|s| s.poster.as_mut())
+                && *asked == id
+            {
+                *poster = url;
+            }
+        }
         Message::AvailChoice(choice) => {
             if let Some(avail) = state_mut(app).and_then(|s| s.avail.as_mut()) {
                 avail.choice = choice;
@@ -625,25 +738,25 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
     Task::none()
 }
 
-/// Marks the picker as reading a picture; false when it already is, or
-/// none is open.
-fn begin_reading(app: &mut App) -> bool {
-    if subject(app).is_none() {
-        return false;
-    }
+/// Marks the picker as reading a picture and gives the longer side the
+/// upload keeps at most; none when it already is reading, or none is
+/// open.
+fn begin_reading(app: &mut App) -> Option<u32> {
+    let side = subject(app)?.long_side();
     match state_mut(app) {
         Some(state) if !state.busy => {
             state.busy = true;
             state.error = None;
-            true
+            Some(side)
         }
-        _ => false,
+        _ => None,
     }
 }
 
-/// The picture in `bytes` as an upload.
-fn make(bytes: Vec<u8>) -> Result<Upload, String> {
-    let prepared = picture::prepare(&bytes)?;
+/// The picture in `bytes` as an upload, its longer side `long_side` at
+/// most.
+fn make(bytes: Vec<u8>, long_side: u32) -> Result<Upload, String> {
+    let prepared = picture::prepare(&bytes, long_side)?;
     Ok(Upload {
         prepared: Arc::new(prepared),
         original: Arc::new(bytes),
@@ -787,7 +900,7 @@ fn fit_use(app: &mut App) -> Task<AppMessage> {
     let Some(subject) = subject(app) else {
         return Task::none();
     };
-    let square = subject.square();
+    let (square, long_side) = (subject.square(), subject.long_side());
     let Some(fit) = state(app).and_then(|s| s.fit.clone()) else {
         return Task::none();
     };
@@ -819,7 +932,7 @@ fn fit_use(app: &mut App) -> Task<AppMessage> {
                 ),
                 (None, None) => return Err("The picture is not on this computer.".to_owned()),
             };
-            let prepared = picture::fit(&bytes, fit.mode, fit.at, square)?;
+            let prepared = picture::fit(&bytes, fit.mode, fit.at, square, long_side)?;
             Ok(Upload {
                 prepared: Arc::new(prepared),
                 original: bytes,
@@ -900,6 +1013,60 @@ pub fn check_online(app: &mut App) -> Task<AppMessage> {
             msg(Message::Online {
                 id: id.clone(),
                 url: result.ok().flatten().and_then(|(url, _)| url),
+            })
+        },
+    )
+}
+
+/// For Pick a cover on an anime with a TMDB show: asks the lookup once
+/// for the show's poster, which is the first online tile. Nothing is
+/// asked while the entry shows that poster already.
+pub fn check_poster(app: &mut App) -> Task<AppMessage> {
+    let Some(subject) = subject(app).filter(|subject| subject.media == MediaType::Anime) else {
+        return Task::none();
+    };
+    let Some((tmdb, shown)) = app.repo.library().entry(&subject.id).and_then(|entry| {
+        let tmdb = anime_poster(entry)?;
+        let shown = (entry.cover_from.as_deref() == Some(tmdb))
+            .then(|| app.artwork.own_cover_url(entry).map(str::to_owned))
+            .flatten();
+        Some((tmdb.to_owned(), shown))
+    }) else {
+        return Task::none();
+    };
+    let service = app.lookups.clone();
+    let Some(state) = state_mut(app) else {
+        return Task::none();
+    };
+    if state
+        .poster
+        .as_ref()
+        .is_some_and(|(asked, _)| *asked == tmdb)
+    {
+        return Task::none();
+    }
+    let known = shown.is_some();
+    state.poster = Some((tmdb.clone(), shown));
+    if known {
+        return Task::none();
+    }
+    let poster = |service: &crate::lookup::Service, id: &str| {
+        service
+            .source_of(id)
+            .and_then(|lookup| lookup.picked_cover_url(id, MediaType::Anime).ok())
+            .flatten()
+    };
+    if service.is_instant() {
+        let url = poster(&service, &tmdb);
+        return update(app, Message::Poster { id: tmdb, url });
+    }
+    let id = tmdb.clone();
+    Task::perform(
+        crate::app::blocking(move || Ok(poster(&service, &tmdb))),
+        move |result| {
+            msg(Message::Poster {
+                id: id.clone(),
+                url: result.ok().flatten(),
             })
         },
     )
@@ -1059,12 +1226,22 @@ fn picker<'a>(
     // Online: the match's own cover first, then the other matches.
     let (choices, loading, failed) = online(app, subject);
     let with_image = choices.iter().filter(|c| c.url.is_some()).count();
+    // The choice whose largest version is clearly the widest, by the
+    // image addresses alone; no source is named.
+    let widths: Vec<Option<u32>> = choices
+        .iter()
+        .map(|choice| crate::lookup::largest_cover_width(choice.url.as_deref()?, square))
+        .collect();
+    let sharpest = crate::lookup::sharpest(&widths);
     let online_tiles: Vec<Element<'a, AppMessage>> = choices
         .into_iter()
-        .map(|choice| {
-            let is_own = choice.cover_from.is_none();
+        .zip(sharpest)
+        .map(|(choice, sharpest)| {
+            let is_own = choice.own;
+            // With nothing stored the match's own cover is the one in
+            // use, also an anime's, which has an id to store.
             let on = match (&subject.current, &choice.cover_from) {
-                (None, None) => true,
+                (None, _) => is_own,
                 (Some(current), Some(id)) => current == id,
                 _ => false,
             };
@@ -1073,7 +1250,12 @@ fn picker<'a>(
                 tint: choice.tint,
                 title: &choice.title,
                 sub: choice.sub,
-                note: if is_own { "The match's cover" } else { "" },
+                note: match (is_own, sharpest) {
+                    (true, true) => "The match's cover\nSharpest",
+                    (true, false) => "The match's cover",
+                    (false, true) => "Sharpest",
+                    (false, false) => "",
+                },
                 on,
                 square,
                 badge: None,
@@ -1310,7 +1492,7 @@ fn fit_view<'a>(
         Fit::Whole => {
             // The result as it will be: all of the picture in a frame of
             // the shape, on its blurred copy.
-            let (ow, oh) = picture::fitted_size(w, h, square, Fit::Whole);
+            let (ow, oh) = picture::fitted_size(w, h, square, Fit::Whole, subject.long_side());
             let scale = (PREVIEW.0 / ow as f32).min(PREVIEW.1 / oh as f32);
             let (bw, bh) = ((ow as f32 * scale).round(), (oh as f32 * scale).round());
             let backdrop: Element<'a, AppMessage> = match app.artwork.backdrop(&url) {
@@ -1374,7 +1556,13 @@ fn fit_view<'a>(
         Fit::Crop => "Drag sideways to choose which part is kept.",
         Fit::Whole => "The whole image, centered on a blurred copy of itself.",
     };
-    let (ow, oh) = picture::fitted_size(fit.source.0, fit.source.1, square, fit.mode);
+    let (ow, oh) = picture::fitted_size(
+        fit.source.0,
+        fit.source.1,
+        square,
+        fit.mode,
+        subject.long_side(),
+    );
     let saved_as = format!(
         "{}/{}/{}.<hash>.jpg",
         covers::FOLDER,
@@ -1640,6 +1828,53 @@ mod tests {
         send(app, EntryMessage::ChangeCover);
     }
 
+    #[test]
+    fn an_anime_with_a_tmdb_show_offers_its_poster_first_and_an_anilist_pick_sticks() {
+        const FRIEREN: &str = "anime/frieren-beyond-journeys-end-2023";
+        let (anilist, tmdb) = ("anilist:154587", "tmdb:tv:209867");
+        let mut app = app();
+        let linked = Entry {
+            source: Some(anilist.into()),
+            tmdb: Some(tmdb.into()),
+            ..entry(&app, FRIEREN).clone()
+        };
+        app.apply(Operation::UpdateEntry(linked));
+        open_viewer(&mut app, FRIEREN);
+        let choices = |app: &App| -> Vec<(bool, Option<String>)> {
+            let subject = subject(app).unwrap();
+            let list = online(app, &subject).0;
+            list.into_iter().map(|c| (c.own, c.cover_from)).collect()
+        };
+        // The show's poster first, then the match's cover under the
+        // entry's own id.
+        assert_eq!(
+            choices(&app)[..2],
+            [
+                (false, Some(tmdb.to_owned())),
+                (true, Some(anilist.to_owned()))
+            ]
+        );
+        // The poster was asked for once.
+        assert!(matches!(&state(&app).unwrap().poster, Some((id, _)) if id == tmdb));
+        // Picking AniList's cover writes the entry's own id, so the
+        // phone's check does not put the poster back.
+        send(&mut app, EntryMessage::SetCover(Some(anilist.into())));
+        assert_eq!(entry(&app, FRIEREN).cover_from.as_deref(), Some(anilist));
+        assert!(is_own_cover(entry(&app, FRIEREN), anilist));
+        send(&mut app, EntryMessage::SetCover(Some(tmdb.into())));
+        assert_eq!(entry(&app, FRIEREN).cover_from.as_deref(), Some(tmdb));
+        assert!(is_own_cover(entry(&app, FRIEREN), tmdb));
+        assert!(!is_own_cover(entry(&app, FRIEREN), "anilist:999"));
+        // Dropping one of the owner's own covers leaves it empty.
+        send(&mut app, EntryMessage::SetCover(None));
+        assert!(entry(&app, FRIEREN).cover_from.is_none());
+
+        // Any other title: the match's own cover is stored as nothing.
+        open_viewer(&mut app, BABY);
+        assert_eq!(choices(&app)[0], (true, None));
+        assert!(!is_own_cover(entry(&app, BABY), "tmdb:movie:70"));
+    }
+
     /// Marks the entry as keeping its own cover, so no online cover is
     /// offered when the picker opens.
     fn show_own(app: &mut App, id: &str, path: &str, keep: bool) {
@@ -1687,7 +1922,7 @@ mod tests {
     fn an_upload_is_named_after_the_title_stored_and_picked() {
         let mut app = app();
         open_viewer(&mut app, BABY);
-        let upload = make(png(400, 600)).unwrap();
+        let upload = make(png(400, 600), picture::LONG_SIDE).unwrap();
         let sha = upload.prepared.sha.clone();
         pick_says(&mut app, Message::Prepared(Ok(Some(upload))));
         let path = format!("movies/million-dollar-baby-2004.{}.jpg", &sha[..7]);
@@ -1720,7 +1955,7 @@ mod tests {
         open_viewer(&mut app, BABY);
         pick_says(
             &mut app,
-            Message::Prepared(Ok(Some(make(png(1920, 1080)).unwrap()))),
+            Message::Prepared(Ok(Some(make(png(1920, 1080), picture::LONG_SIDE).unwrap()))),
         );
         let wide = entry(&app, BABY)
             .cover_from
@@ -1729,7 +1964,7 @@ mod tests {
             .unwrap()
             .to_owned();
         let size = shape_of(&app, state(&app).unwrap(), &wide).unwrap();
-        assert_eq!(size, (1000, 563));
+        assert_eq!(size, (1920, 1080));
         assert!(
             picture::off_shape(size.0, size.1, false),
             "Not 2:3 · Adjust"
@@ -1751,8 +1986,8 @@ mod tests {
 
         // Use this cover: made from the picture as it was picked.
         let original = app.covers.original(&wide).unwrap();
-        let prepared = picture::fit(&original, Fit::Whole, 1.0, false).unwrap();
-        assert_eq!((prepared.width, prepared.height), (1000, 1500));
+        let prepared = picture::fit(&original, Fit::Whole, 1.0, false, picture::LONG_SIDE).unwrap();
+        assert_eq!((prepared.width, prepared.height), (1333, 2000));
         pick_says(
             &mut app,
             Message::Fitted {
@@ -1879,7 +2114,7 @@ mod tests {
         // An upload is named after the album and changes the album.
         pick_says(
             &mut app,
-            Message::Prepared(Ok(Some(make(png(500, 500)).unwrap()))),
+            Message::Prepared(Ok(Some(make(png(500, 500), picture::LONG_SIDE).unwrap()))),
         );
         let shown = entry(&app, &album.id).cover_from.clone().unwrap();
         assert!(shown.starts_with("repo:music/green-river-creedence-clearwater-revival."));
@@ -1967,6 +2202,51 @@ mod tests {
         assert!(super::super::dismiss_top(&mut app));
         assert!(matches!(app.dialog, Some(Dialog::Cover(_))));
         assert!(!takes_paste(&app));
+    }
+
+    #[test]
+    fn the_viewers_button_is_named_after_what_it_does() {
+        let shown = |app: &App, words: &str| {
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            ui.find(words).is_ok()
+        };
+        let mut app = app();
+        // A title with one of the owner's covers, and one with none.
+        show_own(&mut app, BABY, STEELBOOK, true);
+        send(&mut app, EntryMessage::ViewCover(BABY.into()));
+        assert!(shown(&app, "Change cover…"));
+        send(&mut app, EntryMessage::ViewCover(SONG.into()));
+        assert!(shown(&app, "Add a cover…"));
+        // A series: its button opens the Series cover dialog.
+        let towers = "movies/the-lord-of-the-rings-the-two-towers-2002";
+        send(
+            &mut app,
+            EntryMessage::ViewSeriesCover {
+                id: towers.into(),
+                media: MediaType::Movies,
+                name: "The Lord of the Rings".into(),
+            },
+        );
+        assert!(shown(&app, "Choose series cover…"));
+        // ‹ and › keep it a series' viewer.
+        send(&mut app, EntryMessage::StepCover(-1));
+        assert!(shown(&app, "Choose series cover…"));
+        send(&mut app, EntryMessage::ChooseSeriesCover);
+        assert!(app.dialog.is_none());
+        assert_eq!(
+            app.library.cover_dialog,
+            Some((MediaType::Movies, "The Lord of the Rings".to_owned()))
+        );
+        // An artist.
+        let _ = super::super::artist::update(
+            &mut app,
+            super::super::artist::Message::View("Metallica".into()),
+        );
+        assert!(shown(&app, "Change photo…"));
     }
 
     #[test]

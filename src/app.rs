@@ -2314,7 +2314,11 @@ impl App {
         {
             let parts = crate::series::entries_in(self.repo.library(), open.media, &open.name);
             if let Some(cover) = crate::series::cover_entry(&parts) {
-                return Message::Entry(entry::Message::ViewCover(cover.id.clone()));
+                return Message::Entry(entry::Message::ViewSeriesCover {
+                    id: cover.id.clone(),
+                    media: open.media,
+                    name: open.name.clone(),
+                });
             }
         }
         match message {

@@ -292,8 +292,8 @@ pub fn group<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
         photos_row(app, tokens),
         group_row(
             "Uploads",
-            "Scaled to 1000 px on the long side and saved as JPEG; files you commit yourself are \
-             left as they are."
+            "Scaled down to 2000 px on the long side when larger (artist photos to 1200 px), \
+             never enlarged, and saved as JPEG; files you commit yourself are left as they are."
                 .to_owned(),
             None,
             tokens,
