@@ -32,14 +32,17 @@ image = "0.25"
 [dev-dependencies]
 iced_test = "0.14.0"
 
-# iced_wgpu 0.14.0 with one change in `window/compositor.rs`, backported
+# iced_wgpu 0.14.0 with two changes. In `window/compositor.rs`, backported
 # from iced master: the surface format is never one with a 2-bit alpha.
 # NVIDIA's Wayland driver lists 10-bit formats first, iced 0.14 takes the
 # first non-sRGB one with its default `web-colors` blending, and a 2-bit
 # alpha rounds every see-through surface of Glass to thirds (docs/DESIGN.md
 # section 10, Glass). The next iced release carries the fix; this patch
 # only matches iced_wgpu 0.14.0, so after the upgrade Cargo warns that it is
-# unused, and the folder and these lines go.
+# unused, and the folder and these lines go. In `image/cache.rs`, Libri's
+# own: the image worker asks for one relayout per run of loaded images, not
+# one per image, which held up a slide's first frames (docs/DESIGN.md
+# section 10, Frame pacing); check whether the next iced still needs it.
 [patch.crates-io]
 iced_wgpu = { path = "vendor/iced_wgpu" }
 

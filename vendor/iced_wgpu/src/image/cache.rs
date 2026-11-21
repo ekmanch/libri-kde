@@ -528,30 +528,71 @@ mod worker {
 
     impl Instance {
         fn run(mut self) {
+            // Libri: one relayout for a run of loaded images, not one
+            // each. A list that comes into view asks for all its covers
+            // in one frame, and upstream's relayout per image (a window
+            // laid out again some seventy times in a fifth of a second)
+            // held up the frames of a slide as it started. The job after
+            // this one is taken early to see whether the run goes on.
+            let mut next = None;
+            let mut layout_due = false;
+
             loop {
                 if self.quit.try_recv().is_ok() {
                     return;
                 }
 
-                let Ok(job) = self.jobs.recv() else {
-                    return;
+                let job = match next.take() {
+                    Some(job) => job,
+                    None => match self.jobs.recv() {
+                        Ok(job) => job,
+                        Err(_) => return,
+                    },
                 };
 
                 match job {
                     Job::Load(handle) => {
-                        match crate::graphics::image::load(&handle) {
+                        let loaded = crate::graphics::image::load(&handle);
+
+                        next = self.jobs.try_recv().ok();
+                        let last = !matches!(next, Some(Job::Load(_)));
+
+                        let uploaded = match loaded {
                             Ok(image) => self.upload(
                                 handle,
                                 image.width(),
                                 image.height(),
                                 image.into_raw(),
-                                Shell::invalidate_layout,
+                                if last {
+                                    Shell::invalidate_layout
+                                } else {
+                                    Shell::request_redraw
+                                },
                             ),
                             Err(error) => {
                                 let _ = self
                                     .output
                                     .send(Work::Error { handle, error });
+
+                                false
                             }
+                        };
+
+                        if !last {
+                            layout_due |= uploaded;
+                        } else if layout_due && !uploaded {
+                            // The run ended on an image that failed: the
+                            // ones before it still get their relayout,
+                            // once they have been handed over.
+                            let shell = self.shell.clone();
+
+                            self.queue.on_submitted_work_done(move || {
+                                shell.invalidate_layout();
+                            });
+                            let _ = self.device.poll(wgpu::PollType::Poll);
+                            layout_due = false;
+                        } else {
+                            layout_due = false;
                         }
                     }
                     Job::Upload {
@@ -560,7 +601,7 @@ mod worker {
                         width,
                         height,
                     } => {
-                        self.upload(
+                        let _ = self.upload(
                             handle,
                             width,
                             height,
@@ -583,7 +624,7 @@ mod worker {
             height: u32,
             rgba: Bytes,
             callback: fn(&Shell),
-        ) {
+        ) -> bool {
             let mut encoder = self.device.create_command_encoder(
                 &wgpu::CommandEncoderDescriptor {
                     label: Some("raster image upload"),
@@ -605,7 +646,7 @@ mod worker {
                 height,
                 &rgba,
             ) else {
-                return;
+                return false;
             };
 
             let output = self.output.clone();
@@ -631,6 +672,8 @@ mod worker {
                 submission_index: Some(submission),
                 timeout: None,
             });
+
+            true
         }
     }
 }
