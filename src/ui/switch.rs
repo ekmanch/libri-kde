@@ -5,7 +5,7 @@ use super::FocusExt;
 use crate::theme::{Tokens, font};
 
 /// A labeled on/off switch: the label on the left, a 30 × 18 track on the
-/// right, the accent when on.
+/// right, the accent when on (`track`).
 pub fn switch<'a, Message: Clone + 'a>(
     label: &'a str,
     on: bool,
@@ -40,10 +40,13 @@ pub fn setting_switch<'a, Message: Clone + 'a>(
 }
 
 /// The switch alone, `width` px wide (30 in dialogs, 38 in Settings),
-/// for a row that lays its own label out.
+/// for a row that lays its own label out. On, the track is the accent
+/// on the dark themes and the accent's pale tint on Light, where the
+/// solid accent is kept for progress bars and focus outlines; the knob is
+/// dark on both.
 pub fn track<'a, Message: 'a>(on: bool, width: f32, tokens: &Tokens) -> Element<'a, Message> {
     let (track, knob) = if on {
-        (tokens.accent, tokens.on_accent)
+        (tokens.tint, tokens.on_accent)
     } else {
         (tokens.line, tokens.sub)
     };
