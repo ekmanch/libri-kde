@@ -50,7 +50,7 @@ pub fn cancel() {
 /// answers; a failure (offline, refused, a server error) is neither.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Found {
-    /// The photo as Apple serves it: a 640 × 640 JPEG.
+    /// The photo as Apple serves it: a square JPEG of the side asked for.
     Photo(Vec<u8>),
     Missing(Reason),
 }
@@ -438,8 +438,8 @@ impl AppleArtists {
 
     /// Asks Apple about the library's artist `name`, whose saved album
     /// titles are `owned` and whose saved songs are `songs`: the match,
-    /// its page, the photo.
-    pub fn find(&self, name: &str, owned: &[String], songs: &[String]) -> Reply<Found> {
+    /// its page, the photo at `side` × `side`.
+    pub fn find(&self, name: &str, owned: &[String], songs: &[String], side: u32) -> Reply<Found> {
         let owned: Vec<&str> = owned.iter().map(String::as_str).collect();
         let songs: Vec<&str> = songs.iter().map(String::as_str).collect();
         let listed = self.with_songs(name, &owned, &songs, self.candidates(name)?)?;
@@ -457,8 +457,39 @@ impl AppleArtists {
             kept.photos.insert(chosen.id.clone(), photo.clone());
         });
         match photo {
-            Some(url) => Ok(Found::Photo(self.image(&url)?)),
+            Some(url) => Ok(Found::Photo(self.image(&artists::photo_at(&url, side))?)),
             None => Ok(Found::Missing(Reason::NoPhoto)),
+        }
+    }
+
+    /// The photo of the library's artist `name` once more, at `side` ×
+    /// `side`, for an artist who has a file: the match as it was kept
+    /// (asked anew only when it is not), and the photo's address as it
+    /// was kept, else read from the artist's page once more, at the
+    /// pages' pace. None when nobody matches now or the page shows no
+    /// photo, and the file then stays as it is.
+    pub fn sharper(
+        &self,
+        name: &str,
+        owned: &[String],
+        songs: &[String],
+        side: u32,
+    ) -> Reply<Option<Vec<u8>>> {
+        let owned: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let songs: Vec<&str> = songs.iter().map(String::as_str).collect();
+        let listed = self.with_songs(name, &owned, &songs, self.candidates_kept(name)?)?;
+        let candidates: Vec<Candidate> = listed.iter().map(|(c, _)| c.clone()).collect();
+        let Some(chosen) = artists::choose_artist(name, &owned, &songs, &candidates) else {
+            return Ok(None);
+        };
+        let page = listed
+            .iter()
+            .find(|(candidate, _)| candidate.id == chosen.id)
+            .map(|(_, page)| page.as_str())
+            .unwrap_or_default();
+        match self.photo_of(&chosen.id, page)? {
+            Some(url) => Ok(Some(self.image(&artists::photo_at(&url, side))?)),
+            None => Ok(None),
         }
     }
 }

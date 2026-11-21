@@ -221,6 +221,9 @@ pub struct App {
     /// The artist photos' fetching: who is being asked about, and the
     /// batch held for its commit (`covers::backfill`).
     pub photos: covers::backfill::State,
+    /// Whether `photo_size` and `picked` are written to `_missing.json`
+    /// (`covers::artists::WRITES_PHOTO_KEYS`; the tests turn it on).
+    pub photo_keys: bool,
     /// Apple Music, for the artists' photos.
     pub apple: Arc<lookup::apple_artists::AppleArtists>,
     /// When the artists are next gone through for one to ask about.
@@ -319,6 +322,15 @@ pub enum Message {
     PhotoFound {
         work: covers::backfill::Work,
         result: Result<lookup::apple_artists::Found, lookup::Failure>,
+    },
+    /// The messages of the commits that touched the artists' photos,
+    /// newest first, for the sharper photos' `picked` list.
+    PhotoHistory(Result<Vec<String>, String>),
+    /// Apple's sharper copy of an artist's photo; none when there is
+    /// nothing to replace it with.
+    PhotoSharper {
+        work: covers::backfill::Work,
+        result: Result<Option<Vec<u8>>, lookup::Failure>,
     },
 }
 
@@ -782,6 +794,7 @@ impl App {
             covers: Covers::default(),
             photos_dropped: Vec::new(),
             photos: covers::backfill::State::default(),
+            photo_keys: covers::artists::WRITES_PHOTO_KEYS,
             apple: Arc::default(),
             photos_due: Instant::now(),
             discover: discover::State::default(),
@@ -1383,11 +1396,20 @@ impl App {
             self.photos.again,
         )
         .len();
+        let (found, yours) = covers::backfill::sharper_counts(library, &self.covers);
+        let sharp = covers::backfill::Sharp {
+            // On offer until the run's first batch has written the size.
+            offered: self.photo_keys && self.covers.missing().photo_size.is_none(),
+            found,
+            yours,
+            left: covers::backfill::sharper_todo(library, &self.covers, &self.photos).len(),
+        };
         covers::backfill::Row::of(
             &self.photos,
             covers::backfill::totals(library, &self.covers),
             left,
             self.photos_active(),
+            sharp,
         )
     }
 
@@ -1400,11 +1422,16 @@ impl App {
             self.photos.look = match look {
                 Look::Fetching => Some(Look::Paused),
                 Look::Paused | Look::Stopped => Some(Look::Fetching),
+                Look::Sharper => Some(Look::Sharpening),
+                Look::Sharpening => Some(Look::Sharper),
             };
             return Task::none();
         }
         match self.photos_row() {
-            Row::Fetching { .. } => self.photos.paused = true,
+            Row::Fetching { .. } | Row::Checking | Row::Sharpening { .. } => {
+                self.photos.paused = true
+            }
+            Row::Sharper { .. } => self.photos.start_sharper(),
             Row::Paused { .. } => self.photos.paused = false,
             Row::Stopped { .. } => {
                 self.photos.stopped = false;
@@ -1412,6 +1439,7 @@ impl App {
             }
             Row::Done(_) => {
                 self.photos.check_again();
+                self.photos.disagreed.clear();
                 self.photos.retry_at = None;
             }
         }
@@ -1435,6 +1463,10 @@ impl App {
             self.photos.again,
         );
         let Some(work) = todo.into_iter().next() else {
+            // Nobody new: the sharper photos, while their run is on.
+            if self.photos.sharper.is_some() {
+                return self.sharper_next();
+            }
             // Done only when nobody was passed over after a failure.
             self.queue_photo_batch(self.photos.none_passed_over());
             self.photos.again = false;
@@ -1446,13 +1478,196 @@ impl App {
         self.photos.running = Some(work.name.clone());
         let apple = self.apple.clone();
         let asked = work.clone();
+        // At the record's size: 1200 once the sharper photos' first
+        // batch has written it, 640 before.
+        let side = self.covers.missing().photo_side();
         Task::perform(
-            blocking(move || Ok(apple.find(&asked.name, &asked.owned, &asked.songs))),
+            blocking(move || Ok(apple.find(&asked.name, &asked.owned, &asked.songs, side))),
             move |result| Message::PhotoFound {
                 work: work.clone(),
                 result: result.unwrap_or_else(|error| Err(lookup::Failure::other(error))),
             },
         )
+    }
+
+    /// The sharper photos' next step: the `picked` list first, from this
+    /// computer's memory and the commit history, then one artist at a
+    /// time whose photo was found automatically, fifty to a commit.
+    fn sharper_next(&mut self) -> Task<Message> {
+        let Some(sharper) = &self.photos.sharper else {
+            return Task::none();
+        };
+        if !sharper.checked {
+            if self.photos.checking {
+                return Task::none();
+            }
+            let (Some(client), Some(engine)) = (&self.github, &self.engine) else {
+                // The library is kept on this computer: no history.
+                return self.sharper_checked(None);
+            };
+            self.photos.checking = true;
+            let target = engine.target().clone();
+            let client = client.clone();
+            let path = format!("{}/{}", covers::root(&target.file), covers::artists::FOLDER);
+            return Task::perform(
+                blocking(move || {
+                    client
+                        .commit_messages(&path, &target.branch)
+                        .map_err(|failure| failure.describe())
+                }),
+                Message::PhotoHistory,
+            );
+        }
+        let todo = covers::backfill::sharper_todo(self.repo.library(), &self.covers, &self.photos);
+        let Some(work) = todo.into_iter().next() else {
+            self.photos.sharper_done();
+            self.queue_photo_batch(self.photos.none_passed_over());
+            return Task::none();
+        };
+        if self.photos.is_full() {
+            self.queue_photo_batch(false);
+        }
+        self.photos.running = Some(work.name.clone());
+        let apple = self.apple.clone();
+        let asked = work.clone();
+        Task::perform(
+            blocking(move || {
+                let side = covers::artists::SHARP_SIDE;
+                Ok(apple.sharper(&asked.name, &asked.owned, &asked.songs, side))
+            }),
+            move |result| Message::PhotoSharper {
+                work: work.clone(),
+                result: result.unwrap_or_else(|error| Err(lookup::Failure::other(error))),
+            },
+        )
+    }
+
+    /// The commit history came, or did not: without it nothing is
+    /// replaced, and the row offers the sharper photos again.
+    fn sharper_history(&mut self, result: Result<Vec<String>, String>) -> Task<Message> {
+        self.photos.checking = false;
+        match result {
+            Ok(messages) => self.sharper_checked(Some(messages)),
+            Err(error) => {
+                eprintln!("libri: the photos' history could not be read: {error}");
+                self.photos.sharper = None;
+                self.photos.save();
+                Task::none()
+            }
+        }
+    }
+
+    /// Builds the record's `picked` list before any photo is replaced:
+    /// every artist whose photo this computer remembers as picked or
+    /// uploaded, or whose last word in the history is "Set the photo
+    /// of", on top of what the record has. The edits and the photo size
+    /// lead the first batch.
+    fn sharper_checked(&mut self, history: Option<Vec<String>>) -> Task<Message> {
+        let (picked, disagreed) =
+            covers::backfill::picked_from(self.repo.library(), &self.covers, history.as_deref());
+        if !disagreed.is_empty() {
+            eprintln!(
+                "libri: counted as picked, since this computer and the history disagree: {}",
+                disagreed.join(", ")
+            );
+        }
+        let record = self.covers.missing();
+        let mut changes: Vec<covers::Change> = picked
+            .into_iter()
+            .filter(|slug| !record.picked.contains(slug))
+            .map(|slug| covers::Change::Missing(covers::artists::MissingEdit::Pick { slug }))
+            .collect();
+        if record.photo_size.is_none() {
+            changes.push(covers::Change::Missing(
+                covers::artists::MissingEdit::PhotoSize(covers::artists::SHARP_SIDE),
+            ));
+        }
+        if self.engine.is_none() {
+            for change in &changes {
+                self.covers.apply(change, true);
+            }
+            changes.clear();
+        }
+        self.photos.sharper_checked(changes, 0, disagreed);
+        let queued = self.queued_cover_changes();
+        self.covers.rebuild(&queued);
+        let of =
+            covers::backfill::sharper_todo(self.repo.library(), &self.covers, &self.photos).len();
+        if let Some(sharper) = &mut self.photos.sharper {
+            sharper.of = of;
+        }
+        self.photos.save();
+        self.photos_next()
+    }
+
+    /// Apple's sharper copy of an artist's photo came. It takes the
+    /// file's place only while the artist still has one that is not the
+    /// owner's own, and only when it is larger than the one there.
+    fn photo_sharper(
+        &mut self,
+        work: covers::backfill::Work,
+        result: Result<Option<Vec<u8>>, lookup::Failure>,
+    ) -> Task<Message> {
+        self.photos.running = None;
+        let bytes = match result {
+            Ok(bytes) => bytes,
+            Err(failure) if lookup::apple_artists::refused(&failure) => {
+                eprintln!(
+                    "libri: Apple stopped answering ({failure}); no more photos this session"
+                );
+                self.photos.stopped = true;
+                return Task::none();
+            }
+            Err(failure) if failure.kind == lookup::FailureKind::Offline => {
+                eprintln!("libri: no answer about {}: {failure}", work.name);
+                self.photos.retry_at = Some(self.now + covers::backfill::RETRY);
+                return Task::none();
+            }
+            Err(failure) => {
+                eprintln!(
+                    "libri: no sharper photo of {} for now: {failure}",
+                    work.name
+                );
+                self.photos.skip_sharper(&work.slug);
+                return self.photos_next();
+            }
+        };
+        let path = covers::artists::file_path(&work.name);
+        let change = bytes.zip(path).and_then(|(bytes, path)| {
+            // Picked, uploaded or removed while Apple was being asked.
+            if self.covers.get(&path).is_none() || self.covers.is_picked(&work.slug) {
+                return None;
+            }
+            let side = |size: Option<(u32, u32)>| size.map(|(width, _)| width);
+            let new = side(lookup::store::image_size(&bytes))?;
+            let old = self
+                .covers
+                .ready(&path)
+                .and_then(|local| side(lookup::store::image_size_of(&local)));
+            if new <= old.unwrap_or(covers::artists::PHOTO_SIDE) {
+                return None;
+            }
+            let seen = self.covers.seen(&path, &self.queued_cover_changes());
+            if let Err(error) = self.covers.store(&path, &bytes) {
+                eprintln!("libri: could not store the photo {path}: {error}");
+                return None;
+            }
+            self.covers.set_kind(&path, covers::PhotoKind::Fetched);
+            self.artwork.forget_image(&covers::cover_from(&path));
+            Some(covers::Change::Sharpen { path, seen })
+        });
+        if self.engine.is_none() {
+            // The library is kept on this computer: made at once.
+            if let Some(change) = &change {
+                self.covers.apply(change, true);
+            }
+            self.photos.sharpened(&work.slug, None);
+        } else {
+            self.photos.sharpened(&work.slug, change);
+            let queued = self.queued_cover_changes();
+            self.covers.rebuild(&queued);
+        }
+        self.photos_next()
     }
 
     /// Hands the held batch to the queue as one commit's worth. `done`
@@ -1656,12 +1871,28 @@ impl App {
         let url = file.url();
         self.artwork.forget_image(&url);
         // The owner chose the picture, also when it is Apple's.
-        let change = covers::Change::Put {
+        let mut changes = vec![covers::Change::Put {
             path,
             seen,
             picked: true,
-        };
-        self.change_cover_files(vec![change], summary);
+        }];
+        // The record's `picked` list: on it for a picture picked or
+        // uploaded, off it for the suggested photo, which is what the
+        // fetch would have stored.
+        if let Some(slug) = covers::artists::slug(name).filter(|_| self.photo_keys) {
+            use covers::artists::MissingEdit;
+            let on_list = self.covers.missing().picked.contains(&slug);
+            match kind {
+                covers::PhotoKind::Picked | covers::PhotoKind::Uploaded if !on_list => {
+                    changes.push(covers::Change::Missing(MissingEdit::Pick { slug }));
+                }
+                covers::PhotoKind::Fetched if on_list => {
+                    changes.push(covers::Change::Missing(MissingEdit::Unpick { slug }));
+                }
+                _ => {}
+            }
+        }
+        self.change_cover_files(changes, summary);
         Some(file)
     }
 
@@ -1675,7 +1906,13 @@ impl App {
             return;
         }
         let seen = self.covers.seen(&path, &self.queued_cover_changes());
-        self.change_cover_files(vec![covers::Change::Remove { path, seen }], summary);
+        // Off the record's `picked` list first, while the file is there.
+        let unpick = covers::artists::slug(name)
+            .filter(|slug| self.photo_keys && self.covers.missing().picked.contains(slug))
+            .map(|slug| covers::Change::Missing(covers::artists::MissingEdit::Unpick { slug }));
+        let mut changes: Vec<covers::Change> = unpick.into_iter().collect();
+        changes.push(covers::Change::Remove { path, seen });
+        self.change_cover_files(changes, summary);
     }
 
     /// Deletes or moves cover files: on this computer at once, on GitHub
@@ -1700,6 +1937,7 @@ impl App {
                 }
                 covers::Change::Upload { .. }
                 | covers::Change::Put { .. }
+                | covers::Change::Sharpen { .. }
                 | covers::Change::Missing(_)
                 | covers::Change::Settings(_) => {}
             }
@@ -2768,6 +3006,8 @@ impl App {
             Message::Token(message) => return token::update(self, message),
             Message::Covers(message) => return self.covers_update(message),
             Message::PhotoFound { work, result } => return self.photo_found(work, result),
+            Message::PhotoHistory(result) => return self.sharper_history(result),
+            Message::PhotoSharper { work, result } => return self.photo_sharper(work, result),
             Message::Lookup(artwork::Message::Prune) => {
                 // Discover's covers belong to no entry; the prune keeps
                 // them too, hidden ones included.
@@ -4040,6 +4280,167 @@ mod tests {
             id: id.into(),
             rating,
         }
+    }
+
+    /// A plain square JPEG of `side` pixels.
+    fn jpeg(side: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut bytes)
+            .encode_image(&image::RgbImage::new(side, side))
+            .expect("a JPEG");
+        bytes
+    }
+
+    #[test]
+    fn a_pick_goes_on_the_picked_list_and_use_automatic_takes_it_off() {
+        use covers::artists::MissingEdit;
+        let mut app = App::new(Screen::Library);
+        connected(&mut app);
+        let edits = |app: &App| -> Vec<MissingEdit> {
+            let changes = app.engine.as_ref().unwrap().pending().changes();
+            let edits = changes.into_iter().filter_map(|change| match change {
+                covers::Change::Missing(edit) => Some(edit),
+                _ => None,
+            });
+            edits.collect()
+        };
+        let pick = |slug: &str| MissingEdit::Pick { slug: slug.into() };
+        let unpick = |slug: &str| MissingEdit::Unpick { slug: slug.into() };
+        // Until the phone keeps the keys, nothing is written to the list.
+        assert!(!covers::artists::WRITES_PHOTO_KEYS && !app.photo_keys);
+        app.set_artist_photo("Massive Attack", b"a", covers::PhotoKind::Picked, None);
+        assert!(edits(&app).is_empty());
+
+        app.photo_keys = true;
+        app.set_artist_photo("Massive Attack", b"b", covers::PhotoKind::Uploaded, None);
+        assert_eq!(edits(&app), [pick("massive-attack")]);
+        assert!(app.covers.missing().picked.contains("massive-attack"));
+        // The suggested photo is what the fetch would have stored.
+        app.set_artist_photo("Massive Attack", b"c", covers::PhotoKind::Fetched, None);
+        assert_eq!(
+            edits(&app),
+            [pick("massive-attack"), unpick("massive-attack")]
+        );
+        assert!(app.covers.missing().picked.is_empty());
+        app.set_artist_photo("Massive Attack", b"d", covers::PhotoKind::Picked, None);
+        app.remove_artist_photo("Massive Attack", None);
+        assert_eq!(edits(&app).last(), Some(&unpick("massive-attack")));
+        assert!(app.covers.missing().picked.is_empty());
+    }
+
+    #[test]
+    fn the_sharper_photos_build_the_picked_list_first_and_never_replace_a_pick() {
+        use covers::artists::MissingEdit;
+        let mut app = App::new(Screen::Library);
+        connected(&mut app);
+        app.photo_keys = true;
+        let work = |app: &App, name: &str| {
+            covers::backfill::work_for(app.repo.library(), name).expect("in the library")
+        };
+        // Three photos from before the keys were written: one found, one
+        // picked here, one set on the phone.
+        app.photo_keys = false;
+        app.set_artist_photo("Daft Punk", &jpeg(640), covers::PhotoKind::Fetched, None);
+        app.set_artist_photo(
+            "Alice in Chains",
+            &jpeg(600),
+            covers::PhotoKind::Picked,
+            None,
+        );
+        app.set_artist_photo("Miles Davis", &jpeg(640), covers::PhotoKind::Fetched, None);
+        app.photo_keys = true;
+        let sha = |app: &App, name: &str| app.covers.artist_file(name).unwrap().sha.clone();
+        let (alice, miles) = (sha(&app, "Alice in Chains"), sha(&app, "Miles Davis"));
+
+        // Offered, since the record has no size yet.
+        assert!(matches!(
+            covers::backfill::Row::of(
+                &app.photos,
+                covers::backfill::Totals::default(),
+                0,
+                true,
+                covers::backfill::Sharp {
+                    offered: app.covers.missing().photo_size.is_none(),
+                    found: 2,
+                    yours: 1,
+                    left: 0
+                }
+            ),
+            covers::backfill::Row::Sharper { found: 2, yours: 1 }
+        ));
+        app.photos.start_sharper();
+        // Nothing is replaced before the list is built.
+        assert!(
+            covers::backfill::sharper_todo(app.repo.library(), &app.covers, &app.photos).len() == 2
+        );
+        let history = vec![
+            "Set the photo of Miles Davis".to_owned(),
+            "Add photos of 2 artists".to_owned(),
+        ];
+        let _ = app.update(Message::PhotoHistory(Ok(history)));
+        let held: Vec<MissingEdit> = app
+            .photos
+            .held()
+            .iter()
+            .filter_map(|change| match change {
+                covers::Change::Missing(edit) => Some(edit.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            held,
+            [
+                MissingEdit::Pick {
+                    slug: "alice-in-chains".into()
+                },
+                MissingEdit::Pick {
+                    slug: "miles-davis".into()
+                },
+                MissingEdit::PhotoSize(1200),
+            ]
+        );
+        // This computer remembered Miles Davis as found, the history says
+        // set: picked, and named. Alice in Chains was picked here in a
+        // commit the history does not name: picked, and named too.
+        assert_eq!(app.photos.disagreed, ["Alice in Chains", "Miles Davis"]);
+        assert_eq!(app.covers.missing().photo_side(), 1200);
+        let todo = covers::backfill::sharper_todo(app.repo.library(), &app.covers, &app.photos);
+        assert_eq!(todo.len(), 1);
+        assert_eq!(todo[0].name, "Daft Punk");
+
+        // An answer for a picked artist changes nothing, whatever it is.
+        for name in ["Alice in Chains", "Miles Davis"] {
+            let _ = app.update(Message::PhotoSharper {
+                work: work(&app, name),
+                result: Ok(Some(jpeg(1200))),
+            });
+        }
+        assert_eq!(sha(&app, "Alice in Chains"), alice);
+        assert_eq!(sha(&app, "Miles Davis"), miles);
+        // A copy that is no larger is not stored; a larger one is.
+        let before = sha(&app, "Daft Punk");
+        app.photos.sharper.as_mut().unwrap().tried.clear();
+        let _ = app.update(Message::PhotoSharper {
+            work: work(&app, "Daft Punk"),
+            result: Ok(Some(jpeg(640))),
+        });
+        assert_eq!(sha(&app, "Daft Punk"), before);
+        app.photos.sharper.as_mut().unwrap().tried.clear();
+        let _ = app.update(Message::PhotoSharper {
+            work: work(&app, "Daft Punk"),
+            result: Ok(Some(jpeg(1200))),
+        });
+        assert_ne!(sha(&app, "Daft Punk"), before);
+        let sharpened: Vec<&covers::Change> = app
+            .photos
+            .held()
+            .iter()
+            .filter(|change| matches!(change, covers::Change::Sharpen { .. }))
+            .collect();
+        assert!(
+            matches!(sharpened.as_slice(), [covers::Change::Sharpen { path, .. }] if path == "artists/daft-punk.jpg"),
+            "{sharpened:?}"
+        );
     }
 
     #[test]

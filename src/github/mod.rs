@@ -555,6 +555,37 @@ impl Client {
         Ok(())
     }
 
+    /// The messages of every commit that touched `path` on `branch`,
+    /// newest first: a hundred a request, three thousand at most.
+    pub fn commit_messages(&self, path: &str, branch: &str) -> Reply<Vec<String>> {
+        const PAGE: usize = 100;
+        let mut messages = Vec::new();
+        for page in 1..=30 {
+            let page = page.to_string();
+            let url = self.url(
+                &["commits"],
+                &[
+                    ("path", path),
+                    ("sha", branch),
+                    ("per_page", "100"),
+                    ("page", &page),
+                ],
+            );
+            let json = self.send(self.get(&url, JSON), &[200])?.json()?;
+            let items = json.as_array().map(Vec::as_slice).unwrap_or_default();
+            messages.extend(items.iter().map(|item| {
+                item["commit"]["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned()
+            }));
+            if items.len() < PAGE {
+                break;
+            }
+        }
+        Ok(messages)
+    }
+
     /// The newest commits that touched `path` on `branch`, newest first.
     pub fn commits(&self, path: &str, branch: &str, limit: usize) -> Reply<Vec<CommitInfo>> {
         let per_page = limit.to_string();

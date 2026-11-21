@@ -11,7 +11,7 @@
 //! function and its cases are in `assets/fixtures/artist_photos.json`,
 //! which both apps run (DESIGN.md "Artist photos").
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::Date;
 use crate::model::text::slugify;
@@ -20,9 +20,24 @@ use crate::model::text::slugify;
 pub const FOLDER: &str = "artists";
 /// The record of artists tried with nothing found, in that folder.
 pub const MISSING_FILE: &str = "_missing.json";
-/// The last segment of a photo's URL as it is fetched and stored: Apple's
-/// 640 × 640 square JPEG.
+/// The last segment of a photo's URL as it is read from Apple's page and
+/// kept: the 640 × 640 square JPEG. `photo_at` makes it the size that is
+/// fetched.
 pub const PHOTO_SIZE: &str = "640x640cc.jpg";
+/// The side of an artist's photo, in pixels, until the record says
+/// otherwise (`Missing::photo_size`).
+pub const PHOTO_SIDE: u32 = 640;
+/// The side once the existing photos were fetched again: what the first
+/// batch of that run writes as `photo_size`, and the most a picked or
+/// uploaded photo keeps.
+pub const SHARP_SIDE: u32 = 1200;
+/// Whether `photo_size` and `picked` are written to `_missing.json`. Off
+/// until the phone build that keeps the keys it does not know is
+/// installed: an older build rewrites the file from the keys it knows
+/// and would erase them. With it off nothing adds to `picked`, and the
+/// sharper photos of Settings are not offered, since their first batch
+/// writes `photo_size`. Both keys are read and kept either way.
+pub const WRITES_PHOTO_KEYS: bool = false;
 /// How long "nothing found" stands before the artist is tried again.
 pub const RETRY_DAYS: i64 = 90;
 /// The `_missing.json` format.
@@ -330,6 +345,17 @@ pub fn choose_artist<'a>(
     }
 }
 
+/// The photo at `url` (`photo_url`) as a `side` × `side` JPEG. Any other
+/// URL is left as it is.
+pub fn photo_at(url: &str, side: u32) -> String {
+    match url.strip_suffix(PHOTO_SIZE) {
+        Some(image) if side != PHOTO_SIDE && image.ends_with('/') => {
+            format!("{image}{side}x{side}cc.jpg")
+        }
+        _ => url.to_owned(),
+    }
+}
+
 /// Why an artist has no photo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reason {
@@ -376,19 +402,108 @@ impl Tried {
     }
 }
 
-/// `_missing.json`: the artists tried with nothing found, by slug, and
-/// the day the desktop's backfill finished.
+/// A top-level key of `_missing.json` this build does not know, with its
+/// value's text exactly as the file had it and the known key it followed
+/// (none at the start of the file).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Extra {
+    after: Option<&'static str>,
+    key: String,
+    text: String,
+}
+
+/// The top-level keys this build reads and writes, in the order it writes
+/// them.
+const KNOWN: [&str; 5] = ["version", "backfilled", "photo_size", "picked", "artists"];
+
+/// `_missing.json`: the artists tried with nothing found, by slug, the
+/// day the desktop's backfill finished, the size photos are fetched at
+/// and the artists whose photo the owner chose.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Missing {
     /// Written by the backfill's last batch; the phone fetches nothing
     /// until it is there.
     pub backfilled: Option<Date>,
+    /// The side new photos are fetched at, written by the first batch of
+    /// the sharper photos; `PHOTO_SIDE` while it is not there.
+    pub photo_size: Option<u32>,
+    /// The slugs of the artists whose photo the owner picked or
+    /// uploaded: never replaced by a fetch.
+    pub picked: BTreeSet<String>,
     pub artists: BTreeMap<String, Tried>,
+    /// What this build does not know, written back as it was read.
+    extra: Vec<Extra>,
+}
+
+/// The top-level keys of the JSON object `text` (valid JSON), each with
+/// the text of its value as written. A key written twice keeps its first
+/// place and its last value, as a JSON reader would have it.
+fn top_level(text: &str) -> Vec<(String, &str)> {
+    let bytes = text.as_bytes();
+    let past = |mut at: usize| {
+        while bytes.get(at).is_some_and(u8::is_ascii_whitespace) {
+            at += 1;
+        }
+        at
+    };
+    // `at` is a string's opening quote; the index after its closing one.
+    let after_string = |mut at: usize| {
+        at += 1;
+        while at < bytes.len() && bytes[at] != b'"' {
+            if bytes[at] == b'\\' {
+                at += 1;
+            }
+            at += 1;
+        }
+        (at + 1).min(bytes.len())
+    };
+    let mut out: Vec<(String, &str)> = Vec::new();
+    let mut at = text.find('{').map_or(bytes.len(), |open| open + 1);
+    loop {
+        at = past(at);
+        if bytes.get(at) != Some(&b'"') {
+            break;
+        }
+        let key_end = after_string(at);
+        let Ok(key) = serde_json::from_str::<String>(&text[at..key_end]) else {
+            break;
+        };
+        // Past the colon.
+        at = past(past(key_end) + 1);
+        let start = at;
+        let mut depth = 0usize;
+        while at < bytes.len() {
+            match bytes[at] {
+                b'"' => {
+                    at = after_string(at);
+                    continue;
+                }
+                b'{' | b'[' => depth += 1,
+                b'}' | b']' if depth == 0 => break,
+                b'}' | b']' => depth -= 1,
+                b',' if depth == 0 => break,
+                _ => {}
+            }
+            at += 1;
+        }
+        let value = text[start..at.min(bytes.len())].trim_end();
+        match out.iter_mut().find(|(known, _)| *known == key) {
+            Some(slot) => slot.1 = value,
+            None => out.push((key, value)),
+        }
+        if bytes.get(at) == Some(&b',') {
+            at += 1;
+        }
+    }
+    out
 }
 
 impl Missing {
     /// Reads the file. Anything but version 1 in the shape below is an
-    /// error, and such a file is left as it is.
+    /// error, and such a file is left as it is. A top-level key this
+    /// build does not know is kept with its value as written (`extra`),
+    /// and so is a `photo_size` that is no positive number or a `picked`
+    /// that is no list of slugs.
     pub fn decode(text: &str) -> Result<Missing, String> {
         let json: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
         if json["version"].as_i64() != Some(MISSING_VERSION) {
@@ -404,6 +519,17 @@ impl Missing {
             None | Some(serde_json::Value::Null) => None,
             Some(value) => Some(date(value, "backfilled")?),
         };
+        let photo_size = json
+            .get("photo_size")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|side| u32::try_from(side).ok())
+            .filter(|side| *side > 0);
+        let picked: Option<BTreeSet<String>> = json.get("picked").and_then(|list| {
+            list.as_array()?
+                .iter()
+                .map(|slug| slug.as_str().map(str::to_owned))
+                .collect()
+        });
         let mut artists = BTreeMap::new();
         let listed = json["artists"].as_object().ok_or("no artists")?;
         for (slug, entry) in listed {
@@ -423,43 +549,95 @@ impl Missing {
                 },
             );
         }
+        let mut extra = Vec::new();
+        let mut after = None;
+        for (key, value) in top_level(text) {
+            let known = KNOWN.into_iter().find(|known| *known == key);
+            let understood = match known {
+                Some("photo_size") => photo_size.is_some(),
+                Some("picked") => picked.is_some(),
+                Some(_) => true,
+                None => false,
+            };
+            if !understood {
+                extra.push(Extra {
+                    after,
+                    key,
+                    text: value.to_owned(),
+                });
+            }
+            if known.is_some() {
+                after = known;
+            }
+        }
         Ok(Missing {
             backfilled,
+            photo_size,
+            picked: picked.unwrap_or_default(),
             artists,
+            extra,
         })
     }
 
     /// The file's bytes: two-space indent, `version`, then `backfilled`
-    /// when set, then `artists` with one artist per line in slug order
-    /// (by code unit; a slug is ASCII), each with `name`, `tried` and
-    /// `reason` in that order, and a newline at the end.
+    /// when set, `photo_size` when set, `picked` while it has a slug (one
+    /// per line, in order), then `artists` with one artist per line in
+    /// slug order (by code unit; a slug is ASCII), each with `name`,
+    /// `tried` and `reason` in that order, and a newline at the end.
+    /// Every key this build does not know keeps its value's text and its
+    /// place after the known key it followed.
     pub fn encode(&self) -> String {
         let quoted = |text: &str| serde_json::Value::from(text).to_string();
-        let mut out = format!("{{\n  \"version\": {MISSING_VERSION},\n");
-        if let Some(day) = self.backfilled {
-            out.push_str(&format!("  \"backfilled\": \"{day}\",\n"));
+        let mut parts: Vec<String> = Vec::new();
+        let extras = |parts: &mut Vec<String>, after: Option<&str>| {
+            for extra in self.extra.iter().filter(|extra| extra.after == after) {
+                parts.push(format!("  {}: {}", quoted(&extra.key), extra.text));
+            }
+        };
+        extras(&mut parts, None);
+        for key in KNOWN {
+            match key {
+                "version" => parts.push(format!("  \"version\": {MISSING_VERSION}")),
+                "backfilled" => {
+                    if let Some(day) = self.backfilled {
+                        parts.push(format!("  \"backfilled\": \"{day}\""));
+                    }
+                }
+                "photo_size" => {
+                    if let Some(side) = self.photo_size {
+                        parts.push(format!("  \"photo_size\": {side}"));
+                    }
+                }
+                "picked" if !self.picked.is_empty() => {
+                    let slugs: Vec<String> = self
+                        .picked
+                        .iter()
+                        .map(|slug| format!("    {}", quoted(slug)))
+                        .collect();
+                    parts.push(format!("  \"picked\": [\n{}\n  ]", slugs.join(",\n")));
+                }
+                "artists" if self.artists.is_empty() => parts.push("  \"artists\": {}".into()),
+                "artists" => {
+                    let lines: Vec<String> = self
+                        .artists
+                        .iter()
+                        .map(|(slug, tried)| {
+                            format!(
+                                "    {}: {{\"name\": {}, \"tried\": \"{}\", \"reason\": \"{}\"}}",
+                                quoted(slug),
+                                quoted(&tried.name),
+                                tried.tried,
+                                tried.reason.key()
+                            )
+                        })
+                        .collect();
+                    parts.push(format!("  \"artists\": {{\n{}\n  }}", lines.join(",\n")));
+                }
+                _ => {}
+            }
+            extras(&mut parts, Some(key));
         }
-        if self.artists.is_empty() {
-            out.push_str("  \"artists\": {}\n}\n");
-            return out;
-        }
-        out.push_str("  \"artists\": {\n");
-        let lines: Vec<String> = self
-            .artists
-            .iter()
-            .map(|(slug, tried)| {
-                format!(
-                    "    {}: {{\"name\": {}, \"tried\": \"{}\", \"reason\": \"{}\"}}",
-                    quoted(slug),
-                    quoted(&tried.name),
-                    tried.tried,
-                    tried.reason.key()
-                )
-            })
-            .collect();
-        out.push_str(&lines.join(",\n"));
-        out.push_str("\n  }\n}\n");
-        out
+        format!("{{\n{}\n}}\n", parts.join(",\n"))
     }
 
     /// Whether Apple is asked about the artist with `slug` on `today`:
@@ -482,6 +660,13 @@ pub enum MissingEdit {
     Remove { slug: String },
     /// The backfill finished on this day.
     Backfilled(Date),
+    /// The owner picked or uploaded the artist's photo.
+    Pick { slug: String },
+    /// Use automatic, or the suggested photo picked again: the photo is
+    /// no longer the owner's own choice.
+    Unpick { slug: String },
+    /// New photos are fetched at this side from now on.
+    PhotoSize(u32),
 }
 
 impl MissingEdit {
@@ -495,6 +680,9 @@ impl MissingEdit {
             }),
             MissingEdit::Remove { slug } => serde_json::json!({"remove": slug}),
             MissingEdit::Backfilled(day) => serde_json::json!({"backfilled": day.to_string()}),
+            MissingEdit::Pick { slug } => serde_json::json!({"pick": slug}),
+            MissingEdit::Unpick { slug } => serde_json::json!({"unpick": slug}),
+            MissingEdit::PhotoSize(side) => serde_json::json!({"photo_size": side}),
         }
     }
 
@@ -513,6 +701,18 @@ impl MissingEdit {
             return Some(MissingEdit::Remove {
                 slug: slug.to_owned(),
             });
+        }
+        for (key, edit) in [("pick", true), ("unpick", false)] {
+            if let Some(slug) = json[key].as_str() {
+                let slug = slug.to_owned();
+                return Some(match edit {
+                    true => MissingEdit::Pick { slug },
+                    false => MissingEdit::Unpick { slug },
+                });
+            }
+        }
+        if let Some(side) = json["photo_size"].as_u64() {
+            return u32::try_from(side).ok().map(MissingEdit::PhotoSize);
         }
         json["backfilled"]
             .as_str()
@@ -534,6 +734,16 @@ impl Missing {
             MissingEdit::Backfilled(day) => {
                 self.backfilled.get_or_insert(*day);
             }
+            MissingEdit::Pick { slug } => {
+                self.picked.insert(slug.clone());
+            }
+            MissingEdit::Unpick { slug } => {
+                self.picked.remove(slug);
+            }
+            // The first size stands, like the day.
+            MissingEdit::PhotoSize(side) => {
+                self.photo_size.get_or_insert(*side);
+            }
         }
     }
 
@@ -541,7 +751,9 @@ impl Missing {
     /// without the artists that have a file (`has_file`, by slug) or are
     /// no longer in the library (`in_library`, by slug): an entry leaves
     /// when a file for the artist appears, whoever put it there, or when
-    /// no entry names the artist any more, and for no other reason.
+    /// no entry names the artist any more, and for no other reason. The
+    /// other way round for `picked`: a slug stays only while the artist
+    /// has a file and is in the library.
     pub fn merged(
         mut self,
         edits: &[MissingEdit],
@@ -553,7 +765,14 @@ impl Missing {
         }
         self.artists
             .retain(|slug, _| !has_file(slug) && in_library(slug));
+        self.picked
+            .retain(|slug| has_file(slug) && in_library(slug));
         self
+    }
+
+    /// The side a new photo is fetched at.
+    pub fn photo_side(&self) -> u32 {
+        self.photo_size.unwrap_or(PHOTO_SIDE)
     }
 }
 
@@ -579,6 +798,25 @@ pub fn merged_missing(
     }
     let text = merged.encode();
     Ok((theirs != Some(text.as_str())).then_some(text))
+}
+
+/// The record's `picked` list once `edits` are merged into the repo's
+/// copy (`theirs`): the artists whose photo a sharper copy must leave
+/// alone. Slugs without a file are still on it here, which only errs on
+/// the side of leaving a photo alone. An error for a copy that cannot be
+/// read.
+pub fn picked_after(
+    theirs: Option<&str>,
+    edits: &[MissingEdit],
+) -> Result<BTreeSet<String>, String> {
+    let mut record = match theirs {
+        Some(text) => Missing::decode(text)?,
+        None => Missing::default(),
+    };
+    for edit in edits {
+        record.apply(edit);
+    }
+    Ok(record.picked)
 }
 
 /// The slug of an artist's file at `path` under `covers/`:
@@ -803,8 +1041,53 @@ mod tests {
     }
 
     #[test]
+    fn the_size_and_the_picked_list_have_one_form() {
+        for case in cases("picked") {
+            let written = text(&case, "text");
+            let missing = Missing::decode(written).unwrap_or_else(|e| panic!("{e}: {case}"));
+            assert_eq!(missing.encode(), written, "{case}");
+            assert_eq!(
+                missing.photo_size.map(u64::from),
+                case["photo_size"].as_u64(),
+                "{case}"
+            );
+            let picked: Vec<&str> = missing.picked.iter().map(String::as_str).collect();
+            assert_eq!(picked, strings(&case, "picked"), "{case}");
+            assert_eq!(
+                missing.photo_side(),
+                case["photo_size"].as_u64().map_or(PHOTO_SIDE, |s| s as u32)
+            );
+        }
+        for case in cases("picked_rewritten") {
+            let missing = Missing::decode(text(&case, "read")).expect("readable");
+            assert_eq!(missing.encode(), text(&case, "written"), "{case}");
+        }
+        // A size or a list this build cannot read is kept as it is, like
+        // a key it does not know.
+        let odd = "{\n  \"version\": 1,\n  \"photo_size\": \"large\",\n  \"picked\": {\"a\": 1},\n  \"artists\": {}\n}\n";
+        let missing = Missing::decode(odd).expect("readable");
+        assert_eq!((missing.photo_size, missing.picked.len()), (None, 0));
+        assert_eq!(missing.encode(), odd);
+    }
+
+    #[test]
+    fn a_photo_is_fetched_at_the_side_asked_for() {
+        for case in cases("photo_at") {
+            let side = case["side"].as_u64().unwrap() as u32;
+            assert_eq!(
+                photo_at(text(&case, "url"), side),
+                text(&case, "at"),
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
     fn the_missing_file_is_merged_per_artist() {
-        for case in cases("missing_merge") {
+        for case in cases("missing_merge")
+            .into_iter()
+            .chain(cases("picked_merge"))
+        {
             let edits: Vec<MissingEdit> = case["edits"]
                 .as_array()
                 .unwrap()

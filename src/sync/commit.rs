@@ -20,12 +20,16 @@
 //! `artists/_missing.json` is never sent whole: the queued edits are
 //! merged per artist into the repo's copy as it is when the commit is
 //! made (`covers::artists::merged_missing`), and an artist who got a
-//! file or left the library leaves the record there. `settings.json`
+//! file or left the library leaves the record there. Its `picked` list
+//! goes the same way, per slug; a pick that is dropped takes its edit to
+//! the list with it, and a photo fetched again at a sharper size
+//! (`Change::Sharpen`) is dropped when the list, as the commit finds it,
+//! has the artist. `settings.json`
 //! beside the library goes the same way: its queued edits are made on
 //! the repo's copy as it is then (`shared::merged`), so a change made on
 //! the phone meanwhile is kept.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
 use crate::connection::Target;
@@ -63,6 +67,9 @@ pub struct Plan {
     /// The edits to `settings.json` beside the library, merged like the
     /// missing record's.
     pub settings: Vec<shared::Edit>,
+    /// The paths in the repo, among `edits`, of the photos fetched again
+    /// at a sharper size: each still has to pass `keep_picked`.
+    pub sharper: Vec<String>,
 }
 
 /// A commit made, or found to be made already, and what it dropped.
@@ -112,6 +119,10 @@ pub fn plan_guarded(
                 ends.insert(full(path), None);
                 guards.insert(full(path), change);
             }
+            Change::Sharpen { path, .. } => {
+                ends.insert(full(path), Some(Edit::Upload(path.clone())));
+                guards.insert(full(path), change);
+            }
             Change::Missing(edit) => missing.push(edit.clone()),
             Change::Settings(edit) => settings.push(edit.clone()),
             Change::Upload { path } => {
@@ -142,6 +153,7 @@ pub fn plan_guarded(
         }
     }
     let mut dropped = Vec::new();
+    let mut sharper = Vec::new();
     for (at, change) in guards {
         let current = there.get(at.as_str()).map(|sha| (*sha).to_owned());
         let (path, made, picked) = match change {
@@ -153,9 +165,20 @@ pub fn plan_guarded(
             Change::Remove { path, seen } => {
                 (path, current.is_none() || seen.contains(&current), true)
             }
+            // Only over a photo that is there: a sharper copy never
+            // brings back a file that was removed.
+            Change::Sharpen { path, seen } => (
+                path,
+                current.is_some() && (seen.contains(&current) || local_sha(path) == current),
+                false,
+            ),
             _ => continue,
         };
-        if !made {
+        if made {
+            if matches!(change, Change::Sharpen { .. }) {
+                sharper.push(at);
+            }
+        } else {
             ends.remove(&at);
             dropped.push(Dropped {
                 path: path.clone(),
@@ -164,6 +187,19 @@ pub fn plan_guarded(
         }
     }
     dropped.sort_by(|a, b| a.path.cmp(&b.path));
+    sharper.sort();
+    // A pick or a Use automatic that was not made says nothing about
+    // GitHub's file: its edit to the `picked` list goes with it.
+    let dropped_slugs: Vec<&str> = dropped
+        .iter()
+        .filter_map(|file| artists::slug_of_path(&file.path))
+        .collect();
+    missing.retain(|edit| match edit {
+        MissingEdit::Pick { slug } | MissingEdit::Unpick { slug } => {
+            !dropped_slugs.contains(&slug.as_str())
+        }
+        _ => true,
+    });
     let mut edits: Vec<(String, Edit)> = ends
         .into_iter()
         .filter_map(|(path, end)| match end {
@@ -180,7 +216,38 @@ pub fn plan_guarded(
         dropped,
         missing,
         settings,
+        sharper,
     }
+}
+
+/// Takes the sharper photos of the artists on `picked` out of the plan:
+/// `picked` is the record's list as this commit leaves it, or `None` when
+/// the record could not be read, which replaces nobody's photo. Their
+/// uploads go to `dropped`, so GitHub's file stands and is fetched again.
+pub fn keep_picked(plan: &mut Plan, root: &str, picked: Option<&BTreeSet<String>>) {
+    let kept: Vec<String> = std::mem::take(&mut plan.sharper)
+        .into_iter()
+        .filter(|at| {
+            let path = at
+                .strip_prefix(root)
+                .and_then(|rest| rest.strip_prefix('/'))
+                .unwrap_or(at);
+            let on_list = match (picked, artists::slug_of_path(path)) {
+                (Some(picked), Some(slug)) => picked.contains(slug),
+                _ => true,
+            };
+            if on_list {
+                plan.edits.retain(|(edit_at, _)| edit_at != at);
+                plan.dropped.push(Dropped {
+                    path: path.to_owned(),
+                    picked: false,
+                });
+            }
+            !on_list
+        })
+        .collect();
+    plan.sharper = kept;
+    plan.dropped.sort_by(|a, b| a.path.cmp(&b.path));
 }
 
 /// `_missing.json` as the commit writes it, or `None` to leave it:
@@ -261,8 +328,7 @@ pub fn run(
         let bytes = std::fs::read(covers_dir?.join(path)).ok()?;
         Some(blob_sha(&bytes))
     };
-    let plan = plan_guarded(&tree, &root, changes, &local_sha);
-    let dropped = plan.dropped;
+    let mut plan = plan_guarded(&tree, &root, changes, &local_sha);
     let at = format!("{root}/{}", artists::missing_path());
     let listed = tree.iter().any(|file| file.path == at);
     if !plan.missing.is_empty() || (listed && adds_photo(&root, &plan.edits)) {
@@ -271,6 +337,12 @@ pub fn run(
             false => None,
         };
         let theirs = theirs.as_ref().map(|raw| raw.text().unwrap_or("not UTF-8"));
+        // The photos the owner chose, on any device, are never replaced
+        // by a sharper copy.
+        if !plan.sharper.is_empty() {
+            let picked = artists::picked_after(theirs, &plan.missing);
+            keep_picked(&mut plan, &root, picked.as_ref().ok());
+        }
         // The library as this commit leaves it: the one it carries, else
         // the branch's. One that cannot be read drops nobody.
         let slugs = match library {
@@ -309,6 +381,7 @@ pub fn run(
             }
         }
     }
+    let dropped = plan.dropped;
     for (path, edit) in plan.edits {
         match edit {
             Edit::Delete => edits.push((path, TreeEdit::Delete)),
@@ -519,6 +592,95 @@ mod tests {
         assert_eq!(
             plan_guarded(&[], "covers", &undone, &|_| None),
             Plan::default()
+        );
+    }
+
+    fn sharpen(path: &str, seen: &[Option<&str>]) -> Change {
+        Change::Sharpen {
+            path: path.into(),
+            seen: seen.iter().map(|sha| sha.map(str::to_owned)).collect(),
+        }
+    }
+
+    #[test]
+    fn a_sharper_photo_never_replaces_a_picked_one() {
+        let there = tree(&[
+            ("library.json", "lib"),
+            ("covers/artists/adele.jpg", "a1"),
+            ("covers/artists/burial.jpg", "b1"),
+            ("covers/artists/dido.jpg", "new"),
+        ]);
+        let changes = [
+            sharpen("artists/adele.jpg", &[Some("a1")]),
+            sharpen("artists/burial.jpg", &[Some("b1")]),
+            // Removed meanwhile, and replaced meanwhile: neither is made.
+            sharpen("artists/can.jpg", &[Some("c1")]),
+            sharpen("artists/dido.jpg", &[Some("old")]),
+        ];
+        let plan = plan_guarded(&there, "covers", &changes, &|_| Some("mine".into()));
+        assert_eq!(
+            plan.sharper,
+            ["covers/artists/adele.jpg", "covers/artists/burial.jpg"]
+        );
+        let paths =
+            |plan: &Plan| -> Vec<String> { plan.dropped.iter().map(|d| d.path.clone()).collect() };
+        assert_eq!(paths(&plan), ["artists/can.jpg", "artists/dido.jpg"]);
+        assert!(plan.dropped.iter().all(|dropped| !dropped.picked));
+
+        // The phone put Burial on the list after this computer looked.
+        let theirs =
+            "{\n  \"version\": 1,\n  \"picked\": [\n    \"burial\"\n  ],\n  \"artists\": {}\n}\n";
+        let mut kept = plan.clone();
+        let picked = artists::picked_after(Some(theirs), &kept.missing).unwrap();
+        keep_picked(&mut kept, "covers", Some(&picked));
+        assert_eq!(
+            kept.edits,
+            [(
+                "covers/artists/adele.jpg".to_owned(),
+                Edit::Upload("artists/adele.jpg".into())
+            )]
+        );
+        assert_eq!(
+            paths(&kept),
+            ["artists/burial.jpg", "artists/can.jpg", "artists/dido.jpg"]
+        );
+        // A pick queued here counts before it is on GitHub.
+        let queued = [MissingEdit::Pick {
+            slug: "adele".into(),
+        }];
+        let picked = artists::picked_after(Some(theirs), &queued).unwrap();
+        let mut none = plan.clone();
+        keep_picked(&mut none, "covers", Some(&picked));
+        assert!(none.edits.is_empty(), "{none:?}");
+        // A record that cannot be read replaces nobody's photo.
+        assert!(artists::picked_after(Some("not json"), &[]).is_err());
+        let mut unread = plan;
+        keep_picked(&mut unread, "covers", None);
+        assert!(unread.edits.is_empty() && unread.sharper.is_empty());
+    }
+
+    #[test]
+    fn a_dropped_pick_is_not_put_on_the_picked_list() {
+        let pick = |slug: &str| {
+            Change::Missing(MissingEdit::Pick {
+                slug: slug.to_owned(),
+            })
+        };
+        let changes = [
+            put("artists/adele.jpg", &[None], true),
+            pick("adele"),
+            put("artists/burial.jpg", &[None], true),
+            pick("burial"),
+        ];
+        // Another device put a photo of Adele there first.
+        let there = tree(&[(ADELE, "theirs")]);
+        let plan = plan_guarded(&there, "covers", &changes, &|_| Some("mine".into()));
+        assert_eq!(plan.dropped.len(), 1);
+        assert_eq!(
+            plan.missing,
+            [MissingEdit::Pick {
+                slug: "burial".into()
+            }]
         );
     }
 

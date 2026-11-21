@@ -182,10 +182,16 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
             }
         }
         Message::Choices { name, result } => {
+            let side = app.covers.missing().photo_side();
             if let Some(view) = view_mut(app, &name) {
                 view.loading = false;
                 match result {
-                    Ok(choices) => view.choices = Some(choices),
+                    Ok(mut choices) => {
+                        // At the size photos are fetched at by now.
+                        choices.suggested =
+                            choices.suggested.map(|url| artists::photo_at(&url, side));
+                        view.choices = Some(choices);
+                    }
                     Err(error) => {
                         eprintln!("libri: no photos of {name} from Apple: {error}");
                         view.failed = true;
@@ -200,6 +206,7 @@ pub fn update(app: &mut App, message: Message) -> Task<AppMessage> {
         }
         Message::ShowOthers => return show_others(app),
         Message::OtherFound { name, other, url } => {
+            let url = artists::photo_at(&url, app.covers.missing().photo_side());
             if let Some(view) = view_mut(app, &name)
                 && !view.others.iter().any(|(known, _)| known.id == other.id)
             {

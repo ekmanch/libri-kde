@@ -334,6 +334,19 @@ fn photos_row<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
     .spacing(12)
     .align_y(Center);
     let mut content = Column::new().spacing(10).push(line);
+    // The photos the sharper run left alone because this computer and
+    // the commit history said different things about them.
+    if !app.photos.disagreed.is_empty() && app.photos.look.is_none() {
+        content = content.push(
+            text(format!(
+                "Counted as yours, since this computer and the commit history disagree: {}.",
+                app.photos.disagreed.join(", ")
+            ))
+            .size(12.5)
+            .line_height(1.45)
+            .color(tokens.sub),
+        );
+    }
     if let Some(progress) = state.progress() {
         content = content.push(
             iced::widget::progress_bar(0.0..=1.0, progress)

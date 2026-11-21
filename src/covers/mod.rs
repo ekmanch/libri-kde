@@ -254,6 +254,14 @@ pub enum Change {
         path: String,
         seen: Vec<Option<String>>,
     },
+    /// An artist's photo fetched again at a sharper size, over the one
+    /// there: made like a `Put` of a photo nobody picked, and besides
+    /// only while the artist is not on the record's `picked` list as the
+    /// commit finds it.
+    Sharpen {
+        path: String,
+        seen: Vec<Option<String>>,
+    },
     /// An edit to `artists/_missing.json`, merged per artist into the
     /// repo's copy when the commit is made.
     Missing(MissingEdit),
@@ -274,6 +282,9 @@ impl Change {
             }
             Change::Remove { path, seen } => {
                 json!({"change": "remove", "path": path, "seen": seen})
+            }
+            Change::Sharpen { path, seen } => {
+                json!({"change": "sharpen", "path": path, "seen": seen})
             }
             Change::Missing(edit) => {
                 let mut json = edit.to_json();
@@ -315,6 +326,10 @@ impl Change {
                 path: path()?,
                 seen: seen()?,
             }),
+            "sharpen" => Some(Change::Sharpen {
+                path: path()?,
+                seen: seen()?,
+            }),
             "missing" => MissingEdit::from_json(json).map(Change::Missing),
             "settings" => crate::shared::Edit::from_json(json).map(Change::Settings),
             _ => None,
@@ -324,7 +339,9 @@ impl Change {
     /// The fixed-name path the change writes or deletes on a condition.
     pub fn guarded_path(&self) -> Option<&str> {
         match self {
-            Change::Put { path, .. } | Change::Remove { path, .. } => Some(path),
+            Change::Put { path, .. }
+            | Change::Remove { path, .. }
+            | Change::Sharpen { path, .. } => Some(path),
             _ => None,
         }
     }
@@ -527,6 +544,23 @@ impl Covers {
         (self.have.get(path) == Some(sha)).then_some(*kind)
     }
 
+    /// How the photo of the artist with `slug` came to be, when this
+    /// computer remembers it.
+    pub fn kind_of_slug(&self, slug: &str) -> Option<PhotoKind> {
+        self.kind(&format!("{}/{slug}.jpg", artists::FOLDER))
+    }
+
+    /// Whether the artist's photo is the owner's own choice as far as
+    /// this computer knows: on the record's `picked` list (with the
+    /// queued edits), or remembered here as picked or uploaded.
+    pub fn is_picked(&self, slug: &str) -> bool {
+        self.missing.picked.contains(slug)
+            || matches!(
+                self.kind_of_slug(slug),
+                Some(PhotoKind::Picked | PhotoKind::Uploaded)
+            )
+    }
+
     /// The blobs a fixed-name path may hold on GitHub when a change made
     /// now is pushed: what GitHub listed, the copy on this computer, and
     /// what the changes still queued for the path allowed.
@@ -542,7 +576,8 @@ impl Covers {
             if let Change::Put {
                 path: at, seen: s, ..
             }
-            | Change::Remove { path: at, seen: s } = change
+            | Change::Remove { path: at, seen: s }
+            | Change::Sharpen { path: at, seen: s } = change
                 && at == path
             {
                 seen.extend(s.iter().cloned());
@@ -672,7 +707,7 @@ impl Covers {
 
     fn apply_to(&self, files: &mut Vec<File>, change: &Change) {
         match change {
-            Change::Upload { path } | Change::Put { path, .. } => {
+            Change::Upload { path } | Change::Put { path, .. } | Change::Sharpen { path, .. } => {
                 files.retain(|file| file.path != *path);
                 let size = self
                     .local_path(path)
@@ -725,7 +760,10 @@ impl Covers {
     /// (the library is kept on this computer), so GitHub's list follows.
     pub fn apply(&mut self, change: &Change, settled: bool) {
         match change {
-            Change::Upload { .. } | Change::Put { .. } | Change::Settings(_) => {}
+            Change::Upload { .. }
+            | Change::Put { .. }
+            | Change::Sharpen { .. }
+            | Change::Settings(_) => {}
             Change::Delete { path } | Change::Remove { path, .. } => {
                 if let Some(local) = self.local_path(path) {
                     let _ = crate::storage::remove_if_exists(&local);
@@ -771,6 +809,10 @@ impl Covers {
         self.missing
             .artists
             .retain(|slug, _| !with_file.contains(slug.as_str()));
+        // And only an artist with a file has a picked photo.
+        self.missing
+            .picked
+            .retain(|slug| with_file.contains(slug.as_str()));
         self.save();
     }
 

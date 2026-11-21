@@ -381,12 +381,23 @@
       "text": "{\n  \"version\": 1,\n  \"backfilled\": \"2026-11-16\",\n  \"artists\": {\n    \"ac-dc\": {\"name\": \"AC/DC\", \"tried\": \"2026-11-15\", \"reason\": \"no-photo\"},\n    \"acdc\": {\"name\": \"ACDC\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"},\n    \"sigur-ros\": {\"name\": \"Sigur Rós\", \"tried\": \"2026-11-16\", \"reason\": \"no-match\"},\n    \"the-quote-band\": {\"name\": \"The \\\"Quote\\\" Band\", \"tried\": \"2026-11-16\", \"reason\": \"no-photo\"}\n  }\n}\n",
       "backfilled": "2026-11-16",
       "slugs": ["ac-dc", "acdc", "sigur-ros", "the-quote-band"]
+    },
+    {
+      "about": "Top-level keys a build does not know are written back with their value's text exactly as read, each after the known key it followed.",
+      "text": "{\n  \"first\": true,\n  \"version\": 1,\n  \"backfilled\": \"2026-11-15\",\n  \"zebra\": [\n    1,\n    \"}, ]\"\n  ],\n  \"artists\": {\n    \"abba\": {\"name\": \"ABBA\", \"tried\": \"2026-11-16\", \"reason\": \"no-photo\"}\n  },\n  \"later\": {\"a\": [1, \"}, ]\"], \"b\": null}\n}\n",
+      "backfilled": "2026-11-15",
+      "slugs": ["abba"]
     }
   ],
   "missing_rewritten": [
     {
       "read": "{\"artists\":{\"b\":{\"reason\":\"no-photo\",\"tried\":\"2026-11-15\",\"name\":\"B\"},\"a\":{\"name\":\"A\",\"tried\":\"2026-11-14\",\"reason\":\"no-match\"}},\"backfilled\":null,\"version\":1}",
       "written": "{\n  \"version\": 1,\n  \"artists\": {\n    \"a\": {\"name\": \"A\", \"tried\": \"2026-11-14\", \"reason\": \"no-match\"},\n    \"b\": {\"name\": \"B\", \"tried\": \"2026-11-15\", \"reason\": \"no-photo\"}\n  }\n}\n"
+    },
+    {
+      "about": "Unknown keys in a file in another order: the known keys take their fixed order, and each unknown key stays after the known key it followed (before all of them when it followed none).",
+      "read": "{\"extra\":{\"x\":1},\"artists\":{},\"mid\": [1,2] ,\"version\":1,\"tail\":\"t\"}",
+      "written": "{\n  \"extra\": {\"x\":1},\n  \"version\": 1,\n  \"tail\": \"t\",\n  \"artists\": {},\n  \"mid\": [1,2]\n}\n"
     }
   ],
   "missing_refused": [
@@ -442,7 +453,92 @@
     {
       "about": "A file that cannot be read is left as it is.",
       "theirs": "{\"version\": 2, \"artists\": {}}", "edits": [{"set": "burial", "name": "Burial", "tried": "2026-11-16", "reason": "no-photo"}], "files": [], "refused": true
+    },
+    {
+      "about": "Unknown keys survive an edit merged into the file.",
+      "theirs": "{\n  \"first\": true,\n  \"version\": 1,\n  \"backfilled\": \"2026-11-15\",\n  \"zebra\": [\n    1,\n    \"}, ]\"\n  ],\n  \"artists\": {\n    \"abba\": {\"name\": \"ABBA\", \"tried\": \"2026-11-16\", \"reason\": \"no-photo\"}\n  },\n  \"later\": {\"a\": [1, \"}, ]\"], \"b\": null}\n}\n", "edits": [{"set": "zz-top", "name": "ZZ Top", "tried": "2026-11-21", "reason": "no-match"}], "files": ["abba"], "written": "{\n  \"first\": true,\n  \"version\": 1,\n  \"backfilled\": \"2026-11-15\",\n  \"zebra\": [\n    1,\n    \"}, ]\"\n  ],\n  \"artists\": {\n    \"zz-top\": {\"name\": \"ZZ Top\", \"tried\": \"2026-11-21\", \"reason\": \"no-match\"}\n  },\n  \"later\": {\"a\": [1, \"}, ]\"], \"b\": null}\n}\n"
+    },
+    {
+      "about": "The last artist leaving keeps the unknown keys too.",
+      "theirs": "{\n  \"first\": true,\n  \"version\": 1,\n  \"backfilled\": \"2026-11-15\",\n  \"zebra\": [\n    1,\n    \"}, ]\"\n  ],\n  \"artists\": {\n    \"abba\": {\"name\": \"ABBA\", \"tried\": \"2026-11-16\", \"reason\": \"no-photo\"}\n  },\n  \"later\": {\"a\": [1, \"}, ]\"], \"b\": null}\n}\n", "edits": [], "files": ["abba"], "written": "{\n  \"first\": true,\n  \"version\": 1,\n  \"backfilled\": \"2026-11-15\",\n  \"zebra\": [\n    1,\n    \"}, ]\"\n  ],\n  \"artists\": {},\n  \"later\": {\"a\": [1, \"}, ]\"], \"b\": null}\n}\n"
     }
+  ],
+  "picked": [
+    {
+      "about": "photo_size and picked in the one form: after backfilled and before artists, picked with one slug per line in order (by code unit) and left out while empty. Same checks as 'missing', with the size and the list.",
+      "text": "{\n  \"version\": 1,\n  \"backfilled\": \"2026-11-15\",\n  \"photo_size\": 1200,\n  \"picked\": [\n    \"adele\",\n    \"cat-stevens-yusuf\"\n  ],\n  \"artists\": {}\n}\n",
+      "backfilled": "2026-11-15",
+      "slugs": [],
+      "photo_size": 1200,
+      "picked": ["adele", "cat-stevens-yusuf"]
+    },
+    {
+      "about": "Neither key: the size is 640 and nobody is picked.",
+      "text": "{\n  \"version\": 1,\n  \"artists\": {}\n}\n",
+      "backfilled": null,
+      "slugs": [],
+      "photo_size": null,
+      "picked": []
+    }
+  ],
+  "picked_rewritten": [
+    {
+      "about": "Another order, another layout and an empty list read the same and are written in the one form.",
+      "read": "{\"artists\":{},\"picked\":[\"b\",\"a\",\"b\"],\"photo_size\":1200,\"version\":1}",
+      "written": "{\n  \"version\": 1,\n  \"photo_size\": 1200,\n  \"picked\": [\n    \"a\",\n    \"b\"\n  ],\n  \"artists\": {}\n}\n"
+    },
+    {
+      "read": "{\"version\":1,\"picked\":[],\"artists\":{}}",
+      "written": "{\n  \"version\": 1,\n  \"artists\": {}\n}\n"
+    }
+  ],
+  "picked_merge": [
+    {
+      "about": "Same shape as 'missing_merge', with the edits {pick}, {unpick} and {photo_size}. A pick makes the file.",
+      "theirs": null, "edits": [{"pick": "adele"}], "files": ["adele"], "written": "{\n  \"version\": 1,\n  \"picked\": [\n    \"adele\"\n  ],\n  \"artists\": {}\n}\n"
+    },
+    {
+      "about": "A slug another device added meanwhile is kept: the list is merged per slug, never replaced whole.",
+      "theirs": "{\n  \"version\": 1,\n  \"photo_size\": 1200,\n  \"picked\": [\n    \"burial\"\n  ],\n  \"artists\": {}\n}\n", "edits": [{"pick": "adele"}], "files": ["adele", "burial"], "written": "{\n  \"version\": 1,\n  \"photo_size\": 1200,\n  \"picked\": [\n    \"adele\",\n    \"burial\"\n  ],\n  \"artists\": {}\n}\n"
+    },
+    {
+      "about": "Use automatic takes the slug off.",
+      "theirs": "{\n  \"version\": 1,\n  \"picked\": [\n    \"adele\",\n    \"burial\"\n  ],\n  \"artists\": {}\n}\n", "edits": [{"unpick": "adele"}], "files": ["burial"], "written": "{\n  \"version\": 1,\n  \"picked\": [\n    \"burial\"\n  ],\n  \"artists\": {}\n}\n"
+    },
+    {
+      "about": "A slug whose artist has no file is dropped at the next write, and never added.",
+      "theirs": "{\n  \"version\": 1,\n  \"picked\": [\n    \"adele\",\n    \"burial\"\n  ],\n  \"artists\": {}\n}\n", "edits": [{"pick": "can"}], "files": ["burial"], "written": "{\n  \"version\": 1,\n  \"picked\": [\n    \"burial\"\n  ],\n  \"artists\": {}\n}\n"
+    },
+    {
+      "about": "The last slug leaving takes the key with it.",
+      "theirs": "{\n  \"version\": 1,\n  \"picked\": [\n    \"burial\"\n  ],\n  \"artists\": {}\n}\n", "edits": [], "files": [], "written": "{\n  \"version\": 1,\n  \"artists\": {}\n}\n"
+    },
+    {
+      "about": "A slug whose artist is no longer in the library is dropped at the next write.",
+      "theirs": "{\n  \"version\": 1,\n  \"picked\": [\n    \"adele\",\n    \"burial\"\n  ],\n  \"artists\": {}\n}\n", "edits": [], "files": ["adele", "burial"], "library": ["burial"], "written": "{\n  \"version\": 1,\n  \"picked\": [\n    \"burial\"\n  ],\n  \"artists\": {}\n}\n"
+    },
+    {
+      "about": "Picking for an artist tried with nothing found: on the list, and off the record with the file.",
+      "theirs": "{\n  \"version\": 1,\n  \"artists\": {\n    \"adele\": {\"name\": \"Adele\", \"tried\": \"2026-11-15\", \"reason\": \"no-match\"}\n  }\n}\n", "edits": [{"pick": "adele"}], "files": ["adele"], "written": "{\n  \"version\": 1,\n  \"picked\": [\n    \"adele\"\n  ],\n  \"artists\": {}\n}\n"
+    },
+    {
+      "about": "photo_size is written once and the first size stands.",
+      "theirs": "{\n  \"version\": 1,\n  \"backfilled\": \"2026-11-15\",\n  \"artists\": {}\n}\n", "edits": [{"photo_size": 1200}, {"photo_size": 2000}], "files": [], "written": "{\n  \"version\": 1,\n  \"backfilled\": \"2026-11-15\",\n  \"photo_size\": 1200,\n  \"artists\": {}\n}\n"
+    },
+    {
+      "about": "Nothing changes: nothing is written.",
+      "theirs": "{\n  \"version\": 1,\n  \"photo_size\": 1200,\n  \"picked\": [\n    \"adele\",\n    \"burial\"\n  ],\n  \"artists\": {}\n}\n", "edits": [{"pick": "adele"}, {"photo_size": 1200}, {"unpick": "can"}], "files": ["adele", "burial"], "written": null
+    },
+    {
+      "about": "No file in the repo yet and a pick for an artist without a file: none is made.",
+      "theirs": null, "edits": [{"pick": "adele"}], "files": [], "written": null
+    }
+  ],
+  "photo_at": [
+    {"url": "https://is1-ssl.mzstatic.com/image/thumb/AMCArtistImages/v4/aa/bb/cc/photo.jpg/640x640cc.jpg", "side": 640, "at": "https://is1-ssl.mzstatic.com/image/thumb/AMCArtistImages/v4/aa/bb/cc/photo.jpg/640x640cc.jpg"},
+    {"url": "https://is1-ssl.mzstatic.com/image/thumb/AMCArtistImages/v4/aa/bb/cc/photo.jpg/640x640cc.jpg", "side": 1200, "at": "https://is1-ssl.mzstatic.com/image/thumb/AMCArtistImages/v4/aa/bb/cc/photo.jpg/1200x1200cc.jpg"},
+    {"url": "repo:artists/abba.jpg", "side": 1200, "at": "repo:artists/abba.jpg"},
+    {"url": "https://example.com/x640x640cc.jpg", "side": 1200, "at": "https://example.com/x640x640cc.jpg"}
   ],
   "due": [
     {"tried": "2026-11-15", "today": "2026-11-15", "added": null, "due": false},

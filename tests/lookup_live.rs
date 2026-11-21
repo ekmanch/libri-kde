@@ -327,7 +327,7 @@ fn apple_finds_an_artists_photo_and_tells_a_namesake_apart() {
         println!("  {} {} {}", namesake.id, namesake.name, namesake.page);
     }
     assert!(!namesakes.is_empty());
-    match apple.find("Massive Attack", &["Mezzanine".to_owned()], &[]) {
+    match apple.find("Massive Attack", &["Mezzanine".to_owned()], &[], 640) {
         Ok(Found::Photo(bytes)) => {
             let size = libri::lookup::store::image_size(&bytes);
             println!("photo: {} bytes, {size:?}", bytes.len());
@@ -340,7 +340,18 @@ fn apple_finds_an_artists_photo_and_tells_a_namesake_apart() {
         "Massive Attack",
         &["Not An Album Of Theirs".to_owned()],
         &[],
+        640,
     );
+    // The same photo once more at the sharper size, from the match and
+    // the address kept in memory: only the image is asked for.
+    match apple.sharper("Massive Attack", &["Mezzanine".to_owned()], &[], 1200) {
+        Ok(Some(bytes)) => {
+            let size = libri::lookup::store::image_size(&bytes);
+            println!("sharper photo: {} bytes, {size:?}", bytes.len());
+            assert!(size.is_some_and(|(width, _)| width > 640), "{size:?}");
+        }
+        other => panic!("no sharper photo of Massive Attack: {other:?}"),
+    }
     assert_eq!(none.ok(), Some(Found::Missing(Reason::NoMatch)));
     // No album saved, only a song: the song search tells who it is.
     let rows = apple

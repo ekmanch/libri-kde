@@ -2077,6 +2077,22 @@ fn capture_every_screen() {
                 app.photos.look = Some(libri::covers::backfill::Look::Stopped);
             }),
         ),
+        // The sharper photos on offer, and while they are fetched (the
+        // canvas's numbers).
+        (
+            Screen::Settings,
+            ("settings-covers-photos-sharper", |app| {
+                own_covers(app);
+                app.photos.look = Some(libri::covers::backfill::Look::Sharper);
+            }),
+        ),
+        (
+            Screen::Settings,
+            ("settings-covers-photos-sharpening", |app| {
+                own_covers(app);
+                app.photos.look = Some(libri::covers::backfill::Look::Sharpening);
+            }),
+        ),
         (
             Screen::Settings,
             ("settings-covers-found", |app| {
