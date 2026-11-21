@@ -23,7 +23,7 @@ use super::http::{self, Http, int_at, objects_at, str_at, strings_at};
 use super::iso::two_letter;
 use super::text::{
     MAX_BOOK_TAGS, core_title, edition_label, first_publish_year, is_tag_like, same_book,
-    same_title, share_author, strip_html, title_key, volume_of,
+    same_title, share_author, strip_html, title_key, volume_of, without_edition_note,
 };
 use super::wikidata::Wikidata;
 use super::{
@@ -164,17 +164,13 @@ impl OpenLibrary {
     }
 
     /// The author named exactly `name` in the authors index, else the
-    /// first hit (the index ranks by how many works they have), as an
-    /// author key ("OL2162284A").
-    fn author_key(&self, name: &str) -> Reply<Option<String>> {
+    /// first hit (the index ranks by how many works they have): their id
+    /// ("openlibrary:author:OL2162284A") and whether they have died
+    /// (`author_from`).
+    fn author(&self, name: &str) -> Reply<Option<CreatorMatch>> {
         let json = self.get("/search/authors.json", &[("q", name), ("limit", "5")])?;
         let hits: Vec<&Value> = objects_at(&json, "docs").collect();
-        Ok(hits
-            .iter()
-            .find(|doc| str_at(doc, "name").is_some_and(|n| n.eq_ignore_ascii_case(name)))
-            .or(hits.first())
-            .and_then(|doc| str_at(doc, "key"))
-            .map(|key| key.rsplit('/').next().unwrap_or(key).to_owned()))
+        Ok(author_from(&hits, name))
     }
 
     /// The author's newest works (`/search.json?author_key=…&sort=new`).
@@ -855,7 +851,8 @@ impl Books {
         if found.released.is_none() {
             return true;
         }
-        let core = core_title(&found.title);
+        // "The Green Mile 30 Year Anniversary" is asked as "The Green Mile".
+        let core = without_edition_note(&core_title(&found.title)).to_owned();
         let author = found.creator.as_deref();
         if let Ok(hits) = self.open_library.search_title(&core, author, 10) {
             for hit in hits {
@@ -878,6 +875,30 @@ impl Books {
         }
         true
     }
+}
+
+/// The author named exactly `name` among the author search's hits, else
+/// the first (the search ranks by how many works they have), with the
+/// death Open Library records for them: "9 June 1870" reads "Died 1870".
+/// It is the record the new works are then asked of, so a namesake says
+/// nothing here.
+fn author_from(hits: &[&Value], name: &str) -> Option<CreatorMatch> {
+    let hit = hits
+        .iter()
+        .find(|doc| str_at(doc, "name").is_some_and(|n| n.eq_ignore_ascii_case(name)))
+        .or(hits.first())?;
+    let key = str_at(hit, "key")?;
+    let key = key.rsplit('/').next().unwrap_or(key);
+    let inactive = str_at(hit, "death_date")
+        .filter(|date| date.chars().any(|c| c.is_ascii_digit()))
+        .map(|date| match parse_publish_date(date) {
+            Some(day) => format!("Died {}", day.year),
+            None => "Died".to_owned(),
+        });
+    Some(CreatorMatch {
+        provider_id: format!("openlibrary:author:{key}"),
+        inactive,
+    })
 }
 
 /// How many of a work's editions are read for their languages and dates.
@@ -987,10 +1008,7 @@ impl Source for Books {
     }
 
     fn find_creator(&self, _kind: FollowKind, name: &str) -> Reply<Option<CreatorMatch>> {
-        Ok(self.open_library.author_key(name)?.map(|key| CreatorMatch {
-            provider_id: format!("openlibrary:author:{key}"),
-            inactive: None,
-        }))
+        self.open_library.author(name)
     }
 
     /// The author's newest works, those first published this year or later,
@@ -1381,6 +1399,34 @@ impl ITunes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_author_is_the_one_of_that_name_with_the_death_open_library_records() {
+        let docs = serde_json::json!([
+            {"key": "OL1A", "name": "Charles Dickens, LL.D.", "death_date": "1793"},
+            {"key": "OL24638A", "name": "Charles Dickens", "death_date": "9 June 1870"},
+        ]);
+        let hits: Vec<&Value> = docs.as_array().unwrap().iter().collect();
+        let dickens = author_from(&hits, "charles dickens").unwrap();
+        assert_eq!(dickens.provider_id, "openlibrary:author:OL24638A");
+        assert_eq!(dickens.inactive.as_deref(), Some("Died 1870"));
+
+        let docs = serde_json::json!([
+            {"key": "/authors/OL19981A", "name": "Stephen King", "birth_date": "21 September 1947"},
+            {"key": "OL2A", "name": "Homer", "death_date": "8th century BC"},
+            {"key": "OL3A", "name": "Someone", "death_date": "?"},
+        ]);
+        let hits: Vec<&Value> = docs.as_array().unwrap().iter().collect();
+        let king = author_from(&hits, "Stephen King").unwrap();
+        assert_eq!(king.provider_id, "openlibrary:author:OL19981A");
+        assert_eq!(king.inactive, None);
+        assert_eq!(
+            author_from(&hits, "Homer").unwrap().inactive.as_deref(),
+            Some("Died")
+        );
+        assert_eq!(author_from(&hits, "Someone").unwrap().inactive, None);
+        assert!(author_from(&[], "Nobody").is_none());
+    }
 
     fn book(title: &str, author: &str, source: &str) -> Match {
         Match {

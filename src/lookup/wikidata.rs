@@ -184,9 +184,7 @@ impl Wikidata {
     }
 
     /// For each of `names` Wikidata knows as one of the kind's classes, why
-    /// they are no longer active: only when every item of that name has a
-    /// date of death or dissolution, so a living namesake keeps a creator
-    /// active. The year is the latest date's.
+    /// they are no longer active (`inactive_from`).
     pub fn inactive_of(
         &self,
         kind: FollowKind,
@@ -204,16 +202,30 @@ impl Wikidata {
             .map(|c| format!("wd:{c}"))
             .collect();
         let rows = self.sparql(&format!(
-            "SELECT ?name ?item ?class ?death ?dissolved WHERE {{\n  \
+            "SELECT ?name ?item ?class ?links ?death ?dissolved WHERE {{\n  \
              VALUES ?name {{ {} }}\n  ?item rdfs:label ?name .\n  ?item wdt:P31 ?class .\n  \
-             VALUES ?class {{ {} }}\n  OPTIONAL {{ ?item wdt:P570 ?death }}\n  \
+             VALUES ?class {{ {} }}\n  ?item wikibase:sitelinks ?links .\n  \
+             OPTIONAL {{ ?item wdt:P570 ?death }}\n  \
              OPTIONAL {{ ?item wdt:P576 ?dissolved }}\n}}\nLIMIT 1000",
             values.join(" "),
             classes.join(" ")
         ))?;
+        Ok(Wikidata::inactive_from(kind, &rows))
+    }
+
+    /// Why each name in the query's `rows` is no longer active. A name is
+    /// often several items, and the one meant is taken to be the one with
+    /// the most pages about it on the Wikimedia sites (`?links`): the
+    /// novelist Charles Dickens has 250, the living researcher of that name
+    /// none, so the name reads "Died 1870", and the many living Stephen
+    /// Kings do not matter either way beside the writer. Items that tie
+    /// for the most must all have a date of death or dissolution, so a
+    /// namesake as well known still keeps a creator active. The year is
+    /// the latest date's.
+    fn inactive_from(kind: FollowKind, rows: &[Value]) -> HashMap<String, String> {
         type Why = Option<(&'static str, u16)>;
-        let mut by_name: HashMap<String, HashMap<String, Why>> = HashMap::new();
-        for row in &rows {
+        let mut by_name: HashMap<String, HashMap<String, (u64, Why)>> = HashMap::new();
+        for row in rows {
             let (Some(name), Some(item)) =
                 (Wikidata::value(row, "name"), Wikidata::item(row, "item"))
             else {
@@ -235,19 +247,29 @@ impl Wikidata {
             } else {
                 None
             };
+            let links = Wikidata::value(row, "links")
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(0);
             let items = by_name.entry(name.to_owned()).or_default();
-            let seen = items.entry(item).or_default();
+            let seen = items.entry(item).or_insert((links, None));
             // An item seen with and without a date keeps its date.
             if why.is_some() {
-                *seen = why;
+                seen.1 = why;
             }
         }
         let mut result = HashMap::new();
         for (name, items) in by_name {
-            if items.values().any(Option::is_none) {
+            let most = items.values().map(|(links, _)| *links).max().unwrap_or(0);
+            let meant = || {
+                items
+                    .values()
+                    .filter(move |(links, _)| *links == most)
+                    .map(|(_, why)| why)
+            };
+            if meant().any(Option::is_none) {
                 continue;
             }
-            if let Some((word, year)) = items.values().flatten().max_by_key(|(_, year)| *year) {
+            if let Some((word, year)) = meant().flatten().max_by_key(|(_, year)| *year) {
                 let label = if *year == 0 {
                     (*word).to_owned()
                 } else {
@@ -256,7 +278,7 @@ impl Wikidata {
                 result.insert(name, label);
             }
         }
-        Ok(result)
+        result
     }
 
     /// Whether a Wikidata author name is the entry's creator: a word of
@@ -507,6 +529,70 @@ mod tests {
             map.insert((*key).to_owned(), serde_json::json!({"value": value}));
         }
         Value::Object(map)
+    }
+
+    #[test]
+    fn the_best_known_of_a_name_says_whether_the_creator_is_active() {
+        let wd = "http://www.wikidata.org/entity/";
+        let item = |id: &str| format!("{wd}{id}");
+        let human = item("Q5");
+        let band = item("Q215380");
+        let rows = vec![
+            // The novelist, and a living researcher of the same name.
+            row(&[
+                ("name", "Charles Dickens"),
+                ("item", &item("Q5686")),
+                ("class", &human),
+                ("links", "250"),
+                ("death", "1870-06-09T00:00:00Z"),
+            ]),
+            row(&[
+                ("name", "Charles Dickens"),
+                ("item", &item("Q130950046")),
+                ("class", &human),
+                ("links", "0"),
+            ]),
+            // The living writer, and a namesake who died.
+            row(&[
+                ("name", "Stephen King"),
+                ("item", &item("Q39829")),
+                ("class", &human),
+                ("links", "148"),
+            ]),
+            row(&[
+                ("name", "Stephen King"),
+                ("item", &item("Q1")),
+                ("class", &human),
+                ("links", "2"),
+                ("death", "1990-01-01T00:00:00Z"),
+            ]),
+            // Two as well known as each other: both must have a date.
+            row(&[
+                ("name", "John Smith"),
+                ("item", &item("Q2")),
+                ("class", &human),
+                ("links", "3"),
+                ("death", "1950-01-01T00:00:00Z"),
+            ]),
+            row(&[
+                ("name", "John Smith"),
+                ("item", &item("Q3")),
+                ("class", &human),
+                ("links", "3"),
+            ]),
+            row(&[
+                ("name", "Daft Punk"),
+                ("item", &item("Q185828")),
+                ("class", &band),
+                ("links", "70"),
+                ("dissolved", "2021-02-22T00:00:00Z"),
+            ]),
+        ];
+        let found = Wikidata::inactive_from(FollowKind::Artists, &rows);
+        assert_eq!(found["Charles Dickens"], "Died 1870");
+        assert_eq!(found["Daft Punk"], "Disbanded 2021");
+        assert!(!found.contains_key("Stephen King"));
+        assert!(!found.contains_key("John Smith"));
     }
 
     #[test]

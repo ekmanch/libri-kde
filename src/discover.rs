@@ -397,12 +397,12 @@ pub struct CreatorStatus {
 /// Version 2 (2026-11-09): version 1 recorded a creator as active when
 /// Wikidata refused to say, so its authors, artists and studios without
 /// a reason are dropped on reading and asked again.
-const RECORD_VERSION: u64 = 2;
+const RECORD_VERSION: u64 = 3;
 
 impl Record {
     fn from_json(json: &Value) -> Option<Record> {
         let version = json.get("version").and_then(Value::as_u64)?;
-        if version != 1 && version != RECORD_VERSION {
+        if !(1..=RECORD_VERSION).contains(&version) {
             return None;
         }
         let items = json
@@ -439,8 +439,11 @@ impl Record {
             creators: {
                 let mut creators: BTreeMap<String, CreatorStatus> =
                     serde_json::from_value(json["creators"].clone()).unwrap_or_default();
-                if version == 1 {
-                    // TMDB says who died itself; the rest asked Wikidata.
+                if version < RECORD_VERSION {
+                    // Who is recorded as active is asked again where the
+                    // answer was Wikidata's: version 1 took a refusal for
+                    // one, version 2 let any living namesake stand for
+                    // the creator. TMDB says who died itself.
                     creators.retain(|key, status| {
                         status.inactive.is_some()
                             || key.starts_with("directors/")
@@ -2286,20 +2289,28 @@ mod tests {
     }
 
     #[test]
-    fn a_version_1_record_asks_again_who_died() {
-        let json = json!({
-            "version": 1,
-            "creators": {
-                "artists/eva cassidy": {"checked_on": "2026-11-07", "inactive": null},
-                "artists/miles davis": {"checked_on": "2026-11-07", "inactive": "Died 1991"},
-                "directors/clint-eastwood": {"checked_on": "2026-11-07", "inactive": null},
-            },
+    fn an_older_record_asks_again_who_died() {
+        for version in [1, 2] {
+            let json = json!({
+                "version": version,
+                "creators": {
+                    "artists/eva cassidy": {"checked_on": "2026-11-07", "inactive": null},
+                    "artists/miles davis": {"checked_on": "2026-11-07", "inactive": "Died 1991"},
+                    "authors/charles-dickens": {"checked_on": "2026-11-12", "inactive": null},
+                    "directors/clint-eastwood": {"checked_on": "2026-11-07", "inactive": null},
+                },
+            });
+            let record = Record::from_json(&json).unwrap();
+            let keys: Vec<&str> = record.creators.keys().map(String::as_str).collect();
+            assert_eq!(keys, ["artists/miles davis", "directors/clint-eastwood"]);
+            assert_eq!(record.to_json()["version"], RECORD_VERSION);
+        }
+        let kept = json!({
+            "version": RECORD_VERSION,
+            "creators": {"authors/stephen-king": {"checked_on": "2026-11-21", "inactive": null}},
         });
-        let record = Record::from_json(&json).unwrap();
-        let keys: Vec<&str> = record.creators.keys().map(String::as_str).collect();
-        assert_eq!(keys, ["artists/miles davis", "directors/clint-eastwood"]);
-        assert_eq!(record.to_json()["version"], RECORD_VERSION);
-        assert!(Record::from_json(&json!({"version": 3})).is_none());
+        assert_eq!(Record::from_json(&kept).unwrap().creators.len(), 1);
+        assert!(Record::from_json(&json!({"version": RECORD_VERSION + 1})).is_none());
     }
 
     #[test]

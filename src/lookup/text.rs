@@ -591,6 +591,77 @@ pub fn volume_of(title: &str) -> Option<(String, u32)> {
     None
 }
 
+/// The words an edition note written straight into a book's title is made
+/// of, beside numbers: "30 Year Anniversary", "Deluxe Illustrated Edition",
+/// "The 25th Anniversary Edition".
+const BOOK_NOTE_WORDS: [&str; 34] = [
+    "anniversary",
+    "edition",
+    "deluxe",
+    "illustrated",
+    "collector's",
+    "collectors",
+    "special",
+    "limited",
+    "annotated",
+    "unabridged",
+    "uncut",
+    "commemorative",
+    "revised",
+    "expanded",
+    "complete",
+    "gift",
+    "movie",
+    "film",
+    "tie-in",
+    "new",
+    "the",
+    "year",
+    "years",
+    "tenth",
+    "twentieth",
+    "twenty-fifth",
+    "thirtieth",
+    "fortieth",
+    "fiftieth",
+    "sixtieth",
+    "seventy-fifth",
+    "hundredth",
+    "centenary",
+    "centennial",
+];
+
+/// A book's title without an edition note at its end that no bracket or
+/// colon sets apart: "The Green Mile 30 Year Anniversary" gives "The
+/// Green Mile" and "Carrie - Deluxe Edition" gives "Carrie". The note is
+/// the run of note words and numbers the title ends with, and only one
+/// that says "anniversary" or "edition"; "The Illustrated Man" and a
+/// title that is nothing but such words stay as they are.
+pub fn without_edition_note(title: &str) -> &str {
+    let mut start = None;
+    let mut says = false;
+    for word in title.split_whitespace().rev() {
+        let key = word
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_lowercase()
+            .replace('\u{2019}', "'");
+        let digits = key.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+        let ordinal = !digits.is_empty()
+            && digits.chars().all(|c| c.is_ascii_digit())
+            && matches!(&key[digits.len()..], "" | "st" | "nd" | "rd" | "th");
+        if !key.is_empty() && !ordinal && !BOOK_NOTE_WORDS.contains(&key.as_str()) {
+            break;
+        }
+        says |= key == "anniversary" || key == "edition";
+        start = Some(word.as_ptr() as usize - title.as_ptr() as usize);
+    }
+    let Some(start) = start.filter(|_| says) else {
+        return title;
+    };
+    let head = title[..start].trim_end_matches(|c: char| !c.is_alphanumeric());
+    if head.is_empty() { title } else { head }
+}
+
 /// A title cut before a parenthesis, a colon, or ", Part", ", Book" or
 /// ", Vol": "Tai-Pan (Asian Saga" and "Shōgun, Part One" give "Tai-Pan"
 /// and "Shōgun". A title that would lose everything stays as it is.
@@ -882,6 +953,28 @@ mod tests {
         assert_eq!(core_title("Shōgun, Part One"), "Shōgun");
         assert_eq!(core_title("Dune: Part Two"), "Dune");
         assert_eq!(core_title("(x)"), "(x)");
+    }
+
+    #[test]
+    fn an_edition_note_at_the_end_of_a_books_title_is_cut() {
+        for (title, without) in [
+            ("The Green Mile 30 Year Anniversary", "The Green Mile"),
+            ("Carrie - Deluxe Edition", "Carrie"),
+            ("It, The 25th Anniversary Edition", "It"),
+            ("Dracula Collector\u{2019}s Edition", "Dracula"),
+            (
+                "The Illustrated Man Anniversary Edition",
+                "The Illustrated Man",
+            ),
+            // No note, or nothing but one.
+            ("The Illustrated Man", "The Illustrated Man"),
+            ("Brave New World", "Brave New World"),
+            ("The Special Edition", "The Special Edition"),
+            ("1984", "1984"),
+            ("Dune Messiah", "Dune Messiah"),
+        ] {
+            assert_eq!(without_edition_note(title), without, "{title}");
+        }
         assert_eq!(
             collection_name("The Lord of the Rings Collection"),
             "The Lord of the Rings"
