@@ -378,6 +378,31 @@ mod tests {
     }
 
     #[test]
+    fn a_settings_change_survives_a_restart_in_the_queue() {
+        let dir = TempDir::new("pending-settings");
+        let path = dir.path("pending.json");
+        let edit = crate::shared::Edit::Follow {
+            kind: crate::follows::Kind::Authors,
+            ids: vec!["stephen-king".into()],
+            on: false,
+            default_on: true,
+        };
+        {
+            let mut queue = PendingQueue::open(path.clone());
+            queue.add_file(
+                Change::Settings(edit.clone()),
+                Some("Unfollow Stephen King".into()),
+            );
+        }
+        let queue = PendingQueue::open(path);
+        assert_eq!(queue.changes(), [Change::Settings(edit)]);
+        assert_eq!(
+            queue.files()[0].summary.as_deref(),
+            Some("Unfollow Stephen King")
+        );
+    }
+
+    #[test]
     fn removing_the_carried_operations_drops_the_in_flight_record() {
         let mut queue = PendingQueue::in_memory();
         queue.add(status("movies/a"), "a".into());

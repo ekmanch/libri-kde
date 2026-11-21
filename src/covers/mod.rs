@@ -257,6 +257,10 @@ pub enum Change {
     /// An edit to `artists/_missing.json`, merged per artist into the
     /// repo's copy when the commit is made.
     Missing(MissingEdit),
+    /// A change to `settings.json` beside the library, which is no cover
+    /// file but goes out the same way: merged into the repo's copy when
+    /// the commit is made (`shared::merged`).
+    Settings(crate::shared::Edit),
 }
 
 impl Change {
@@ -274,6 +278,11 @@ impl Change {
             Change::Missing(edit) => {
                 let mut json = edit.to_json();
                 json["change"] = json!("missing");
+                json
+            }
+            Change::Settings(edit) => {
+                let mut json = edit.to_json();
+                json["change"] = json!("settings");
                 json
             }
         }
@@ -307,6 +316,7 @@ impl Change {
                 seen: seen()?,
             }),
             "missing" => MissingEdit::from_json(json).map(Change::Missing),
+            "settings" => crate::shared::Edit::from_json(json).map(Change::Settings),
             _ => None,
         }
     }
@@ -677,7 +687,7 @@ impl Covers {
             Change::Delete { path } | Change::Remove { path, .. } => {
                 files.retain(|file| file.path != *path)
             }
-            Change::Missing(_) => {}
+            Change::Missing(_) | Change::Settings(_) => {}
             Change::Move { from, to } => {
                 if let Some(at) = files.iter().position(|file| file.path == *from) {
                     let mut moved = files.remove(at);
@@ -715,7 +725,7 @@ impl Covers {
     /// (the library is kept on this computer), so GitHub's list follows.
     pub fn apply(&mut self, change: &Change, settled: bool) {
         match change {
-            Change::Upload { .. } | Change::Put { .. } => {}
+            Change::Upload { .. } | Change::Put { .. } | Change::Settings(_) => {}
             Change::Delete { path } | Change::Remove { path, .. } => {
                 if let Some(local) = self.local_path(path) {
                     let _ = crate::storage::remove_if_exists(&local);

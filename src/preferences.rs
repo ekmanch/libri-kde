@@ -1,7 +1,8 @@
 //! The display preferences on this computer: `preferences.json` under
 //! `storage::config_dir()`, never synced (docs/DESIGN.md section 10,
 //! phase 2). What is kept: Settings' choices (theme, background style,
-//! accent, timeline default, seasonal touches, default platform), the
+//! accent; the timeline default, the seasonal touches and the default
+//! platform moved to `settings.json` beside the library, `shared`), the
 //! sidebar's tag mode, pins and type checkboxes, the view and the details
 //! panel's pin per type, the sort of each of Music's tabs, the plan page's pin, each plan's look and the
 //! changed shortcuts. The file is written whenever one of them changes.
@@ -35,10 +36,17 @@ pub struct Preferences {
     /// "vivid:Peach" or "catppuccin:Mauve": the group and the name, since
     /// both groups have a Blue and a Green.
     pub accent: String,
-    pub timeline: bool,
-    pub seasonal: bool,
-    /// The default platform for a new game; `None` is Settings' "None".
-    pub platform: Option<String>,
+    /// The timeline default, the seasonal touches and the default
+    /// platform as a file from before 2026-11-21 held them. They live in
+    /// `settings.json` beside the library now (`shared`), so they are
+    /// read once, for a library that has no such file yet, and never
+    /// written again. The platform's inner `None` is Settings' "None".
+    #[serde(skip_serializing)]
+    pub timeline: Option<bool>,
+    #[serde(skip_serializing)]
+    pub seasonal: Option<bool>,
+    #[serde(skip_serializing, deserialize_with = "present")]
+    pub platform: Option<Option<String>>,
     /// "pinned" or "most_used".
     pub sidebar_tags: String,
     pub pins: Vec<String>,
@@ -77,9 +85,9 @@ impl Default for Preferences {
             theme: theme_key(settings.theme).to_owned(),
             flat: settings.flat,
             accent: accent_key(settings.accent),
-            timeline: settings.timeline,
-            seasonal: settings.seasonal,
-            platform: settings.platform,
+            timeline: None,
+            seasonal: None,
+            platform: None,
             sidebar_tags: sidebar_key(SidebarTags::default()).to_owned(),
             pins: Vec::new(),
             type_boxes: false,
@@ -102,9 +110,9 @@ impl Preferences {
             theme: theme_key(settings.theme).to_owned(),
             flat: settings.flat,
             accent: accent_key(settings.accent),
-            timeline: settings.timeline,
-            seasonal: settings.seasonal,
-            platform: settings.platform.clone(),
+            timeline: None,
+            seasonal: None,
+            platform: None,
             sidebar_tags: sidebar_key(app.library.sidebar_tags).to_owned(),
             pins: app.library.pins.clone(),
             type_boxes: app.library.type_boxes,
@@ -156,9 +164,15 @@ impl Preferences {
         if let Some(accent) = accent_from_key(&self.accent) {
             settings.accent = accent;
         }
-        settings.timeline = self.timeline;
-        settings.seasonal = self.seasonal;
-        settings.platform = self.platform.clone();
+        if let Some(timeline) = self.timeline {
+            settings.timeline = timeline;
+        }
+        if let Some(seasonal) = self.seasonal {
+            settings.seasonal = seasonal;
+        }
+        if let Some(platform) = &self.platform {
+            settings.platform = platform.clone();
+        }
         if let Some(mode) = sidebar_from_key(&self.sidebar_tags) {
             app.library.sidebar_tags = mode;
         }
@@ -208,6 +222,16 @@ impl Preferences {
     pub fn from_json(text: &str) -> Result<Preferences, serde_json::Error> {
         serde_json::from_str(text)
     }
+}
+
+/// A key that is there, whatever it holds: `null` is a value of its own
+/// for the old default platform.
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 fn theme_key(theme: ThemeChoice) -> &'static str {
@@ -386,9 +410,6 @@ mod tests {
         app.settings.theme = ThemeChoice::Fixed(Theme::Mocha);
         app.settings.flat = true;
         app.settings.accent = CATPPUCCIN[7];
-        app.settings.timeline = true;
-        app.settings.seasonal = false;
-        app.settings.platform = None;
         app.library.sidebar_tags = SidebarTags::MostUsed;
         app.library.pins = vec!["horror".into(), "classic".into()];
         app.library.type_boxes = true;
@@ -465,6 +486,25 @@ mod tests {
             "unknown keys and views are dropped"
         );
         assert!(app.settings.seasonal, "a missing key keeps the default");
+    }
+
+    #[test]
+    fn the_three_settings_that_moved_are_read_from_an_old_file_and_never_written() {
+        let old = r#"{"version": 1, "timeline": true, "seasonal": false, "platform": null}"#;
+        let preferences = Preferences::from_json(old).unwrap();
+        let mut app = App::new(Screen::Library);
+        preferences.apply_to(&mut app);
+        assert!(app.settings.timeline && !app.settings.seasonal);
+        assert_eq!(app.settings.platform, None, "null was Settings' None");
+        let written = Preferences::of(&app).to_json();
+        for key in ["timeline", "seasonal", "platform"] {
+            assert!(!written.contains(&format!("\"{key}\"")), "{written}");
+        }
+        // A file without them leaves the three as they are.
+        let mut app = App::new(Screen::Library);
+        Preferences::from_json("{}").unwrap().apply_to(&mut app);
+        assert!(!app.settings.timeline && app.settings.seasonal);
+        assert_eq!(app.settings.platform.as_deref(), Some("PC"));
     }
 
     #[test]

@@ -20,7 +20,10 @@
 //! `artists/_missing.json` is never sent whole: the queued edits are
 //! merged per artist into the repo's copy as it is when the commit is
 //! made (`covers::artists::merged_missing`), and an artist who got a
-//! file or left the library leaves the record there.
+//! file or left the library leaves the record there. `settings.json`
+//! beside the library goes the same way: its queued edits are made on
+//! the repo's copy as it is then (`shared::merged`), so a change made on
+//! the phone meanwhile is kept.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -29,6 +32,7 @@ use crate::connection::Target;
 use crate::covers::artists::{self, MissingEdit};
 use crate::covers::{self, Change, backfill};
 use crate::github::{Client, Failure, FailureKind, PutResult, Reply, TreeEdit, TreeFile, blob_sha};
+use crate::shared;
 
 /// What the commit does to one cover file, by its path in the repo.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +60,9 @@ pub struct Plan {
     pub edits: Vec<(String, Edit)>,
     pub dropped: Vec<Dropped>,
     pub missing: Vec<MissingEdit>,
+    /// The edits to `settings.json` beside the library, merged like the
+    /// missing record's.
+    pub settings: Vec<shared::Edit>,
 }
 
 /// A commit made, or found to be made already, and what it dropped.
@@ -94,6 +101,7 @@ pub fn plan_guarded(
     // The last guarded change of each path.
     let mut guards: HashMap<String, &Change> = HashMap::new();
     let mut missing = Vec::new();
+    let mut settings = Vec::new();
     for change in changes {
         match change {
             Change::Put { path, .. } => {
@@ -105,6 +113,7 @@ pub fn plan_guarded(
                 guards.insert(full(path), change);
             }
             Change::Missing(edit) => missing.push(edit.clone()),
+            Change::Settings(edit) => settings.push(edit.clone()),
             Change::Upload { path } => {
                 ends.insert(full(path), Some(Edit::Upload(path.clone())));
             }
@@ -170,6 +179,7 @@ pub fn plan_guarded(
         edits,
         dropped,
         missing,
+        settings,
     }
 }
 
@@ -279,6 +289,24 @@ pub fn run(
             &in_library,
         ) {
             edits.push((at, TreeEdit::Text(text)));
+        }
+    }
+    if !plan.settings.is_empty() {
+        let at = shared::path_beside(&target.file);
+        let theirs = match tree.iter().any(|file| file.path == at) {
+            true => client.file_raw(&at, &target.branch, None)?,
+            false => None,
+        };
+        let theirs = theirs.as_ref().map(|raw| raw.text().unwrap_or("not UTF-8"));
+        match shared::merged(theirs, &plan.settings) {
+            Ok(Some(text)) => edits.push((at, TreeEdit::Text(text))),
+            Ok(None) => {}
+            // Another version's file, or one edited by hand into
+            // something else: it stands, and the changes stay on this
+            // computer.
+            Err(error) => {
+                eprintln!("libri: sync: settings.json on GitHub is left as it is: {error}")
+            }
         }
     }
     for (path, edit) in plan.edits {
@@ -580,6 +608,27 @@ mod tests {
             missing_text(&[], "covers", &made.edits, &made.missing, Some("{}"), &all),
             None
         );
+    }
+
+    #[test]
+    fn settings_edits_are_set_aside_for_the_merge_and_touch_no_cover() {
+        let hide = shared::Edit::Hide("tmdb:movie:1".into());
+        let changes = [
+            upload("movies/a.jpg"),
+            Change::Settings(shared::Edit::Timeline(true)),
+            Change::Settings(hide.clone()),
+        ];
+        let plan = plan_guarded(&tree(&[]), "covers", &changes, &|_| None);
+        assert_eq!(plan.settings, [shared::Edit::Timeline(true), hide]);
+        assert_eq!(plan.edits.len(), 1, "the upload alone");
+        // The file is written from the repo's copy as it is then.
+        let theirs = "{\n  \"version\": 1,\n  \"seasonal_theme_default\": false\n}\n";
+        let text = shared::merged(Some(theirs), &plan.settings)
+            .unwrap()
+            .unwrap();
+        let settings = shared::decode(&text).unwrap();
+        assert!(settings.timeline && !settings.seasonal);
+        assert!(settings.not_interested.contains("tmdb:movie:1"));
     }
 
     #[test]
