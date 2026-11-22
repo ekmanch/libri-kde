@@ -3,14 +3,18 @@
 //! cover shelves with a side column holding the plan and Recently added
 //! (rows with covers, as the list view's).
 //! Every list has a "See all" that opens the full, filtered list.
+//! Recently added ends the right column in every view and has no fixed
+//! length: it shows the whole rows that fit down to the footer
+//! (`filling_section`), counted again whenever the window is resized.
 //!
 //! Home has no details panel of its own: a selected title's details take
 //! the place of the right column (the side column in the grid, Coming
 //! soon and Recently added in the lists), so the layout never changes.
-//! The left part scrolls on its own, since the details scroll too.
+//! The left part scrolls on its own, since the details scroll too; the
+//! right column never scrolls.
 
 use iced::widget::{
-    Column, Row, button, column, container, opaque, progress_bar, row, space, text,
+    Column, Row, button, column, container, opaque, progress_bar, responsive, row, space, text,
 };
 use iced::{Background, Border, Center, Color, Element, Fill, Padding};
 
@@ -30,9 +34,6 @@ fn msg(message: Message) -> AppMessage {
 /// shows at most.
 const SHELVES: [Section; 3] = [Section::ComingSoon, Section::TopRated, Section::InProgress];
 const SHELF_COVERS: usize = 7;
-/// The rows of Recently added beside the shelves: the list view's rows
-/// with covers, so eight where twelve text rows stood.
-const SIDE_ROWS: usize = 8;
 /// A shelf cover's width and the gap between covers; the cover is 150 tall.
 const COVER_WIDTH: f32 = 100.0;
 const COVER_GAP: f32 = 14.0;
@@ -52,7 +53,9 @@ fn shelf_covers(app: &App) -> usize {
 
 /// The covers the overview shows: the shelves' first seven and Recently
 /// added's rows in the grid, the lists' rows in the list view, nothing in
-/// the text view.
+/// the text view. Recently added's rows are counted when it is laid out,
+/// so its covers are asked for up to the rows a window this tall could
+/// hold: a few more than are shown, never fewer.
 pub fn wanted(app: &App, view: View, wants: &mut crate::artwork::Wants) {
     let overview = Overview::of(app.repo.library(), app.today);
     match view {
@@ -76,7 +79,7 @@ pub fn wanted(app: &App, view: View, wants: &mut crate::artwork::Wants) {
                 overview
                     .list(Section::RecentlyAdded)
                     .iter()
-                    .take(SIDE_ROWS)
+                    .take(RowStyle::Cover.whole_rows(app.window.height))
                     .map(|e| e.id.clone()),
             );
         }
@@ -87,7 +90,11 @@ pub fn wanted(app: &App, view: View, wants: &mut crate::artwork::Wants) {
                 Section::ComingSoon,
                 Section::RecentlyAdded,
             ] {
-                let cap = if section == Section::TopRated { 3 } else { 4 };
+                let cap = match section {
+                    Section::TopRated => 3,
+                    Section::RecentlyAdded => RowStyle::Cover.whole_rows(app.window.height),
+                    _ => 4,
+                };
                 wants.covers.extend(
                     overview
                         .list(section)
@@ -107,9 +114,14 @@ pub fn body<'a>(app: &'a App) -> Element<'a, AppMessage> {
     // The details are part of Home's body here: a click on their empty
     // space stays in them, rather than closing them as the list's does.
     let details = super::panel::details(app).map(opaque);
+    let padding = Padding::new(0.0).top(10).bottom(PADDING);
     let scroll = |content: Element<'a, AppMessage>| {
-        ui::scroll(container(content).padding(Padding::new(0.0).top(10).bottom(PADDING)))
-            .height(Fill)
+        ui::scroll(container(content).padding(padding)).height(Fill)
+    };
+    // The right column is as tall as the body and never scrolls:
+    // Recently added, its last list, shows the rows that fit.
+    let fitted = |content: Element<'a, AppMessage>| -> Element<'a, AppMessage> {
+        container(content).padding(padding).height(Fill).into()
     };
     let row = match app.library.view_mode() {
         View::Grid => {
@@ -118,7 +130,7 @@ pub fn body<'a>(app: &'a App) -> Element<'a, AppMessage> {
                 .on_scroll(|viewport| msg(Message::HomeScrolled(viewport.absolute_offset().y)));
             let side = match details {
                 Some(details) => details,
-                None => scroll(side(app, &overview, &tokens)).into(),
+                None => fitted(side(app, &overview, &tokens)),
             };
             row![left, container(side).width(Fill).max_width(SIDE_MAX)].spacing(COLUMN_GAP)
         }
@@ -130,7 +142,7 @@ pub fn body<'a>(app: &'a App) -> Element<'a, AppMessage> {
                 .on_scroll(|viewport| msg(Message::HomeScrolled(viewport.absolute_offset().y)));
             let right = match details {
                 Some(details) => details,
-                None => scroll(right).into(),
+                None => fitted(right),
             };
             row![left, container(right).width(Fill)].spacing(36)
         }
@@ -171,10 +183,13 @@ fn columns<'a>(
             .into_iter()
             .flatten(),
     );
-    let right = Column::new().spacing(28).width(Fill).extend(
-        [list(Section::ComingSoon), list(Section::RecentlyAdded)]
-            .into_iter()
-            .flatten(),
+    let right = Column::new().spacing(28).width(Fill).height(Fill).extend(
+        [
+            list(Section::ComingSoon),
+            filling_section(app, overview, Section::RecentlyAdded, style, tokens),
+        ]
+        .into_iter()
+        .flatten(),
     );
     (left.into(), right.into())
 }
@@ -198,15 +213,15 @@ fn side<'a>(app: &'a App, overview: &Overview<'a>, tokens: &Tokens) -> Element<'
     let mut side = Column::new()
         .spacing(28)
         .width(Fill)
+        .height(Fill)
         .padding(Padding::new(0.0).top(34));
     if let Some(plan) = &overview.plan {
         side = side.push(plan_card(plan, tokens));
     }
-    side.extend(list_section(
+    side.extend(filling_section(
         app,
         overview,
         Section::RecentlyAdded,
-        SIDE_ROWS,
         RowStyle::Cover,
         tokens,
     ))
@@ -338,6 +353,21 @@ pub(super) enum RowStyle {
     Cover,
 }
 
+impl RowStyle {
+    /// A row's height, without the line under it.
+    fn height(self) -> f32 {
+        match self {
+            RowStyle::Dot => 38.0,
+            RowStyle::Cover => 56.0,
+        }
+    }
+
+    /// How many rows, each with its line, fit in `height` whole.
+    fn whole_rows(self, height: f32) -> usize {
+        (height / (self.height() + 1.0)).floor().max(0.0) as usize
+    }
+}
+
 /// A titled list: the title in gray caps and "See all N" on the right,
 /// then up to `cap` rows. Nothing when the list is empty.
 pub(super) fn list_section<'a>(
@@ -352,9 +382,42 @@ pub(super) fn list_section<'a>(
     if list.is_empty() {
         return None;
     }
+    let rows = section_rows(app, &list[..cap.min(list.len())], section, style, tokens);
+    Some(
+        column![section_header(section, list.len(), tokens), rows]
+            .spacing(4)
+            .into(),
+    )
+}
+
+/// A titled list with no fixed length, for the end of a column: it takes
+/// the height that is left and shows the rows that fit in it whole, so
+/// never half a row and never a scroll of its own; fewer entries leave
+/// the space under them empty. Nothing when the list is empty.
+fn filling_section<'a>(
+    app: &'a App,
+    overview: &Overview<'a>,
+    section: Section,
+    style: RowStyle,
+    tokens: &Tokens,
+) -> Option<Element<'a, AppMessage>> {
+    let list = overview.list(section).to_vec();
+    if list.is_empty() {
+        return None;
+    }
+    let header = section_header(section, list.len(), tokens);
+    let rows = responsive(move |size| {
+        let fit = style.whole_rows(size.height).min(list.len());
+        section_rows(app, &list[..fit], section, style, &app.tokens())
+    });
+    Some(column![header, rows].spacing(4).height(Fill).into())
+}
+
+/// A list's header: the title in gray caps and "See all N" on the right.
+fn section_header<'a>(section: Section, count: usize, tokens: &Tokens) -> Element<'a, AppMessage> {
     let see_all = button(
         row![
-            text(format!("See all {}", list.len()))
+            text(format!("See all {count}"))
                 .size(13)
                 .font(font::SEMIBOLD),
             ui::icon(Icon::ChevronRight, 12.0, tokens.ink),
@@ -368,15 +431,26 @@ pub(super) fn list_section<'a>(
     .on_press(msg(Message::SeeAll(section)))
     .style(text_button(tokens.ink))
     .focusable(6.0, tokens);
-    let header = row![
+    row![
         ui::section_header(section.title(), tokens),
         space::horizontal(),
         see_all
     ]
     .align_y(Center)
-    .height(24);
+    .height(24)
+    .into()
+}
+
+/// The rows of a list, one under the other.
+fn section_rows<'a>(
+    app: &'a App,
+    entries: &[&'a Entry],
+    section: Section,
+    style: RowStyle,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
     let selected = app.library.selected.as_deref();
-    let rows = Column::with_children(list.iter().take(cap).map(|entry| {
+    Column::with_children(entries.iter().map(|&entry| {
         let is_selected = selected == Some(entry.id.as_str());
         overview_row(
             app,
@@ -386,8 +460,8 @@ pub(super) fn list_section<'a>(
             is_selected,
             tokens,
         )
-    }));
-    Some(column![header, rows].spacing(4).into())
+    }))
+    .into()
 }
 
 pub(super) fn overview_row<'a>(
@@ -429,11 +503,10 @@ pub(super) fn overview_row<'a>(
         }
     };
     content = content.push(ui::figure(meta, 12.0, tokens.sub));
-    let height = if style == RowStyle::Dot { 38.0 } else { 56.0 };
     let line = tokens.line;
     let row_button = button(content.height(Fill))
         .width(Fill)
-        .height(height)
+        .height(style.height())
         .padding([4, 8])
         .on_press(msg(Message::Select(entry.id.clone())))
         .style(ui::row_style(
@@ -618,6 +691,36 @@ mod shelf_tests {
     }
 
     #[test]
+    fn rows_are_counted_whole() {
+        // A cover row is 56 px and its line, a text row 38 and its line.
+        assert_eq!(RowStyle::Cover.whole_rows(0.0), 0);
+        assert_eq!(RowStyle::Cover.whole_rows(56.9), 0);
+        assert_eq!(RowStyle::Cover.whole_rows(57.0), 1);
+        assert_eq!(RowStyle::Cover.whole_rows(8.0 * 57.0 + 56.0), 8);
+        assert_eq!(RowStyle::Dot.whole_rows(8.0 * 57.0 + 56.0), 13);
+    }
+
+    /// Recently added shows the rows that fit the window: six of the
+    /// fixture's eight beside the shelves at the smallest window, all
+    /// eight at the mockup's size, counted again for each size.
+    #[test]
+    fn recently_added_fills_the_height_it_has() {
+        let mut app = App::new(Screen::Library);
+        app.today = Date::parse("2026-10-19").unwrap();
+        let _ = app.update(msg(Message::SetView(View::Grid)));
+        let mut shows = |size: iced::Size, day: &str| {
+            app.window = size;
+            let mut ui = iced_test::Simulator::with_size(crate::app::settings(), size, app.view());
+            ui.find(day).is_ok()
+        };
+        // The sixth row was added on Sep 25, the last two on Sep 20.
+        let min = crate::app::MIN_WINDOW_SIZE;
+        assert!(shows(min, "Sep 25"));
+        assert!(!shows(min, "Sep 20"));
+        assert!(shows(crate::app::WINDOW_SIZE, "Sep 20"));
+    }
+
+    #[test]
     fn the_grid_asks_for_recently_added_covers() {
         let mut app = App::new(Screen::Library);
         app.today = Date::parse("2026-10-19").unwrap();
@@ -626,7 +729,7 @@ mod shelf_tests {
         assert!(!recent.is_empty());
         let mut wants = crate::artwork::Wants::default();
         wanted(&app, View::Grid, &mut wants);
-        for entry in recent.iter().take(SIDE_ROWS) {
+        for entry in recent.iter().take(8) {
             assert!(wants.covers.contains(&entry.id), "{}", entry.id);
         }
     }

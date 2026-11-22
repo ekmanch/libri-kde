@@ -2301,8 +2301,9 @@ fn capture_every_screen() {
 
 /// The window sizes of phase 1g: the minimum, the common screens, and
 /// 1080p and 1440p at KDE's 125 % and 150 % scaling (their logical sizes).
-/// Captures the library with the details pane, the overview and a plan
-/// page in Graphite, to `screenshots/sizes/`.
+/// Captures the library with the details pane, the overview in its three
+/// views (Recently added fills the column's height) and a plan page in
+/// Graphite, to `screenshots/sizes/`.
 #[test]
 #[ignore = "writes PNGs; run with --ignored"]
 fn capture_window_sizes() {
@@ -2321,6 +2322,12 @@ fn capture_window_sizes() {
     ];
     let pages: Vec<Variant> = vec![
         ("overview", nothing),
+        ("overview-list", |app| {
+            let _ = app.update(Message::Library(library::Message::SetView(View::List)));
+        }),
+        ("overview-text", |app| {
+            let _ = app.update(Message::Library(library::Message::SetView(View::Text)));
+        }),
         ("library", |app| {
             let _ = app.update(Message::Library(library::Message::ShowType(Some(
                 MediaType::Movies,
