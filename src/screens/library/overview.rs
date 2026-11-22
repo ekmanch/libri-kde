@@ -208,13 +208,12 @@ fn shelves<'a>(app: &'a App, overview: &Overview<'a>, tokens: &Tokens) -> Elemen
 }
 
 /// The grid's side column: the plan and Recently added, in the list
-/// view's rows with covers.
+/// view's rows with covers. It starts on the line of the first shelf's
+/// header, as the right column of the lists starts on the line of the
+/// left one's: the top of the plan card, or with no active plan the
+/// Recently added header, whose first row is then level with the covers.
 fn side<'a>(app: &'a App, overview: &Overview<'a>, tokens: &Tokens) -> Element<'a, AppMessage> {
-    let mut side = Column::new()
-        .spacing(28)
-        .width(Fill)
-        .height(Fill)
-        .padding(Padding::new(0.0).top(34));
+    let mut side = Column::new().spacing(28).width(Fill).height(Fill);
     if let Some(plan) = &overview.plan {
         side = side.push(plan_card(plan, tokens));
     }
@@ -700,7 +699,7 @@ mod shelf_tests {
         assert_eq!(RowStyle::Dot.whole_rows(8.0 * 57.0 + 56.0), 13);
     }
 
-    /// Recently added shows the rows that fit the window: six of the
+    /// Recently added shows the rows that fit the window: seven of the
     /// fixture's eight beside the shelves at the smallest window, all
     /// eight at the mockup's size, counted again for each size.
     #[test]
@@ -708,16 +707,64 @@ mod shelf_tests {
         let mut app = App::new(Screen::Library);
         app.today = Date::parse("2026-10-19").unwrap();
         let _ = app.update(msg(Message::SetView(View::Grid)));
-        let mut shows = |size: iced::Size, day: &str| {
+        let mut shows = |size: iced::Size, label: &str| {
             app.window = size;
             let mut ui = iced_test::Simulator::with_size(crate::app::settings(), size, app.view());
-            ui.find(day).is_ok()
+            ui.find(label).is_ok()
         };
-        // The sixth row was added on Sep 25, the last two on Sep 20.
+        // The seventh row was added on Sep 20; the eighth is the only
+        // show among them, and only these rows name a title's type.
         let min = crate::app::MIN_WINDOW_SIZE;
-        assert!(shows(min, "Sep 25"));
-        assert!(!shows(min, "Sep 20"));
-        assert!(shows(crate::app::WINDOW_SIZE, "Sep 20"));
+        assert!(shows(min, "Sep 20"));
+        assert!(!shows(min, "Show"));
+        assert!(shows(crate::app::WINDOW_SIZE, "Show"));
+    }
+
+    /// The right column starts on the line of the left one's first
+    /// header in every view: the top of the plan card when a plan is
+    /// active, else the Recently added header (the grid) or the Coming
+    /// soon one (the lists), with no room kept for a missing card.
+    #[test]
+    fn the_right_column_starts_on_the_first_headers_line() {
+        // A header is 24 px tall; the card's own is 18 px, 14 px down.
+        let header_top = |bounds: iced::Rectangle| bounds.center_y() - 12.0;
+        let card_top = |bounds: iced::Rectangle| bounds.center_y() - 9.0 - 14.0;
+        for planned in [true, false] {
+            for view in [View::Grid, View::List, View::Text] {
+                let mut app = App::new(Screen::Library);
+                app.today = Date::parse("2026-10-19").unwrap();
+                app.window = crate::app::WINDOW_SIZE;
+                let _ = app.update(msg(Message::SetView(view)));
+                if !planned {
+                    let ids: Vec<String> =
+                        (app.repo.library().plans.iter().map(|p| p.id.clone())).collect();
+                    for id in ids {
+                        app.apply(crate::repo::Operation::DeletePlan { id });
+                    }
+                }
+                let mut ui = iced_test::Simulator::with_size(
+                    crate::app::settings(),
+                    crate::app::WINDOW_SIZE,
+                    app.view(),
+                );
+                let mut place = |label: &str| ui.find(label).expect(label).bounds();
+                let (left, right) = match (view, planned) {
+                    (View::Grid, true) => ("COMING SOON", card_top(place("ACTIVE PLAN"))),
+                    (View::Grid, false) => ("COMING SOON", header_top(place("RECENTLY ADDED"))),
+                    (_, true) => ("ACTIVE PLAN", header_top(place("COMING SOON"))),
+                    (_, false) => ("IN PROGRESS", header_top(place("COMING SOON"))),
+                };
+                let left = match left {
+                    "ACTIVE PLAN" => card_top(place(left)),
+                    _ => header_top(place(left)),
+                };
+                assert!(
+                    (left - right).abs() < 0.6,
+                    "{view:?}, plan {planned}: {left} {right}"
+                );
+                assert_eq!(ui.find("ACTIVE PLAN").is_ok(), planned);
+            }
+        }
     }
 
     #[test]

@@ -31,6 +31,14 @@ type Variant = (&'static str, fn(&mut App));
 
 fn nothing(_: &mut App) {}
 
+/// Deletes every plan, so Home has no active one.
+fn no_plans(app: &mut App) {
+    let ids: Vec<String> = (app.repo.library().plans.iter().map(|p| p.id.clone())).collect();
+    for id in ids {
+        app.apply(libri::repo::Operation::DeletePlan { id });
+    }
+}
+
 fn setup_at(step: Step) -> impl Fn(&mut App) {
     move |app| app.setup = setup::State::at(step, app.source.as_ref())
 }
@@ -945,6 +953,36 @@ fn capture_every_screen() {
             ("home-list-selected", |app| {
                 let _ = app.update(Message::Library(library::Message::SetView(View::List)));
                 select(app, "books/project-hail-mary-2021");
+            }),
+        ),
+        // Home's right column starts on the line of the first header on
+        // the left in every view, with the plan card ("library" is the
+        // grid) and without one: no room is kept for a missing card.
+        (
+            Screen::Library,
+            ("home-list", |app| {
+                let _ = app.update(Message::Library(library::Message::SetView(View::List)));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("home-text", |app| {
+                let _ = app.update(Message::Library(library::Message::SetView(View::Text)));
+            }),
+        ),
+        (Screen::Library, ("home-no-plan", no_plans)),
+        (
+            Screen::Library,
+            ("home-list-no-plan", |app| {
+                no_plans(app);
+                let _ = app.update(Message::Library(library::Message::SetView(View::List)));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("home-text-no-plan", |app| {
+                no_plans(app);
+                let _ = app.update(Message::Library(library::Message::SetView(View::Text)));
             }),
         ),
         // The details panel elsewhere: pinned with nothing selected (At a
