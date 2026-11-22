@@ -186,26 +186,41 @@ impl Deezer {
             .unwrap_or_default())
     }
 
-    /// Up to three artists for a search, the best known first: Deezer
-    /// ranks a search's artists poorly ("Ghost & Gale" before Ghost), so
-    /// the hits go by their fans, and one with a hundredth of the best's
-    /// fans or fewer is left out.
+    /// Up to three artists for a search: those named as the search is
+    /// first, then the best known. Deezer ranks a search's artists poorly
+    /// ("Ghost & Gale" before Ghost) and loosely (Pink Floyd for
+    /// "pinback"), so the hits go by their fans, and one with a hundredth
+    /// of the best's fans or fewer is left out. An artist with the
+    /// search's own name is measured against its namesakes only, so a
+    /// far better known near-miss never hides it.
     fn matching_artists(&self, query: &str) -> Reply<Vec<ArtistHit>> {
         let hits = self.list("/search/artist", &[("q", query), ("limit", ARTIST_HITS)])?;
-        Ok(Deezer::best_artists(&hits))
+        Ok(Deezer::best_artists(&hits, query))
     }
 
-    fn best_artists(hits: &[Value]) -> Vec<ArtistHit> {
-        let mut hits: Vec<(i64, &Value)> = hits
+    fn best_artists(hits: &[Value], query: &str) -> Vec<ArtistHit> {
+        let mut hits: Vec<(bool, i64, &Value)> = hits
             .iter()
-            .map(|hit| (int_at(hit, "nb_fan").unwrap_or_default(), hit))
+            .map(|hit| {
+                let named = str_at(hit, "name").is_some_and(|name| same_title(name, query));
+                (named, int_at(hit, "nb_fan").unwrap_or_default(), hit)
+            })
             .collect();
         // Stable, so equal fans keep Deezer's order.
-        hits.sort_by_key(|(fans, _)| std::cmp::Reverse(*fans));
-        let best = hits.first().map_or(0, |(fans, _)| *fans);
-        hits.into_iter()
-            .filter(|(fans, _)| *fans * ARTIST_FAN_SHARE > best)
-            .filter_map(|(_, hit)| {
+        hits.sort_by_key(|(named, fans, _)| (!*named, std::cmp::Reverse(*fans)));
+        let best_of = |named: bool| {
+            hits.iter()
+                .filter(|(n, ..)| !named || *n)
+                .map(|(_, fans, _)| *fans)
+                .max()
+                .unwrap_or(0)
+        };
+        let (best_named, best) = (best_of(true), best_of(false));
+        hits.iter()
+            .filter(|(named, fans, _)| {
+                *fans * ARTIST_FAN_SHARE > if *named { best_named } else { best }
+            })
+            .filter_map(|(_, _, hit)| {
                 let name = str_at(hit, "name")?;
                 if NO_PHOTO.contains(&name.trim().to_lowercase().as_str()) {
                     return None;
@@ -700,12 +715,26 @@ mod tests {
                 {"id": 6, "name": "Ghost B.C.", "nb_fan": 6000}]"#,
         )
         .unwrap();
-        let best = Deezer::best_artists(&hits);
+        let best = Deezer::best_artists(&hits, "ghost");
         let names: Vec<&str> = best.iter().map(|a| a.name.as_str()).collect();
         assert_eq!(names, ["Ghost", "Ghostface Killah", "Ghost Town"]);
         assert_eq!(best[0].source, "deezer:artist:2");
         assert_eq!(best[0].albums, Some(30));
         assert_eq!(best[0].picture_url.as_deref(), Some("p.jpg"));
+
+        // The artist the search names comes first, however well known a
+        // near-miss is; its namesake with no fans stays out.
+        let hits: Vec<Value> = serde_json::from_str(
+            r#"[{"id": 1997, "name": "Pinback", "nb_fan": 9021, "nb_album": 13},
+                {"id": 860, "name": "Pink Floyd", "nb_fan": 6852025, "nb_album": 65},
+                {"id": 6248, "name": "Laid Back", "nb_fan": 9347, "nb_album": 7},
+                {"id": 382395121, "name": "Pinback", "nb_fan": 1, "nb_album": 1}]"#,
+        )
+        .unwrap();
+        let best = Deezer::best_artists(&hits, " pinback");
+        let names: Vec<&str> = best.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["Pinback", "Pink Floyd"]);
+        assert_eq!(best[0].source, "deezer:artist:1997");
 
         let mut albums: Vec<Value> = serde_json::from_str(
             r#"[{"title": "Impera", "release_date": "2022-03-11", "record_type": "album"},
