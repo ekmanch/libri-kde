@@ -237,6 +237,22 @@ pub fn sidebar_row_style(
     )
 }
 
+/// The sidebar's Settings gear: marked with the selection gray in every
+/// theme while Settings is open, never Light's tint of the accent, which
+/// is for a picked row.
+pub fn sidebar_gear_style(
+    tokens: &Tokens,
+    selected: bool,
+    radius: f32,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style + use<> {
+    let hover = if tokens.hover == tokens.chrome {
+        tokens.selection
+    } else {
+        tokens.hover
+    };
+    row_fills(tokens, selected.then_some(tokens.selection), hover, radius)
+}
+
 /// A row of a list of pages inside a dialog (the Following window's
 /// kinds): selected as the sidebar's row is, with the plain hover, since
 /// a dialog is never the chrome.

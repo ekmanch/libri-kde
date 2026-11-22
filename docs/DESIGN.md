@@ -178,8 +178,9 @@ Flat style uses one shade for chrome and content (Graphite flat: #151515 everywh
 
 | | Light | Dark themes |
 |---|---|---|
-| Selected sidebar row (Home, a type, Coming soon, a plan, a tag, All plans, All tags) and the Settings gear while Settings is open | the 18 % accent tint | the selection gray: the sidebar should not be loud, and a bright bar around a type dot of another color looks odd on dark |
+| Selected sidebar row (Home, a type, Coming soon, a plan, a tag, All plans, All tags) | the 18 % accent tint | the selection gray: the sidebar should not be loud, and a bright bar around a type dot of another color looks odd on dark |
 | The selected kind in the Following window | as the sidebar's row | as the sidebar's row |
+| The Settings gear while Settings is open (canvas revision of 2026-11-22) | the selection gray, the icon in the text color: an icon is not a row, and a tinted square in the corner read as a button of its own (`ui::sidebar_gear_style`) | the selection gray, the icon in the text color |
 | Picked status chip (All, Want, Done and so on) | the 18 % accent tint, normal text | the solid accent with the dark text, the Add button's colors. Never a low-opacity tint: it turns an orange accent brown on dark |
 | Active filter chip | the 18 % accent tint | the selection gray |
 | Ticked check box (the Following window, Add to plan, the tag picker) | the 22 % tint, dark check, the 45 % tint as its edge | the solid accent, dark check |

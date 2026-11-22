@@ -767,13 +767,14 @@ fn sync_row<'a>(app: &App, tokens: &Tokens) -> Element<'a, Message> {
         );
     }
     let on_settings = app.screen == Screen::Settings;
+    let gear = if on_settings { tokens.text } else { tokens.sub };
     line = line.push(
-        button(container(ui::icon(Icon::Settings, 18.0, tokens.sub)).center(Fill))
+        button(container(ui::icon(Icon::Settings, 18.0, gear)).center(Fill))
             .width(26)
             .height(26)
             .padding(0)
             .on_press(Message::Show(Screen::Settings))
-            .style(ui::sidebar_row_style(tokens, on_settings, 8.0))
+            .style(ui::sidebar_gear_style(tokens, on_settings, 8.0))
             .focusable(8.0, tokens),
     );
     let mut content = column![line];
