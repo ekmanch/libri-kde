@@ -353,6 +353,24 @@ fn deezer_search_shows_a_song_on_its_single_and_on_its_album() {
     println!("Picture You on {copies:?}");
     assert!(copies.contains(&"deezer:album:679137691"), "the single");
     assert!(copies.contains(&"deezer:album:9682786"), "the album");
+
+    // The album comes after more singles than records are asked about.
+    let page = service
+        .music_page(&MusicRequest {
+            list: MusicList::Search("Panda desiigner".into()),
+            scope: MusicScope::Songs,
+            cursor: 0,
+        })
+        .unwrap();
+    let copies: Vec<&str> = page
+        .matches
+        .iter()
+        .filter(|m| m.title == "Panda" && m.creator.as_deref() == Some("Desiigner"))
+        .filter_map(|m| m.album_source.as_deref())
+        .collect();
+    println!("Panda on {copies:?}");
+    assert!(copies.contains(&"deezer:album:12511986"), "the single");
+    assert!(copies.contains(&"deezer:album:13476107"), "New English");
 }
 
 #[test]

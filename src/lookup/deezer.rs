@@ -320,21 +320,45 @@ impl Deezer {
     }
 
     /// The albums among a page of song hits that may hold a copy the
-    /// search left out, in the hits' order. Deezer's search lists a
-    /// recording once: a song out as a single and on its album (one ISRC)
-    /// comes from one of the two only, mostly the single. An album is
-    /// worth asking when its artist has a hit on another record too.
+    /// search left out. Deezer's search lists a recording once: a song
+    /// out as a single and on its album (one ISRC) comes from one of the
+    /// two only, mostly the single. An album is worth asking when its
+    /// artist has a hit on another record too. The records that look like
+    /// more than a single come first, in the hits' order, since only so
+    /// many are asked: an artist's page of hits is mostly singles, which
+    /// hold no other hit's copy.
     fn albums_to_ask(hits: &[Value]) -> Vec<i64> {
-        let records: Vec<(i64, i64)> = hits
+        // A hit's artist, its record, and whether the record is named
+        // after the song (a single, as far as a hit can tell).
+        let records: Vec<(i64, i64, bool)> = hits
             .iter()
-            .filter_map(|hit| Some((int_at(&hit["artist"], "id")?, int_at(&hit["album"], "id")?)))
+            .filter_map(|hit| {
+                let album = &hit["album"];
+                let named_after = match (str_at(hit, "title"), str_at(album, "title")) {
+                    (Some(song), Some(record)) => song.to_lowercase() == record.to_lowercase(),
+                    _ => false,
+                };
+                Some((
+                    int_at(&hit["artist"], "id")?,
+                    int_at(album, "id")?,
+                    named_after,
+                ))
+            })
             .collect();
         let mut albums = Vec::new();
-        for (artist, album) in &records {
-            if !albums.contains(album) && records.iter().any(|(a, b)| a == artist && b != album) {
+        for (artist, album, _) in &records {
+            if !albums.contains(album) && records.iter().any(|(a, b, _)| a == artist && b != album)
+            {
                 albums.push(*album);
             }
         }
+        // Stable: the singles keep their order after the rest.
+        albums.sort_by_key(|album| {
+            records
+                .iter()
+                .filter(|(_, b, _)| b == album)
+                .all(|(_, _, named_after)| *named_after)
+        });
         albums.truncate(HIDDEN_ALBUMS);
         albums
     }
@@ -764,8 +788,9 @@ mod tests {
                  "album": {"id": 300, "title": "Else"}}]"#,
         )
         .unwrap();
-        // Only the artist with two records in the hits is asked about.
-        assert_eq!(Deezer::albums_to_ask(&hits), [100, 200]);
+        // Only the artist with two records in the hits is asked about,
+        // the record that is more than a single first.
+        assert_eq!(Deezer::albums_to_ask(&hits), [200, 100]);
 
         let lists: Vec<(i64, Vec<Value>)> = vec![
             (
@@ -808,5 +833,26 @@ mod tests {
         assert_eq!(songs[1].cover_url.as_deref(), Some("album.jpg"));
         // With no track lists the hits come as they are.
         assert_eq!(Deezer::songs_with_copies(&hits, &[]).len(), 3);
+    }
+
+    #[test]
+    fn an_album_is_asked_before_the_singles_ahead_of_it() {
+        // "Panda desiigner": seven singles, then a song of the album
+        // that holds Panda too. Only six records are asked.
+        let mut hits: Vec<Value> = (0..7)
+            .map(|n| {
+                serde_json::json!({
+                    "id": n, "title": format!("Single {n}"), "isrc": format!("S{n}"),
+                    "artist": {"id": 7, "name": "Desiigner"},
+                    "album": {"id": 100 + n, "title": format!("single {n}")},
+                })
+            })
+            .collect();
+        hits.push(serde_json::json!({
+            "id": 50, "title": "Caliber", "isrc": "C1",
+            "artist": {"id": 7, "name": "Desiigner"},
+            "album": {"id": 200, "title": "New English"},
+        }));
+        assert_eq!(Deezer::albums_to_ask(&hits), [200, 100, 101, 102, 103, 104]);
     }
 }
