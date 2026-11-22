@@ -44,6 +44,9 @@ const ARTIST_FAN_SHARE: i64 = 100;
 /// How many albums a page of song hits asks for the copies of its songs
 /// that the search left out.
 const HIDDEN_ALBUMS: usize = 6;
+/// How many albums a song search asks the album search for, to look for
+/// those copies on.
+const NAMED_ALBUMS: &str = "10";
 
 impl Deezer {
     pub fn new() -> Deezer {
@@ -319,15 +322,20 @@ impl Deezer {
         Ok(page)
     }
 
-    /// The albums among a page of song hits that may hold a copy the
-    /// search left out. Deezer's search lists a recording once: a song
-    /// out as a single and on its album (one ISRC) comes from one of the
-    /// two only, mostly the single. An album is worth asking when its
-    /// artist has a hit on another record too. The records that look like
-    /// more than a single come first, in the hits' order, since only so
-    /// many are asked: an artist's page of hits is mostly singles, which
-    /// hold no other hit's copy.
-    fn albums_to_ask(hits: &[Value]) -> Vec<i64> {
+    /// The albums that may hold a copy of a song hit that the search left
+    /// out, as Deezer describes them (id, title, covers). Deezer's search
+    /// lists a recording once: a song out as a single and on its album,
+    /// or on an album and a compilation (one ISRC), comes from one of
+    /// them only. An album is worth asking when its artist has a hit on
+    /// another record: the albums of the hits themselves, then `named`,
+    /// the albums Deezer's album search finds for the same words, which
+    /// is how a record with no hit of its own on the page is found
+    /// ("tainted love marilyn manson" names the best-of beside the studio
+    /// album the one hit is on). The records that are more than a single
+    /// come first, in that order, since only so many are asked: an
+    /// artist's page of hits is mostly singles, which hold no other hit's
+    /// copy.
+    fn albums_to_ask(hits: &[Value], named: &[Value]) -> Vec<Value> {
         // A hit's artist, its record, and whether the record is named
         // after the song (a single, as far as a hit can tell).
         let records: Vec<(i64, i64, bool)> = hits
@@ -345,28 +353,44 @@ impl Deezer {
                 ))
             })
             .collect();
-        let mut albums = Vec::new();
-        for (artist, album, _) in &records {
-            if !albums.contains(album) && records.iter().any(|(a, b, _)| a == artist && b != album)
-            {
-                albums.push(*album);
+        // The album search says what a record is; a hit does not.
+        let is_single = |id: i64| {
+            let found = named.iter().find(|album| int_at(album, "id") == Some(id));
+            match found.and_then(|album| str_at(album, "record_type")) {
+                Some(record_type) => record_type == "single",
+                None => records
+                    .iter()
+                    .filter(|(_, album, _)| *album == id)
+                    .all(|(_, _, named_after)| *named_after),
+            }
+        };
+        let of_hits = hits
+            .iter()
+            .map(|hit| (int_at(&hit["artist"], "id"), &hit["album"]));
+        let of_search = named
+            .iter()
+            .map(|album| (int_at(&album["artist"], "id"), album));
+        let mut albums: Vec<(i64, &Value)> = Vec::new();
+        for (artist, album) in of_hits.chain(of_search) {
+            let (Some(artist), Some(id)) = (artist, int_at(album, "id")) else {
+                continue;
+            };
+            let elsewhere = records.iter().any(|(a, b, _)| *a == artist && *b != id);
+            if elsewhere && !albums.iter().any(|(listed, _)| *listed == id) {
+                albums.push((id, album));
             }
         }
         // Stable: the singles keep their order after the rest.
-        albums.sort_by_key(|album| {
-            records
-                .iter()
-                .filter(|(_, b, _)| b == album)
-                .all(|(_, _, named_after)| *named_after)
-        });
+        albums.sort_by_key(|(id, _)| is_single(*id));
         albums.truncate(HIDDEN_ALBUMS);
-        albums
+        albums.into_iter().map(|(_, album)| album.clone()).collect()
     }
 
     /// A page of song hits as matches, each followed by the copies of the
     /// same recording (the same ISRC) on the other albums in `lists`
-    /// (an album's id and its tracks) that the search did not show.
-    fn songs_with_copies(hits: &[Value], lists: &[(i64, Vec<Value>)]) -> Vec<Match> {
+    /// (an album as Deezer describes it, and its tracks) that the search
+    /// did not show.
+    fn songs_with_copies(hits: &[Value], lists: &[(Value, Vec<Value>)]) -> Vec<Match> {
         let mut listed: HashSet<i64> = hits.iter().filter_map(|hit| int_at(hit, "id")).collect();
         let mut matches = Vec::new();
         for hit in hits {
@@ -378,18 +402,10 @@ impl Deezer {
                 continue;
             };
             let own = int_at(&hit["album"], "id");
-            for (album_id, tracks) in lists {
-                if Some(*album_id) == own {
+            for (album, tracks) in lists {
+                if int_at(album, "id") == own {
                     continue;
                 }
-                // An album's track list names no album: a hit's does.
-                let Some(album) = hits
-                    .iter()
-                    .map(|other| &other["album"])
-                    .find(|album| int_at(album, "id") == Some(*album_id))
-                else {
-                    continue;
-                };
                 for track in tracks {
                     if str_at(track, "isrc") != Some(isrc) {
                         continue;
@@ -400,6 +416,7 @@ impl Deezer {
                     if !listed.insert(id) {
                         continue;
                     }
+                    // An album's track list names no album.
                     let mut copy = track.clone();
                     copy["album"] = album.clone();
                     matches.extend(Deezer::track(&copy));
@@ -409,14 +426,19 @@ impl Deezer {
         matches
     }
 
-    /// A page of song hits with the copies the search left out. A track
-    /// list that does not come only leaves its copies out.
-    fn songs(&self, hits: &[Value]) -> Vec<Match> {
-        let lists: Vec<(i64, Vec<Value>)> = Deezer::albums_to_ask(hits)
+    /// A page of the song hits for `query` with the copies the search
+    /// left out. The album search or a track list that does not come
+    /// only leaves its copies out.
+    fn songs(&self, hits: &[Value], query: &str) -> Vec<Match> {
+        let named = self
+            .list("/search/album", &[("q", query), ("limit", NAMED_ALBUMS)])
+            .unwrap_or_default();
+        let lists: Vec<(Value, Vec<Value>)> = Deezer::albums_to_ask(hits, &named)
             .into_iter()
-            .filter_map(|id| {
+            .filter_map(|album| {
+                let id = int_at(&album, "id")?;
                 let tracks = self.list(&format!("/album/{id}/tracks"), &[("limit", "200")]);
-                Some((id, tracks.ok()?))
+                Some((album, tracks.ok()?))
             })
             .collect();
         Deezer::songs_with_copies(hits, &lists)
@@ -554,7 +576,7 @@ impl Source for Deezer {
                     self.page(path, &[("q", query), ("index", &index), ("limit", &count)])?;
                 let matches = match request.scope {
                     MusicScope::Albums => items.iter().filter_map(Deezer::album).collect(),
-                    MusicScope::Songs => self.songs(&items),
+                    MusicScope::Songs => self.songs(&items, query),
                 };
                 let artists = if cursor == 0 {
                     self.matching_artists(query)?
@@ -700,6 +722,14 @@ impl Deezer {
 mod tests {
     use super::*;
 
+    /// The ids of the albums asked for a page of hits.
+    fn asked(hits: &[Value], named: &[Value]) -> Vec<i64> {
+        Deezer::albums_to_ask(hits, named)
+            .iter()
+            .filter_map(|album| int_at(album, "id"))
+            .collect()
+    }
+
     #[test]
     fn albums_and_tracks_become_matches() {
         let album: Value = serde_json::from_str(
@@ -790,11 +820,11 @@ mod tests {
         .unwrap();
         // Only the artist with two records in the hits is asked about,
         // the record that is more than a single first.
-        assert_eq!(Deezer::albums_to_ask(&hits), [200, 100]);
+        assert_eq!(asked(&hits, &[]), [200, 100]);
 
-        let lists: Vec<(i64, Vec<Value>)> = vec![
+        let lists: Vec<(Value, Vec<Value>)> = vec![
             (
-                100,
+                hits[0]["album"].clone(),
                 serde_json::from_str(
                     r#"[{"id": 31, "title": "Picture You", "isrc": "USBQU1300308",
                          "artist": {"id": 7, "name": "The Amazing"}}]"#,
@@ -802,7 +832,7 @@ mod tests {
                 .unwrap(),
             ),
             (
-                200,
+                hits[1]["album"].clone(),
                 serde_json::from_str(
                     r#"[{"id": 11, "title": "Broken", "isrc": "USBQU1300307",
                          "artist": {"id": 7, "name": "The Amazing"}},
@@ -853,6 +883,86 @@ mod tests {
             "artist": {"id": 7, "name": "Desiigner"},
             "album": {"id": 200, "title": "New English"},
         }));
-        assert_eq!(Deezer::albums_to_ask(&hits), [200, 100, 101, 102, 103, 104]);
+        assert_eq!(asked(&hits, &[]), [200, 100, 101, 102, 103, 104]);
+    }
+
+    #[test]
+    fn an_album_the_album_search_names_is_asked_for_a_hits_copy() {
+        // "tainted love marilyn manson": one hit by the artist, on the
+        // studio album; the album search names the best-of as well.
+        let hits: Vec<Value> = serde_json::from_str(
+            r#"[{"id": 2516603, "title": "Tainted Love", "isrc": "USIR10120378",
+                 "artist": {"id": 482, "name": "Marilyn Manson"},
+                 "album": {"id": 246972, "title": "The Golden Age Of Grotesque"}},
+                {"id": 397244952, "title": "Tainted Love", "isrc": "USQY51769707",
+                 "artist": {"id": 5174833, "name": "Midnite String Quartet"},
+                 "album": {"id": 46660982, "title": "MSQ Performs Marilyn Manson"}}]"#,
+        )
+        .unwrap();
+        let named: Vec<Value> = serde_json::from_str(
+            r#"[{"id": 246972, "title": "The Golden Age Of Grotesque", "record_type": "album",
+                 "artist": {"id": 482, "name": "Marilyn Manson"}},
+                {"id": 123378, "title": "Lest We Forget (The Best Of)", "record_type": "album",
+                 "cover_medium": "best-of.jpg", "artist": {"id": 482, "name": "Marilyn Manson"}},
+                {"id": 9376196, "title": "Sing Tainted Love Like Marilyn Manson",
+                 "record_type": "single", "artist": {"id": 321401, "name": "The Karaoke Channel"}}]"#,
+        )
+        .unwrap();
+        // Not the album the hit is on, nor one by an artist with no hit.
+        assert!(asked(&hits, &[]).is_empty());
+        let albums = Deezer::albums_to_ask(&hits, &named);
+        assert_eq!(albums.len(), 1);
+        assert_eq!(int_at(&albums[0], "id"), Some(123378));
+
+        let tracks: Vec<Value> = serde_json::from_str(
+            r#"[{"id": 1151612, "title": "The Fight Song", "isrc": "USIR10001297",
+                 "artist": {"id": 482, "name": "Marilyn Manson"}},
+                {"id": 1151613, "title": "Tainted Love", "isrc": "USIR10120378",
+                 "artist": {"id": 482, "name": "Marilyn Manson"}}]"#,
+        )
+        .unwrap();
+        let songs = Deezer::songs_with_copies(&hits, &[(albums[0].clone(), tracks)]);
+        let rows: Vec<(&str, Option<&str>)> = songs
+            .iter()
+            .map(|m| (m.source.as_str(), m.album.as_deref()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("deezer:track:2516603", Some("The Golden Age Of Grotesque")),
+                ("deezer:track:1151613", Some("Lest We Forget (The Best Of)")),
+                (
+                    "deezer:track:397244952",
+                    Some("MSQ Performs Marilyn Manson")
+                ),
+            ]
+        );
+        assert_eq!(songs[1].creator.as_deref(), Some("Marilyn Manson"));
+        assert_eq!(songs[1].cover_url.as_deref(), Some("best-of.jpg"));
+
+        // The album search says what a record is: a single of the
+        // artist's comes after their albums, the hits' own first.
+        let mut hits = hits;
+        hits.push(serde_json::json!({
+            "id": 7, "title": "mOBSCENE", "isrc": "USIR10300204",
+            "artist": {"id": 482, "name": "Marilyn Manson"},
+            "album": {"id": 300, "title": "mOBSCENE"},
+        }));
+        let mut named = named;
+        named.insert(
+            0,
+            serde_json::json!({
+                "id": 300, "title": "mOBSCENE", "record_type": "ep",
+                "artist": {"id": 482, "name": "Marilyn Manson"},
+            }),
+        );
+        named.insert(
+            0,
+            serde_json::json!({
+                "id": 287715, "title": "Personal Jesus", "record_type": "single",
+                "artist": {"id": 482, "name": "Marilyn Manson"},
+            }),
+        );
+        assert_eq!(asked(&hits, &named), [246972, 300, 123378, 287715]);
     }
 }

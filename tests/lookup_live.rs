@@ -371,6 +371,42 @@ fn deezer_search_shows_a_song_on_its_single_and_on_its_album() {
     println!("Panda on {copies:?}");
     assert!(copies.contains(&"deezer:album:12511986"), "the single");
     assert!(copies.contains(&"deezer:album:13476107"), "New English");
+
+    // The one hit is on the studio album; the best-of has no hit of its
+    // own, and is found through the album search for the same words.
+    let page = service
+        .music_page(&MusicRequest {
+            list: MusicList::Search("tainted love marilyn manson".into()),
+            scope: MusicScope::Songs,
+            cursor: 0,
+        })
+        .unwrap();
+    let rows: Vec<(&str, &str)> = page
+        .matches
+        .iter()
+        .filter_map(|m| Some((m.creator.as_deref()?, m.album_source.as_deref()?)))
+        .collect();
+    println!("Tainted Love on {rows:?}");
+    assert_eq!(rows[0], ("Marilyn Manson", "deezer:album:246972"));
+    assert_eq!(rows[1], ("Marilyn Manson", "deezer:album:123378"));
+
+    // The same for the album behind a single, with the song's name alone.
+    let page = service
+        .music_page(&MusicRequest {
+            list: MusicList::Search("picture you".into()),
+            scope: MusicScope::Songs,
+            cursor: 0,
+        })
+        .unwrap();
+    let copies: Vec<&str> = page
+        .matches
+        .iter()
+        .filter(|m| m.title == "Picture You" && m.creator.as_deref() == Some("The Amazing"))
+        .filter_map(|m| m.album_source.as_deref())
+        .collect();
+    println!("Picture You on {copies:?}");
+    assert!(copies.contains(&"deezer:album:679137691"), "the single");
+    assert!(copies.contains(&"deezer:album:9682786"), "the album");
 }
 
 #[test]
