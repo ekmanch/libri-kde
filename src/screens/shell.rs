@@ -156,7 +156,7 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
         let row = row![
             lead,
             item_label(label, selected, tokens),
-            ui::mono(library.count(media).to_string(), 12.0, tokens.sub),
+            ui::figure(library.count(media).to_string(), 12.0, tokens.sub),
         ];
         items = items.push(item(
             row,
@@ -174,7 +174,7 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
     let soon_row = row![
         container(ui::icon(Icon::Clock, 14.0, tokens.sub)).width(9),
         item_label("Coming soon", on_soon, tokens),
-        ui::mono(upcoming.to_string(), 12.0, tokens.sub),
+        ui::figure(upcoming.to_string(), 12.0, tokens.sub),
     ];
     items = items.push(
         container(item(
@@ -211,7 +211,7 @@ fn sidebar<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, Message> {
             text(&plan.name).size(14).font(weight),
             text(year).size(13).font(font::MEDIUM).color(tokens.sub),
             space::horizontal(),
-            ui::mono(format!("{done}/{total}"), 11.5, tokens.sub),
+            ui::figure(format!("{done}/{total}"), 11.5, tokens.sub),
         ]
         .spacing(6)
         .align_y(iced::alignment::Vertical::Bottom);
@@ -284,15 +284,9 @@ fn tags<'a>(app: &'a App, mut items: Column<'a, Message>, tokens: &Tokens) -> Co
     for (tag, count) in sidebar_tags {
         let selected = on_library && state.filter.tags.iter().any(|t| t == tag);
         let row = row![
-            container(
-                text("#")
-                    .size(13)
-                    .font(font::MONO_MEDIUM)
-                    .color(tokens.mark)
-            )
-            .width(9),
+            container(text("#").size(13).font(font::MEDIUM).color(tokens.mark)).width(9),
             item_label(tag, selected, tokens),
-            ui::mono(count.to_string(), 12.0, tokens.sub),
+            ui::figure(count.to_string(), 12.0, tokens.sub),
         ];
         let message = Message::Library(library::Message::PickTag(tag.to_owned()));
         items = items.push(item(row, 32.0, selected, tokens, message));
@@ -384,7 +378,7 @@ fn more_row<'a>(
     let content = row![
         ui::icon(Icon::More, 12.0, tokens.sub),
         item_label(label, selected, tokens),
-        ui::mono(count.to_string(), 12.0, tokens.sub),
+        ui::figure(count.to_string(), 12.0, tokens.sub),
     ]
     .spacing(10)
     .align_y(Center)
@@ -684,7 +678,7 @@ fn unreadable_dialog<'a>(
     let body = column![
         text("The file on GitHub is no longer a valid library, so it can't replace this computer's copy.")
             .size(14),
-        ui::mono(reason.to_owned(), 12.5, tokens.sub),
+        ui::figure(reason.to_owned(), 12.5, tokens.sub),
         sides,
         warning,
     ]

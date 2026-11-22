@@ -367,7 +367,7 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
             "0:00",
             &track.length,
             move |length| msg(Message::Length(index, length)),
-            font::MONO,
+            font::REGULAR,
             &tokens,
         )
         .on_submit(msg(Message::Next(index)))
@@ -377,7 +377,7 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
         .width(70);
         let line = row![
             grip,
-            container(ui::mono((index + 1).to_string(), 12.0, tokens.sub))
+            container(ui::figure((index + 1).to_string(), 12.0, tokens.sub))
                 .width(24)
                 .align_x(iced::alignment::Horizontal::Right),
             title,
@@ -422,7 +422,7 @@ pub fn view<'a>(app: &'a App, form: &'a Form) -> Element<'a, AppMessage> {
             "One track per line, e.g. from Wikipedia or Discogs:\n1. Hometown Glory 4:31\n2. I'll Be Waiting 4:07",
         )
         .on_action(|action| msg(Message::Paste(action)))
-        .font(font::MONO)
+        .font(font::REGULAR)
         .height(84)
         .padding([8, 10])
         .size(13)

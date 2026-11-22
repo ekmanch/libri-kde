@@ -128,7 +128,7 @@ pub fn all_tags_popover<'a>(app: &'a App) -> Element<'a, AppMessage> {
 
     let header = row![
         text("All tags").size(17).font(font::EXTRABOLD),
-        ui::mono(total.to_string(), 12.0, tokens.sub),
+        ui::figure(total.to_string(), 12.0, tokens.sub),
         space::horizontal(),
         ui::icon_button(Icon::Close, 16.0, &tokens, msg(Message::ClosePopup)),
     ]
@@ -157,7 +157,7 @@ pub fn all_tags_popover<'a>(app: &'a App) -> Element<'a, AppMessage> {
             container(
                 row![
                     ui::section_header(category.name(), &tokens),
-                    ui::mono(tags.len().to_string(), 11.0, tokens.sub)
+                    ui::figure(tags.len().to_string(), 11.0, tokens.sub)
                 ]
                 .spacing(8)
                 .align_y(Center),
@@ -207,7 +207,7 @@ fn tag_row<'a>(
     let pick = button(
         row![
             text(format!("#{tag}")).size(14).width(Fill),
-            ui::mono(count.to_string(), 12.0, tokens.sub)
+            ui::figure(count.to_string(), 12.0, tokens.sub)
         ]
         .spacing(10)
         .align_y(Center)

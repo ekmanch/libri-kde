@@ -134,7 +134,7 @@ pub fn view<'a>(
     };
     let top = Row::new().push(back).spacing(10).align_y(Center);
     let header = column![
-        ui::mono(kicker.to_uppercase(), 11.5, kicker_color),
+        ui::kicker(kicker.to_uppercase(), 11.5, kicker_color),
         text(title).size(28).font(font::EXTRABOLD),
         line,
     ]
@@ -274,7 +274,7 @@ fn episodes_view<'a>(
         };
         container(
             row![
-                container(ui::mono(episode.number.to_string(), 12.5, tokens.sub)).width(32),
+                container(ui::figure(episode.number.to_string(), 12.5, tokens.sub)).width(32),
                 container(
                     text(title)
                         .size(14)
@@ -283,8 +283,8 @@ fn episodes_view<'a>(
                 )
                 .width(Fill)
                 .clip(true),
-                container(ui::mono(aired, 12.5, tokens.sub)).width(110),
-                container(ui::mono(runtime, 12.5, tokens.sub)).width(70),
+                container(ui::figure(aired, 12.5, tokens.sub)).width(110),
+                container(ui::figure(runtime, 12.5, tokens.sub)).width(70),
             ]
             .spacing(12)
             .align_y(Center),

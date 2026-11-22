@@ -1133,7 +1133,7 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         "2026-12-25",
         &form.released,
         |r| msg(Message::Released(r)),
-        font::MONO,
+        font::REGULAR,
         tokens
     )]
     .spacing(6);
@@ -1236,7 +1236,7 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
                 "Optional",
                 &form.pages,
                 |p| msg(Message::Pages(p)),
-                font::MONO,
+                font::REGULAR,
                 tokens,
             ),
             tokens,
@@ -1262,7 +1262,7 @@ fn fields<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
                     "#",
                     &form.series_number,
                     |n| msg(Message::SeriesNumber(n)),
-                    font::MONO,
+                    font::REGULAR,
                     tokens,
                 ),
                 tokens,
@@ -1441,7 +1441,7 @@ fn season_line<'a>(
         "Not set",
         &season.released,
         move |d| msg(Message::SeasonDate(number, d)),
-        font::MONO,
+        font::REGULAR,
         tokens,
     )
     .width(170);

@@ -656,7 +656,7 @@ pub fn glance_covers(app: &App, listing: &Listing<'_>) -> Vec<String> {
 fn tag_chip_width(tag: &str, n: usize) -> f32 {
     ui::text_width(&format!("#{tag}"), 13.0, font::REGULAR)
         + 6.0
-        + ui::text_width(&n.to_string(), 11.5, font::MONO)
+        + ui::text_width(&n.to_string(), 11.5, font::REGULAR)
         + 20.0
 }
 
@@ -810,7 +810,7 @@ fn glance<'a>(app: &'a App, height: f32) -> Element<'a, AppMessage> {
                 container(
                     row![
                         text(format!("#{tag}")).size(13),
-                        ui::mono(n.to_string(), 11.5, t.sub)
+                        ui::figure(n.to_string(), 11.5, t.sub)
                     ]
                     .spacing(6)
                     .align_y(Center),
@@ -890,7 +890,7 @@ fn glance<'a>(app: &'a App, height: f32) -> Element<'a, AppMessage> {
 
 /// A row of the glance: a type dot (text view) or a 26 × 39 cover (an
 /// album's square) with
-/// `sub` under the title (list and grid), `meta` in mono at the right,
+/// `sub` under the title (list and grid), `meta` at the right,
 /// and a line under it; a click selects the title.
 fn glance_row<'a>(
     app: &'a App,
@@ -932,7 +932,7 @@ fn glance_row<'a>(
             .push(ui::dot(color, 8.0, 3.0))
             .push(container(title).width(Fill).clip(true))
     };
-    content = content.push(ui::mono(meta, 12.0, tokens.sub));
+    content = content.push(ui::figure(meta, 12.0, tokens.sub));
     let height = if cover { COVER_ROW_H } else { TEXT_ROW_H };
     let line = tokens.line;
     let row_button = button(content.height(Fill))

@@ -231,7 +231,7 @@ fn shelf<'a>(
             text(section.title().to_uppercase())
                 .size(theme::size::SECTION)
                 .font(font::BOLD),
-            ui::mono(list.len().to_string(), 12.0, tokens.sub),
+            ui::figure(list.len().to_string(), 12.0, tokens.sub),
             ui::icon(Icon::ChevronRight, 12.0, tokens.sub),
         ]
         .spacing(8)
@@ -306,7 +306,7 @@ fn shelf_cover<'a>(
         .height(ui::cover::height_for(COVER_WIDTH, all_square));
     let content = column![
         cover,
-        ui::mono(meta, 12.0, tokens.sub).wrapping(text::Wrapping::None)
+        ui::figure(meta, 12.0, tokens.sub).wrapping(text::Wrapping::None)
     ]
     .spacing(6)
     .width(100);
@@ -428,7 +428,7 @@ pub(super) fn overview_row<'a>(
                 )
         }
     };
-    content = content.push(ui::mono(meta, 12.0, tokens.sub));
+    content = content.push(ui::figure(meta, 12.0, tokens.sub));
     let height = if style == RowStyle::Dot { 38.0 } else { 56.0 };
     let line = tokens.line;
     let row_button = button(content.height(Fill))

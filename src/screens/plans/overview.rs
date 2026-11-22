@@ -22,7 +22,7 @@ pub fn view(app: &App) -> Element<'_, AppMessage> {
     let library = app.repo.library();
     let header = row![
         text("All plans").size(30).font(font::EXTRABOLD),
-        ui::mono(library.plans.len().to_string(), 13.0, tokens.sub),
+        ui::figure(library.plans.len().to_string(), 13.0, tokens.sub),
         space::horizontal(),
         ui::add_button("New plan", &tokens, msg(Message::NewPlan)),
     ]

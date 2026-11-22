@@ -62,7 +62,7 @@ pub fn track_rating<'a, Message: Clone + 'a>(
     let tokens_copy = *tokens;
     let label = match value {
         Some(n) => text(format!("{n}/10"))
-            .font(font::MONO_MEDIUM)
+            .font(font::MEDIUM)
             .size(13)
             .color(tokens.text),
         None => text("Rate").size(13).color(tokens.sub),

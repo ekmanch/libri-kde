@@ -319,7 +319,7 @@ pub(super) fn section_header<'a>(
                 .size(theme::size::SECTION)
                 .font(font::BOLD)
                 .color(tokens.sub),
-            ui::mono(count.to_string(), 12.0, tokens.sub),
+            ui::figure(count.to_string(), 12.0, tokens.sub),
         ]
         .spacing(8)
         .align_y(iced::Center),
@@ -359,7 +359,7 @@ pub(super) fn bar_header<'a>(
                 .font(font::EXTRABOLD)
                 .line_height(1.0)
                 .color(color),
-            ui::mono(count.to_string(), 13.0, tokens.sub),
+            ui::figure(count.to_string(), 13.0, tokens.sub),
         ]
         .spacing(10)
         .align_y(iced::Center),

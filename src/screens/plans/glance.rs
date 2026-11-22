@@ -155,7 +155,7 @@ fn build<'a>(
                 msg(Message::ToggleGlancePop(pop)),
             )
         } else {
-            ui::mono(total.to_string(), 12.0, tokens.sub).into()
+            ui::figure(total.to_string(), 12.0, tokens.sub).into()
         }
     };
     let left_rows = |n: usize| {
@@ -215,7 +215,10 @@ fn build<'a>(
         None => return pane,
     };
     let list = column![
-        header(title, ui::mono(total.to_string(), 12.0, tokens.sub).into()),
+        header(
+            title,
+            ui::figure(total.to_string(), 12.0, tokens.sub).into()
+        ),
         ui::scroll(rows).height(iced::Shrink)
     ]
     .spacing(HEADER_GAP);
@@ -321,7 +324,7 @@ fn type_row<'a>(progress: TypeProgress, tokens: &Tokens) -> Element<'a, AppMessa
     row![
         text(progress.media.label()).size(14).width(64),
         bar,
-        container(ui::mono(
+        container(ui::figure(
             format!("{}/{}", progress.done, progress.total),
             12.0,
             tokens.sub

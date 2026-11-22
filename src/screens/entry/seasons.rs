@@ -158,7 +158,7 @@ pub fn series_row<'a>(
     .width(Fill);
     // A long title or subtitle is cut off before the status pill.
     let mut content = row![
-        container(ui::mono(number, 12.5, tokens.sub)).width(26),
+        container(ui::figure(number, 12.5, tokens.sub)).width(26),
         container(words).width(Fill).clip(true),
     ]
     .spacing(10)

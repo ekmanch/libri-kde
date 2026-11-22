@@ -123,7 +123,7 @@ pub fn view<'a>(app: &'a App, open: &OpenSeries) -> Option<Element<'a, AppMessag
         format!("{owned} of {} in your library", rows.len())
     };
     let facts = column![
-        ui::mono(
+        ui::kicker(
             format!("Series · {}", open.media.label()).to_uppercase(),
             11.0,
             tokens.type_text(open.media)

@@ -587,8 +587,9 @@ pub fn card_background(tokens: &Tokens) -> Color {
     }
 }
 
-/// Figtree only. Headings are ExtraBold, body Regular, labels and buttons
-/// SemiBold.
+/// Figtree for everything, numbers included. Headings are ExtraBold, body
+/// Regular, labels and buttons SemiBold. DejaVu Sans Mono only for text
+/// that is code or an identifier.
 pub mod font {
     use super::*;
 
@@ -613,23 +614,19 @@ pub mod font {
         weight: Weight::ExtraBold,
         ..REGULAR
     };
-    /// Years, counts and dates.
-    pub const MONO: Font = Font::with_name("JetBrains Mono");
-    pub const MONO_MEDIUM: Font = Font {
-        weight: Weight::Medium,
-        ..MONO
-    };
+    /// Code and identifiers: the repository, branch, file and token, file
+    /// paths and names, the starter JSON and keyboard keys.
+    pub const MONO: Font = Font::with_name("DejaVu Sans Mono");
 
     /// The font files, loaded at startup.
-    pub const FILES: [&[u8]; 8] = [
+    pub const FILES: [&[u8]; 7] = [
         include_bytes!("../assets/fonts/figtree/Figtree-Regular.ttf"),
         include_bytes!("../assets/fonts/figtree/Figtree-Italic.ttf"),
         include_bytes!("../assets/fonts/figtree/Figtree-Medium.ttf"),
         include_bytes!("../assets/fonts/figtree/Figtree-SemiBold.ttf"),
         include_bytes!("../assets/fonts/figtree/Figtree-Bold.ttf"),
         include_bytes!("../assets/fonts/figtree/Figtree-ExtraBold.ttf"),
-        include_bytes!("../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf"),
-        include_bytes!("../assets/fonts/jetbrains-mono/JetBrainsMono-Medium.ttf"),
+        include_bytes!("../assets/fonts/dejavu-sans-mono/DejaVuSansMono.ttf"),
     ];
 }
 

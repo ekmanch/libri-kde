@@ -47,7 +47,7 @@ pub fn view<'a>(app: &'a App, form: &'a PlanForm) -> Element<'a, AppMessage> {
             "2027",
             &form.year,
             |y| msg(Message::Year(y)),
-            font::MONO,
+            font::REGULAR,
             &tokens
         ),
     ]

@@ -8,7 +8,8 @@
 
 use iced::alignment::Vertical;
 use iced::widget::{
-    Column, Row, button, column, container, operation, row, scrollable, space, text,
+    Column, Row, button, column, container, operation, rich_text, row, scrollable, space, span,
+    text,
 };
 use iced::{Background, Border, Center, Color, Element, Fill, FillPortion, Padding, Task};
 
@@ -452,13 +453,33 @@ fn setting_notes<'a>(
         .into_iter()
         .fold(
             column![text(name).size(14.5).font(font::SEMIBOLD)],
-            |words, help| words.push(text(help).size(13).line_height(1.45).color(sub)),
+            |words, help| words.push(help_text(help, sub)),
         )
         .spacing(4)
         .width(230);
     row![words, control.into()]
         .spacing(28)
         .align_y(Vertical::Top)
+        .into()
+}
+
+/// A paragraph of help; what stands between backticks (a path) is in mono.
+fn help_text<'a>(help: String, color: Color) -> Element<'a, AppMessage> {
+    if !help.contains('`') {
+        return text(help).size(13).line_height(1.45).color(color).into();
+    }
+    let spans: Vec<_> = help
+        .split('`')
+        .enumerate()
+        .map(|(index, words)| match index % 2 {
+            0 => span(words.to_owned()),
+            _ => span(words.to_owned()).font(font::MONO).size(12),
+        })
+        .collect();
+    rich_text::<(), AppMessage, _, _>(spans)
+        .size(13)
+        .line_height(1.45)
+        .color(color)
         .into()
 }
 
@@ -1060,7 +1081,7 @@ fn source<'a>(app: &'a App, tokens: &Tokens) -> Element<'a, AppMessage> {
             ),
             setting(
                 "Your covers",
-                "Covers you uploaded. They live in covers/<type>/, next to library.json.".into(),
+                "Covers you uploaded. They live in `covers/<type>/`, next to library.json.".into(),
                 super::your_covers::group(app, tokens),
                 tokens,
             ),
@@ -1593,7 +1614,7 @@ const LICENSES: [(&str, &str); 12] = [
     ("sha1 and base64", "MIT or Apache-2.0"),
     ("zbus and tokio", "MIT"),
     ("Figtree", "SIL Open Font License 1.1"),
-    ("JetBrains Mono", "SIL Open Font License 1.1"),
+    ("DejaVu Sans Mono", "Bitstream Vera Fonts license"),
     ("Libri", "MIT"),
 ];
 
@@ -1765,9 +1786,14 @@ fn disconnect_dialog<'a>(
     match step {
         DisconnectStep::Confirm => {
             let body = column![
-                text(format!(
-                    "Libri stops syncing with {repo}. Next you choose what happens to the library on this computer."
-                ))
+                rich_text::<(), AppMessage, _, _>([
+                    span("Libri stops syncing with "),
+                    match &app.source {
+                        Some(_) => span(repo.to_owned()).font(font::MONO).size(13),
+                        None => span(repo.to_owned()),
+                    },
+                    span(". Next you choose what happens to the library on this computer."),
+                ])
                 .size(14),
                 text("The repo on GitHub is never touched.")
                     .size(13)

@@ -5,7 +5,7 @@
 use iced::widget::{Column, Row, button, column, container, row, space, text};
 use iced::{Background, Border, Center, Element, Fill};
 
-use super::{FocusExt, Icon, icon_button, mono};
+use super::{FocusExt, Icon, figure, icon_button};
 use crate::model::{Date, PlanWhen};
 use crate::theme::{Tokens, font};
 
@@ -93,7 +93,7 @@ pub fn calendar<'a, Message: Clone + 'a>(
             let in_month = day.month == month.month;
             let chosen = picked.is_some_and(|w| w.from <= day && day <= w.to);
             let is_today = day == today;
-            let label = mono(
+            let label = figure(
                 day.day.to_string(),
                 12.5,
                 if chosen {

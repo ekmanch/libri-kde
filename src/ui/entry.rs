@@ -5,7 +5,7 @@ use iced::widget::svg::{self, Svg};
 use iced::widget::{Space, button, column, container, image, row, stack, text};
 use iced::{Background, Border, Center, Color, Element, Fill, FillPortion, Length, Padding};
 
-use super::{FocusExt, Focusable, Icon, cover, icon, mono, row_style};
+use super::{FocusExt, Focusable, Icon, cover, figure, icon, row_style};
 use crate::model::EntryStatus;
 use crate::theme::{self, Tokens, font};
 
@@ -59,7 +59,7 @@ pub fn entry_card<'a, Message: Clone + 'a>(
     } else if let Some(count) = look.stack {
         row![
             icon(Icon::Stack, 13.0, white),
-            mono(count.to_string(), 11.0, white)
+            figure(count.to_string(), 11.0, white)
         ]
         .spacing(4)
         .align_y(Center)
@@ -112,7 +112,7 @@ pub fn entry_card<'a, Message: Clone + 'a>(
         )
         .width(Fill)
         .clip(true),
-        mono(look.year, 12.0, tokens.sub),
+        figure(look.year, 12.0, tokens.sub),
     ]
     .spacing(8)
     .padding([0, 2])
@@ -194,8 +194,8 @@ pub fn entry_list_row<'a, Message: Clone + 'a>(
             200.0
         ),
         cell(text(look.status_label).size(13).color(tokens.sub), 90.0),
-        cell(mono(look.rating, 13.0, tokens.text), 56.0),
-        container(mono(look.year, 12.5, tokens.sub).wrapping(text::Wrapping::None))
+        cell(figure(look.rating, 13.0, tokens.text), 56.0),
+        container(figure(look.year, 12.5, tokens.sub).wrapping(text::Wrapping::None))
             .width(72)
             .align_right(72),
     ]
@@ -264,9 +264,9 @@ pub fn entry_table_row<'a, Message: Clone + 'a>(
             .color(tokens.sub)
             .wrapping(text::Wrapping::None)
             .width(width(COLUMNS[1])),
-        mono(look.released, 12.5, tokens.sub).width(width(COLUMNS[2])),
+        figure(look.released, 12.5, tokens.sub).width(width(COLUMNS[2])),
         text(look.status_label).size(14).width(width(COLUMNS[3])),
-        mono(look.rating, 13.0, tokens.text).width(width(COLUMNS[4])),
+        figure(look.rating, 13.0, tokens.text).width(width(COLUMNS[4])),
         text(look.tags)
             .size(13)
             .color(tokens.sub)

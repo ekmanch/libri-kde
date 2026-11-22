@@ -117,7 +117,24 @@ pub fn heading<'a, Message>(
         .into()
 }
 
-/// Years, counts and dates.
+/// Years, counts, dates, ratings and lengths, in Figtree. Its figures are
+/// proportional: iced 0.14's `Font` has no OpenType features, so Figtree's
+/// `tnum` cannot be turned on.
+pub fn figure<'a>(value: impl text::IntoFragment<'a>, text_size: f32, color: Color) -> Text<'a> {
+    text(value).size(text_size).font(font::REGULAR).color(color)
+}
+
+/// The small uppercase label over a title in the details pane and the
+/// cover panes ("UPCOMING · MOVIE"), in SemiBold; the caller uppercases it.
+pub fn kicker<'a>(value: impl text::IntoFragment<'a>, text_size: f32, color: Color) -> Text<'a> {
+    text(value)
+        .size(text_size)
+        .font(font::SEMIBOLD)
+        .color(color)
+}
+
+/// Code and identifiers: a repository, a branch, a file path or name, a
+/// keyboard key.
 pub fn mono<'a>(value: impl text::IntoFragment<'a>, text_size: f32, color: Color) -> Text<'a> {
     text(value).size(text_size).font(font::MONO).color(color)
 }

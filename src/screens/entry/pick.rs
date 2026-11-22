@@ -1132,14 +1132,26 @@ pub fn panel<'a>(app: &'a App, on_done: EntryMessage, tokens: &Tokens) -> Elemen
     picker(app, &subject, state, on_done, tokens)
 }
 
-/// A section's header: its name in small caps, and a mono note.
-fn section_head<'a>(name: String, note: String, tokens: &Tokens) -> Element<'a, AppMessage> {
+/// A section's header: its name in small caps, a note (a count), and
+/// the folder its files are in, in mono.
+fn section_head<'a>(
+    name: String,
+    note: String,
+    folder: Option<String>,
+    tokens: &Tokens,
+) -> Element<'a, AppMessage> {
+    let mut note = row![ui::figure(note, 11.5, tokens.sub)]
+        .spacing(4)
+        .align_y(Center);
+    if let Some(folder) = folder {
+        note = note.push(ui::mono(folder, 11.5, tokens.sub));
+    }
     row![
         text(name.to_uppercase())
             .size(12)
             .font(font::BOLD)
             .color(tokens.sub),
-        ui::mono(note, 11.5, tokens.sub),
+        note,
     ]
     .spacing(8)
     .align_y(Center)
@@ -1244,9 +1256,9 @@ fn picker<'a>(
     let files = app.covers.candidates_of(subject.media, &subject.id);
     let folder = format!("{}/{}/", covers::FOLDER, covers::folder(subject.media));
     let yours_note = if files.is_empty() {
-        folder.clone()
+        String::new()
     } else {
-        format!("{} · {folder}", files.len())
+        format!("{} ·", files.len())
     };
     let yours_name = match &subject.song {
         Some(_) => format!("{}'s covers", subject.title),
@@ -1304,7 +1316,12 @@ fn picker<'a>(
 
     let mut body = Column::new()
         .spacing(14)
-        .push(section_head(yours_name, yours_note, tokens))
+        .push(section_head(
+            yours_name,
+            yours_note,
+            Some(folder.clone()),
+            tokens,
+        ))
         .push(grid(yours));
     if let Some(error) = &state.error {
         body = body.push(text(error.clone()).size(13).color(tokens.danger));
@@ -1317,6 +1334,7 @@ fn picker<'a>(
             } else {
                 with_image.to_string()
             },
+            None,
             tokens,
         ))
         .push(grid(online_tiles));
@@ -1351,7 +1369,7 @@ fn picker<'a>(
             row![
                 ui::icon(chevron, 14.0, tokens.sub),
                 text(format!("Other files in {}", subject.media.label())).size(13.5),
-                ui::mono(others.len().to_string(), 11.5, tokens.sub),
+                ui::figure(others.len().to_string(), 11.5, tokens.sub),
                 iced::widget::space::horizontal(),
                 text("Files whose name doesn't match a title")
                     .size(12.5)

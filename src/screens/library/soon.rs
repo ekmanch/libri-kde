@@ -627,7 +627,7 @@ fn header<'a>(
         text("Coming soon")
             .size(theme::size::HEADING)
             .font(font::EXTRABOLD),
-        ui::mono(count.to_string(), 13.0, tokens.sub),
+        ui::figure(count.to_string(), 13.0, tokens.sub),
         container(segments).padding(Padding::new(0.0).left(4)),
         space::horizontal(),
     ]
@@ -722,7 +722,7 @@ fn segmented<'a>(items: [(Slice, usize, bool); 3], tokens: &Tokens) -> Element<'
                     .size(13.5)
                     .font(font::SEMIBOLD)
                     .color(color),
-                ui::mono(count.to_string(), 12.0, t.sub),
+                ui::figure(count.to_string(), 12.0, t.sub),
             ]
             .spacing(7)
             .align_y(Center)
@@ -1260,7 +1260,7 @@ fn text_row<'a>(row: &SoonRow<'a>, look: Look, tokens: &Tokens) -> Element<'a, A
         container(mark(&look, 24.0, true, tokens))
             .width(70)
             .align_right(70),
-        container(ui::mono(look.date.clone(), 12.5, tokens.sub).wrapping(text::Wrapping::None))
+        container(ui::figure(look.date.clone(), 12.5, tokens.sub).wrapping(text::Wrapping::None))
             .width(76)
             .align_right(76),
     ]
@@ -1316,7 +1316,7 @@ fn cover_row<'a>(
         ui::cover::thumb(image, tint, 44.0, row.media(), 5.0),
         words,
         mark(&look, 28.0, false, tokens),
-        container(ui::mono(look.date.clone(), 12.5, tokens.sub).wrapping(text::Wrapping::None))
+        container(ui::figure(look.date.clone(), 12.5, tokens.sub).wrapping(text::Wrapping::None))
             .width(76)
             .align_right(76),
     ]
@@ -1413,7 +1413,7 @@ fn tile<'a>(
     let caption = row![
         mark(&look, CAPTION_HEIGHT, false, tokens),
         space::horizontal(),
-        ui::mono(tile_date, 12.5, tokens.sub).wrapping(text::Wrapping::None),
+        ui::figure(tile_date, 12.5, tokens.sub).wrapping(text::Wrapping::None),
     ]
     .spacing(8)
     .align_y(Center)
@@ -1648,7 +1648,7 @@ pub fn glance<'a>(app: &'a App, height: f32) -> Element<'a, AppMessage> {
                     )
                     .width(90),
                     bar,
-                    container(ui::mono(n.to_string(), 12.0, t.sub))
+                    container(ui::figure(n.to_string(), 12.0, t.sub))
                         .width(36)
                         .align_right(36),
                 ]
@@ -1687,7 +1687,7 @@ pub fn glance<'a>(app: &'a App, height: f32) -> Element<'a, AppMessage> {
                 row![
                     ui::section_header("Hidden", &tokens),
                     space::horizontal(),
-                    ui::mono(hidden.len().to_string(), 12.0, t.sub)
+                    ui::figure(hidden.len().to_string(), 12.0, t.sub)
                 ]
                 .align_y(Center)
                 .height(HEADER_H),
@@ -1757,7 +1757,7 @@ fn small_cover_row<'a>(
         .spacing(1)
         .width(Fill)
         .clip(true),
-        ui::mono(date, 12.0, tokens.sub),
+        ui::figure(date, 12.0, tokens.sub),
     ]
     .spacing(12)
     .align_y(Center);
@@ -1815,7 +1815,7 @@ fn dot_row<'a>(
                 .focusable(4.0, tokens),
         );
     } else {
-        content = content.push(ui::mono(date, 12.0, t.sub));
+        content = content.push(ui::figure(date, 12.0, t.sub));
     }
     let body: Element<'a, AppMessage> = match on_press {
         Some(message) => button(content.height(Fill))
@@ -1861,11 +1861,11 @@ pub fn preview<'a>(app: &'a App, found: &'a Found) -> Element<'a, AppMessage> {
     if let Some(sub) = &found.sub {
         heading = heading.push(text(sub.clone()).size(15).font(font::SEMIBOLD).color(t.sub));
     }
-    let mut facts = column![ui::mono(kicker, 11.0, color), heading].spacing(6);
+    let mut facts = column![ui::kicker(kicker, 11.0, color), heading].spacing(6);
     if let Some(creator) = &found.creator {
         facts = facts.push(text(creator.clone()).size(14).color(t.sub));
     }
-    facts = facts.push(ui::mono(
+    facts = facts.push(ui::figure(
         upcoming::date_label(found.released, app.today),
         12.5,
         t.sub,
@@ -1952,7 +1952,7 @@ pub fn type_popover<'a>(app: &'a App, height: f32) -> Element<'a, AppMessage> {
     let head = row![
         text("Coming soon").size(18).font(font::EXTRABOLD),
         text(label).size(13).font(font::SEMIBOLD).color(color),
-        ui::mono(rows.len().to_string(), 12.0, t.sub),
+        ui::figure(rows.len().to_string(), 12.0, t.sub),
         space::horizontal(),
         button(container(ui::icon(Icon::Close, 15.0, t.sub)).center(Fill))
             .width(28)

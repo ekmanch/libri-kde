@@ -33,7 +33,7 @@ Items in section 11 ("Open") are not decided yet; decide them in the phase the T
   - **Content** on a slightly lighter surface with a rounded top-left corner, so it reads as a sheet laid on the chrome.
   - **Details panel** on the right, 352 px (see 4.3): on Home the details take the place of the right column instead; elsewhere pinned (always there) or unpinned (a drawer over the list while something is selected), per type. Selecting a title never moves the list.
 - Section headers everywhere (sidebar, menus, popovers, the inspector) are small gray caps: 12.5 px, weight 700, uppercase, slight letter spacing, in the secondary text color. Selectable items under them (entries, tags, chips) use the normal text color. This was compared against colored headers and chosen on purpose.
-- The repository and branch show quietly in the content footer ("ekmanch/library · main") in mono.
+- The repository and branch show quietly in the content footer ("ekmanch/library · main") in DejaVu Sans Mono.
 
 ## 4. Screens
 
@@ -139,8 +139,10 @@ The rules are the phone's (section 7). Desktop-specific:
 
 - **Figtree** for all text: Regular 400 (body), Italic 400 (subtitles, notes), Medium 500, SemiBold 600 (labels, buttons), Bold 700 (section headers in small caps).
 - **Headings** (screen titles, plan names, dialog titles, the wordmark, cover titles) are Figtree ExtraBold 800. The phone uses -0.03em letter spacing; iced 0.14 cannot, so the desktop uses default tracking (section 10).
-- **JetBrains Mono** Regular and Medium for years, counts, dates, the window title and the repo footer.
-- The font files are bundled in the app (the same six Figtree files as the phone, plus the two JetBrains Mono files), with their OFL licenses.
+- Numbers are Figtree too (years, counts, dates, ratings, plan progress, track and episode numbers and lengths). The canvas asks for fixed-width figures; Figtree has them (`tnum`), but iced 0.14's `Font` carries no OpenType features, so the figures are proportional (decided 2026-11-22, no workaround).
+- The small uppercase labels over a title in the details pane and the cover panes ("UPCOMING · MOVIE") are SemiBold 600.
+- **DejaVu Sans Mono** (one file, Book) only for text that is code or an identifier: the repository, branch, library file and token, file paths and names, the repo footer, the starter JSON, branch names and keyboard keys.
+- The font files are bundled in the app (the same six Figtree files as the phone, plus DejaVu Sans Mono), each with its license.
 
 ## 8. Visual design
 

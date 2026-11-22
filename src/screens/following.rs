@@ -164,7 +164,7 @@ fn view<'a>(app: &'a App, state: &'a State, tokens: &Tokens) -> Element<'a, AppM
 
     let kinds = Column::with_children(Kind::ALL.into_iter().map(|kind| {
         let on = kind == state.kind;
-        let count = ui::mono(
+        let count = ui::figure(
             app.follows.count_label(kind),
             12.0,
             if on { t.text } else { t.sub },
@@ -345,7 +345,7 @@ pub fn button_for<'a>(app: &App, tokens: &Tokens) -> Element<'a, AppMessage> {
     let t = *tokens;
     let label = row![
         text("Following").size(13.5).font(font::SEMIBOLD),
-        ui::mono(app.follows.total().to_string(), 12.0, t.sub),
+        ui::figure(app.follows.total().to_string(), 12.0, t.sub),
     ]
     .spacing(7)
     .align_y(Center)

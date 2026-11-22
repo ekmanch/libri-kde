@@ -1,7 +1,7 @@
 use iced::widget::{Column, Row, button, container, row, space, text};
 use iced::{Center, Element, Fill, Padding};
 
-use super::{FocusExt, Icon, icon, mono, row_style};
+use super::{FocusExt, Icon, figure, icon, row_style};
 use crate::theme::{Tokens, font, size};
 
 /// A collapsible group of tag chips, as in the tag picker: a chevron, the
@@ -66,7 +66,7 @@ pub fn tag_group_header<'a, Message: Clone + 'a>(
             .size(size::SECTION)
             .font(font::BOLD)
             .color(tokens.sub),
-        mono(count.to_string(), 11.0, tokens.sub),
+        figure(count.to_string(), 11.0, tokens.sub),
         space::horizontal(),
         text(picked).size(12).color(tokens.text),
     ]

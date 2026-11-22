@@ -398,7 +398,7 @@ fn section<'a>(title: &str, count: usize, tokens: &Tokens) -> Element<'a, AppMes
                 .size(theme::size::SECTION)
                 .font(font::BOLD)
                 .color(tokens.sub),
-            ui::mono(count.to_string(), 12.0, tokens.sub),
+            ui::figure(count.to_string(), 12.0, tokens.sub),
         ]
         .spacing(8),
     )

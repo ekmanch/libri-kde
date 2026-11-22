@@ -4,11 +4,11 @@
 use iced::widget::{Row, button, row, text};
 use iced::{Background, Border, Center, Color, Element, Padding};
 
-use super::{FocusExt, Icon, icon, mono};
+use super::{FocusExt, Icon, figure, icon};
 use crate::theme::{Tokens, font};
 
 /// An option in the Filter popover and the tag picker: 30 px, the
-/// selection gray when on. `count` shows in mono after the label.
+/// selection gray when on. `count` shows after the label.
 pub fn filter_chip<'a, Message: Clone + 'a>(
     label: String,
     dot: Option<Color>,
@@ -23,7 +23,7 @@ pub fn filter_chip<'a, Message: Clone + 'a>(
     }
     content = content.push(text(label).size(13).font(font::MEDIUM));
     if let Some(count) = count {
-        content = content.push(mono(count.to_string(), 11.0, tokens.sub));
+        content = content.push(figure(count.to_string(), 11.0, tokens.sub));
     }
     chip(
         content,
@@ -49,7 +49,7 @@ pub fn status_chip<'a, Message: Clone + 'a>(
     let fg = if on { tokens.on_status() } else { tokens.sub };
     let content = row![
         text(label).size(13).font(font::MEDIUM),
-        mono(count.to_string(), 11.5, fg.scale_alpha(0.75)),
+        figure(count.to_string(), 11.5, fg.scale_alpha(0.75)),
     ]
     .spacing(6)
     .align_y(Center);
@@ -75,7 +75,7 @@ pub fn suggested_chip<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     let content = row![
         text(label).size(13).font(font::MEDIUM),
-        mono(count.to_string(), 11.5, tokens.sub),
+        figure(count.to_string(), 11.5, tokens.sub),
     ]
     .spacing(6)
     .align_y(Center);

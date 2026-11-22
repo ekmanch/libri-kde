@@ -126,7 +126,7 @@ pub fn toolbar<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessag
             .size(26)
             .font(font::EXTRABOLD)
             .color(title_color),
-        ui::mono(count.to_string(), 13.0, tokens.sub),
+        ui::figure(count.to_string(), 13.0, tokens.sub),
         space::horizontal(),
         search,
         filter,

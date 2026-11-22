@@ -27,7 +27,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 
 ### 0c. Fonts and theme
 - [x] Typography: Figtree only, headings in ExtraBold.
-- [x] Bundle the fonts in `assets/fonts/` and load them at startup with `include_bytes!` + `.font(...)`: Figtree Regular, Italic, Medium, SemiBold, Bold, ExtraBold (same six files as the phone app) and JetBrains Mono Regular and Medium (years, counts, dates); add both OFL license files
+- [x] Bundle the fonts in `assets/fonts/` and load them at startup with `include_bytes!` + `.font(...)`: Figtree Regular, Italic, Medium, SemiBold, Bold, ExtraBold (same six files as the phone app) and a mono font (DejaVu Sans Mono since 2026-11-22, for code and identifiers only); add the license files
 - [x] Check whether iced 0.14 supports letter spacing; the phone's headings use -0.03em. If not, note it in DESIGN.md and accept default tracking (it does not; noted in `docs/DESIGN.md`)
 - [x] `theme` module from the mockup tokens: the four themes Graphite, Charcoal, Catppuccin Mocha and Light; the six type colors (Libri dark, Catppuccin with Mocha, light inks); accent palette (Vivid and Catppuccin) with Peach as the default; selection gray; small gray caps for section headers (12.5 px, 700, uppercase)
 - [x] A throwaway "token sheet" view (`LIBRI_SCREEN=tokens cargo run`) that shows every color, text style and button, to eyeball against the mockup; remove at the end of phase 1
@@ -67,7 +67,7 @@ Phase 1 builds the whole UI on fixture data, with nothing saved and no network. 
 - [x] Type checkboxes in the sidebar (optional, colored, a box adds or removes the type, the name shows only it); the setting itself is in Settings (1f)
 - [x] DNF badge on grid covers
 - [x] Grouped results: a thin type-colored scrollbar (one segment per group, sized by its count; a click jumps to the group; the thumb is an outline) and pinned type headers. `ui::Groups` measures where each group starts; the text view's column header stays above the rows
-- [x] Grouped results' type headers as in the mockup: a 4 px bar and the type in its color (Figtree ExtraBold 24), the count in mono 13; the pinned one hides what scrolls under it (the content color, nearly solid #151515 on Glass, the `pinned` token)
+- [x] Grouped results' type headers as in the mockup: a 4 px bar and the type in its color (Figtree ExtraBold 24), the count at 13; the pinned one hides what scrolls under it (the content color, nearly solid #151515 on Glass, the `pinned` token)
 
 ### 1c. Entry details and editing
 - [x] Entry details as in the mockup: cover spot, status, rating, note, about, tags, plans, Edit, Delete; the same details view is used from Plans (wired with the plan screen, 1e)
@@ -352,6 +352,8 @@ Artist photos from Apple Music, kept in the library repo (owner's decisions of 2
 
 ### Lists, details and the shell
 
+- [x] Fonts as the canvas of 2026-11-22: Figtree for every number (counts, dates, years, ratings, progress, track and episode numbers), the kickers in Figtree SemiBold, and DejaVu Sans Mono in place of JetBrains Mono, only for code and identifiers (repository, branch, file, token, paths, the footer, keyboard keys, the starter JSON). iced 0.14 cannot turn on Figtree's `tnum`, so the figures are proportional. Done 2026-11-22
+- [ ] Text view: a long creator ("The Duffer Brothers · 5 seasons") runs over the Released column instead of being cut at its own; seen in the `panel-glance-text` capture
 - [x] The sidebar's All reads Home. Done 2026-10-31
 - [x] Home's grid with details open: shelves that scroll sideways (fades, ‹ ›, the selected cover kept in view) and a side column that keeps 340 px. Done 2026-10-31
 - [x] The tag picker's long group: the dialog grew to the window and the letter rail ran past the list. Done 2026-10-31

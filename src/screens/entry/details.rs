@@ -257,7 +257,7 @@ fn build<'a>(
         ui::line_count(words, size, 1.3, face, facts_w).max(1) as f32 * size * 1.3
     };
     let mut facts: Vec<(Element<'a, AppMessage>, f32)> =
-        vec![(ui::mono(kicker, 11.0, color).into(), 11.0 * 1.3)];
+        vec![(ui::kicker(kicker, 11.0, color).into(), 11.0 * 1.3)];
     if let Some(creator) = &entry.creator {
         facts.push((
             text(creator).size(14).color(tokens.sub).into(),
@@ -286,7 +286,7 @@ fn build<'a>(
     if seasons.is_empty() {
         if let Some(released) = entry.first_released() {
             facts.push((
-                ui::mono(released.to_string(), 12.5, tokens.sub).into(),
+                ui::figure(released.to_string(), 12.5, tokens.sub).into(),
                 12.5 * 1.3,
             ));
         }
@@ -295,7 +295,7 @@ fn build<'a>(
         if seasons.len() > 1 {
             line = format!("{line} · {}", entry.season_count_label());
         }
-        facts.push((ui::mono(line, 12.5, tokens.sub).into(), 12.5 * 1.3));
+        facts.push((ui::figure(line, 12.5, tokens.sub).into(), 12.5 * 1.3));
     }
     if entry.has_new_season(today) {
         facts.push((ui::new_season_badge(&tokens), 20.0));
@@ -1235,7 +1235,7 @@ fn tracks<'a>(
             tokens,
         );
         let mut line = row![
-            container(ui::mono(number, 12.0, tokens.sub)).width(22),
+            container(ui::figure(number, 12.0, tokens.sub)).width(22),
             container(text(title).size(14).wrapping(text::Wrapping::None))
                 .width(Fill)
                 .clip(true),
@@ -1244,7 +1244,7 @@ fn tracks<'a>(
         .align_y(iced::Center)
         .height(TRACK_H);
         if let Some(length) = length {
-            line = line.push(ui::mono(length, 12.0, tokens.sub));
+            line = line.push(ui::figure(length, 12.0, tokens.sub));
         }
         rows = rows.push(line.push(picker));
     }

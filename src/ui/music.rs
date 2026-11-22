@@ -4,7 +4,7 @@
 use iced::widget::{button, column, container, image, row, text};
 use iced::{Center, Color, Element, Fill};
 
-use super::{FocusExt, Focusable, cover, mono, row_style};
+use super::{FocusExt, Focusable, cover, figure, row_style};
 use crate::theme::{self, Tokens, font};
 
 /// "AC" for Alice in Chains, "B" for The Beatles: the first letters of
@@ -154,7 +154,7 @@ pub fn song_row<'a, Message: Clone + 'a>(
         super::dot(look.type_color, 8.0, 3.0),
         text(look.title).size(14).font(font::SEMIBOLD).width(Fill),
         text(look.subtitle).size(13).color(tokens.sub),
-        container(mono(look.rating, 13.0, tokens.text)).width(56),
+        container(figure(look.rating, 13.0, tokens.text)).width(56),
     ]
     .spacing(12)
     .align_y(Center)
@@ -183,7 +183,7 @@ pub fn song_list_row<'a, Message: Clone + 'a>(
         ]
         .spacing(3)
         .width(Fill),
-        container(mono(look.rating, 13.0, tokens.text)).width(56),
+        container(figure(look.rating, 13.0, tokens.text)).width(56),
     ]
     .spacing(16)
     .align_y(Center);
@@ -226,7 +226,7 @@ pub fn song_card<'a, Message: Clone + 'a>(
         )
         .width(Fill)
         .clip(true),
-        mono(look.rating, 12.0, tokens.sub),
+        figure(look.rating, 12.0, tokens.sub),
     ]
     .spacing(8)
     .height(20);

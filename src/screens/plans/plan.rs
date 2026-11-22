@@ -198,8 +198,8 @@ fn header<'a>(
     let dates = rules::date_span(plan)
         .map(|s| rules::format_when(s, plan.year))
         .unwrap_or_default();
-    needed += ui::text_width(&dates, 13.0, font::MONO) + 12.0;
-    title = title.push(ui::mono(dates, 13.0, tokens.sub));
+    needed += ui::text_width(&dates, 13.0, font::REGULAR) + 12.0;
+    title = title.push(ui::figure(dates, 13.0, tokens.sub));
     // The scope tabs, View, Edit plan and the panel button: beside the
     // title, or on a row of their own when the window is narrow.
     let mut actions = Row::new().spacing(12).align_y(Center);
@@ -542,7 +542,7 @@ fn section<'a>(
             .size(18)
             .font(font::EXTRABOLD)
             .color(tokens.type_text(media)),
-        ui::mono(count, 12.0, tokens.sub),
+        ui::figure(count, 12.0, tokens.sub),
     ]
     .spacing(8)
     .align_y(iced::alignment::Vertical::Bottom)
@@ -681,7 +681,7 @@ fn timeline<'a>(
                 .size(13)
                 .font(font::SEMIBOLD)
                 .color(if reached { tokens.text } else { tokens.sub }),
-            ui::mono(group.dates.clone(), 12.0, tokens.sub),
+            ui::figure(group.dates.clone(), 12.0, tokens.sub),
         ]
         .spacing(2)
         .align_x(iced::alignment::Horizontal::Right)
