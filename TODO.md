@@ -353,7 +353,7 @@ Artist photos from Apple Music, kept in the library repo (owner's decisions of 2
 ### Lists, details and the shell
 
 - [x] Fonts as the canvas of 2026-11-22: Figtree for every number (counts, dates, years, ratings, progress, track and episode numbers), the kickers in Figtree SemiBold, and DejaVu Sans Mono in place of JetBrains Mono, only for code and identifiers (repository, branch, file, token, paths, the footer, keyboard keys, the starter JSON). iced 0.14 cannot turn on Figtree's `tnum`, so the figures are proportional. Done 2026-11-22
-- [ ] Text view: a long creator ("The Duffer Brothers · 5 seasons") runs over the Released column instead of being cut at its own; seen in the `panel-glance-text` capture
+- [x] Text view: a long creator ("The Duffer Brothers · 5 seasons") is cut at its own column instead of running over Released. Done 2026-11-22
 - [x] The sidebar's All reads Home. Done 2026-10-31
 - [x] Home's grid with details open: shelves that scroll sideways (fades, ‹ ›, the selected cover kept in view) and a side column that keeps 340 px. Done 2026-10-31
 - [x] The tag picker's long group: the dialog grew to the window and the letter rail ran past the list. Done 2026-10-31

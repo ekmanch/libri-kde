@@ -259,11 +259,15 @@ pub fn entry_table_row<'a, Message: Clone + 'a>(
         .spacing(10)
         .align_y(Center)
         .width(width(COLUMNS[0])),
-        text(look.creator)
-            .size(14)
-            .color(tokens.sub)
-            .wrapping(text::Wrapping::None)
-            .width(width(COLUMNS[1])),
+        // Cut at the column's edge, not run over Released.
+        container(
+            text(look.creator)
+                .size(14)
+                .color(tokens.sub)
+                .wrapping(text::Wrapping::None)
+        )
+        .width(width(COLUMNS[1]))
+        .clip(true),
         figure(look.released, 12.5, tokens.sub).width(width(COLUMNS[2])),
         text(look.status_label).size(14).width(width(COLUMNS[3])),
         figure(look.rating, 13.0, tokens.text).width(width(COLUMNS[4])),
