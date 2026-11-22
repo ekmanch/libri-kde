@@ -91,6 +91,84 @@ pub fn clamp(
     (format!("{}…", flat[..end].trim_end()), true)
 }
 
+/// `content` and then `tail` on one line no wider than `width`: as they
+/// are when they fit, else `content` cut with an ellipsis after it and
+/// the tail kept whole ("The Duffer Bro… · 5 seasons"). The cut is at the
+/// last letter that fits or, with `whole_words`, back at the end of a word
+/// (a single long word to a letter). The rows of a list ask this on every
+/// layout, so the answers are remembered.
+pub fn one_line(
+    content: &str,
+    tail: &str,
+    size: f32,
+    font: Font,
+    width: f32,
+    whole_words: bool,
+) -> String {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    type Key = (String, String, u32, Font, u32, bool);
+    thread_local! {
+        static CUTS: RefCell<HashMap<Key, String>> = RefCell::new(HashMap::new());
+    }
+    let key = (
+        content.to_owned(),
+        tail.to_owned(),
+        size.to_bits(),
+        font,
+        width.to_bits(),
+        whole_words,
+    );
+    if let Some(cut) = CUTS.with_borrow(|cuts| cuts.get(&key).cloned()) {
+        return cut;
+    }
+    let whole = format!("{content}{tail}");
+    let cut = if text_width(&whole, size, font) <= width {
+        whole
+    } else {
+        let room = width - text_width(tail, size, font);
+        format!("{}{tail}", cut_line(content, size, font, room, whole_words))
+    };
+    CUTS.with_borrow_mut(|cuts| {
+        // A window being resized asks at every width on the way.
+        if cuts.len() >= 4096 {
+            cuts.clear();
+        }
+        cuts.insert(key, cut.clone());
+    });
+    cut
+}
+
+/// `content`, too wide for `width`, cut to it with an ellipsis.
+fn cut_line(content: &str, size: f32, font: Font, width: f32, whole_words: bool) -> String {
+    let room = width - text_width("…", size, font);
+    let shaped = paragraph(content, size, 1.0, font, f32::INFINITY);
+    let mut end = shaped
+        .hit_test(Point::new(room.max(0.0), size * 0.5))
+        .map(|hit| hit.cursor())
+        .unwrap_or(content.len())
+        .min(content.len());
+    while !content.is_char_boundary(end) {
+        end -= 1;
+    }
+    // In the middle of a word: back to the end of the one before.
+    if whole_words
+        && !content[end..].starts_with(char::is_whitespace)
+        && let Some(space) = content[..end].rfind(char::is_whitespace)
+    {
+        end = space;
+    }
+    loop {
+        let kept = content[..end].trim_end();
+        let candidate = format!("{kept}…");
+        if kept.is_empty() || text_width(&candidate, size, font) <= width {
+            return candidate;
+        }
+        // Still too wide (the hit is to the nearest letter): one less.
+        end = kept.char_indices().next_back().map_or(0, |(at, _)| at);
+    }
+}
+
 /// How many rows `widths` take laid out in a row that wraps at
 /// `row_width` with `spacing` between items; nothing is no rows.
 pub fn wrapped_rows(widths: &[f32], row_width: f32, spacing: f32) -> usize {
@@ -138,6 +216,33 @@ pub fn fold(
 mod tests {
     use super::*;
     use crate::theme::font;
+
+    #[test]
+    fn one_line_is_kept_when_it_fits_and_cut_with_an_ellipsis_before_its_tail() {
+        let (name, tail) = ("The Duffer Brothers", " · 5 seasons");
+        let f = font::REGULAR;
+        let full = text_width("The Duffer Brothers · 5 seasons", 14.0, f);
+        assert_eq!(
+            one_line(name, tail, 14.0, f, full + 1.0, false),
+            "The Duffer Brothers · 5 seasons"
+        );
+        // The name is cut in a word; the seasons stay whole.
+        let cut = one_line(name, tail, 14.0, f, full - 10.0, false);
+        assert!(cut.starts_with("The Duffer Bro"), "{cut}");
+        assert!(cut.ends_with("… · 5 seasons"), "{cut}");
+        assert!(text_width(&cut, 14.0, f) <= full - 10.0);
+        // The tags keep their two spaces and are cut at a whole tag; one
+        // long word is cut to a letter.
+        let tags = "#comedy  #horror  #lighthearted";
+        let width = text_width("#comedy  #horror  #lig", 13.0, f);
+        assert_eq!(
+            one_line(tags, "", 13.0, f, width, true),
+            "#comedy  #horror…"
+        );
+        let word = one_line("#lighthearted", "", 13.0, f, 50.0, true);
+        assert!(word.starts_with("#li") && word.ends_with('…'), "{word}");
+        assert_eq!(one_line("#lighthearted", "", 13.0, f, 2.0, true), "…");
+    }
 
     #[test]
     fn a_short_text_fits_and_a_long_one_is_cut_with_an_ellipsis() {

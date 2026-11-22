@@ -2,7 +2,7 @@
 //! grid, a row with a cover in the list, and a row in the text table.
 
 use iced::widget::svg::{self, Svg};
-use iced::widget::{Space, button, column, container, image, row, stack, text};
+use iced::widget::{Space, button, column, container, image, responsive, row, stack, text};
 use iced::{Background, Border, Center, Color, Element, Fill, FillPortion, Length, Padding};
 
 use super::{FocusExt, Focusable, Icon, cover, figure, icon, row_style};
@@ -14,6 +14,9 @@ use crate::theme::{self, Tokens, font};
 pub struct EntryLook {
     pub title: String,
     pub creator: String,
+    /// What ends `creator` and is never cut in the text view: a show's
+    /// " · 5 seasons", or nothing.
+    pub creator_note: String,
     /// "1999", or empty.
     pub year: String,
     /// The full release text: "2026-12-25".
@@ -259,23 +262,28 @@ pub fn entry_table_row<'a, Message: Clone + 'a>(
         .spacing(10)
         .align_y(Center)
         .width(width(COLUMNS[0])),
-        // Cut at the column's edge, not run over Released.
-        container(
-            text(look.creator)
-                .size(14)
-                .color(tokens.sub)
-                .wrapping(text::Wrapping::None)
-        )
-        .width(width(COLUMNS[1]))
-        .clip(true),
+        cut_cell(
+            look.creator
+                .strip_suffix(look.creator_note.as_str())
+                .unwrap_or(&look.creator)
+                .to_owned(),
+            look.creator_note,
+            14.0,
+            tokens.sub,
+            false,
+            width(COLUMNS[1]),
+        ),
         figure(look.released, 12.5, tokens.sub).width(width(COLUMNS[2])),
         text(look.status_label).size(14).width(width(COLUMNS[3])),
         figure(look.rating, 13.0, tokens.text).width(width(COLUMNS[4])),
-        text(look.tags)
-            .size(13)
-            .color(tokens.sub)
-            .wrapping(text::Wrapping::None)
-            .width(width(COLUMNS[5])),
+        cut_cell(
+            look.tags,
+            String::new(),
+            13.0,
+            tokens.sub,
+            true,
+            width(COLUMNS[5])
+        ),
     ]
     .spacing(16)
     .align_y(Center)
@@ -288,6 +296,34 @@ pub fn entry_table_row<'a, Message: Clone + 'a>(
         .on_press(on_press)
         .style(row_style(tokens, look.selected || look.menu, 0.0))
         .focusable(0.0, tokens)
+}
+
+/// A table cell of one line of text, cut with an ellipsis at the width the
+/// column turns out to have, so it never runs over the next one: `words`
+/// are cut (with `whole_words`, the tags, never in a word) and `tail`
+/// after them is kept whole.
+fn cut_cell<'a, Message: 'a>(
+    words: String,
+    tail: String,
+    size: f32,
+    color: Color,
+    whole_words: bool,
+    width: Length,
+) -> Element<'a, Message> {
+    responsive(move |cell| {
+        let line = super::one_line(&words, &tail, size, font::REGULAR, cell.width, whole_words);
+        container(
+            text(line)
+                .size(size)
+                .color(color)
+                .wrapping(text::Wrapping::None),
+        )
+        .center_y(Fill)
+        .clip(true)
+        .into()
+    })
+    .width(width)
+    .into()
 }
 
 /// The title of a list or table row, with a series' stack icon in front

@@ -50,7 +50,7 @@ pub use field::{labeled, text_field};
 pub use focus::{Barrier, FocusExt, Focusable};
 pub use groups::{Groups, Measure};
 pub use icon::{Icon, icon, marker};
-pub use measure::{clamp, fold, line_count, text_width, wrapped_rows};
+pub use measure::{clamp, fold, line_count, one_line, text_width, wrapped_rows};
 pub use menu::radio_menu;
 pub use picture::picture;
 pub use popover::{Align, Edge, Placement, Popover};

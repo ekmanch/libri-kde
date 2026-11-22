@@ -581,11 +581,12 @@ fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryL
             let tags: Vec<String> = entry.tags.iter().map(|t| format!("#{t}")).collect();
             let seasons = entry.season_list().len();
             let creator = entry.creator.as_deref().unwrap_or("");
-            let creator = if seasons > 1 {
-                format!("{creator} · {}", entry.season_count_label())
+            let creator_note = if seasons > 1 {
+                format!(" · {}", entry.season_count_label())
             } else {
-                creator.to_owned()
+                String::new()
             };
+            let creator = format!("{creator}{creator_note}");
             let years = entry.years(today).unwrap_or_default();
             let released = if seasons > 0 {
                 years.clone()
@@ -595,6 +596,7 @@ fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryL
             let look = EntryLook {
                 title: entry.title.clone(),
                 creator,
+                creator_note,
                 year: years,
                 released,
                 type_color: tokens.type_color(entry.media),
@@ -624,6 +626,7 @@ fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryL
             let look = EntryLook {
                 title: group.title(),
                 creator: group.subtitle(),
+                creator_note: String::new(),
                 year: group.year_span().unwrap_or_default(),
                 released: group.year_span().unwrap_or_default(),
                 type_color: tokens.type_color(group.media),
