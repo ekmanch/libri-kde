@@ -176,14 +176,37 @@ impl<'a> Song<'a> {
     }
 }
 
-/// The search (a needle from `browse::search_needle`) names the entry's
-/// artist.
-pub fn names_artist(entry: &Entry, needle: &str) -> bool {
-    !needle.is_empty()
-        && entry
-            .creator
-            .as_deref()
-            .is_some_and(|artist| artist.to_lowercase().contains(needle))
+/// The words of a search (`browse::search_words`) left for a track's
+/// title once the entry's artist is named, or none when the search does
+/// not name the artist. Words the artist's name holds anywhere name it
+/// when they are the whole search ("ylan"); beside other words only
+/// those that start a word of the name do, so "in" is no part of Pink
+/// Floyd in "alice in".
+fn beside_artist<'w>(entry: &Entry, words: &'w [String]) -> Option<Vec<&'w str>> {
+    let artist = entry.creator.as_deref()?.to_lowercase();
+    if words.is_empty() {
+        return None;
+    }
+    if words.iter().all(|word| artist.contains(word.as_str())) {
+        return Some(Vec::new());
+    }
+    let starts = |word: &str| {
+        artist
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|part| part.starts_with(word))
+    };
+    let (named, rest): (Vec<&str>, Vec<&str>) =
+        words.iter().map(String::as_str).partition(|w| starts(w));
+    (!named.is_empty()).then_some(rest)
+}
+
+/// The Songs tab may list tracks of `entry` that the entry itself does
+/// not hold: an album whose artist the search names, the other words
+/// being for the titles of its fetched tracks ("bob dylan girl").
+pub fn may_list_tracks(entry: &Entry, query: &str) -> bool {
+    entry.media == MediaType::Music
+        && !is_song(entry)
+        && beside_artist(entry, &crate::browse::search_words(query)).is_some()
 }
 
 /// Every track of `album`, rated or not, as its details list them: the
@@ -219,38 +242,49 @@ fn tracks_of<'a>(album: &'a Entry, fetched: Option<&'a [TrackInfo]>) -> Vec<Song
 /// The Songs tab, in the order of `entries` (the current sort). Without
 /// a search it lists song entries only: the songs saved on their own. A
 /// search also brings in the tracks of albums, right where their album
-/// would have been: every track of an artist the search names, rated or
-/// not (`fetched` gives an album's track list once it is on this
-/// computer; until then its stored tracks stand in), and any rated track
-/// whose own title holds the search (that song, not the rest of its
-/// album).
+/// would have been. The search is its words: those an album's artist
+/// holds name the artist, and the rest are for the track's own title. So
+/// an artist alone brings every track of their albums, rated or not
+/// (`fetched` gives an album's track list once it is on this computer;
+/// until then its stored tracks stand in), an artist with more words
+/// those of their tracks whose title holds the rest ("bob dylan girl"),
+/// and words that name no artist any rated track whose title holds them
+/// all (that song, not the rest of its album).
 pub fn songs_matching<'a>(
     entries: &[&'a Entry],
     query: &str,
     fetched: impl Fn(&'a Entry) -> Option<&'a [TrackInfo]>,
 ) -> Vec<Song<'a>> {
-    let needle = crate::browse::search_needle(query);
+    let words = crate::browse::search_words(query);
     let mut songs = Vec::new();
     for &entry in entries.iter().filter(|e| e.media == MediaType::Music) {
         if is_song(entry) {
             songs.push(Song::Entry(entry));
-        } else if names_artist(entry, &needle) {
-            songs.extend(tracks_of(entry, fetched(entry)));
-        } else if !needle.is_empty() {
-            songs.extend(
-                entry
-                    .tracks
-                    .iter()
-                    .flatten()
+            continue;
+        }
+        if words.is_empty() {
+            continue;
+        }
+        let (tracks, rest) = match beside_artist(entry, &words) {
+            Some(rest) => (tracks_of(entry, fetched(entry)), rest),
+            None => {
+                let rated = entry.tracks.iter().flatten();
+                let rated = rated
                     .filter(|track| track.rating.is_some())
-                    .filter(|track| track.title.to_lowercase().contains(&needle))
                     .map(|track| Song::Track {
                         album: entry,
                         title: &track.title,
                         rating: track.rating,
-                    }),
-            );
-        }
+                    })
+                    .collect();
+                (rated, words.iter().map(String::as_str).collect())
+            }
+        };
+        songs.extend(
+            tracks
+                .into_iter()
+                .filter(|song| crate::browse::holds_all(song.title(), &rest)),
+        );
     }
     songs
 }
@@ -547,6 +581,37 @@ mod tests {
             .map(|s| s.title())
             .collect();
         assert_eq!(titles, ["Rooster"], "not the rest of the album");
+
+        // More words than the artist: their tracks whose title holds the
+        // rest, the unrated ones too once the album's list is here.
+        let titles: Vec<&str> = songs_matching(&found("alice in hole"), "alice in hole", |_| None)
+            .iter()
+            .map(|s| s.title())
+            .collect();
+        assert_eq!(titles, ["Down in a Hole"]);
+        // Dam That River is not rated, so the entry does not hold it.
+        let query = "chains river";
+        assert!(found(query).is_empty());
+        let dirt: Vec<&Entry> = library
+            .entries
+            .iter()
+            .filter(|e| may_list_tracks(e, query))
+            .collect();
+        let titles: Vec<&str> = songs_matching(&dirt, query, |album| {
+            (album.title == "Dirt").then_some(list.as_slice())
+        })
+        .iter()
+        .map(|s| s.title())
+        .collect();
+        assert_eq!(titles, ["Dam That River"], "not the whole album");
+        // "in" is no part of Pink Floyd or Vince Guaraldi here.
+        let named: Vec<&str> = library
+            .entries
+            .iter()
+            .filter(|e| may_list_tracks(e, "alice in"))
+            .map(|e| e.title.as_str())
+            .collect();
+        assert_eq!(named, ["Dirt"]);
 
         // An album found by its own title or a tag brings no tracks along.
         let titles: Vec<&str> = songs_matching(&found("dirt"), "dirt", |_| None)

@@ -1008,22 +1008,45 @@ pub fn search_needle(query: &str) -> String {
     query.trim().trim_start_matches('#').to_lowercase()
 }
 
+/// The words of a search as they are compared: split at spaces,
+/// lowercase, each without a leading "#".
+pub fn search_words(query: &str) -> Vec<String> {
+    query
+        .split_whitespace()
+        .map(|word| word.trim_start_matches('#').to_lowercase())
+        .filter(|word| !word.is_empty())
+        .collect()
+}
+
 /// Case-insensitive search over titles, creators (artist, author,
 /// director), tags and an album's rated tracks; a leading "#" is ignored.
+/// The search is its words, in any order: every one is held by the
+/// entry's title, creator or tags, or those the entry lacks are all in
+/// the title of one rated track ("bob dylan hurricane").
 pub fn matches_search(entry: &Entry, query: &str) -> bool {
-    let query = search_needle(query);
-    query.is_empty()
-        || matches_entry(entry, &query)
+    let words = search_words(query);
+    let rest: Vec<&str> = words
+        .iter()
+        .map(String::as_str)
+        .filter(|word| !matches_entry(entry, word))
+        .collect();
+    rest.is_empty()
         || entry
             .tracks
             .iter()
             .flatten()
             .filter(|track| track.rating.is_some())
-            .any(|track| track.title.to_lowercase().contains(&query))
+            .any(|track| holds_all(&track.title, &rest))
 }
 
-/// The entry's own title, creator or tags hold `needle` (from
-/// `search_needle`), leaving its tracks out.
+/// `text` holds every one of `words` (lowercase), whatever its case.
+pub fn holds_all(text: &str, words: &[&str]) -> bool {
+    let text = text.to_lowercase();
+    words.iter().all(|word| text.contains(word))
+}
+
+/// The entry's own title, creator or tags hold `needle` (one of
+/// `search_words`), leaving its tracks out.
 pub fn matches_entry(entry: &Entry, needle: &str) -> bool {
     entry.title.to_lowercase().contains(needle)
         || entry
@@ -1554,6 +1577,10 @@ mod tests {
         assert!(matches_search(&album, "silent"));
         assert!(!matches_entry(&album, "silent"));
         assert!(!matches_search(&album, "whitney"));
+        // Word by word, in any order: the artist and a rated track.
+        assert!(matches_search(&album, "mariah silent"));
+        assert!(matches_search(&album, "silent  Carey"));
+        assert!(!matches_search(&album, "mariah whitney"));
     }
 
     #[test]

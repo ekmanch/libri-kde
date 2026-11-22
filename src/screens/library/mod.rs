@@ -576,12 +576,11 @@ pub fn wanted(app: &App, wants: &mut Wants) {
     // An artist searched under Songs: the track lists of their albums,
     // a few at a time so a search that names many artists is no burst.
     if state.songs_tab_shown() {
-        let needle = browse::search_needle(&state.query);
         let listing = state.listing(library, app.today);
         let albums = listing
             .shown
             .iter()
-            .filter(|e| !crate::music::is_song(e) && crate::music::names_artist(e, &needle));
+            .filter(|e| crate::music::may_list_tracks(e, &state.query));
         let mut loading = 0;
         for album in albums {
             if app.artwork.track_list(album) == TrackList::Loading {
@@ -1407,18 +1406,32 @@ impl State {
     /// the picked one slide past in their own order.
     pub fn shown_in_tab<'a>(&self, listing: &Listing<'a>, tab: MusicTab) -> Vec<&'a Entry> {
         let sort = self.music_sorts.get(tab);
-        if sort == self.current_sort() {
+        // Songs lists from more albums under a search than the other two.
+        let same_entries = (tab == MusicTab::Songs) == (self.music_tab == MusicTab::Songs);
+        if sort == self.current_sort() && same_entries {
             return listing.shown.clone();
         }
+        let base = if tab == MusicTab::Songs {
+            listing.wide.clone()
+        } else {
+            self.without_track_albums(&listing.wide)
+        };
         // From the library's order, which Newest added breaks its ties by.
-        let mut shown: Vec<&Entry> = listing
-            .base
-            .iter()
-            .copied()
+        let mut shown: Vec<&Entry> = base
+            .into_iter()
             .filter(|e| self.status.is_none_or(|s| e.status == s))
             .collect();
         sort.apply(&mut shown);
         shown
+    }
+
+    /// `wide` without the albums only the Songs tab lists from: those
+    /// the search does not find by themselves.
+    fn without_track_albums<'a>(&self, wide: &[&'a Entry]) -> Vec<&'a Entry> {
+        wide.iter()
+            .copied()
+            .filter(|e| browse::matches_search(e, &self.query))
+            .collect()
     }
 
     /// How many things of `entries` the list on screen shows, for the
@@ -1704,12 +1717,25 @@ impl State {
             }
         };
         let of_type = |e: &&Entry| self.types.is_empty() || self.types.contains(&e.media);
-        let base: Vec<&Entry> = library
+        // The Songs tab also keeps the albums of an artist the search
+        // names: the other words may be in a track only its fetched
+        // list holds.
+        let tracks = music_tabs_shown(self);
+        let wide: Vec<&Entry> = library
             .entries
             .iter()
             .filter(of_type)
-            .filter(|e| filter.matches(e, today) && browse::matches_search(e, &self.query))
+            .filter(|e| {
+                filter.matches(e, today)
+                    && (browse::matches_search(e, &self.query)
+                        || tracks && crate::music::may_list_tracks(e, &self.query))
+            })
             .collect();
+        let base: Vec<&Entry> = if !tracks || self.music_tab == MusicTab::Songs {
+            wide.clone()
+        } else {
+            self.without_track_albums(&wide)
+        };
         let mut shown: Vec<&Entry> = base
             .iter()
             .copied()
@@ -1723,6 +1749,7 @@ impl State {
             shown.iter().map(|&e| Row::Entry(e)).collect()
         };
         Listing {
+            wide,
             base,
             shown,
             rows,
@@ -1732,6 +1759,9 @@ impl State {
 }
 
 pub struct Listing<'a> {
+    /// `base` with, on Music's tabs under a search, the albums only the
+    /// Songs tab lists from (`music::may_list_tracks`).
+    pub wide: Vec<&'a Entry>,
     pub base: Vec<&'a Entry>,
     pub shown: Vec<&'a Entry>,
     /// `shown` as the list lays it out: a series as one row in a long
@@ -2630,6 +2660,36 @@ mod tests {
             content: 100.0 * found.len() as f32,
         }));
         assert!(crate::screens::wanted(&app).covers.contains(&found[0]));
+    }
+
+    #[test]
+    fn a_songs_search_of_an_artist_and_a_title_finds_an_unrated_track() {
+        let mut app = App::new(crate::screens::Screen::Library);
+        app.library
+            .update(Message::ShowType(Some(MediaType::Music)));
+        app.library.update(Message::MusicTab(MusicTab::Songs));
+        let library = app.repo.library();
+        // Dam That River is on Dirt's list and not rated.
+        app.library
+            .update(Message::Search("alice chains river".into()));
+        let wants = crate::screens::wanted(&app);
+        assert_eq!(wants.tracks, ["music/dirt-alice-in-chains"]);
+        let _ = app.artwork.refresh(&wants, library, &app.lookups);
+        let listing = app.library.listing(library, app.today);
+        let songs = app.library.songs(&listing.shown, &app.artwork);
+        let titles: Vec<&str> = songs.iter().map(|s| s.title()).collect();
+        assert_eq!(titles, ["Dam That River"]);
+        assert_eq!(app.library.count_shown(&listing.shown, &app.artwork), 1);
+        // The other tabs list what the search finds by itself: nothing,
+        // as their copies beside Songs do.
+        for tab in [MusicTab::Albums, MusicTab::Artists] {
+            assert!(app.library.shown_in_tab(&listing, tab).is_empty());
+            let mut beside = app.library.clone();
+            beside.music_tab = tab;
+            let listing = beside.listing(library, app.today);
+            assert!(listing.shown.is_empty(), "{tab:?}");
+            assert_eq!(beside.shown_in_tab(&listing, MusicTab::Songs).len(), 1);
+        }
     }
 
     #[test]
