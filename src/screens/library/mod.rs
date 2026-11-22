@@ -573,24 +573,16 @@ pub fn wanted(app: &App, wants: &mut Wants) {
         overview::wanted(app, view, wants);
         return;
     }
-    // An artist searched under Songs: the track lists of their albums,
-    // a few at a time so a search that names many artists is no burst.
+    // A search under Songs: the track lists of every album it may find
+    // a track on. `Artwork` fetches the ones not on this computer a few
+    // at a time.
     if state.songs_tab_shown() {
         let listing = state.listing(library, app.today);
         let albums = listing
             .shown
             .iter()
             .filter(|e| crate::music::may_list_tracks(e, &state.query));
-        let mut loading = 0;
-        for album in albums {
-            if app.artwork.track_list(album) == TrackList::Loading {
-                loading += 1;
-                if loading > TRACK_LISTS_AT_ONCE {
-                    break;
-                }
-            }
-            wants.tracks.push(album.id.clone());
-        }
+        wants.tracks.extend(albums.map(|album| album.id.clone()));
     }
     if view == View::Text {
         return;
@@ -692,9 +684,6 @@ pub fn kept_beside(app: &App, wants: &mut Wants) {
         }
     }
 }
-
-/// How many track lists a Songs search waits for at a time.
-const TRACK_LISTS_AT_ONCE: usize = 6;
 
 impl Message {
     /// Whether the message shows the library, from the sidebar or the All
@@ -1717,9 +1706,8 @@ impl State {
             }
         };
         let of_type = |e: &&Entry| self.types.is_empty() || self.types.contains(&e.media);
-        // The Songs tab also keeps the albums of an artist the search
-        // names: the other words may be in a track only its fetched
-        // list holds.
+        // The Songs tab also keeps every album: the words may be in a
+        // track only its fetched list holds.
         let tracks = music_tabs_shown(self);
         let wide: Vec<&Entry> = library
             .entries
@@ -2641,7 +2629,11 @@ mod tests {
         app.library.update(Message::Search("alice in".into()));
         assert_eq!(tiles(&app).len(), 3, "Dirt's three rated tracks");
         let wants = crate::screens::wanted(&app);
-        assert_eq!(wants.tracks, ["music/dirt-alice-in-chains"]);
+        assert!(
+            wants
+                .tracks
+                .contains(&"music/dirt-alice-in-chains".to_owned())
+        );
         let _ = app.artwork.refresh(&wants, library, &app.lookups);
         let found = tiles(&app);
         assert_eq!(found.len(), 13, "every track of Dirt, rated or not");
@@ -2673,7 +2665,11 @@ mod tests {
         app.library
             .update(Message::Search("alice chains river".into()));
         let wants = crate::screens::wanted(&app);
-        assert_eq!(wants.tracks, ["music/dirt-alice-in-chains"]);
+        assert!(
+            wants
+                .tracks
+                .contains(&"music/dirt-alice-in-chains".to_owned())
+        );
         let _ = app.artwork.refresh(&wants, library, &app.lookups);
         let listing = app.library.listing(library, app.today);
         let songs = app.library.songs(&listing.shown, &app.artwork);
@@ -2688,7 +2684,38 @@ mod tests {
             beside.music_tab = tab;
             let listing = beside.listing(library, app.today);
             assert!(listing.shown.is_empty(), "{tab:?}");
-            assert_eq!(beside.shown_in_tab(&listing, MusicTab::Songs).len(), 1);
+            let songs = beside.shown_in_tab(&listing, MusicTab::Songs);
+            assert_eq!(beside.songs(&songs, &app.artwork).len(), 1);
+        }
+    }
+
+    #[test]
+    fn a_songs_search_of_a_title_finds_an_unrated_album_track() {
+        let mut app = App::new(crate::screens::Screen::Library);
+        app.library
+            .update(Message::ShowType(Some(MediaType::Music)));
+        app.library.update(Message::MusicTab(MusicTab::Songs));
+        let library = app.repo.library();
+        // Dam That River is on Dirt's list and not rated; no word names
+        // the artist, so every album's list is asked for.
+        app.library.update(Message::Search("that river".into()));
+        let wants = crate::screens::wanted(&app);
+        let albums = library
+            .entries
+            .iter()
+            .filter(|e| e.media == MediaType::Music && !crate::music::is_song(e))
+            .count();
+        assert_eq!(wants.tracks.len(), albums);
+        let _ = app.artwork.refresh(&wants, library, &app.lookups);
+        let listing = app.library.listing(library, app.today);
+        let songs = app.library.songs(&listing.shown, &app.artwork);
+        let titles: Vec<&str> = songs.iter().map(|s| s.title()).collect();
+        assert_eq!(titles, ["Dam That River"]);
+        assert_eq!(songs[0].entry().title, "Dirt", "it opens its album");
+        assert_eq!(app.library.count_shown(&listing.shown, &app.artwork), 1);
+        // Albums and Artists still list what the search finds by itself.
+        for tab in [MusicTab::Albums, MusicTab::Artists] {
+            assert!(app.library.shown_in_tab(&listing, tab).is_empty());
         }
     }
 

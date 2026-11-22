@@ -667,6 +667,17 @@ fn look<'a>(app: &'a App, row: &Row<'a>, view: View, tokens: &Tokens) -> (EntryL
     }
 }
 
+/// A search with no results.
+pub(super) fn no_results<'a>(query: &str, tokens: &Tokens) -> Element<'a, AppMessage> {
+    ui::empty_state(
+        Icon::Search,
+        format!("No results for \"{query}\""),
+        "Check the spelling, or add it to your library as a new entry.".into(),
+        Some(("Clear search", msg(Message::Search(String::new())))),
+        tokens,
+    )
+}
+
 /// Nothing to show: an empty type, a search with no results, filters that
 /// match nothing, or a status nothing has yet.
 fn empty_state<'a>(
@@ -704,12 +715,7 @@ fn empty_state<'a>(
             ),
         }
     } else if !query.is_empty() {
-        (
-            Icon::Search,
-            format!("No results for \"{query}\""),
-            "Check the spelling, or add it to your library as a new entry.".into(),
-            Some(("Clear search", msg(Message::Search(String::new())))),
-        )
+        return Some(no_results(query, tokens));
     } else if state.filter_count() == 0 && listing.base.is_empty() {
         // Only seasonal-only entries in this type.
         (

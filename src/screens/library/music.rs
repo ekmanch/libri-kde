@@ -131,7 +131,15 @@ fn tab_list<'a>(
         MusicTab::Songs => {
             let songs = state.songs(&shown, &app.artwork);
             if songs.is_empty() {
-                return empty("No songs here", tokens);
+                // Under a search the listing still holds every album,
+                // for the tracks it may find, so this is the search's
+                // own empty state.
+                let query = state.query.trim();
+                return if query.is_empty() {
+                    empty("No songs here", tokens)
+                } else {
+                    super::entries::no_results(query, tokens)
+                };
             }
             // A track of an album sits where its album sorts, so in its
             // album's section.

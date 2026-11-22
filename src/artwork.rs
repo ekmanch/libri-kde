@@ -48,6 +48,8 @@ const CONCURRENCY: usize = 2;
 /// How many image downloads run at once; the cover viewer's sharper copy
 /// starts over that.
 const DOWNLOADS: usize = 4;
+/// How many track lists are fetched at a time.
+const TRACK_LISTS_AT_ONCE: usize = 6;
 /// How long a miss stands before the cover is looked for again.
 const MISS_RETRY: i64 = 14 * 86_400;
 /// How long a lookup that did not work out waits before it is asked again
@@ -759,9 +761,16 @@ impl Artwork {
                 tasks.extend(self.want_episodes(entry, season, service));
             }
         }
+        // A Songs search wants every album's list: the ones not on this
+        // computer are fetched a few at a time, in the order wanted.
+        let mut fetching = self.tracks.values().filter(|s| s.loading).count();
         for id in &wants.tracks {
             if let Some(entry) = library.entry(id) {
-                tasks.extend(self.want_tracks(entry, service));
+                let room = fetching < TRACK_LISTS_AT_ONCE;
+                if let Some(task) = self.want_tracks(entry, service, room) {
+                    fetching += 1;
+                    tasks.push(task);
+                }
             }
         }
         if wants.platforms {
@@ -1060,7 +1069,15 @@ impl Artwork {
         )
     }
 
-    fn want_tracks(&mut self, entry: &Entry, service: &Arc<Service>) -> Option<Task<Message>> {
+    /// Asks for the album's track list unless it is here or on its way;
+    /// without `room` (enough lists are being fetched) it waits for a
+    /// later refresh.
+    fn want_tracks(
+        &mut self,
+        entry: &Entry,
+        service: &Arc<Service>,
+        room: bool,
+    ) -> Option<Task<Message>> {
         if service.is_instant() {
             self.tracks.entry(entry.id.clone()).or_insert_with(|| {
                 let tracks = lookup::fake::track_list(crate::music::artist_of(entry), &entry.title);
@@ -1094,6 +1111,9 @@ impl Artwork {
             && state.source == source
             && (state.loading || state.loaded != Loaded::Loading)
         {
+            return None;
+        }
+        if !room {
             return None;
         }
         if let Some(stored) = self.stores.read_tracks(&source) {

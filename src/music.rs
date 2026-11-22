@@ -1,5 +1,5 @@
 //! Music by artist: the artist list, the Songs list (song entries, and
-//! under a search the album tracks it finds), and the matching
+//! under a search the album tracks it finds, rated or not), and the matching
 //! behind the phone's replace dialogs (DESIGN.md section 5 of the phone's
 //! design).
 
@@ -201,30 +201,38 @@ fn beside_artist<'w>(entry: &Entry, words: &'w [String]) -> Option<Vec<&'w str>>
 }
 
 /// The Songs tab may list tracks of `entry` that the entry itself does
-/// not hold: an album whose artist the search names, the other words
-/// being for the titles of its fetched tracks ("bob dylan girl").
+/// not hold: under a search any album, since the words may be in the
+/// title of a track only its fetched list holds ("america" for a live
+/// album's "America", "bob dylan girl").
 pub fn may_list_tracks(entry: &Entry, query: &str) -> bool {
     entry.media == MediaType::Music
         && !is_song(entry)
-        && beside_artist(entry, &crate::browse::search_words(query)).is_some()
+        && !crate::browse::search_words(query).is_empty()
 }
 
-/// Every track of `album`, rated or not, as its details list them: the
-/// fetched list in its order with the stored ratings matched by title,
-/// then the rated tracks that list lacks. Without a fetched list (not
-/// loaded yet, or the album has no online match) the stored tracks.
-fn tracks_of<'a>(album: &'a Entry, fetched: Option<&'a [TrackInfo]>) -> Vec<Song<'a>> {
+/// The tracks of `album` whose title holds `words`, rated or not, as its
+/// details list them: the fetched list in its order with the stored
+/// ratings matched by title, then the rated tracks that list lacks.
+/// Without a fetched list (not loaded yet, or the album has no online
+/// match) the stored tracks.
+fn tracks_of<'a>(
+    album: &'a Entry,
+    fetched: Option<&'a [TrackInfo]>,
+    words: &[&str],
+) -> Vec<Song<'a>> {
     let stored = album.tracks.as_deref().unwrap_or_default();
+    let holds = |title: &str| crate::browse::holds_all(title, words);
     let row = |title: &'a str, rating| Song::Track {
         album,
         title,
         rating,
     };
     let Some(fetched) = fetched else {
-        return stored.iter().map(|t| row(&t.title, t.rating)).collect();
+        let stored = stored.iter().filter(|t| holds(&t.title));
+        return stored.map(|t| row(&t.title, t.rating)).collect();
     };
     let key = crate::lookup::text::track_title_key;
-    let listed = fetched.iter().map(|track| {
+    let listed = fetched.iter().filter(|t| holds(&t.title)).map(|track| {
         let rating = stored
             .iter()
             .find(|t| key(&t.title) == key(&track.title))
@@ -233,7 +241,7 @@ fn tracks_of<'a>(album: &'a Entry, fetched: Option<&'a [TrackInfo]>) -> Vec<Song
     });
     let extra = stored
         .iter()
-        .filter(|t| t.rating.is_some())
+        .filter(|t| t.rating.is_some() && holds(&t.title))
         .filter(|t| !fetched.iter().any(|l| key(&l.title) == key(&t.title)))
         .map(|t| row(&t.title, t.rating));
     listed.chain(extra).collect()
@@ -242,14 +250,14 @@ fn tracks_of<'a>(album: &'a Entry, fetched: Option<&'a [TrackInfo]>) -> Vec<Song
 /// The Songs tab, in the order of `entries` (the current sort). Without
 /// a search it lists song entries only: the songs saved on their own. A
 /// search also brings in the tracks of albums, right where their album
-/// would have been. The search is its words: those an album's artist
-/// holds name the artist, and the rest are for the track's own title. So
-/// an artist alone brings every track of their albums, rated or not
-/// (`fetched` gives an album's track list once it is on this computer;
-/// until then its stored tracks stand in), an artist with more words
+/// would have been, rated or not (`fetched` gives an album's track list
+/// once it is on this computer; until then its stored tracks stand in).
+/// The search is its words: those an album's artist holds name the
+/// artist, and the rest are for the track's own title. So an artist
+/// alone brings every track of their albums, an artist with more words
 /// those of their tracks whose title holds the rest ("bob dylan girl"),
-/// and words that name no artist any rated track whose title holds them
-/// all (that song, not the rest of its album).
+/// and words that name no artist any track whose title holds them all
+/// (that song, not the rest of its album).
 pub fn songs_matching<'a>(
     entries: &[&'a Entry],
     query: &str,
@@ -265,26 +273,9 @@ pub fn songs_matching<'a>(
         if words.is_empty() {
             continue;
         }
-        let (tracks, rest) = match beside_artist(entry, &words) {
-            Some(rest) => (tracks_of(entry, fetched(entry)), rest),
-            None => {
-                let rated = entry.tracks.iter().flatten();
-                let rated = rated
-                    .filter(|track| track.rating.is_some())
-                    .map(|track| Song::Track {
-                        album: entry,
-                        title: &track.title,
-                        rating: track.rating,
-                    })
-                    .collect();
-                (rated, words.iter().map(String::as_str).collect())
-            }
-        };
-        songs.extend(
-            tracks
-                .into_iter()
-                .filter(|song| crate::browse::holds_all(song.title(), &rest)),
-        );
+        let rest = beside_artist(entry, &words)
+            .unwrap_or_else(|| words.iter().map(String::as_str).collect());
+        songs.extend(tracks_of(entry, fetched(entry), &rest));
     }
     songs
 }
@@ -589,7 +580,22 @@ mod tests {
             .map(|s| s.title())
             .collect();
         assert_eq!(titles, ["Down in a Hole"]);
-        // Dam That River is not rated, so the entry does not hold it.
+        // A track found by its own title needs no rating either: Dam
+        // That River is not rated, and no word names the artist.
+        let albums: Vec<&Entry> = library
+            .entries
+            .iter()
+            .filter(|e| may_list_tracks(e, "river"))
+            .collect();
+        assert!(albums.len() > 1, "every album may hold the track");
+        let titles: Vec<&str> = songs_matching(&albums, "river", |album| {
+            (album.title == "Dirt").then_some(list.as_slice())
+        })
+        .iter()
+        .map(|s| s.title())
+        .collect();
+        assert_eq!(titles, ["Dam That River"]);
+        // The entry itself does not hold it.
         let query = "chains river";
         assert!(found(query).is_empty());
         let dirt: Vec<&Entry> = library
@@ -604,14 +610,16 @@ mod tests {
         .map(|s| s.title())
         .collect();
         assert_eq!(titles, ["Dam That River"], "not the whole album");
-        // "in" is no part of Pink Floyd or Vince Guaraldi here.
-        let named: Vec<&str> = library
+        // "in" is no part of Pink Floyd or Vince Guaraldi here: only
+        // Dirt's artist is named, so only Dirt lists every track.
+        let albums: Vec<&Entry> = library
             .entries
             .iter()
             .filter(|e| may_list_tracks(e, "alice in"))
-            .map(|e| e.title.as_str())
             .collect();
-        assert_eq!(named, ["Dirt"]);
+        let named = songs_matching(&albums, "alice in", |_| None);
+        assert!(named.iter().all(|s| s.entry().title == "Dirt"));
+        assert_eq!(named.len(), 3);
 
         // An album found by its own title or a tag brings no tracks along.
         let titles: Vec<&str> = songs_matching(&found("dirt"), "dirt", |_| None)
