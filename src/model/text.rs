@@ -97,29 +97,42 @@ pub fn entry_id<'a>(
 }
 
 /// A tag is lowercase ASCII letters, digits and hyphens, plus a dot
-/// between two digits ("2.5d"). Drops a leading "#", folds, and turns every
-/// run of other characters into one hyphen.
+/// between two digits ("2.5d") and an "&" between two letters or digits
+/// ("r&b"). Drops a leading "#", folds, and turns every run of other
+/// characters into one hyphen, or into one "&" when the run holds one
+/// ("r & b" is "r&b"); a run at either end is dropped.
 pub fn normalize_tag(raw: &str) -> String {
     let raw = raw.trim();
     let folded = fold_to_ascii(raw.strip_prefix('#').unwrap_or(raw));
     let chars: Vec<char> = folded.chars().collect();
     let mut tag = String::with_capacity(chars.len());
+    // The run of other characters since the last kept one: a hyphen, or
+    // an "&" once the run has held one.
+    let mut gap: Option<char> = None;
     for (i, &c) in chars.iter().enumerate() {
         let digit_dot = c == '.'
             && i > 0
             && chars[i - 1].is_ascii_digit()
             && chars.get(i + 1).is_some_and(char::is_ascii_digit);
         if c.is_ascii_lowercase() || c.is_ascii_digit() || digit_dot {
+            if let Some(separator) = gap.take()
+                && !tag.is_empty()
+            {
+                tag.push(separator);
+            }
             tag.push(c);
-        } else if !tag.ends_with('-') {
-            tag.push('-');
+        } else if c == '&' {
+            gap = Some('&');
+        } else {
+            gap.get_or_insert('-');
         }
     }
-    tag.trim_matches('-').to_owned()
+    tag
 }
 
 /// The existing tag most like `candidate`, or none when nothing is close:
-/// the same with hyphens and dots ignored, a plural of the other, or one
+/// the same with hyphens and dots ignored and an "&" read as "and" or as
+/// nothing ("r&b" beside "r-and-b" or "r-b"), a plural of the other, or one
 /// edit apart (two for six letters or more), where swapping two neighbors
 /// is one edit. An exact match is the same tag, not a similar one.
 pub fn find_similar_tag<'a>(
@@ -140,8 +153,13 @@ pub fn find_similar_tag<'a>(
 
 /// Lower is closer.
 fn similarity_rank(a: &str, b: &str) -> Option<usize> {
-    let bare = |s: &str| s.replace(['-', '.'], "");
-    if bare(a) == bare(b) {
+    // Each tag without hyphens and dots, its "&" left out and spelled out.
+    let bare = |s: &str| {
+        let plain = s.replace(['-', '.'], "");
+        [plain.replace('&', ""), plain.replace('&', "and")]
+    };
+    let (bare_a, bare_b) = (bare(a), bare(b));
+    if bare_a.iter().any(|form| bare_b.contains(form)) {
         return Some(0);
     }
     if is_plural_of(a, b) || is_plural_of(b, a) {
@@ -401,6 +419,37 @@ mod tests {
         assert_eq!(normalize_tag("2.5D"), "2.5d");
         assert_eq!(normalize_tag("rock 'n' roll"), "rock-n-roll");
         assert_eq!(normalize_tag("...dark..."), "dark");
+    }
+
+    #[test]
+    fn a_tag_keeps_an_ampersand_between_two_letters_or_digits() {
+        assert_eq!(normalize_tag("#R&B"), "r&b");
+        assert_eq!(normalize_tag("r & b"), "r&b");
+        assert_eq!(normalize_tag("Rock & Roll"), "rock&roll");
+        assert_eq!(normalize_tag("drum&bass"), "drum&bass");
+        assert_eq!(normalize_tag("drum-&-bass"), "drum&bass");
+        assert_eq!(normalize_tag("drum -&bass"), "drum&bass");
+        assert_eq!(normalize_tag("r&&b"), "r&b");
+        assert_eq!(normalize_tag("r & & b"), "r&b");
+        assert_eq!(normalize_tag("&rb&"), "rb");
+        assert_eq!(normalize_tag("- & r&b & -"), "r&b");
+        assert_eq!(normalize_tag("&"), "");
+        assert_eq!(normalize_tag("2.5&3"), "2.5&3");
+        assert_eq!(normalize_tag("2.&5"), "2&5", "a dot only between digits");
+    }
+
+    #[test]
+    fn an_ampersand_reads_as_and_or_as_nothing_in_the_similar_tag_check() {
+        for close in ["rnb", "r-and-b", "r-b", "rb", "randb"] {
+            assert_eq!(find_similar_tag("r&b", [close]), Some(close));
+            assert_eq!(find_similar_tag(close, ["r&b"]), Some("r&b"));
+        }
+        assert_eq!(find_similar_tag("R & B", ["r&b"]), None, "the same tag");
+        assert_eq!(
+            find_similar_tag("drum-and-bass", ["drums", "drum&bass"]),
+            Some("drum&bass")
+        );
+        assert_eq!(find_similar_tag("rock&roll", ["rock", "pop"]), None);
     }
 
     #[test]

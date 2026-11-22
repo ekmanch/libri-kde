@@ -329,11 +329,13 @@ pub fn canonical_tag(raw: &str) -> String {
 }
 
 /// The library's spelling of a normalized name, when the alias table has
-/// one.
+/// one. The table spells an "&" as a hyphen ("Rap & Hip Hop" is
+/// `rap-hip-hop` there).
 fn aliased(name: String) -> String {
+    let hyphenated = name.replace('&', "-");
     TAG_ALIASES
         .iter()
-        .find(|(alias, _)| *alias == name)
+        .find(|(alias, _)| *alias == name || *alias == hyphenated)
         .map_or(name, |(_, tag)| (*tag).to_owned())
 }
 
@@ -347,14 +349,22 @@ pub fn library_tags(raw: &str, has: impl Fn(&str) -> bool) -> Vec<String> {
     if has(&name) {
         return vec![name];
     }
-    let words: Vec<&str> = name.split('-').collect();
+    // Where each word starts and ends in the name; a run of them is cut
+    // from the name, so it keeps its own hyphens and "&".
+    let mut words: Vec<(usize, usize)> = Vec::new();
+    let mut from = 0;
+    for (at, _) in name.match_indices(['-', '&']) {
+        words.push((from, at));
+        from = at + 1;
+    }
+    words.push((from, name.len()));
     let mut tags: Vec<String> = Vec::new();
     let mut start = 0;
     while start < words.len() {
         // The longest run of words that is a tag, so "hack-and-slash"
         // is found before "hack".
         let run = (start + 1..=words.len()).rev().find_map(|end| {
-            let tag = aliased(words[start..end].join("-"));
+            let tag = aliased(name[words[start].0..words[end - 1].1].to_owned());
             has(&tag).then_some((tag, end))
         });
         let Some((tag, end)) = run else {
@@ -889,6 +899,21 @@ mod tests {
         // A word the library has no tag for keeps the name whole.
         assert_eq!(tags("Indie Folk"), ["indie-folk"]);
         assert_eq!(tags("Grunge"), ["grunge"]);
+    }
+
+    #[test]
+    fn a_genre_with_an_ampersand_is_its_tag_or_the_tags_either_side() {
+        let library = ["r&b", "soul", "action", "adventure", "scifi", "hiphop"];
+        let tags = |raw: &str| library_tags(raw, |tag| library.contains(&tag));
+        assert_eq!(canonical_tag("R&B"), "r&b");
+        assert_eq!(canonical_tag("Rap & Hip Hop"), "hiphop");
+        assert_eq!(tags("R&B"), ["r&b"]);
+        assert_eq!(tags("R&B/Soul"), ["r&b", "soul"]);
+        assert_eq!(tags("Action & Adventure"), ["action", "adventure"]);
+        assert_eq!(tags("Sci-Fi & Fantasy"), ["sci-fi&fantasy"]);
+        assert_eq!(tags("Sci-Fi & Adventure"), ["scifi", "adventure"]);
+        // Not in the library yet: offered whole, as the tag it would be.
+        assert_eq!(tags("Drum & Bass"), ["drum&bass"]);
     }
 
     #[test]

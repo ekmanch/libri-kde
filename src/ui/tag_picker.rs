@@ -62,7 +62,7 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
     }
 
     /// The search as a tag: lower case, a leading "#" dropped, spaces as
-    /// hyphens.
+    /// hyphens, none beside an "&".
     fn query(&self) -> String {
         normalize(&self.state.query)
     }
@@ -565,7 +565,7 @@ fn back_row<'a, M: Clone + 'a>(title: &str, on_press: M, tokens: &Tokens) -> Ele
 }
 
 /// A search as a tag would be written: trimmed, lower case, a leading "#"
-/// dropped, spaces as hyphens.
+/// dropped, spaces as hyphens, and none beside an "&" ("r & b" is "r&b").
 fn normalize(query: &str) -> String {
     query
         .trim()
@@ -574,4 +574,6 @@ fn normalize(query: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join("-")
+        .replace("-&", "&")
+        .replace("&-", "&")
 }

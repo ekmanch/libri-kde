@@ -1565,6 +1565,18 @@ mod tests {
     }
 
     #[test]
+    fn a_tag_with_an_ampersand_is_searched_and_suggested_as_written() {
+        let mut album = library().entries[0].clone();
+        album.media = MediaType::Music;
+        album.tags = vec!["r&b".into(), "soul".into()];
+        assert!(matches_search(&album, "r&b"));
+        assert!(matches_search(&album, "#R&B soul"));
+        assert!(!matches_search(&album, "r&d"));
+        assert_eq!(tag_suggestions([&album], "#r&", &[]), [("r&b", 1)]);
+        assert_eq!(tag_suggestions([&album], "&b", &[]), [("r&b", 1)]);
+    }
+
+    #[test]
     fn search_matches_creators_and_rated_tracks() {
         let mut album = library().entries[0].clone();
         album.media = MediaType::Music;

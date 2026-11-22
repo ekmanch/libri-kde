@@ -217,16 +217,26 @@ pub fn sort_tags<'a>(tags: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
 }
 
 /// "Stephen King" for #stephen-king: the words capitalized, for the rows of
-/// a long group.
+/// a long group. An "&" stands between its words ("Simon & Garfunkel"),
+/// or joins them when one is a single letter ("R&B").
 pub fn tag_display_name(tag: &str) -> String {
+    let capitalized = |word: &str| {
+        let mut chars = word.chars();
+        match chars.next() {
+            Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
+            None => String::new(),
+        }
+    };
     tag.split('-')
         .filter(|w| !w.is_empty())
         .map(|w| {
-            let mut chars = w.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
-                None => String::new(),
-            }
+            let parts: Vec<&str> = w.split('&').filter(|p| !p.is_empty()).collect();
+            let joined = parts.iter().any(|p| p.chars().count() == 1);
+            parts
+                .iter()
+                .map(|p| capitalized(p))
+                .collect::<Vec<_>>()
+                .join(if joined { "&" } else { " & " })
         })
         .collect::<Vec<_>>()
         .join(" ")
@@ -305,5 +315,7 @@ mod tests {
             ["bram-stoker", "the-cramps", "stephen-king"]
         );
         assert_eq!(tag_display_name("ursula-k-le-guin"), "Ursula K Le Guin");
+        assert_eq!(tag_display_name("r&b"), "R&B");
+        assert_eq!(tag_display_name("simon&garfunkel"), "Simon & Garfunkel");
     }
 }
