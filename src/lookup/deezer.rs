@@ -5,7 +5,7 @@
 //! album when a match is picked. Deezer answers errors as 200 with an
 //! `error` object, which `data` turns into failures.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -41,6 +41,9 @@ const ARTIST_HITS: &str = "25";
 /// An artist this far below the best known match is left out (a
 /// hundredth of its fans).
 const ARTIST_FAN_SHARE: i64 = 100;
+/// How many albums a page of song hits asks for the copies of its songs
+/// that the search left out.
+const HIDDEN_ALBUMS: usize = 6;
 
 impl Deezer {
     pub fn new() -> Deezer {
@@ -301,6 +304,85 @@ impl Deezer {
         Ok(page)
     }
 
+    /// The albums among a page of song hits that may hold a copy the
+    /// search left out, in the hits' order. Deezer's search lists a
+    /// recording once: a song out as a single and on its album (one ISRC)
+    /// comes from one of the two only, mostly the single. An album is
+    /// worth asking when its artist has a hit on another record too.
+    fn albums_to_ask(hits: &[Value]) -> Vec<i64> {
+        let records: Vec<(i64, i64)> = hits
+            .iter()
+            .filter_map(|hit| Some((int_at(&hit["artist"], "id")?, int_at(&hit["album"], "id")?)))
+            .collect();
+        let mut albums = Vec::new();
+        for (artist, album) in &records {
+            if !albums.contains(album) && records.iter().any(|(a, b)| a == artist && b != album) {
+                albums.push(*album);
+            }
+        }
+        albums.truncate(HIDDEN_ALBUMS);
+        albums
+    }
+
+    /// A page of song hits as matches, each followed by the copies of the
+    /// same recording (the same ISRC) on the other albums in `lists`
+    /// (an album's id and its tracks) that the search did not show.
+    fn songs_with_copies(hits: &[Value], lists: &[(i64, Vec<Value>)]) -> Vec<Match> {
+        let mut listed: HashSet<i64> = hits.iter().filter_map(|hit| int_at(hit, "id")).collect();
+        let mut matches = Vec::new();
+        for hit in hits {
+            let Some(found) = Deezer::track(hit) else {
+                continue;
+            };
+            matches.push(found);
+            let Some(isrc) = str_at(hit, "isrc").filter(|isrc| !isrc.is_empty()) else {
+                continue;
+            };
+            let own = int_at(&hit["album"], "id");
+            for (album_id, tracks) in lists {
+                if Some(*album_id) == own {
+                    continue;
+                }
+                // An album's track list names no album: a hit's does.
+                let Some(album) = hits
+                    .iter()
+                    .map(|other| &other["album"])
+                    .find(|album| int_at(album, "id") == Some(*album_id))
+                else {
+                    continue;
+                };
+                for track in tracks {
+                    if str_at(track, "isrc") != Some(isrc) {
+                        continue;
+                    }
+                    let Some(id) = int_at(track, "id") else {
+                        continue;
+                    };
+                    if !listed.insert(id) {
+                        continue;
+                    }
+                    let mut copy = track.clone();
+                    copy["album"] = album.clone();
+                    matches.extend(Deezer::track(&copy));
+                }
+            }
+        }
+        matches
+    }
+
+    /// A page of song hits with the copies the search left out. A track
+    /// list that does not come only leaves its copies out.
+    fn songs(&self, hits: &[Value]) -> Vec<Match> {
+        let lists: Vec<(i64, Vec<Value>)> = Deezer::albums_to_ask(hits)
+            .into_iter()
+            .filter_map(|id| {
+                let tracks = self.list(&format!("/album/{id}/tracks"), &[("limit", "200")]);
+                Some((id, tracks.ok()?))
+            })
+            .collect();
+        Deezer::songs_with_copies(hits, &lists)
+    }
+
     fn released(album: &Value) -> Option<Released> {
         str_at(album, "release_date").and_then(Released::parse)
     }
@@ -424,20 +506,24 @@ impl Source for Deezer {
         let cursor = request.cursor;
         match &request.list {
             MusicList::Search(query) => {
-                let (path, read): (&str, fn(&Value) -> Option<Match>) = match request.scope {
-                    MusicScope::Albums => ("/search/album", Deezer::album),
-                    MusicScope::Songs => ("/search/track", Deezer::track),
+                let path = match request.scope {
+                    MusicScope::Albums => "/search/album",
+                    MusicScope::Songs => "/search/track",
                 };
                 let (index, count) = (cursor.to_string(), limit.to_string());
                 let (items, total, more) =
                     self.page(path, &[("q", query), ("index", &index), ("limit", &count)])?;
+                let matches = match request.scope {
+                    MusicScope::Albums => items.iter().filter_map(Deezer::album).collect(),
+                    MusicScope::Songs => self.songs(&items),
+                };
                 let artists = if cursor == 0 {
                     self.matching_artists(query)?
                 } else {
                     Vec::new()
                 };
                 Ok(MusicPage {
-                    matches: items.iter().filter_map(read).collect(),
+                    matches,
                     total,
                     next: more.then_some(cursor + limit),
                     artists,
@@ -631,5 +717,67 @@ mod tests {
         Deezer::newest_first(&mut albums);
         let titles: Vec<&str> = albums.iter().filter_map(|a| str_at(a, "title")).collect();
         assert_eq!(titles, ["It's A Sin", "Impera", "Popestar", "Undated"]);
+    }
+
+    #[test]
+    fn a_song_hit_is_followed_by_its_copy_on_an_album_the_search_hid() {
+        // "the amazing": the single's Picture You, then the album's
+        // other songs; the album's own copy is not among the hits.
+        let hits: Vec<Value> = serde_json::from_str(
+            r#"[{"id": 31, "title": "Picture You", "isrc": "USBQU1300308",
+                 "artist": {"id": 7, "name": "The Amazing"},
+                 "album": {"id": 100, "title": "Picture You", "cover_medium": "single.jpg"}},
+                {"id": 11, "title": "Broken", "isrc": "USBQU1300307",
+                 "artist": {"id": 7, "name": "The Amazing"},
+                 "album": {"id": 200, "title": "Picture You", "cover_medium": "album.jpg"}},
+                {"id": 50, "title": "Amazing", "isrc": "X1",
+                 "artist": {"id": 8, "name": "Someone"},
+                 "album": {"id": 300, "title": "Else"}}]"#,
+        )
+        .unwrap();
+        // Only the artist with two records in the hits is asked about.
+        assert_eq!(Deezer::albums_to_ask(&hits), [100, 200]);
+
+        let lists: Vec<(i64, Vec<Value>)> = vec![
+            (
+                100,
+                serde_json::from_str(
+                    r#"[{"id": 31, "title": "Picture You", "isrc": "USBQU1300308",
+                         "artist": {"id": 7, "name": "The Amazing"}}]"#,
+                )
+                .unwrap(),
+            ),
+            (
+                200,
+                serde_json::from_str(
+                    r#"[{"id": 11, "title": "Broken", "isrc": "USBQU1300307",
+                         "artist": {"id": 7, "name": "The Amazing"}},
+                        {"id": 12, "title": "Picture You", "isrc": "USBQU1300308",
+                         "artist": {"id": 7, "name": "The Amazing"}},
+                        {"id": 13, "title": "Circles", "isrc": "USBQU1300309",
+                         "artist": {"id": 7, "name": "The Amazing"}}]"#,
+                )
+                .unwrap(),
+            ),
+        ];
+        let songs = Deezer::songs_with_copies(&hits, &lists);
+        let rows: Vec<(&str, &str)> = songs
+            .iter()
+            .map(|m| (m.source.as_str(), m.album_source.as_deref().unwrap()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("deezer:track:31", "deezer:album:100"),
+                ("deezer:track:12", "deezer:album:200"),
+                ("deezer:track:11", "deezer:album:200"),
+                ("deezer:track:50", "deezer:album:300"),
+            ]
+        );
+        assert_eq!(songs[1].title, "Picture You");
+        assert_eq!(songs[1].creator.as_deref(), Some("The Amazing"));
+        assert_eq!(songs[1].cover_url.as_deref(), Some("album.jpg"));
+        // With no track lists the hits come as they are.
+        assert_eq!(Deezer::songs_with_copies(&hits, &[]).len(), 3);
     }
 }

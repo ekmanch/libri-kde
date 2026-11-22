@@ -330,6 +330,31 @@ fn deezer_pages_a_search_and_an_artists_albums_and_songs() {
     assert!(songs.matches.len() >= 25);
 }
 
+/// Deezer's search lists a recording once, so "Picture You" comes from
+/// the 2014 single alone; the 2015 album's copy is added from its tracks.
+#[test]
+#[ignore = "asks Deezer; run with --ignored"]
+fn deezer_search_shows_a_song_on_its_single_and_on_its_album() {
+    use libri::lookup::{MusicList, MusicRequest, MusicScope};
+    let service = Service::real(&Keys::default(), None);
+    let page = service
+        .music_page(&MusicRequest {
+            list: MusicList::Search("the amazing".into()),
+            scope: MusicScope::Songs,
+            cursor: 0,
+        })
+        .unwrap();
+    let copies: Vec<&str> = page
+        .matches
+        .iter()
+        .filter(|m| m.title == "Picture You" && m.creator.as_deref() == Some("The Amazing"))
+        .filter_map(|m| m.album_source.as_deref())
+        .collect();
+    println!("Picture You on {copies:?}");
+    assert!(copies.contains(&"deezer:album:679137691"), "the single");
+    assert!(copies.contains(&"deezer:album:9682786"), "the album");
+}
+
 #[test]
 #[ignore = "asks the real providers; run with --ignored"]
 fn wikidata_knows_who_died() {
