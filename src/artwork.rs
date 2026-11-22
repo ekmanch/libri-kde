@@ -99,6 +99,9 @@ struct Record {
     key: String,
     url: Option<String>,
     source: Option<String>,
+    /// The entry's `cover_from` found no image and `url` is the match's
+    /// own cover (`Found::nothing`).
+    nothing: bool,
     resolved: Timestamp,
 }
 
@@ -109,6 +112,7 @@ impl Record {
             key: str_at(json, "key")?.to_owned(),
             url: str_at(json, "url").map(str::to_owned),
             source: str_at(json, "source").map(str::to_owned),
+            nothing: json.get("cover_from_missing").and_then(Value::as_bool) == Some(true),
             resolved: Timestamp::parse(str_at(json, "resolved")?)?,
         })
     }
@@ -120,6 +124,9 @@ impl Record {
         }
         if let Some(source) = &self.source {
             json["source"] = Value::String(source.clone());
+        }
+        if self.nothing {
+            json["cover_from_missing"] = Value::Bool(true);
         }
         json
     }
@@ -212,7 +219,7 @@ pub enum Message {
     CoverResolved {
         id: String,
         key: String,
-        outcome: Result<(Option<String>, Option<String>), FailureKind>,
+        outcome: Result<Found, FailureKind>,
     },
     ImageFetched {
         url: String,
@@ -456,6 +463,13 @@ impl Artwork {
             return Some(cover_from);
         }
         self.record_of(entry).and_then(|r| r.url.as_deref())
+    }
+
+    /// Whether the entry's `cover_from` is known to find no image: its
+    /// source answered that it has none, and the match's own cover is
+    /// shown. The form's next Save then removes the `cover_from`.
+    pub fn cover_from_finds_nothing(&self, entry: &Entry) -> bool {
+        self.record_of(entry).is_some_and(|r| r.nothing)
     }
 
     /// The album entry in the library the song `id` shows the cover of,
@@ -847,14 +861,14 @@ impl Artwork {
                     let id = entry.id.clone();
                     let key = Artwork::key_for(&entry);
                     if service.is_instant() {
-                        let outcome = resolve_cover(service, &entry).map_err(|f| f.kind);
+                        let outcome = resolve(service, &entry).map_err(|f| f.kind);
                         self.cover_resolved(id, key, outcome);
                         continue;
                     }
                     self.resolving.insert(format!("entry:{id}"));
                     let service = service.clone();
                     tasks.push(Task::perform(
-                        crate::app::blocking(move || Ok(resolve_cover(&service, &entry))),
+                        crate::app::blocking(move || Ok(resolve(&service, &entry))),
                         move |result| Message::CoverResolved {
                             id: id.clone(),
                             key: key.clone(),
@@ -888,15 +902,14 @@ impl Artwork {
         tasks
     }
 
-    fn cover_resolved(
-        &mut self,
-        id: String,
-        key: String,
-        outcome: Result<(Option<String>, Option<String>), FailureKind>,
-    ) {
+    fn cover_resolved(&mut self, id: String, key: String, outcome: Result<Found, FailureKind>) {
         self.resolving.remove(&format!("entry:{id}"));
         match outcome {
-            Ok((url, source)) => {
+            Ok(Found {
+                url,
+                source,
+                nothing,
+            }) => {
                 self.failures.remove(&format!("entry:{id}"));
                 self.matches_changed |= source.is_some();
                 if let Some(url) = &url {
@@ -908,6 +921,7 @@ impl Artwork {
                         key,
                         url,
                         source,
+                        nothing,
                         resolved: Timestamp::now(),
                     },
                 );
@@ -1339,15 +1353,49 @@ impl Artwork {
     }
 }
 
+/// What a lookup found for an entry's cover.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Found {
+    /// The cover's URL.
+    pub url: Option<String>,
+    /// For an entry matched on this computer, the id it was matched to
+    /// (the album's, for a song).
+    pub source: Option<String>,
+    /// The entry's `cover_from` finds no image: its source is set up and
+    /// answered that it has none for that id, so `url` is the match's own
+    /// cover. Never for one of the owner's files, a source this build
+    /// does not know or has no key for, or a lookup that failed (that is
+    /// an `Err`): only a real "no image" counts.
+    pub nothing: bool,
+}
+
+impl Found {
+    pub fn of(url: Option<String>, source: Option<String>) -> Found {
+        Found {
+            url,
+            source,
+            nothing: false,
+        }
+    }
+}
+
 /// The cover URL and, for an entry matched on this computer, the id it was
-/// matched to (the album's, for a song). A cover picked from another match
-/// (`cover_from`) is asked of that match's provider, and one that finds
-/// no image there falls back to the match's own cover (an anime's TMDB
-/// show without a poster shows AniList's); an entry without a source is
-/// still matched for its id, which its track list and series go by.
+/// matched to (`resolve`, without the word on a `cover_from` that finds
+/// nothing).
 pub fn resolve_cover(service: &Service, entry: &Entry) -> Reply<(Option<String>, Option<String>)> {
+    resolve(service, entry).map(|found| (found.url, found.source))
+}
+
+/// The entry's cover. A cover picked from another match (`cover_from`) is
+/// asked of that match's provider, and one that finds no image there
+/// falls back to the match's own cover (an anime's TMDB show without a
+/// poster shows AniList's) and is said to find nothing; an entry without
+/// a source is still matched for its id, which its track list and series
+/// go by.
+pub fn resolve(service: &Service, entry: &Entry) -> Reply<Found> {
     if let Some(cover_from) = &entry.cover_from {
-        let url = match service.source_of(cover_from) {
+        let provider = service.source_of(cover_from);
+        let url = match provider {
             Some(provider) => provider.picked_cover_url(cover_from, entry.media)?,
             None => None,
         };
@@ -1355,19 +1403,23 @@ pub fn resolve_cover(service: &Service, entry: &Entry) -> Reply<(Option<String>,
         // replaced by a lookup's cover.
         let falls_back = url.is_none() && covers::repo_path(cover_from).is_none();
         if entry.source.is_some() && !falls_back {
-            return Ok((url, None));
+            return Ok(Found::of(url, None));
         }
         let plain = Entry {
             cover_from: None,
             ..entry.clone()
         };
-        let (own, matched) = resolve_cover(service, &plain)?;
-        return Ok((url.or(own.filter(|_| falls_back)), matched));
+        let own = resolve(service, &plain)?;
+        return Ok(Found {
+            url: url.or(own.url.filter(|_| falls_back)),
+            source: own.source,
+            nothing: falls_back && provider.is_some_and(|provider| provider.is_configured()),
+        });
     }
     if let Some(source) = &entry.source {
         return match service.source_of(source) {
-            Some(provider) => Ok((provider.cover_url(source, entry.media)?, None)),
-            None => Ok((None, None)),
+            Some(provider) => Ok(Found::of(provider.cover_url(source, entry.media)?, None)),
+            None => Ok(Found::default()),
         };
     }
     let is_song = entry.media == MediaType::Music && entry.kind == Some(EntryKind::Song);
@@ -1381,13 +1433,13 @@ pub fn resolve_cover(service: &Service, entry: &Entry) -> Reply<(Option<String>,
         if let Some(found) =
             provider.match_title(title, entry.media, year, entry.creator.as_deref())?
         {
-            return Ok((
+            return Ok(Found::of(
                 found.cache_cover_url().map(str::to_owned),
                 Some(found.source),
             ));
         }
     }
-    Ok((None, None))
+    Ok(Found::default())
 }
 
 /// An artist's photo from the music source, for the artist's Pick a
@@ -1588,7 +1640,7 @@ mod tests {
         artwork.cover_resolved(
             e.id.clone(),
             Artwork::key_for(&e),
-            Ok((Some(cached.into()), None)),
+            Ok(Found::of(Some(cached.into()), None)),
         );
         let mut kept = artwork.kept_images(&[]);
         kept.sort();
@@ -1685,14 +1737,18 @@ mod tests {
         assert!(artwork.resolving.contains("entry:music/live-adele"));
 
         // It found nothing: the album has no online match.
-        artwork.cover_resolved(album.id.clone(), key.clone(), Ok((None, None)));
+        artwork.cover_resolved(album.id.clone(), key.clone(), Ok(Found::default()));
         let _ = artwork.refresh(&wants, &library, &service);
         assert_eq!(artwork.track_list(&album), TrackList::Unmatched);
 
         // It found the album: its list is asked for, and a failure there
         // is a list that could not be loaded too.
         let source = "deezer:album:1".to_owned();
-        artwork.cover_resolved(album.id.clone(), key, Ok((None, Some(source.clone()))));
+        artwork.cover_resolved(
+            album.id.clone(),
+            key,
+            Ok(Found::of(None, Some(source.clone()))),
+        );
         let _ = artwork.refresh(&wants, &library, &service);
         assert_eq!(artwork.track_list(&album), TrackList::Loading);
         let _ = artwork.update(
@@ -1722,7 +1778,7 @@ mod tests {
 
         // Both are matched; only the album's match is kept.
         let found = |n: u32| {
-            Ok((
+            Ok(Found::of(
                 Some(format!("https://e.test/{n}.jpg")),
                 Some(format!("deezer:album:{n}")),
             ))
@@ -1785,8 +1841,8 @@ mod tests {
         assert_eq!(artwork.image_queue, [cover(4), cover(5)], "the rest wait");
     }
 
-    /// A lookup that knows one cover, or none.
-    struct OneCover(&'static str, Option<&'static str>);
+    /// A lookup that knows one cover, or none, or does not answer.
+    struct OneCover(&'static str, Reply<Option<&'static str>>);
 
     impl crate::lookup::Source for OneCover {
         fn id(&self) -> &'static str {
@@ -1806,7 +1862,7 @@ mod tests {
         }
 
         fn cover_url(&self, _: &str, _: MediaType) -> Reply<Option<String>> {
-            Ok(self.1.map(str::to_owned))
+            self.1.clone().map(|url| url.map(str::to_owned))
         }
 
         fn match_title(
@@ -1829,8 +1885,8 @@ mod tests {
         let service = |poster: Option<&'static str>| {
             Service::with(
                 vec![
-                    std::sync::Arc::new(OneCover("tmdb", poster)),
-                    std::sync::Arc::new(OneCover("anilist", Some(own))),
+                    std::sync::Arc::new(OneCover("tmdb", Ok(poster))),
+                    std::sync::Arc::new(OneCover("anilist", Ok(Some(own)))),
                 ],
                 true,
             )
@@ -1849,8 +1905,31 @@ mod tests {
             url(&service(Some(poster)), &frieren).as_deref(),
             Some(poster)
         );
-        // A show without a poster: the match's own cover.
+        assert!(!resolve(&service(Some(poster)), &frieren).unwrap().nothing);
+        // A show without a poster: the match's own cover, and the word
+        // that the `cover_from` finds nothing, which the next Save acts on.
         assert_eq!(url(&service(None), &frieren).as_deref(), Some(own));
+        assert!(resolve(&service(None), &frieren).unwrap().nothing);
+        // No answer is not "no image": nothing is shown and nothing said.
+        let offline = Service::with(
+            vec![
+                std::sync::Arc::new(OneCover(
+                    "tmdb",
+                    Err(lookup::Failure::new(FailureKind::Offline, "no network")),
+                )),
+                std::sync::Arc::new(OneCover("anilist", Ok(Some(own)))),
+            ],
+            true,
+        );
+        assert!(resolve(&offline, &frieren).is_err());
+        // A source this build does not know: the match's cover, and the
+        // `cover_from` stays.
+        let unknown = Entry {
+            cover_from: Some("elsewhere:1".into()),
+            ..frieren.clone()
+        };
+        let found = resolve(&service(Some(poster)), &unknown).unwrap();
+        assert_eq!((found.url.as_deref(), found.nothing), (Some(own), false));
         // AniList's cover picked, stored under the entry's own id.
         frieren.cover_from = frieren.source.clone();
         assert_eq!(url(&service(Some(poster)), &frieren).as_deref(), Some(own));
@@ -1875,7 +1954,10 @@ mod tests {
         artwork.cover_resolved(
             e.id.clone(),
             Artwork::key_for(&e),
-            Ok((Some("https://x/a.jpg".into()), Some("tmdb:movie:1".into()))),
+            Ok(Found::of(
+                Some("https://x/a.jpg".into()),
+                Some("tmdb:movie:1".into()),
+            )),
         );
         assert_eq!(artwork.cover_url(&e), Some("https://x/a.jpg"));
         assert_eq!(artwork.source_of(&e).as_deref(), Some("tmdb:movie:1"));

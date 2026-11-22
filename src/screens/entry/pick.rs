@@ -795,11 +795,47 @@ fn store(app: &mut App, upload: &Upload) -> Option<String> {
     Some(path)
 }
 
+/// What "Use the match's cover" stores for `entry` matched to `source`:
+/// nothing, and for an anime with a TMDB show its own `anilist:` id,
+/// exactly as AniList's tile does, since the phone's standing check
+/// writes the show's poster on such an anime while it has no
+/// `cover_from`.
+pub fn own_cover_from(entry: &Entry, source: Option<&str>) -> Option<String> {
+    anime_poster(entry)?;
+    source
+        .filter(|source| source.starts_with("anilist:"))
+        .map(str::to_owned)
+}
+
+/// The same for what is open: the picker's subject, or the form with
+/// the picker shut.
+fn match_cover_from(app: &App) -> Option<String> {
+    let library = app.repo.library();
+    let form = match app.dialog.as_ref() {
+        Some(Dialog::Form(form)) => Some(form),
+        _ => None,
+    };
+    match (subject(app), form) {
+        (Some(subject), _) if subject.stored => {
+            let entry = library.entry(&subject.id)?;
+            own_cover_from(entry, entry.source.as_deref())
+        }
+        // The form: the anime as it will be saved, its show still linked.
+        (_, Some(form)) if form.keeps_tmdb() => {
+            let edited = library.entry(form.editing.as_deref()?)?;
+            own_cover_from(edited, form.source.as_deref())
+        }
+        _ => None,
+    }
+}
+
 /// A pick in the open picker: saved at once on an entry of the library,
 /// kept in the form for Save otherwise. Picking one of the owner's files
 /// over a cover the lookup has is remembered, so no online cover is
 /// offered for the title later.
 pub fn pick(app: &mut App, cover_from: Option<String>) {
+    // Use the match's cover.
+    let cover_from = cover_from.or_else(|| match_cover_from(app));
     let Some(subject) = subject(app) else {
         // The form's own "Use the match's cover", with the picker shut.
         if let Some(Dialog::Form(form)) = &mut app.dialog {
@@ -852,15 +888,17 @@ pub fn answer_online(app: &mut App, id: &str, choice: OnlineChoice) {
     else {
         return;
     };
+    // The online cover is the match's own.
+    let own = own_cover_from(entry, entry.source.as_deref());
     match choice {
         OnlineChoice::KeepMine => {
             let cover_from = entry.cover_from.clone();
             set_cover(app, id, cover_from, Some(true));
         }
-        OnlineChoice::UseAndKeep => set_cover(app, id, None, None),
+        OnlineChoice::UseAndKeep => set_cover(app, id, own, None),
         OnlineChoice::UseAndDelete => {
             let shared = Covers::used_elsewhere(app.repo.library(), &path, id);
-            set_cover(app, id, None, None);
+            set_cover(app, id, own, None);
             if !shared {
                 app.change_cover_files(vec![Change::Delete { path }], None);
             }
@@ -1865,9 +1903,19 @@ mod tests {
         assert_eq!(entry(&app, FRIEREN).cover_from.as_deref(), Some(tmdb));
         assert!(is_own_cover(entry(&app, FRIEREN), tmdb));
         assert!(!is_own_cover(entry(&app, FRIEREN), "anilist:999"));
-        // Dropping one of the owner's own covers leaves it empty.
+        // Use the match's cover is AniList's tile: the entry's own id
+        // again, from the poster, another match's or one of the owner's
+        // files alike. Left empty, the phone would write the poster.
         send(&mut app, EntryMessage::SetCover(None));
-        assert!(entry(&app, FRIEREN).cover_from.is_none());
+        assert_eq!(entry(&app, FRIEREN).cover_from.as_deref(), Some(anilist));
+        let own = entry(&app, FRIEREN).clone();
+        assert_eq!(
+            own_cover_from(&own, Some(anilist)).as_deref(),
+            Some(anilist)
+        );
+        // Without the show (an anime movie) there is no check to answer.
+        let movie = Entry { tmdb: None, ..own };
+        assert_eq!(own_cover_from(&movie, Some(anilist)), None);
 
         // Any other title: the match's own cover is stored as nothing.
         open_viewer(&mut app, BABY);

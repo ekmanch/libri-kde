@@ -2370,6 +2370,15 @@ fn form_update(app: &mut App, message: Message) -> Task<AppMessage> {
         let mut moves = Vec::new();
         for operation in &mut operations {
             if let Operation::UpdateEntry(entry) = operation {
+                // A `cover_from` left as it was that finds no image goes:
+                // the match's own cover is what the entry shows already.
+                if let Some(before) = app.repo.library().entry(&entry.id)
+                    && entry.cover_from.is_some()
+                    && entry.cover_from == before.cover_from
+                    && app.artwork.cover_from_finds_nothing(before)
+                {
+                    entry.cover_from = None;
+                }
                 moves.extend(move_covers(app, entry));
             }
         }
@@ -3531,7 +3540,10 @@ mod tests {
             crate::artwork::Message::CoverResolved {
                 id: id.into(),
                 key: crate::artwork::Artwork::key_for(&entry),
-                outcome: Ok((Some("https://image.tmdb.org/t/p/w342/m.jpg".into()), None)),
+                outcome: Ok(crate::artwork::Found::of(
+                    Some("https://image.tmdb.org/t/p/w342/m.jpg".into()),
+                    None,
+                )),
             },
             app.repo.library(),
         );
@@ -4392,6 +4404,93 @@ mod tests {
         }
     }
 
+    /// Frieren with its AniList match and its TMDB show, showing
+    /// `cover_from`.
+    fn frieren_showing(app: &mut App, cover_from: &str) -> &'static str {
+        let frieren = "anime/frieren-beyond-journeys-end-2023";
+        let entry = Entry {
+            source: Some("anilist:154587".into()),
+            tmdb: Some("tmdb:tv:209867".into()),
+            cover_from: Some(cover_from.into()),
+            kind: Some(EntryKind::Series),
+            ..app.repo.library().entry(frieren).unwrap().clone()
+        };
+        app.apply(Operation::UpdateEntry(entry));
+        frieren
+    }
+
+    #[test]
+    fn the_matchs_cover_of_an_anime_with_a_show_is_stored_as_its_own_id() {
+        // Left empty, the phone's check would write the show's poster.
+        let mut app = app();
+        let frieren = frieren_showing(&mut app, "anilist:999");
+        send(&mut app, Message::Edit(frieren.into()));
+        send(&mut app, Message::PickCover(None));
+        assert_eq!(form(&app).cover_from.as_deref(), Some("anilist:154587"));
+        send(&mut app, Message::Save);
+        let saved = app.repo.library().entry(frieren).unwrap();
+        assert_eq!(saved.cover_from.as_deref(), Some("anilist:154587"));
+        // Marked a movie in the same edit, it has no show: nothing.
+        send(&mut app, Message::Edit(frieren.into()));
+        send(&mut app, Message::AnimeKind(EntryKind::Movie));
+        send(&mut app, Message::PickCover(None));
+        assert_eq!(form(&app).cover_from, None);
+    }
+
+    #[test]
+    fn a_cover_from_that_finds_no_image_goes_at_the_next_save() {
+        let tmdb = "tmdb:tv:209867";
+        let own = "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587.jpg";
+        let resolved = |app: &mut App, id: &str, nothing: bool| {
+            let entry = app.repo.library().entry(id).unwrap().clone();
+            artwork_says(
+                app,
+                crate::artwork::Message::CoverResolved {
+                    id: id.into(),
+                    key: crate::artwork::Artwork::key_for(&entry),
+                    outcome: Ok(crate::artwork::Found {
+                        url: Some(own.into()),
+                        source: None,
+                        nothing,
+                    }),
+                },
+            );
+        };
+        // The show has no poster: TMDB answered so.
+        let mut app = app();
+        let frieren = frieren_showing(&mut app, tmdb);
+        resolved(&mut app, frieren, true);
+        send(&mut app, Message::Edit(frieren.into()));
+        send(&mut app, Message::Save);
+        let saved = app.repo.library().entry(frieren).unwrap();
+        assert_eq!(saved.cover_from, None);
+        assert_eq!(saved.tmdb.as_deref(), Some(tmdb), "the link stays");
+
+        // A cover picked in that edit is the owner's word.
+        let mut app = self::app();
+        let frieren = frieren_showing(&mut app, tmdb);
+        resolved(&mut app, frieren, true);
+        send(&mut app, Message::Edit(frieren.into()));
+        send(&mut app, Message::PickCover(Some("anilist:999".into())));
+        send(&mut app, Message::Save);
+        let saved = app.repo.library().entry(frieren).unwrap();
+        assert_eq!(saved.cover_from.as_deref(), Some("anilist:999"));
+
+        // An image was found, or nothing is known yet (no answer is not
+        // "no image"): it stays.
+        for known in [false, true] {
+            let mut app = self::app();
+            let frieren = frieren_showing(&mut app, tmdb);
+            if known {
+                resolved(&mut app, frieren, false);
+            }
+            send(&mut app, Message::Edit(frieren.into()));
+            send(&mut app, Message::Save);
+            let saved = app.repo.library().entry(frieren).unwrap();
+            assert_eq!(saved.cover_from.as_deref(), Some(tmdb));
+        }
+    }
+
     #[test]
     fn enter_saves_an_edit() {
         let mut app = app();
@@ -4541,7 +4640,7 @@ mod tests {
             Art::CoverResolved {
                 id: id.into(),
                 key: crate::artwork::Artwork::key_for(&entry),
-                outcome: Ok((Some(cached.into()), None)),
+                outcome: Ok(crate::artwork::Found::of(Some(cached.into()), None)),
             },
         );
         // Details alone ask for nothing more until the pointer is over
