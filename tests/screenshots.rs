@@ -1543,6 +1543,27 @@ fn capture_every_screen() {
                 picker(app, PickerMessage::Query("freeman".into()));
             }),
         ),
+        // The form's picker inside a long group: a search that names no
+        // tag offers to create it, and one that names a tag of another
+        // group lists it under that group.
+        (
+            Screen::Library,
+            ("edit-tag-drill-create", |app| {
+                app.library.force_long = true;
+                edit_baby_tags(app);
+                picker(app, PickerMessage::Drill(TagCategory::Genres));
+                picker(app, PickerMessage::DrillQuery("gothic".into()));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("edit-tag-drill-elsewhere", |app| {
+                app.library.force_long = true;
+                edit_baby_tags(app);
+                picker(app, PickerMessage::Drill(TagCategory::Genres));
+                picker(app, PickerMessage::DrillQuery("cozy".into()));
+            }),
+        ),
         (
             Screen::Library,
             ("edit-tag-move", |app| {

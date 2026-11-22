@@ -83,6 +83,7 @@ pub fn picker<'a>(
         long_group: long_group(app),
         with_menu: false,
         with_add_to: false,
+        with_create: false,
         height: 440.0,
         map: Rc::new(|message| msg(Message::Picker(message))),
     };

@@ -122,6 +122,25 @@ impl PickerState {
         }
     }
 
+    /// The search in view: the long group's inside one, else the one
+    /// across the groups. It names the tag the entry form's search creates.
+    pub fn typed(&self) -> &str {
+        self.drill
+            .as_ref()
+            .map_or(self.query.as_str(), |drill| drill.query.as_str())
+    }
+
+    /// Empties the search in view, after it named a tag that was created.
+    pub fn clear_typed(&mut self) {
+        match &mut self.drill {
+            Some(drill) => {
+                drill.query.clear();
+                drill.emptied = false;
+            }
+            None => self.query.clear(),
+        }
+    }
+
     /// Unfolds `category` (and leaves the others as they are), after a tag
     /// was created or recategorized into it.
     pub fn open(&mut self, category: TagCategory) {
@@ -221,6 +240,26 @@ mod tests {
         state.update(&PickerMessage::Drill(TagCategory::Authors));
         assert!(state.back());
         assert!(!state.back());
+    }
+
+    /// The search in view is the long group's inside one, and emptying it
+    /// leaves the other alone.
+    #[test]
+    fn the_search_in_view_is_the_long_groups_inside_one() {
+        let mut state = PickerState::default();
+        state.update(&PickerMessage::Query("cozy".into()));
+        assert_eq!(state.typed(), "cozy");
+        state.update(&PickerMessage::Drill(TagCategory::Authors));
+        assert_eq!(state.typed(), "");
+        state.update(&PickerMessage::DrillQuery("king".into()));
+        assert_eq!(state.typed(), "king");
+        state.clear_typed();
+        assert_eq!(state.typed(), "");
+        assert!(state.drill.is_some(), "still in the long group");
+        assert_eq!(state.query, "cozy");
+        assert!(state.back_on_backspace(), "an emptied search goes back");
+        state.clear_typed();
+        assert_eq!(state.query, "");
     }
 
     #[test]

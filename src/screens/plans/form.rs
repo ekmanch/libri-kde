@@ -281,6 +281,7 @@ fn tag_view<'a>(
         long_group: crate::screens::library::long_group(app),
         with_menu: false,
         with_add_to: false,
+        with_create: false,
         height: 400.0,
         map: Rc::new(|message| msg(Message::Picker(message))),
     };

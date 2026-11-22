@@ -1995,7 +1995,8 @@ fn tag_picker<'a>(
     on_done: AppMessage,
 ) -> Element<'a, AppMessage> {
     let library = app.repo.library();
-    let query = rules::normalize_tag(&state.query);
+    // The search in view, the long group's inside one: either can create.
+    let query = rules::normalize_tag(state.typed());
     let searching = !query.is_empty();
     let groups = form.picker_groups(library);
     let holds_a_tag: Vec<TagCategory> = groups
@@ -2019,6 +2020,7 @@ fn tag_picker<'a>(
         long_group: crate::screens::library::long_group(app),
         with_menu: true,
         with_add_to: true,
+        with_create: true,
         height: 340.0,
         map: Rc::new(|message| msg(Message::Picker(message))),
     };

@@ -7,6 +7,9 @@
 //! group's name and count, search, letter headers, a letter rail, a check
 //! per row), and, in the entry form, a right-click menu on every chip and
 //! "+ Add to Directors" for a person found under another people category.
+//! A search inside a long group that finds nothing there lists what the
+//! search across the groups would, so it never ends on "No match." alone,
+//! and takes the caller's create box like the search across the groups.
 //!
 //! The state and the messages are `crate::tags`; the caller maps them into
 //! its own messages with `map`, and wraps `header`, `body` and `footer` in
@@ -51,6 +54,9 @@ pub struct Picker<'a, M> {
     pub with_menu: bool,
     /// "+ Add to Directors" rows while searching (the entry form).
     pub with_add_to: bool,
+    /// The search can create a tag (the entry form), which the long
+    /// group's search says too.
+    pub with_create: bool,
     /// The list's height in px.
     pub height: f32,
     pub map: Rc<dyn Fn(PickerMessage) -> M + 'a>,
@@ -121,7 +127,7 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
     }
 
     /// The search and the groups, or the long group in full. `extra` sits
-    /// between the search and the list (the form's create box).
+    /// between the search and the list in both (the form's create box).
     pub fn body(
         &self,
         placeholder: &str,
@@ -130,7 +136,7 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
     ) -> Element<'a, M> {
         let state: &'a PickerState = self.state;
         if let Some(drill) = &state.drill {
-            return self.drill(drill.category, &drill.query, tokens);
+            return self.drill(drill.category, &drill.query, extra, tokens);
         }
         let map = self.map.clone();
         let search = super::search_field(
@@ -146,7 +152,7 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
         if let Some(extra) = extra {
             body = body.push(extra);
         }
-        let groups = self.group_elements(tokens);
+        let groups = self.group_elements(&self.query(), tokens);
         let list: Element<'a, M> = if groups.is_empty() {
             text("No tags match.").size(13.5).color(tokens.sub).into()
         } else {
@@ -155,9 +161,9 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
         body.push(super::scroll(list).height(self.height)).into()
     }
 
-    /// One element per group shown: a folding group, or a long group's row.
-    fn group_elements(&self, tokens: &Tokens) -> Vec<Element<'a, M>> {
-        let query = self.query();
+    /// One element per group shown for `query`, a search as a tag: a
+    /// folding group, or a long group's row.
+    fn group_elements(&self, query: &str, tokens: &Tokens) -> Vec<Element<'a, M>> {
         let searching = !query.is_empty();
         let mut elements = Vec::new();
         // Every category, so a search can offer "+ Add to Authors" under a
@@ -170,14 +176,14 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
             let listed: Vec<&str> = all
                 .iter()
                 .map(String::as_str)
-                .filter(|tag| !searching || tag.contains(&query))
+                .filter(|tag| !searching || tag.contains(query))
                 .collect();
             let selected = all
                 .iter()
                 .filter(|tag| (self.is_on)(tag, self.key(tag, category)))
                 .count();
             let add_rows = if searching && self.with_add_to && listed.is_empty() {
-                self.add_rows(category, &query, tokens)
+                self.add_rows(category, query, tokens)
             } else {
                 Vec::new()
             };
@@ -358,15 +364,24 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
     }
 
     /// The long group in full: its name and "29 genres · 4 selected", a
-    /// search, letter headers, a check per row, and the letter rail that
-    /// jumps.
-    fn drill(&self, category: TagCategory, query: &'a str, tokens: &Tokens) -> Element<'a, M> {
+    /// search, `extra` (the form's create box), letter headers, a check
+    /// per row, and the letter rail that jumps. A search that finds
+    /// nothing in the group lists what the search across the groups would:
+    /// the tag under its own group, "+ Add to Directors".
+    fn drill(
+        &self,
+        category: TagCategory,
+        query: &'a str,
+        extra: Option<Element<'a, M>>,
+        tokens: &Tokens,
+    ) -> Element<'a, M> {
+        let lower = category.name().to_lowercase();
         let all = self.all_in(category);
         let selected = all
             .iter()
             .filter(|tag| (self.is_on)(tag, self.key(tag, category)))
             .count();
-        let mut line = format!("{} {}", all.len(), category.name().to_lowercase());
+        let mut line = format!("{} {lower}", all.len());
         if selected > 0 {
             line.push_str(&format!(" · {selected} selected"));
         }
@@ -418,8 +433,20 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
             }
         }
         let list: Element<'a, M> = if sections.is_empty() {
-            container(text("No match.").size(13.5).color(tokens.sub))
-                .padding([12, 10])
+            let elsewhere = if hyphenated.is_empty() {
+                Vec::new()
+            } else {
+                self.group_elements(&hyphenated, tokens)
+            };
+            let words = if elsewhere.is_empty() {
+                "No match.".to_owned()
+            } else {
+                format!("No match in {lower}. In the other groups:")
+            };
+            Column::new()
+                .spacing(2)
+                .push(container(text(words).size(13.5).color(tokens.sub)).padding([12, 10]))
+                .extend(elsewhere)
                 .into()
         } else {
             list.into()
@@ -454,7 +481,11 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
         .align_x(Center);
 
         let map = self.map.clone();
-        let placeholder = format!("Search {}", category.name().to_lowercase());
+        let placeholder = if self.with_create {
+            format!("Search {lower} or create a tag")
+        } else {
+            format!("Search {lower}")
+        };
         let search = super::search_field(
             &placeholder,
             query,
@@ -468,21 +499,20 @@ impl<'a, M: Clone + 'a> Picker<'a, M> {
             .id(DRILL_ID)
             .height(self.height)
             .width(Fill);
-        column![
-            heading,
-            search,
-            // `height` before `align_y`: `center_y(Fill)` would make the
-            // rail as tall as the window and the dialog with it.
-            row![
-                scroll,
-                container(rail)
-                    .height(self.height)
-                    .align_y(iced::alignment::Vertical::Center)
-            ]
-            .spacing(6)
+        // `height` before `align_y`: `center_y(Fill)` would make the rail
+        // as tall as the window and the dialog with it.
+        let list = row![
+            scroll,
+            container(rail)
+                .height(self.height)
+                .align_y(iced::alignment::Vertical::Center)
         ]
-        .spacing(12)
-        .into()
+        .spacing(6);
+        let mut body = column![heading, search].spacing(12);
+        if let Some(extra) = extra {
+            body = body.push(extra);
+        }
+        body.push(list).into()
     }
 
     /// One tag in the long group: its name, "#tag · 3 entries" and a check.

@@ -3266,12 +3266,20 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
             let name = form
                 .picker
                 .as_ref()
-                .map(|p| text::normalize_tag(&p.query))
+                .map(|p| text::normalize_tag(p.typed()))
                 .unwrap_or_default();
+            // Created from inside a long group, the tag starts in it.
+            let category = form
+                .picker
+                .as_ref()
+                .and_then(|p| p.drill.as_ref())
+                .map(|drill| drill.category)
+                .filter(|category| category.used_for(form.media))
+                .unwrap_or(TagCategory::default_for(form.media));
             if !name.is_empty() {
                 form.new_tag = Some(NewTag {
                     name,
-                    categories: vec![TagCategory::default_for(form.media)],
+                    categories: vec![category],
                 });
             }
         }
@@ -3311,7 +3319,7 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
                 }
                 form.new_tags.push((name, categories));
                 if let Some(picker) = &mut form.picker {
-                    picker.query.clear();
+                    picker.clear_typed();
                 }
             }
         }
@@ -5068,6 +5076,129 @@ mod tests {
                 .iter()
                 .any(|t| t == "gothic")
         );
+    }
+
+    /// The search inside a long group creates a tag as the search across
+    /// the groups does: the new tag starts in that group, and creating it
+    /// empties the search and stays in the group.
+    #[test]
+    fn a_long_groups_search_creates_a_tag_that_starts_in_the_group() {
+        let mut app = app();
+        send(&mut app, Message::EditTags(BABY.into()));
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Drill(TagCategory::Mood)),
+        );
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::DrillQuery("Slow Burn".into())),
+        );
+        send(&mut app, Message::CreateTag);
+        assert_eq!(form(&app).new_tag.as_ref().unwrap().name, "slow-burn");
+        assert_eq!(
+            form(&app).new_tag.as_ref().unwrap().categories,
+            [TagCategory::Mood]
+        );
+        send(&mut app, Message::ConfirmNewTag);
+        let picker = form(&app).picker.as_ref().unwrap();
+        let drill = picker.drill.as_ref().expect("still in the long group");
+        assert_eq!(
+            (drill.category, drill.query.as_str()),
+            (TagCategory::Mood, "")
+        );
+        assert!(form(&app).tags.iter().any(|t| t == "slow-burn"));
+        assert!(
+            form(&app)
+                .picker_groups(app.repo.library())
+                .iter()
+                .any(|(c, tags)| *c == TagCategory::Mood && tags.iter().any(|t| t == "slow-burn")),
+            "listed in the group it was created from"
+        );
+        send(&mut app, Message::SaveTags);
+        assert_eq!(
+            app.repo.library().category_of("slow-burn"),
+            Some(TagCategory::Mood)
+        );
+
+        // A group this type has no tags of (Streaming, for a book) is not
+        // where its new tag starts.
+        send(&mut app, Message::Add);
+        send(&mut app, Message::Type(MediaType::Books));
+        send(&mut app, Message::OpenPicker);
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Drill(TagCategory::Streaming)),
+        );
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::DrillQuery("kindle".into())),
+        );
+        send(&mut app, Message::CreateTag);
+        assert_eq!(
+            form(&app).new_tag.as_ref().unwrap().categories,
+            [TagCategory::Genres]
+        );
+    }
+
+    /// Inside a long group the picker offers what the search across the
+    /// groups does: "Create #gothic" for a name the library does not have,
+    /// the tag under its own group for one filed elsewhere, and "+ Add to
+    /// Music genres" for a genre of another kind of entry.
+    #[test]
+    fn a_long_groups_search_offers_create_and_the_other_groups() {
+        let mut app = app();
+        app.library.force_long = true;
+        let finds = |app: &App, words: &str| {
+            let mut ui = iced_test::Simulator::with_size(
+                crate::app::settings(),
+                crate::app::WINDOW_SIZE,
+                app.view(),
+            );
+            ui.find(words).is_ok()
+        };
+        let search = |app: &mut App, query: &str| {
+            send(
+                app,
+                Message::Picker(PickerMessage::DrillQuery(query.into())),
+            );
+        };
+        send(&mut app, Message::EditTags(BABY.into()));
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Drill(TagCategory::Genres)),
+        );
+        assert!(finds(&app, "Search genres or create a tag"));
+        assert!(!finds(&app, "Create #gothic"));
+
+        search(&mut app, "Gothic");
+        assert!(finds(&app, "Create #gothic"));
+        assert!(finds(&app, "No match."));
+
+        // Part of a name the group has: its rows, and Create all the same.
+        search(&mut app, "hor");
+        assert!(finds(&app, "Create #hor"));
+        assert!(finds(&app, "Horror"));
+
+        // Filed under Mood: no Create, the chip under its own group.
+        search(&mut app, "cozy");
+        assert!(!finds(&app, "Create #cozy"));
+        assert!(finds(&app, "No match in genres. In the other groups:"));
+        assert!(finds(&app, "#cozy"));
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Toggle("cozy".into(), None)),
+        );
+        assert!(form(&app).tags.iter().any(|t| t == "cozy"));
+
+        // A genre of another kind of entry, from inside Music genres.
+        send(&mut app, Message::Close);
+        send(&mut app, Message::EditTags(DIRT.into()));
+        send(
+            &mut app,
+            Message::Picker(PickerMessage::Drill(TagCategory::MusicGenres)),
+        );
+        search(&mut app, "horror");
+        assert!(finds(&app, "+ Add to Music genres"));
     }
 
     /// Esc in the details' picker closes its layers first, then drops the
