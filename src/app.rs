@@ -4363,8 +4363,9 @@ mod tests {
         };
         let pick = |slug: &str| MissingEdit::Pick { slug: slug.into() };
         let unpick = |slug: &str| MissingEdit::Unpick { slug: slug.into() };
-        // Until the phone keeps the keys, nothing is written to the list.
-        assert!(!covers::artists::WRITES_PHOTO_KEYS && !app.photo_keys);
+        // With the gate off nothing is written to the list.
+        assert!(covers::artists::WRITES_PHOTO_KEYS && app.photo_keys);
+        app.photo_keys = false;
         app.set_artist_photo("Massive Attack", b"a", covers::PhotoKind::Picked, None);
         assert!(edits(&app).is_empty());
 
@@ -4509,13 +4510,19 @@ mod tests {
             .set_artist_photo("Massive Attack", b"jpeg", covers::PhotoKind::Picked, None)
             .expect("a name with a slug");
         assert_eq!(file.path, "artists/massive-attack.jpg");
+        // The file, then its slug on the record's `picked` list.
         assert_eq!(
             queued(&app),
-            [covers::Change::Put {
-                path: "artists/massive-attack.jpg".into(),
-                seen: vec![None],
-                picked: true,
-            }]
+            [
+                covers::Change::Put {
+                    path: "artists/massive-attack.jpg".into(),
+                    seen: vec![None],
+                    picked: true,
+                },
+                covers::Change::Missing(covers::artists::MissingEdit::Pick {
+                    slug: "massive-attack".into()
+                })
+            ]
         );
         assert!(app.covers.artist_file("Massive Attack").is_some());
         assert!(app.save_due.is_some());

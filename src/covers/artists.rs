@@ -31,13 +31,14 @@ pub const PHOTO_SIDE: u32 = 640;
 /// batch of that run writes as `photo_size`, and the most a picked or
 /// uploaded photo keeps.
 pub const SHARP_SIDE: u32 = 1200;
-/// Whether `photo_size` and `picked` are written to `_missing.json`. Off
-/// until the phone build that keeps the keys it does not know is
-/// installed: an older build rewrites the file from the keys it knows
-/// and would erase them. With it off nothing adds to `picked`, and the
-/// sharper photos of Settings are not offered, since their first batch
-/// writes `photo_size`. Both keys are read and kept either way.
-pub const WRITES_PHOTO_KEYS: bool = false;
+/// Whether `photo_size` and `picked` are written to `_missing.json`. On
+/// since 2026-11-22, when the phone build that keeps the keys it does
+/// not know was installed: an older build rewrites the file from the
+/// keys it knows and would erase them. With it off nothing adds to
+/// `picked`, and the sharper photos of Settings are not offered, since
+/// their first batch writes `photo_size`. Both keys are read and kept
+/// either way.
+pub const WRITES_PHOTO_KEYS: bool = true;
 /// How long "nothing found" stands before the artist is tried again.
 pub const RETRY_DAYS: i64 = 90;
 /// The `_missing.json` format.
