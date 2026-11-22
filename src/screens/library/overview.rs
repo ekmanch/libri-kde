@@ -186,7 +186,14 @@ fn columns<'a>(
     let right = Column::new().spacing(28).width(Fill).height(Fill).extend(
         [
             list(Section::ComingSoon),
-            filling_section(app, overview, Section::RecentlyAdded, style, tokens),
+            filling_section(
+                app,
+                overview,
+                Section::RecentlyAdded,
+                style,
+                LIST_GAP,
+                tokens,
+            ),
         ]
         .into_iter()
         .flatten(),
@@ -211,20 +218,44 @@ fn shelves<'a>(app: &'a App, overview: &Overview<'a>, tokens: &Tokens) -> Elemen
 /// view's rows with covers. It starts on the line of the first shelf's
 /// header, as the right column of the lists starts on the line of the
 /// left one's: the top of the plan card, or with no active plan the
-/// Recently added header, whose first row is then level with the covers.
+/// Recently added header. The list then starts as far under its header
+/// as puts the first thumbnail's top on the covers' top (`level_gap`);
+/// under the plan card it keeps the lists' gap.
 fn side<'a>(app: &'a App, overview: &Overview<'a>, tokens: &Tokens) -> Element<'a, AppMessage> {
     let mut side = Column::new().spacing(28).width(Fill).height(Fill);
+    let mut gap = LIST_GAP;
     if let Some(plan) = &overview.plan {
         side = side.push(plan_card(plan, tokens));
+    } else if let Some(first) = overview.list(Section::RecentlyAdded).first() {
+        gap = level_gap(ui::cover::is_square(first.media));
     }
     side.extend(filling_section(
         app,
         overview,
         Section::RecentlyAdded,
         RowStyle::Cover,
+        gap,
         tokens,
     ))
     .into()
+}
+
+/// The space between a list's header and its first row, and between a
+/// shelf's header and its covers.
+const LIST_GAP: f32 = 4.0;
+const SHELF_GAP: f32 = 10.0;
+/// A row's thumbnail is this wide.
+const THUMB_WIDTH: f32 = 30.0;
+
+/// The space under the Recently added header that puts the top of the
+/// first row's thumbnail level with a shelf's covers, in whole pixels
+/// so the rows' lines stay sharp. A thumbnail is centered in its row,
+/// so a square one (an album, a song) sits 13 px down in it and the row
+/// starts 3 px up into the header's own height (negative); a 30 × 45
+/// one sits 5.5 px down and the row starts 4 px under the header.
+fn level_gap(square: bool) -> f32 {
+    let above = (RowStyle::Cover.height() - ui::cover::height_for(THUMB_WIDTH, square)) / 2.0;
+    (SHELF_GAP - above).floor()
 }
 
 /// One shelf: its header (the title, the count and a chevron, opening the
@@ -269,7 +300,7 @@ fn shelf<'a>(
         shelf_cover(app, entry, meta, all_square, dimmed, tokens)
     }))
     .spacing(COVER_GAP);
-    Some(column![header, row].spacing(10).into())
+    Some(column![header, row].spacing(SHELF_GAP).into())
 }
 
 /// A 100 × 150 cover with the title on it, the detail under it. An
@@ -384,7 +415,7 @@ pub(super) fn list_section<'a>(
     let rows = section_rows(app, &list[..cap.min(list.len())], section, style, tokens);
     Some(
         column![section_header(section, list.len(), tokens), rows]
-            .spacing(4)
+            .spacing(LIST_GAP)
             .into(),
     )
 }
@@ -392,12 +423,15 @@ pub(super) fn list_section<'a>(
 /// A titled list with no fixed length, for the end of a column: it takes
 /// the height that is left and shows the rows that fit in it whole, so
 /// never half a row and never a scroll of its own; fewer entries leave
-/// the space under them empty. Nothing when the list is empty.
+/// the space under them empty. Nothing when the list is empty. The rows
+/// start `gap` under the header, or over its lower edge when `gap` is
+/// negative, the header drawn on top.
 fn filling_section<'a>(
     app: &'a App,
     overview: &Overview<'a>,
     section: Section,
     style: RowStyle,
+    gap: f32,
     tokens: &Tokens,
 ) -> Option<Element<'a, AppMessage>> {
     let list = overview.list(section).to_vec();
@@ -409,8 +443,12 @@ fn filling_section<'a>(
         let fit = style.whole_rows(size.height).min(list.len());
         section_rows(app, &list[..fit], section, style, &app.tokens())
     });
-    Some(column![header, rows].spacing(4).height(Fill).into())
+    let rows = column![space().height(HEADER_HEIGHT + gap), rows].height(Fill);
+    Some(iced::widget::stack![rows, header].into())
 }
+
+/// A list header's height.
+const HEADER_HEIGHT: f32 = 24.0;
 
 /// A list's header: the title in gray caps and "See all N" on the right.
 fn section_header<'a>(section: Section, count: usize, tokens: &Tokens) -> Element<'a, AppMessage> {
@@ -436,7 +474,7 @@ fn section_header<'a>(section: Section, count: usize, tokens: &Tokens) -> Elemen
         see_all
     ]
     .align_y(Center)
-    .height(24)
+    .height(HEADER_HEIGHT)
     .into()
 }
 
@@ -484,7 +522,7 @@ pub(super) fn overview_row<'a>(
                 .push(ui::cover::thumb(
                     app.artwork.cover(entry),
                     tint,
-                    30.0,
+                    THUMB_WIDTH,
                     entry.media,
                     4.0,
                 ))
@@ -763,6 +801,50 @@ mod shelf_tests {
                     "{view:?}, plan {planned}: {left} {right}"
                 );
                 assert_eq!(ui.find("ACTIVE PLAN").is_ok(), planned);
+            }
+        }
+    }
+
+    /// In the grid with no plan, Recently added's first thumbnail starts
+    /// level with the first shelf's covers, whatever its shape and the
+    /// window's size: a 30 × 45 one (the fixture's first, a book) and a
+    /// square one (its fourth, an album, once the three before it are
+    /// gone).
+    #[test]
+    fn the_first_thumbnail_is_level_with_the_first_covers() {
+        assert_eq!(level_gap(false), 4.0);
+        assert_eq!(level_gap(true), -3.0);
+        let first_three = ["Berserk, Vol. 43", "Silent Hill f", "Paddington 2"];
+        for (square, date, half) in [(false, "Oct 5", 22.5), (true, "Sep 29", 15.0)] {
+            for size in [crate::app::MIN_WINDOW_SIZE, crate::app::WINDOW_SIZE] {
+                let mut app = App::new(Screen::Library);
+                app.today = Date::parse("2026-10-19").unwrap();
+                app.window = size;
+                let _ = app.update(msg(Message::SetView(View::Grid)));
+                let library = app.repo.library();
+                let plans: Vec<String> = library.plans.iter().map(|p| p.id.clone()).collect();
+                let gone: Vec<String> = (library.entries.iter())
+                    .filter(|e| square && first_three.contains(&e.title.as_str()))
+                    .map(|e| e.id.clone())
+                    .collect();
+                assert_eq!(gone.len(), if square { 3 } else { 0 });
+                for id in plans {
+                    app.apply(crate::repo::Operation::DeletePlan { id });
+                }
+                for id in gone {
+                    app.apply(crate::repo::Operation::DeleteEntry { id });
+                }
+                let mut ui =
+                    iced_test::Simulator::with_size(crate::app::settings(), size, app.view());
+                let mut place = |label: &str| ui.find(label).expect(label).bounds();
+                // A shelf's detail is 6 px under its 150 px cover; a row's
+                // date is centered on its thumbnail.
+                let covers = place("Nov 19").y - 6.0 - 150.0;
+                let thumbnail = place(date).center_y() - half;
+                assert!(
+                    (covers - thumbnail).abs() < 0.6,
+                    "{size:?}, square {square}: {covers} {thumbnail}"
+                );
             }
         }
     }

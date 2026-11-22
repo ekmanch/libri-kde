@@ -971,6 +971,22 @@ fn capture_every_screen() {
             }),
         ),
         (Screen::Library, ("home-no-plan", no_plans)),
+        // With an album first in Recently added: its square thumbnail
+        // still starts level with the shelf's covers.
+        (
+            Screen::Library,
+            ("home-no-plan-album", |app| {
+                no_plans(app);
+                let first = ["Berserk, Vol. 43", "Silent Hill f", "Paddington 2"];
+                let ids: Vec<String> = (app.repo.library().entries.iter())
+                    .filter(|e| first.contains(&e.title.as_str()))
+                    .map(|e| e.id.clone())
+                    .collect();
+                for id in ids {
+                    app.apply(libri::repo::Operation::DeleteEntry { id });
+                }
+            }),
+        ),
         (
             Screen::Library,
             ("home-list-no-plan", |app| {
