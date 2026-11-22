@@ -575,6 +575,17 @@ pub fn mix_white(color: Color, amount: f32) -> Color {
     Color::from_rgba(mix(color.r), mix(color.g), mix(color.b), color.a)
 }
 
+/// The arc of the busy ring (`ui::ring`, canvas 2026-11-22): the solid
+/// accent on the dark themes; on Light an accent tint, stronger than the
+/// buttons' (0.78), which disappears against the ring's gray track.
+pub fn ring_arc(tokens: &Tokens) -> Color {
+    if tokens.light {
+        mix_white(tokens.accent, 0.45)
+    } else {
+        tokens.accent
+    }
+}
+
 /// The surface of plan cards and card-style sections: white on Light, a
 /// faint white veil on Glass, a touch lighter than the content otherwise.
 pub fn card_background(tokens: &Tokens) -> Color {

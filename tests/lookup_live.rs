@@ -398,3 +398,75 @@ fn apple_finds_an_artists_photo_and_tells_a_namesake_apart() {
         "{rows:?}"
     );
 }
+
+/// The owner's case of 2026-11-22: Deezer's songs have no "Oats In the
+/// Water", and the extended search finds it on Burgh Island (2012); its
+/// cover, its date and its album's track list then come from Apple by
+/// the ids alone.
+#[test]
+#[ignore = "asks Deezer and Apple; run with --ignored"]
+fn extended_search_finds_a_song_deezer_does_not_show() {
+    use libri::lookup::{MusicList, MusicRequest, MusicScope};
+    let service = Service::real(&Keys::default(), None);
+    let words = "oats in the water ben howard";
+    let page = service
+        .music_page(&MusicRequest {
+            list: MusicList::Search(words.into()),
+            scope: MusicScope::Songs,
+            cursor: 0,
+        })
+        .unwrap();
+    println!("Deezer: {} songs", page.matches.len());
+    let found = service.extended_music(words, MusicScope::Songs).unwrap();
+    for hit in &found {
+        println!(
+            "{} · {} · {} · {} ({})",
+            hit.title,
+            hit.creator.as_deref().unwrap_or("?"),
+            hit.album.as_deref().unwrap_or("?"),
+            hit.year_text(),
+            hit.source
+        );
+    }
+    let song = found
+        .iter()
+        .find(|m| m.album.as_deref() == Some("Burgh Island"))
+        .expect("the song on Burgh Island");
+    assert_eq!(song.title.to_lowercase(), "oats in the water");
+    assert_eq!(song.creator.as_deref(), Some("Ben Howard"));
+    assert_eq!(song.year(), Some(2012));
+    assert!(song.source.starts_with("itunes:track:"));
+    assert!(
+        !page
+            .matches
+            .iter()
+            .any(|m| m.title == song.title && m.creator == song.creator && m.album == song.album),
+        "Deezer does not show it"
+    );
+    // Asked once: the second ask is the remembered answer.
+    assert_eq!(
+        service.cached_extended(words, MusicScope::Songs),
+        Some(found.clone())
+    );
+
+    let apple = service.source_of(&song.source).expect("Apple Music");
+    assert_eq!(apple.name(), "Apple Music");
+    let cover = apple.cover_url(&song.source, MediaType::Music).unwrap();
+    println!("cover: {cover:?}");
+    assert!(cover.is_some_and(|url| url.contains("mzstatic.com")));
+    let album = song.album_source.as_deref().unwrap();
+    assert_eq!(
+        service.album_released(album).unwrap().map(|r| r.year),
+        Some(2012)
+    );
+    let tracks = apple.album_tracks(album).unwrap();
+    println!(
+        "tracks: {:?}",
+        tracks.iter().map(|t| &t.title).collect::<Vec<_>>()
+    );
+    assert!(
+        tracks
+            .iter()
+            .any(|t| t.title.to_lowercase() == "oats in the water")
+    );
+}

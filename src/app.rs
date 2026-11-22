@@ -190,6 +190,9 @@ pub struct App {
     pub settings_page: screens::settings::State,
     /// Where the splash's bar is in its sweep, 0 to 1.
     pub splash_phase: f32,
+    /// Where the busy ring of a search in progress is in its turn, 0 to
+    /// 1 (`ui::ring`).
+    pub ring_phase: f32,
     /// Plasma's animation speed, read from `kdeglobals` at the start;
     /// instant in the tests and `App::new`.
     pub speed: animation::Speed,
@@ -789,6 +792,7 @@ impl App {
             plan_dialog: None,
             settings_page: screens::settings::State::default(),
             splash_phase: 0.0,
+            ring_phase: 0.0,
             speed: animation::Speed::INSTANT,
             scale: 1.0,
             window: WINDOW_SIZE,
@@ -2625,7 +2629,11 @@ impl App {
             Message::SystemTheme(_) => {}
             // One sweep of the splash's bar takes 1.4 s; the setup's ring
             // turns twice in that time.
-            Message::Tick => self.splash_phase = (self.splash_phase + 0.016 / 1.4) % 1.0,
+            // The busy ring of a search in progress turns once in 0.8 s.
+            Message::Tick => {
+                self.splash_phase = (self.splash_phase + 0.016 / 1.4) % 1.0;
+                self.ring_phase = (self.ring_phase + 0.016 / 0.8) % 1.0;
+            }
             // The slide is timed in `update_at`; the frame only redraws.
             Message::Frame(_) => {}
             // Taken in `update_at`, before anything else.

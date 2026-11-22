@@ -1120,6 +1120,69 @@ pub fn music_page(request: &MusicRequest, limit: usize) -> MusicPage {
     }
 }
 
+/// The fake's second music catalog (the canvas's "oats" boards, the
+/// phone's fake): "oats in the water" finds the song on Burgh Island and
+/// a live take, which the first search lists neither of; "ghost" finds
+/// only what the first search shows, so nothing more; any other search
+/// finds nothing.
+pub fn extended_music(query: &str, scope: MusicScope) -> Vec<Match> {
+    let query = query.trim().to_lowercase();
+    let songs = scope == MusicScope::Songs;
+    let song = |title: &str, artist: &str, album: &str, year: u16, id: u32, album_id: u32| Match {
+        creator: Some(artist.to_owned()),
+        released: Released::parse(&year.to_string()),
+        kind: Some(EntryKind::Song),
+        album: Some(album.to_owned()),
+        album_source: Some(format!("itunes:album:{album_id}")),
+        cover_url: Some(format!("fake://cover/itunes:album:{album_id}")),
+        ..Match::new(MediaType::Music, title, format!("itunes:track:{id}"))
+    };
+    if query.contains("oats in the water") && songs {
+        return vec![
+            song(
+                "Oats In the Water",
+                "Ben Howard",
+                "Burgh Island",
+                2012,
+                1_700_000_002,
+                1_700_000_001,
+            ),
+            song(
+                "Oats In the Water (Live)",
+                "Ben Howard",
+                "Live at Glastonbury",
+                2014,
+                1_700_000_004,
+                1_700_000_003,
+            ),
+        ];
+    }
+    if query.starts_with("ghost") {
+        // What the first search lists too, under the other catalog's id.
+        return ALBUMS
+            .iter()
+            .filter(|row| row.0 == "Ghost")
+            .take(1)
+            .flat_map(|row| {
+                let album = Match {
+                    source: "itunes:album:1700000005".into(),
+                    ..album_match(row)
+                };
+                let first_song = song_matches(row).take(1).map(|m| Match {
+                    source: "itunes:track:1700000006".into(),
+                    ..m
+                });
+                if songs {
+                    first_song.collect::<Vec<_>>()
+                } else {
+                    vec![album]
+                }
+            })
+            .collect();
+    }
+    Vec::new()
+}
+
 /// The fake as a source.
 pub struct Fake;
 
@@ -1251,6 +1314,10 @@ impl Source for Fake {
 
     fn music_page(&self, request: &MusicRequest, limit: usize) -> Reply<MusicPage> {
         Ok(music_page(request, limit))
+    }
+
+    fn extended_music(&self, query: &str, scope: MusicScope) -> Option<Reply<Vec<Match>>> {
+        Some(Ok(extended_music(query, scope)))
     }
 
     fn album_released(&self, album_source: &str) -> Reply<Option<Released>> {

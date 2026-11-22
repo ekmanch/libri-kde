@@ -11,7 +11,7 @@ use iced::widget::{
 };
 use iced::{Background, Border, Center, Color, Element, Fill, Padding};
 
-use super::{CategoriesDialog, Form, Message, NewTag, Overlap, Replace, ReplaceChoice};
+use super::{CategoriesDialog, Extended, Form, Message, NewTag, Overlap, Replace, ReplaceChoice};
 use crate::app::{App, Message as AppMessage};
 use crate::browse;
 use crate::lookup::{self, ArtistHit, GamePlatform, Match, MusicScope};
@@ -418,6 +418,8 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
     let music = form.media == MediaType::Music;
     let scope = form.scope();
     let artist = form.music.artist.as_ref();
+    let extra = form.extra();
+    let extended = form.music.extended;
     let head = if music && state.shows_rows() && !matches.is_empty() && !query.is_empty() {
         music_head(form, scope)
     } else if again {
@@ -473,9 +475,16 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
                 .into(),
             true,
         )),
+        // What the extended search added is listed without the first
+        // search's rows.
+        _ if matches.is_empty() && !extra.is_empty() => None,
         _ if matches.is_empty() => Some((
             match platform {
                 Some(platform) => format!("No games called that on {platform}."),
+                None if music && extended == Extended::Nothing => format!(
+                    "No {} found, also not in the extended search.",
+                    scope.noun(2)
+                ),
                 None if music => format!("No {} found.", scope.noun(2)),
                 None => format!("No matches among {noun}."),
             },
@@ -483,6 +492,9 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         )),
         _ => None,
     };
+    // Extended search is offered under the rows as a link, and under "No
+    // albums found." as a button.
+    let offered = music && state == lookup::LookupState::Results && form.offers_extended();
     if state == lookup::LookupState::Loading && (!query.is_empty() || artist.is_some()) {
         for _ in 0..3 {
             list = list.push(placeholder_row(form.media, tokens));
@@ -499,6 +511,12 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
                 Some(msg(Message::RetryLookup)),
             ));
         }
+        if offered {
+            if let Some(failure) = extended_failure(extended) {
+                block = block.push(text(failure).size(13).color(tokens.sub));
+            }
+            block = block.push(extended_button(app, extended, tokens));
+        }
         list = list.push(container(block).padding([8, 4]));
     } else {
         // The artists whose names match, above a music search's rows.
@@ -510,6 +528,15 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         }
         for (index, found) in matches.iter().enumerate() {
             list = list.push(match_row(app, form, index, found, platform, tokens));
+        }
+        // What the extended search added, with no word on where a row
+        // came from.
+        if !extra.is_empty() {
+            list = list.push(more_results(tokens));
+            for (index, found) in extra.iter().enumerate() {
+                let index = matches.len() + index;
+                list = list.push(match_row(app, form, index, found, platform, tokens));
+            }
         }
         if music && !matches.is_empty() {
             if form.music.more_failed {
@@ -546,8 +573,13 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
         }
     }
 
+    let asks = if music && extended.has_run() {
+        "Still not listed?"
+    } else {
+        "Not listed?"
+    };
     let foot = row![
-        text("Not listed?").size(12.5).color(tokens.sub),
+        text(asks).size(12.5).color(tokens.sub),
         if again {
             ui::labeled_button(
                 "Cancel",
@@ -602,10 +634,21 @@ fn lookup<'a>(app: &'a App, form: &'a Form, tokens: &Tokens) -> Element<'a, AppM
             let left = content.height - bounds.height - viewport.absolute_offset().y;
             msg(Message::LookupScrolled(left < NEAR_END))
         });
-    pane = pane
-        .push(text(head).size(12).color(tokens.sub))
-        .push(rows)
-        .push(container(foot).center_x(Fill));
+    pane = pane.push(text(head).size(12).color(tokens.sub)).push(rows);
+    // Under the list and always in view: the extended search, or what
+    // came of it.
+    if music && state.shows_rows() && (!matches.is_empty() || !extra.is_empty()) {
+        if offered {
+            pane = pane.push(extended_line(app, extended, tokens));
+        } else if extended == Extended::Nothing {
+            pane = pane.push(
+                text("Extended search found nothing more.")
+                    .size(13)
+                    .color(tokens.sub),
+            );
+        }
+    }
+    pane = pane.push(container(foot).center_x(Fill));
     let chrome = tokens.dialog_chrome;
     container(pane)
         .width(380)
@@ -800,11 +843,131 @@ fn back_to_results<'a>(query: &str, tokens: &Tokens) -> Element<'a, AppMessage> 
     .into()
 }
 
+/// The ring of a search in progress: a gray track with a quarter arc in
+/// the accent going round.
+fn busy_ring<'a>(app: &App, size: f32, tokens: &Tokens) -> Element<'a, AppMessage> {
+    ui::ring(size, tokens.line, theme::ring_arc(tokens), app.ring_phase)
+}
+
+/// Why the extended search could not be asked, when it could not.
+fn extended_failure(extended: Extended) -> Option<&'static str> {
+    match extended {
+        Extended::Failed(lookup::FailureKind::Offline) => {
+            Some("Extended search could not connect. Check your connection.")
+        }
+        Extended::Failed(lookup::FailureKind::NotConfigured) => {
+            Some("Extended search is not set up on this build.")
+        }
+        Extended::Failed(_) => Some("Extended search did not answer. Try again in a moment."),
+        _ => None,
+    }
+}
+
+/// "Match not shown? Try extended search" under the rows, the link in
+/// the accent ink. While it runs the link stays in place, gray and
+/// without a press: a small ring going round, then "Searching…". After a
+/// failure a line above says why, and the link asks again.
+fn extended_line<'a>(app: &App, extended: Extended, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let busy = extended == Extended::Searching;
+    let mut link = Row::new().spacing(7).align_y(Center);
+    if busy {
+        link = link.push(busy_ring(app, 12.0, tokens));
+    }
+    link = link.push(
+        text(extended_label(extended))
+            .size(13)
+            .font(font::SEMIBOLD)
+            .color(if busy { tokens.sub } else { tokens.ink }),
+    );
+    let hover = tokens.hover;
+    let link = button(link)
+        .padding([2, 4])
+        .on_press_maybe((!busy).then(|| msg(Message::ExtendedSearch)))
+        .style(move |_, status| button::Style {
+            background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+                .then_some(Background::Color(hover)),
+            border: Border::default().rounded(6),
+            ..button::Style::default()
+        })
+        .focusable(6.0, tokens);
+    let line = row![text("Match not shown?").size(13).color(tokens.sub), link,]
+        .spacing(2)
+        .align_y(Center);
+    match extended_failure(extended) {
+        Some(failure) => column![text(failure).size(13).color(tokens.sub), line]
+            .spacing(2)
+            .into(),
+        None => line.into(),
+    }
+}
+
+/// The link's and the button's words.
+fn extended_label(extended: Extended) -> &'static str {
+    match extended {
+        Extended::Searching => "Searching\u{2026}",
+        _ => "Try extended search",
+    }
+}
+
+/// "Try extended search" as a button under "No albums found."; gray,
+/// without a press and with the ring before "Searching…" while it runs.
+fn extended_button<'a>(app: &App, extended: Extended, tokens: &Tokens) -> Element<'a, AppMessage> {
+    let busy = extended == Extended::Searching;
+    let mut words = Row::new().spacing(7).align_y(Center).height(Fill);
+    if busy {
+        words = words.push(busy_ring(app, 14.0, tokens));
+    }
+    words = words.push(
+        text(extended_label(extended))
+            .size(13.5)
+            .font(font::SEMIBOLD)
+            .color(if busy { tokens.sub } else { tokens.text }),
+    );
+    let tokens = *tokens;
+    button(words)
+        .height(34)
+        .padding(Padding::from([0, 16]))
+        .on_press_maybe((!busy).then(|| msg(Message::ExtendedSearch)))
+        .style(move |_, status| {
+            // The outline stays whole while it is busy: only the words
+            // go gray.
+            let status = if status == button::Status::Disabled {
+                button::Status::Active
+            } else {
+                status
+            };
+            ui::button_style(ButtonKind::Outline, &tokens, status)
+        })
+        .focusable(8.0, &tokens)
+}
+
+/// The "More results" divider over what the extended search added: small
+/// capitals and a line to the edge.
+fn more_results<'a>(tokens: &Tokens) -> Element<'a, AppMessage> {
+    let line = tokens.line;
+    container(
+        row![
+            text("MORE RESULTS")
+                .size(11)
+                .font(font::SEMIBOLD)
+                .color(tokens.sub),
+            container(space())
+                .width(Fill)
+                .height(1)
+                .style(move |_| container::background(line)),
+        ]
+        .spacing(10)
+        .align_y(Center),
+    )
+    .padding(Padding::new(2.0).top(10).bottom(4))
+    .into()
+}
+
 /// "Loading more…" under the music rows while the next page comes.
 fn loading_more<'a>(app: &App, tokens: &Tokens) -> Element<'a, AppMessage> {
     container(
         row![
-            ui::spinner(14.0, tokens.accent, app.splash_phase),
+            busy_ring(app, 14.0, tokens),
             text("Loading more\u{2026}").size(12.5).color(tokens.sub),
         ]
         .spacing(8)

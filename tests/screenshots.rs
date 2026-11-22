@@ -274,6 +274,15 @@ fn music_lookup(app: &mut App, query: &str, songs: bool, artist: Option<usize>) 
     let _ = app.update(Message::Entry(entry::Message::Pick(0)));
 }
 
+/// The open music lookup's extended search as it is while Apple is
+/// asked, the ring an eighth of a turn on.
+fn extended_running(app: &mut App) {
+    if let Some(entry::Dialog::Form(form)) = &mut app.dialog {
+        form.music.extended = entry::Extended::Searching;
+    }
+    app.ring_phase = 0.125;
+}
+
 /// The Add dialog with a lookup state faked and nothing picked.
 fn add_in_state(app: &mut App, state: LookupState) {
     show_type(app, MediaType::Games);
@@ -1831,6 +1840,50 @@ fn capture_every_screen() {
                 if let Some(entry::Dialog::Form(form)) = &mut app.dialog {
                     form.music.loading_more = true;
                 }
+            }),
+        ),
+        // Extended search (canvas 2026-11-15 and 2026-11-22, "Add: music,
+        // match not shown (Try extended search)", "… extended search
+        // running", "… extended search results").
+        (
+            Screen::Library,
+            ("add-music-extended-link", |app| {
+                music_lookup(app, "ghost", false, None)
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-music-extended-link-running", |app| {
+                music_lookup(app, "ghost", false, None);
+                extended_running(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-music-extended-nothing", |app| {
+                music_lookup(app, "ghost", false, None);
+                let _ = app.update(Message::Entry(entry::Message::ExtendedSearch));
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-music-extended-button", |app| {
+                music_lookup(app, "oats in the water ben howard", true, None)
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-music-extended-button-running", |app| {
+                music_lookup(app, "oats in the water ben howard", true, None);
+                extended_running(app);
+            }),
+        ),
+        (
+            Screen::Library,
+            ("add-music-extended-results", |app| {
+                music_lookup(app, "oats in the water ben howard", true, None);
+                let _ = app.update(Message::Entry(entry::Message::ExtendedSearch));
+                let _ = app.update(Message::Entry(entry::Message::Pick(0)));
             }),
         ),
         // The music overlap question (canvas: Library › Add: a song from

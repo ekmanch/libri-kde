@@ -8,6 +8,7 @@
 
 mod anilist;
 pub mod apple_artists;
+pub mod apple_music;
 pub mod books;
 mod deezer;
 pub mod fake;
@@ -683,6 +684,13 @@ pub trait Source: Send + Sync {
         Ok(None)
     }
 
+    /// Every album or song a second music catalog finds for `query`, for
+    /// the Add dialog's extended search; `None` from a source that is no
+    /// second catalog.
+    fn extended_music(&self, _query: &str, _scope: MusicScope) -> Option<Reply<Vec<Match>>> {
+        None
+    }
+
     /// A photo of the artist called `name`, or `None` when the source has
     /// no artist of exactly that name.
     fn artist_photo_url(&self, _name: &str) -> Reply<Option<String>> {
@@ -853,6 +861,9 @@ pub struct Service {
     /// The music pages answered this session, so switching between albums
     /// and songs, or going back from an artist, asks nothing again.
     music_cache: Mutex<Vec<(MusicRequest, MusicPage)>>,
+    /// The second music catalog's answers this session, by scope and
+    /// query: it is asked once for each.
+    extended_cache: Mutex<Vec<(String, Vec<Match>)>>,
     /// The fake answers at once and never touches the network, so the
     /// app asks it on the spot instead of from a task.
     instant: bool,
@@ -885,6 +896,7 @@ impl Service {
             Arc::new(anilist::AniList::new(Some(tmdb), cache)),
             Arc::new(books::Books::new(&keys.google_books_key)),
             Arc::new(deezer::Deezer::new()),
+            Arc::new(apple_music::AppleMusic::new()),
         ];
         Service::with(sources, false)
     }
@@ -899,6 +911,7 @@ impl Service {
             sources,
             cache: Mutex::new(Vec::new()),
             music_cache: Mutex::new(Vec::new()),
+            extended_cache: Mutex::new(Vec::new()),
             instant,
         }
     }
@@ -1150,6 +1163,53 @@ impl Service {
             cache.remove(0);
         }
         Ok(page)
+    }
+
+    fn extended_key(query: &str, scope: MusicScope) -> String {
+        format!("{scope:?}|{}", query.trim().to_lowercase())
+    }
+
+    /// A remembered answer of the second music catalog.
+    pub fn cached_extended(&self, query: &str, scope: MusicScope) -> Option<Vec<Match>> {
+        let key = Service::extended_key(query, scope);
+        let cache = self
+            .extended_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        cache
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, m)| m.clone())
+    }
+
+    /// Every album or song the second music catalog finds for `query`
+    /// (the Add dialog's extended search), asked once a session for a
+    /// query and scope; a failure is not remembered, so it can be tried
+    /// again. "Not set up" when no source is a second catalog.
+    pub fn extended_music(&self, query: &str, scope: MusicScope) -> Reply<Vec<Match>> {
+        if let Some(known) = self.cached_extended(query, scope) {
+            return Ok(known);
+        }
+        let found = self
+            .sources
+            .iter()
+            .filter(|s| s.is_configured())
+            .find_map(|s| s.extended_music(query.trim(), scope))
+            .unwrap_or_else(|| {
+                Err(Failure::new(
+                    FailureKind::NotConfigured,
+                    "no second music catalog is set up",
+                ))
+            })?;
+        let mut cache = self
+            .extended_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        cache.push((Service::extended_key(query, scope), found.clone()));
+        while cache.len() > CACHE_SIZE {
+            cache.remove(0);
+        }
+        Ok(found)
     }
 
     /// When the album with `album_source` came out, from its source.

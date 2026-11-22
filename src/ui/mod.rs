@@ -61,7 +61,7 @@ pub use section_rail::{RailLabel, SectionRail};
 pub use segmented::segmented;
 pub use setting_rows::{setting_row, setting_rows};
 pub use slide::{scrolled, slide, slide_by};
-pub use spinner::spinner;
+pub use spinner::{ring, spinner};
 pub use switch::{setting_switch, switch};
 pub use tag_group::tag_group;
 pub use tag_picker::Picker;

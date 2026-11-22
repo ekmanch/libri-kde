@@ -1121,7 +1121,14 @@ impl Artwork {
         let album = source.clone();
         Some(Task::perform(
             crate::app::blocking(move || {
-                let Some(music) = service.music() else {
+                // The album's own catalog lists it (an album saved from
+                // the extended search is Apple Music's), else the music
+                // source.
+                let Some(music) = service
+                    .source_of(&album)
+                    .filter(|s| s.is_configured())
+                    .or_else(|| service.music())
+                else {
                     return Ok(Err(lookup::Failure::new(FailureKind::NotConfigured, "")));
                 };
                 let tracks = music.album_tracks(&album);

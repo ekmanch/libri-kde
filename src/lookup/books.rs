@@ -46,8 +46,8 @@ const FIELDS: &str = "key,title,author_name,first_publish_year,publish_year,cove
 /// How many works are read when listing a series' volumes by name.
 const VOLUMES_LIMIT: usize = 100;
 /// Apple's artwork sizes: a row's, and the cache's.
-const ROW_ARTWORK: u32 = 200;
-const LARGE_ARTWORK: u32 = 600;
+pub(super) const ROW_ARTWORK: u32 = 200;
+pub(super) const LARGE_ARTWORK: u32 = 600;
 
 /// Open Library's search index and work records.
 pub struct OpenLibrary {
@@ -314,11 +314,21 @@ pub fn apple_http() -> std::sync::Arc<Http> {
 }
 
 impl ITunes {
-    fn new() -> ITunes {
+    pub(super) fn new() -> ITunes {
         ITunes { http: apple_http() }
     }
 
     fn results(&self, path: &str, query: &[(&str, &str)]) -> Reply<Vec<Match>> {
+        Ok(self
+            .objects(path, query)?
+            .iter()
+            .filter_map(ITunes::hit)
+            .collect())
+    }
+
+    /// The `results` of one request, as Apple lists them: the books here
+    /// and the music catalog (`apple_music`) both read them.
+    pub(super) fn objects(&self, path: &str, query: &[(&str, &str)]) -> Reply<Vec<Value>> {
         let url = http::url(&format!("{ITUNES}{path}"), query);
         let response = self.http.get(&url, &[("Accept", "application/json")])?;
         if response.status == 403 {
@@ -330,9 +340,7 @@ impl ITunes {
         }
         self.http.check(&response, &[200])?;
         let json = response.object()?;
-        Ok(objects_at(&json, "results")
-            .filter_map(ITunes::hit)
-            .collect())
+        Ok(objects_at(&json, "results").cloned().collect())
     }
 
     /// One result as a match. The genres list "Books" among them, which no
@@ -1064,11 +1072,13 @@ impl Source for Books {
         &[MediaType::Books]
     }
 
+    /// An Apple Music id ("itunes:album:1") is the music catalog's, not
+    /// an Apple Books id.
     fn issued(&self, source: &str) -> bool {
         matches!(
             Match::provider_of(source),
             "openlibrary" | "itunes" | "googlebooks"
-        )
+        ) && super::apple_music::parse(source).is_none()
     }
 
     fn search(&self, query: &str, media: MediaType, limit: usize) -> Reply<Hits> {
@@ -1582,6 +1592,9 @@ mod tests {
         );
         assert_eq!(Books::pick(&hits, "Dracula", Some(1990), None), None);
         assert!(Books::new("").issued("itunes:1") && Books::new("").issued("googlebooks:x"));
+        assert!(
+            !Books::new("").issued("itunes:album:1") && !Books::new("").issued("itunes:track:1")
+        );
         assert!(!Books::new("").issued("tmdb:movie:1"));
     }
 }

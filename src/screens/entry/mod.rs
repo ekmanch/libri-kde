@@ -227,6 +227,36 @@ pub struct MusicLookup {
     pub asked_years: HashSet<String>,
     /// The search the date asks belong to: they stop once another starts.
     pub epoch: Epoch,
+    /// The extended search for the words and the scope on show.
+    pub extended: Extended,
+    /// What it added: the rows the first search had not shown, listed
+    /// under "More results".
+    pub extra: Vec<Match>,
+}
+
+/// Where the music lookup's extended search stands. It asks the second
+/// catalog once for the words and the scope (Albums or Songs), and only
+/// when its button is pressed; other words or the other scope start over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Extended {
+    /// Not asked: the button is offered.
+    #[default]
+    Idle,
+    /// The second catalog is being asked ("Searching…").
+    Searching,
+    /// It added rows under "More results".
+    More,
+    /// It found nothing the first search had not shown.
+    Nothing,
+    /// It could not be asked; the button stays, to try again.
+    Failed(lookup::FailureKind),
+}
+
+impl Extended {
+    /// It has answered, with rows or without: "Still not listed?".
+    pub fn has_run(self) -> bool {
+        matches!(self, Extended::More | Extended::Nothing)
+    }
 }
 
 /// The generation of the music search a date ask belongs to, shared with
@@ -263,6 +293,29 @@ impl MusicLookup {
             .released
             .or_else(|| self.years.get(MusicLookup::album_key(found)).copied())
     }
+
+    /// The extended search's rows go and it is offered again; an answer
+    /// still on its way is for an older search and is dropped by its
+    /// generation.
+    fn drop_extended(&mut self) {
+        self.extended = Extended::Idle;
+        self.extra.clear();
+    }
+
+    /// Whether two rows are one record to the eye: the same title by the
+    /// same artist, and for a song on the same album. The two catalogs
+    /// share no ids.
+    pub fn same_record(a: &Match, b: &Match) -> bool {
+        let same = |a: &Option<String>, b: &Option<String>| {
+            lookup::text::same_title(
+                a.as_deref().unwrap_or_default(),
+                b.as_deref().unwrap_or_default(),
+            )
+        };
+        lookup::text::same_title(&a.title, &b.title)
+            && same(&a.creator, &b.creator)
+            && same(&a.album, &b.album)
+    }
 }
 
 /// Work a form change asks the app to start.
@@ -287,6 +340,12 @@ pub enum Pending {
     Music {
         generation: u64,
         request: MusicRequest,
+    },
+    /// The second music catalog asked for the words and the scope.
+    Extended {
+        generation: u64,
+        query: String,
+        scope: MusicScope,
     },
     /// The dates of the albums of music rows that came without one, asked
     /// one by one until another search starts.
@@ -549,6 +608,13 @@ pub enum Message {
     MusicYear {
         album: String,
         released: Option<Released>,
+    },
+    /// "Try extended search": the second music catalog is asked.
+    ExtendedSearch,
+    /// Its answer came.
+    Extended {
+        generation: u64,
+        result: Result<Vec<Match>, lookup::Failure>,
     },
     /// A matching artist's "All albums ›" or "All songs ›".
     OpenArtist(usize),
@@ -847,6 +913,91 @@ impl Form {
         &self.results.matches
     }
 
+    /// What the extended search added, under "More results".
+    pub fn extra(&self) -> &[Match] {
+        if self.media == MediaType::Music {
+            &self.music.extra
+        } else {
+            &[]
+        }
+    }
+
+    /// Every row of the lookup's list, as the arrow keys walk it: the
+    /// matches, then what the extended search added.
+    pub fn rows(&self) -> impl Iterator<Item = &Match> {
+        self.matches().iter().chain(self.extra())
+    }
+
+    /// Whether extended search is offered: after every finished music
+    /// search, with rows or without, until it has answered; never inside
+    /// one artist's list.
+    pub fn offers_extended(&self) -> bool {
+        self.media == MediaType::Music
+            && (self.editing.is_none() || self.again)
+            && self.music.artist.is_none()
+            && !self.query.trim().is_empty()
+            && !self.searching
+            && self.lookup_state() == lookup::LookupState::Results
+            && !self.music.extended.has_run()
+    }
+
+    /// Asks the second music catalog for the words and the scope on show:
+    /// at once from the fake or when the answer is remembered.
+    fn extended_search(&mut self, ctx: &Context) {
+        if !self.offers_extended() || self.music.extended == Extended::Searching {
+            return;
+        }
+        let (query, scope) = (self.query.trim().to_owned(), self.scope());
+        let ready = if ctx.service.is_instant() {
+            Some(ctx.service.extended_music(&query, scope))
+        } else {
+            ctx.service.cached_extended(&query, scope).map(Ok)
+        };
+        if let Some(result) = ready {
+            self.extended_answer(self.search_generation, result);
+            return;
+        }
+        self.music.extended = Extended::Searching;
+        self.pending.push(Pending::Extended {
+            generation: self.search_generation,
+            query,
+            scope,
+        });
+    }
+
+    /// The second catalog's answer: what the first search does not show
+    /// is listed under "More results". One for older words or the other
+    /// scope is ignored.
+    fn extended_answer(&mut self, generation: u64, result: Result<Vec<Match>, lookup::Failure>) {
+        if generation != self.search_generation || self.media != MediaType::Music {
+            return;
+        }
+        let found = match result {
+            Ok(found) => found,
+            Err(failure) => {
+                self.music.extended = Extended::Failed(failure.kind);
+                return;
+            }
+        };
+        let mut fresh: Vec<Match> = Vec::new();
+        for hit in found {
+            if !self
+                .matches()
+                .iter()
+                .chain(&fresh)
+                .any(|m| MusicLookup::same_record(m, &hit))
+            {
+                fresh.push(hit);
+            }
+        }
+        self.music.extended = if fresh.is_empty() {
+            Extended::Nothing
+        } else {
+            Extended::More
+        };
+        self.music.extra = fresh;
+    }
+
     /// The match the form was filled from, while its id is the form's.
     pub fn own_match(&self) -> Option<&Match> {
         self.picked_match
@@ -912,6 +1063,7 @@ impl Form {
     /// the answer is remembered from this session. The rows on screen stay
     /// while a refined query is on its way.
     fn search(&mut self, ctx: &Context) {
+        self.music.drop_extended();
         if self.media == MediaType::Music {
             self.music_search(ctx, false);
             return;
@@ -966,6 +1118,7 @@ impl Form {
     /// back at its top). The fake and a remembered page answer on the spot.
     fn music_search(&mut self, ctx: &Context, now: bool) {
         self.search_generation += 1;
+        self.music.drop_extended();
         self.music.epoch.set(self.search_generation);
         self.fetching = None;
         self.music.next = None;
@@ -1110,16 +1263,19 @@ impl Form {
             }
             self.results.matches.push(found);
         }
+        // A later page may list what the extended search added.
+        let matches = &self.results.matches;
+        self.music
+            .extra
+            .retain(|hit| !matches.iter().any(|m| MusicLookup::same_record(m, hit)));
         self.music.next = page.next;
         self.music.total = page
             .total
             .or_else(|| page.next.is_none().then_some(self.results.matches.len()));
-        self.picked = self.picked_match.as_ref().and_then(|p| {
-            self.results
-                .matches
-                .iter()
-                .position(|m| m.source == p.source)
-        });
+        self.picked = self
+            .picked_match
+            .as_ref()
+            .and_then(|p| self.rows().position(|m| m.source == p.source));
         self.ask_years(ctx);
         // Deezer drops what is not available from a page, so a short one
         // may not fill the list enough to scroll: the next comes at once.
@@ -2489,6 +2645,22 @@ fn start_pending(service: &Arc<Service>, pending: Vec<Pending>) -> Task<AppMessa
                 },
             )
         }
+        Pending::Extended {
+            generation,
+            query,
+            scope,
+        } => {
+            let service = service.clone();
+            Task::perform(
+                crate::app::blocking(move || Ok(service.extended_music(&query, scope))),
+                move |result| {
+                    AppMessage::Entry(Message::Extended {
+                        generation,
+                        result: result.unwrap_or_else(|e| Err(lookup::Failure::other(e))),
+                    })
+                },
+            )
+        }
         Pending::MusicYears {
             albums,
             epoch,
@@ -2594,7 +2766,7 @@ pub fn wanted(app: &App, wants: &mut Wants) {
     let Some(Dialog::Form(form)) = &app.dialog else {
         return;
     };
-    for found in form.matches() {
+    for found in form.rows() {
         if let Some(url) = &found.cover_url {
             wants.images.push(url.clone());
         }
@@ -2693,7 +2865,11 @@ pub fn music_lookup_open(app: &App) -> bool {
 /// Whether the form waits on a lookup, so the window ticks for its
 /// spinner.
 pub fn is_busy(app: &App) -> bool {
-    matches!(&app.dialog, Some(Dialog::Form(form)) if form.fetching.is_some() || form.searching || form.choices_loading || form.music.loading_more)
+    matches!(&app.dialog, Some(Dialog::Form(form)) if form.fetching.is_some()
+            || form.searching
+            || form.choices_loading
+            || form.music.loading_more
+            || form.music.extended == Extended::Searching)
 }
 
 /// The details' picker's Done: the tags the form holds go on the entry
@@ -2829,6 +3005,8 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
             form.music.years.insert(album, released);
         }
         Message::MusicYear { released: None, .. } => {}
+        Message::ExtendedSearch => form.extended_search(ctx),
+        Message::Extended { generation, result } => form.extended_answer(generation, result),
         Message::OpenArtist(index) => {
             if let Some(artist) = form.music.artists.get(index).cloned() {
                 form.music.artist = Some(artist);
@@ -2856,7 +3034,8 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
         Message::SearchStep { generation, result } => form.searched(generation, result, ctx),
         Message::RetryLookup => form.search(ctx),
         Message::Pick(index) => {
-            if let Some(found) = form.matches().get(index).cloned() {
+            let found = form.rows().nth(index).cloned();
+            if let Some(found) = found {
                 form.picked = Some(index);
                 form.pick(found, ctx);
             }
@@ -2910,13 +3089,13 @@ fn update_form(form: &mut Form, message: Message, ctx: &Context) -> Option<Vec<O
             form.search(ctx);
         }
         Message::MovePick(step) => {
-            let count = form.matches().len();
+            let count = form.rows().count();
             if count > 0 {
                 let next = form.picked.map_or(0, |i| {
                     (i as isize + step).rem_euclid(count as isize) as usize
                 });
                 // Near the end of the music list, its next page comes.
-                if next + 3 >= count {
+                if next + 3 >= form.matches().len() {
                     form.more_music(ctx);
                 }
                 return update_form(form, Message::Pick(next), ctx);
@@ -5376,5 +5555,223 @@ mod tests {
             form(&app).music.released(&first).map(|r| r.year),
             Some(2025)
         );
+    }
+    const OATS: &str = "oats in the water ben howard";
+
+    #[test]
+    fn extended_search_lists_what_the_first_search_did_not_show() {
+        let mut app = app();
+        music_search(&mut app, OATS);
+        send(&mut app, Message::Kind(EntryKind::Song));
+        let f = form(&app);
+        assert!(f.matches().is_empty(), "the first search finds nothing");
+        assert!(f.offers_extended());
+        assert!(shows(&app, "No songs found.") && shows(&app, "Try extended search"));
+        assert!(shows(&app, "Not listed?"));
+
+        send(&mut app, Message::ExtendedSearch);
+        let f = form(&app);
+        assert_eq!(f.music.extended, Extended::More);
+        assert!(
+            !f.offers_extended(),
+            "asked once for the words and the scope"
+        );
+        let titles: Vec<&str> = f.extra().iter().map(|m| m.title.as_str()).collect();
+        assert_eq!(titles, ["Oats In the Water", "Oats In the Water (Live)"]);
+        assert!(shows(&app, "MORE RESULTS") && shows(&app, "Still not listed?"));
+        assert!(!shows(&app, "Try extended search") && !shows(&app, "No songs found."));
+        assert!(shows(&app, "Song · Ben Howard · Burgh Island · 2012"));
+
+        // A row under "More results" fills the form as any match does,
+        // and the arrow keys walk on into them.
+        send(&mut app, Message::Pick(0));
+        let f = form(&app);
+        assert_eq!(f.picked, Some(0));
+        assert_eq!(
+            (f.title.as_str(), f.creator.as_str(), f.album.as_str()),
+            ("Oats In the Water", "Ben Howard", "Burgh Island")
+        );
+        assert_eq!(f.released, "2012");
+        assert_eq!(f.source.as_deref(), Some("itunes:track:1700000002"));
+        assert_eq!(f.cover_from, None, "the cover is the match's own");
+        send(&mut app, Message::MovePick(1));
+        assert_eq!(form(&app).title, "Oats In the Water (Live)");
+        send(&mut app, Message::MovePick(1));
+        assert_eq!(form(&app).picked, Some(0), "and round to the first");
+
+        // The other scope drops the rows and offers it again; so do other
+        // words.
+        send(&mut app, Message::Kind(EntryKind::Album));
+        let f = form(&app);
+        assert!(f.extra().is_empty() && f.music.extended == Extended::Idle);
+        assert!(f.offers_extended());
+        send(&mut app, Message::Kind(EntryKind::Song));
+        send(&mut app, Message::ExtendedSearch);
+        assert_eq!(form(&app).extra().len(), 2);
+        send(&mut app, Message::Query("oats in the water".into()));
+        let f = form(&app);
+        assert!(f.extra().is_empty() && f.music.extended == Extended::Idle);
+    }
+
+    #[test]
+    fn extended_search_with_nothing_new_says_so() {
+        let mut app = app();
+        music_search(&mut app, "ghost");
+        assert!(shows(&app, "Match not shown?") && shows(&app, "Try extended search"));
+        send(&mut app, Message::ExtendedSearch);
+        let f = form(&app);
+        // The second catalog lists an album the first search shows too.
+        assert_eq!(f.music.extended, Extended::Nothing);
+        assert!(f.extra().is_empty() && !f.offers_extended());
+        assert!(shows(&app, "Extended search found nothing more."));
+        assert!(shows(&app, "Still not listed?") && !shows(&app, "MORE RESULTS"));
+        // Inside one artist's list it is not offered at all.
+        send(&mut app, Message::OpenArtist(0));
+        assert!(!form(&app).offers_extended());
+        assert!(!shows(&app, "Match not shown?") && shows(&app, "Not listed?"));
+        // With no rows either, the message says both.
+        send(&mut app, Message::Query("zzzz".into()));
+        send(&mut app, Message::ExtendedSearch);
+        assert!(shows(
+            &app,
+            "No albums found, also not in the extended search."
+        ));
+    }
+
+    /// The Add dialog's songs for the oats search, answered as a real
+    /// lookup answers: by message.
+    fn slow_oats(app: &mut App) -> u64 {
+        app.lookups = Arc::new(Service::with(vec![Arc::new(lookup::fake::Fake)], false));
+        music_search(app, OATS);
+        send(app, Message::Kind(EntryKind::Song));
+        let generation = form(app).search_generation;
+        let request = MusicRequest {
+            list: MusicList::Search(OATS.into()),
+            scope: MusicScope::Songs,
+            cursor: 0,
+        };
+        let result = Ok(lookup::fake::music_page(&request, lookup::MUSIC_PAGE));
+        send(
+            app,
+            Message::MusicPage {
+                generation,
+                request,
+                result,
+            },
+        );
+        generation
+    }
+
+    #[test]
+    fn extended_search_reads_searching_and_spins_until_the_answer() {
+        let mut app = app();
+        let generation = slow_oats(&mut app);
+        assert!(!is_busy(&app));
+        send(&mut app, Message::ExtendedSearch);
+        let f = form(&app);
+        assert_eq!(f.music.extended, Extended::Searching);
+        assert!(f.pending.is_empty(), "the ask was started");
+        assert!(f.offers_extended(), "the button stays in place");
+        assert!(shows(&app, "Searching\u{2026}") && !shows(&app, "Try extended search"));
+        // The window ticks while it runs, and a tick turns the ring.
+        assert!(is_busy(&app));
+        let before = app.ring_phase;
+        let _ = app.update(AppMessage::Tick);
+        assert!(app.ring_phase > before);
+        // A second press asks nothing more.
+        send(&mut app, Message::ExtendedSearch);
+        assert_eq!(form(&app).music.extended, Extended::Searching);
+
+        let found = lookup::fake::extended_music(OATS, MusicScope::Songs);
+        send(
+            &mut app,
+            Message::Extended {
+                generation,
+                result: Ok(found),
+            },
+        );
+        let f = form(&app);
+        assert_eq!(f.music.extended, Extended::More);
+        assert_eq!(f.extra().len(), 2);
+        assert!(!is_busy(&app), "the ticks stop with the search");
+    }
+
+    #[test]
+    fn an_extended_answer_for_old_words_is_ignored_and_a_failure_can_be_retried() {
+        let mut app = app();
+        let generation = slow_oats(&mut app);
+        send(&mut app, Message::ExtendedSearch);
+        // Other words meanwhile: the answer for the old ones is dropped.
+        send(&mut app, Message::Query("oats".into()));
+        assert_eq!(form(&app).music.extended, Extended::Idle);
+        send(
+            &mut app,
+            Message::Extended {
+                generation,
+                result: Ok(lookup::fake::extended_music(OATS, MusicScope::Songs)),
+            },
+        );
+        let f = form(&app);
+        assert!(f.extra().is_empty() && f.music.extended == Extended::Idle);
+
+        // A failure says so and leaves the button, to try again.
+        let generation = slow_oats(&mut app);
+        send(&mut app, Message::ExtendedSearch);
+        send(
+            &mut app,
+            Message::Extended {
+                generation,
+                result: Err(lookup::Failure::new(lookup::FailureKind::Offline, "")),
+            },
+        );
+        let f = form(&app);
+        assert_eq!(
+            f.music.extended,
+            Extended::Failed(lookup::FailureKind::Offline)
+        );
+        assert!(f.offers_extended());
+        assert!(shows(
+            &app,
+            "Extended search could not connect. Check your connection."
+        ));
+        assert!(shows(&app, "Try extended search") && shows(&app, "Not listed?"));
+        send(&mut app, Message::ExtendedSearch);
+        assert_eq!(form(&app).music.extended, Extended::Searching);
+    }
+
+    #[test]
+    fn a_later_page_takes_its_rows_out_of_more_results() {
+        let mut app = app();
+        music_search(&mut app, "ghost");
+        send(&mut app, Message::Kind(EntryKind::Song));
+        let f = form(&app);
+        assert!(f.music.next.is_some());
+        // A song the next page lists, as the second catalog names it.
+        let request = MusicRequest {
+            list: MusicList::Search("ghost".into()),
+            scope: MusicScope::Songs,
+            cursor: f.music.next.unwrap(),
+        };
+        let later = lookup::fake::music_page(&request, lookup::MUSIC_PAGE).matches[0].clone();
+        let generation = f.search_generation;
+        let other = Match {
+            source: "itunes:track:2".into(),
+            ..Match::new(MediaType::Music, "Somewhere Else", "itunes:track:2")
+        };
+        let same = Match {
+            source: "itunes:track:1".into(),
+            ..later
+        };
+        if let Some(Dialog::Form(form)) = &mut app.dialog {
+            form.extended_answer(generation, Ok(vec![same, other]));
+            assert_eq!(form.extra().len(), 2);
+        }
+        send(&mut app, Message::LookupScrolled(true));
+        let titles: Vec<&str> = form(&app)
+            .extra()
+            .iter()
+            .map(|m| m.title.as_str())
+            .collect();
+        assert_eq!(titles, ["Somewhere Else"]);
     }
 }
