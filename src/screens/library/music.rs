@@ -39,7 +39,7 @@ pub fn body<'a>(
         // The same scroll area as the other types' lists, so it reports
         // its size and where it is scrolled: the long-list rule goes by
         // them.
-        return super::entries::scrolling([page], Vec::new(), rail::LEFT);
+        return super::entries::scrolling([page], None, None, rail::LEFT);
     }
     // The tabs side by side, the list sliding between them as the Coming
     // soon page's does between its slices: the picked tab is the live
@@ -162,7 +162,7 @@ fn tab_list<'a>(
                 .width(Fill);
             ui::scrolled(column, offset).into()
         }
-        None => super::entries::scrolling(children, on_rail.into_iter().collect(), room),
+        None => super::entries::scrolling(children, None, on_rail, room),
     }
 }
 

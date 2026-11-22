@@ -10,8 +10,10 @@ use iced::advanced::widget::{Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell, renderer};
 use iced::{Background, Border, Color, Element, Event, Length, Rectangle, Size, mouse};
 
-/// The rail's width, wider than what it draws so it is easy to hit.
-pub const WIDTH: f32 = 21.0;
+/// The rail's width, three times what it draws so it is easy to hit; the
+/// list keeps this much free at its right, so a press here never lands
+/// on a card.
+pub const WIDTH: f32 = 32.0;
 /// The segments' width and the thumb's.
 const SEGMENT: f32 = 5.0;
 const THUMB: f32 = 11.0;

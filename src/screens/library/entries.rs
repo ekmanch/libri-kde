@@ -38,7 +38,7 @@ pub fn body<'a>(app: &'a App, listing: &Listing<'a>) -> Element<'a, AppMessage> 
     // the list is long; All or several types get one group per type.
     let (list, right) = match sectioned(app, listing, view, &tokens) {
         Some(sectioned) => sectioned,
-        None => (grouped(app, listing, view, &tokens), SIDE),
+        None => grouped(app, listing, view, &tokens),
     };
     if view == View::Text {
         // The table header stays above the scrolling rows, as wide as
@@ -96,7 +96,7 @@ fn sectioned<'a>(
     let (children, on_rail, room) = list.view(app, view, tokens, entries, |rows| {
         block(app, rows, view, tokens)
     });
-    Some((scrolling(children, vec![on_rail?], room), room))
+    Some((scrolling(children, None, Some(on_rail?), room), room))
 }
 
 /// The cells of a fluid grid: at most `max_width` wide, `spacing` apart
@@ -228,13 +228,14 @@ fn grid_rows(list_width: f32, room: f32, cell: Cell) -> rail::GridRows {
 }
 
 /// One type in one block, or All and several types grouped by type, in
-/// type order, each in the current sort.
+/// type order, each in the current sort; and the room the list leaves at
+/// its right, which is the type rail's when there are several groups.
 fn grouped<'a>(
     app: &'a App,
     listing: &Listing<'a>,
     view: View,
     tokens: &Tokens,
-) -> Element<'a, AppMessage> {
+) -> (Element<'a, AppMessage>, f32) {
     let state = &app.library;
     let groups: Vec<(Option<MediaType>, Vec<Row<'a>>)> = match state.single() {
         Some(_) => vec![(None, listing.rows.clone())],
@@ -259,30 +260,38 @@ fn grouped<'a>(
         }
         group.push(block(app, rows, view, tokens)).into()
     });
-    // The type-colored rail replaces the scrollbar.
-    let mut overlays = Vec::new();
-    if groups.len() > 1 {
-        let counted: Vec<(Option<MediaType>, Vec<&Entry>)> = groups
-            .iter()
-            .map(|(media, rows)| (*media, rows.iter().map(Row::lead).collect()))
-            .collect();
-        overlays.extend(pinned_header(state, &counted, tokens));
-        overlays.push(rail(state, &counted, tokens));
+    // The type-colored rail replaces the scrollbar, and the cards stop
+    // where it starts.
+    if groups.len() < 2 {
+        return (scrolling(children, None, None, SIDE), SIDE);
     }
-    scrolling(children, overlays, SIDE)
+    let counted: Vec<(Option<MediaType>, Vec<&Entry>)> = groups
+        .iter()
+        .map(|(media, rows)| (*media, rows.iter().map(Row::lead).collect()))
+        .collect();
+    let pinned = pinned_header(state, &counted, tokens);
+    let rail = rail(state, &counted, tokens);
+    let room = ui::type_rail::WIDTH;
+    (scrolling(children, pinned, Some(rail), room), room)
 }
 
 /// A scrolling list of `children`, measured by `Groups` for the rails and
-/// the pinned header, with `overlays` laid over it and `right` px kept
-/// free at its right. The scrollbar gives way to a rail when there is
-/// one.
+/// the pinned header, with the `pinned` header and the `rail` laid over
+/// it and `right` px kept free at its right. The scrollbar gives way to a
+/// rail when there is one.
+///
+/// The two layers are there whether or not they hold anything: a pinned
+/// header comes and goes as the list scrolls, and the rail must keep its
+/// place in the tree through that, or it forgets the button it is being
+/// dragged by.
 pub(super) fn scrolling<'a>(
     children: impl IntoIterator<Item = Element<'a, AppMessage>>,
-    overlays: Vec<Element<'a, AppMessage>>,
+    pinned: Option<Element<'a, AppMessage>>,
+    rail: Option<Element<'a, AppMessage>>,
     right: f32,
 ) -> Element<'a, AppMessage> {
     let list = ui::Groups::new(children, |measure| msg(Message::GroupsMeasured(measure)));
-    let scrollbar = if overlays.is_empty() {
+    let scrollbar = if rail.is_none() {
         ui::scrollbar()
     } else {
         scrollable::Scrollbar::hidden()
@@ -298,11 +307,12 @@ pub(super) fn scrolling<'a>(
             }))
         })
         .height(Fill);
-    let mut layers = stack![scroll];
-    for overlay in overlays {
-        layers = layers.push(overlay);
-    }
-    layers.into()
+    stack![
+        scroll,
+        pinned.unwrap_or_else(|| space().into()),
+        rail.unwrap_or_else(|| space().into())
+    ]
+    .into()
 }
 
 /// A long-list section's heading: the rail's label (a letter, a year, a
@@ -793,6 +803,80 @@ mod tests {
         app.library.group_tops.clear();
         let track = rail_track(&app.library, &colors, &[246, 578]);
         assert_eq!(track.segments[1].1, 246.0);
+    }
+
+    /// The pinned header comes and goes while the rail is dragged (at the
+    /// list's top, and on the line between two groups): the rail must
+    /// still follow the held button after it (reported 2026-11-22, when
+    /// the header's layer leaving moved the rail in the tree and it
+    /// forgot the button).
+    #[test]
+    fn the_type_rail_keeps_the_held_button_when_the_pinned_header_goes() {
+        use iced::advanced::clipboard::Null;
+        use iced::advanced::renderer::Headless;
+        use iced::mouse;
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+
+        let mut renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as Headless>::new(iced::Font::default(), 14.into(), None),
+        )
+        .expect("a headless renderer");
+        let size = crate::app::WINDOW_SIZE;
+        let mut app = grouped_app();
+        app.library.group_tops = vec![0.0, 4000.0];
+        app.library.groups_height = 6000.0;
+        app.library.scroll = super::super::Scroll {
+            offset: 1000.0,
+            viewport: 800.0,
+            content: 6028.0,
+        };
+        // One frame: the view built on the cache, the events with the
+        // pointer at `position`, the offsets the rail asked for.
+        let mut frame = |app: &App, cache: Cache, position: iced::Point, events: &[_]| {
+            let mut ui = UserInterface::build(app.view(), size, cache, &mut renderer);
+            let mut messages = Vec::new();
+            let cursor = mouse::Cursor::Available(position);
+            let events: Vec<iced::Event> = events.iter().copied().map(iced::Event::Mouse).collect();
+            let _ = ui.update(&events, cursor, &mut renderer, &mut Null, &mut messages);
+            let asked: Vec<f32> = messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    AppMessage::Library(Message::ScrollList(offset)) => Some(offset),
+                    _ => None,
+                })
+                .collect();
+            (ui.into_cache(), asked)
+        };
+        let press = mouse::Event::ButtonPressed(mouse::Button::Left);
+        let release = mouse::Event::ButtonReleased(mouse::Button::Left);
+        // The rail is at the list's right edge, wherever that is: the
+        // first press from the window's right that scrolls the list is
+        // on it. Low on the rail, off the thumb, so the press itself asks.
+        let y = size.height - 120.0;
+        let mut cache = Cache::default();
+        let mut held = None;
+        let mut x = size.width - 2.0;
+        while x > size.width / 2.0 {
+            let position = iced::Point::new(x, y);
+            let moved = mouse::Event::CursorMoved { position };
+            let (next, asked) = frame(&app, cache, position, &[moved, press]);
+            cache = next;
+            if !asked.is_empty() {
+                held = Some(position);
+                break;
+            }
+            let (next, _) = frame(&app, cache, position, &[release]);
+            cache = next;
+            x -= 6.0;
+        }
+        let held = held.expect("a press on the rail scrolls the list");
+        // The list is back at its top, where no header is pinned, and the
+        // pointer has strayed far to the left of the rail.
+        app.library.scroll.offset = 0.0;
+        let position = iced::Point::new(held.x - 400.0, held.y - 200.0);
+        let moved = mouse::Event::CursorMoved { position };
+        let (_, asked) = frame(&app, cache, position, &[moved]);
+        assert_eq!(asked.len(), 1, "the rail still follows the held button");
     }
 
     #[test]

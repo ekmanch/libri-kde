@@ -958,13 +958,13 @@ fn list<'a>(
             .width(Fill);
         return ui::scrolled(column, scroll).into();
     }
-    let mut overlays = Vec::new();
+    let mut pinned = None;
     if view != View::Grid
         && let Some(index) = entries::current_group(state)
         && state.scroll.offset > state.group_tops[index] + 0.5
         && let Some(group) = groups.get(index)
     {
-        overlays.push(entries::pinned_bar(
+        pinned = Some(entries::pinned_bar(
             entries::bar_header(
                 &group.name(app.today),
                 tokens.accent,
@@ -975,16 +975,16 @@ fn list<'a>(
             tokens,
         ));
     }
-    if let Some(on_rail) = on_rail {
+    let on_rail = on_rail.map(|on_rail| {
         let on_rail = if view == View::Grid {
             let counts: Vec<usize> = groups.iter().map(|g| g.rows.len()).collect();
             on_rail.in_grid(state, &counts, grid_rows(state.list_width, room))
         } else {
             on_rail.in_list(state)
         };
-        overlays.push(on_rail.view(state, tokens));
-    }
-    entries::scrolling(children, overlays, room)
+        on_rail.view(state, tokens)
+    });
+    entries::scrolling(children, pinned, on_rail, room)
 }
 
 /// A group's rows in the text view, or with `covers` the cover view.
